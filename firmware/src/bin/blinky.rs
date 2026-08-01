@@ -68,12 +68,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
 
     // Init USB CDC serial logging.
-    let _usb_handle = asperitas_logging::usb::init(
-        board.usb_peripherals.usb_otg_fs,
-        board.usb_peripherals.pins.DP,
-        board.usb_peripherals.pins.DN,
-        UsbIrqs,
-    );
+    let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
     info!("Blinky running");
 
     // Transition LED to Running state (steady green) after boot completes.
