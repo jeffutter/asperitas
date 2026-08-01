@@ -2,8 +2,10 @@
 id: TASK-006
 title: 'Probe-free debug channel: USB CDC serial logging + LED boot stages'
 status: To Do
-assignee: []
+assignee:
+  - '@agent'
 created_date: '2026-08-01 05:46'
+updated_date: '2026-08-01 05:56'
 labels: []
 dependencies:
   - TASK-004
@@ -33,9 +35,5 @@ Panics must reach the user somehow: a panic handler that lights a distinctive LE
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Running firmware prints text visible on the host over USB CDC serial
-- [ ] #2 The Pod LEDs indicate at least: pre-init, running, and panicked
-- [ ] #3 A panic reaches the developer via LED state, and via serial when USB is up
-- [ ] #4 Logging goes through a facade with feature-selected backends, so adding a defmt backend later requires no call-site changes
-- [ ] #5 LED drive polarity is verified against real hardware and documented
+- [ ] #1 All subtasks complete
 <!-- AC:END -->
