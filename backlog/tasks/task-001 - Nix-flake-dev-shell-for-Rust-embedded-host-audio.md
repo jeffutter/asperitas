@@ -5,7 +5,7 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:44'
-updated_date: '2026-08-01 06:24'
+updated_date: '2026-08-01 12:36'
 labels: []
 dependencies: []
 documentation:
@@ -41,3 +41,42 @@ See docs/reference/rust-daisy-stack.md for the toolchain section.
 - [ ] #5 flake.lock is committed and `nix flake check` passes
 - [ ] #6 `yq` (mikefarah/yq-go, not the Python yq) and `jq` remain available — required by backlog/unblocked-todo.sh, which both Ralph loops call to resolve ticket dependencies
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Replace the placeholder flake.nix with a production dev shell using fenix for the Rust toolchain.
+
+## File changes
+
+### flake.nix — complete rewrite
+
+1. **Add fenix input** — `inputs.fenix.url = "github:nix-community/fenix";` alongside existing nixpkgs input
+2. **Define system variable** — keep `x86_64-linux` (project is Linux-only per AC; no macOS support needed yet)
+3. **Build Fenix toolchain** using `fenix.combine` with:
+   - Components: `[ fenix.stable.cargo fenix.stable.rustc fenix.stable.clippy fenix.stable.rustfmt fenix.stable.rust-analyzer fenix.stable.rust-src ]`
+   - Targets: `[ fenix.targets.thumbv7em-none-eabihf.stable.rust-std ]`
+   - Extensions: `fenix.stable.llvm-tools-preview` (provides `cargo objcopy`)
+4. **devShell packages** — combine toolchain + nixpkgs packages:
+   - From fenix toolchain: rustc, cargo, clippy, rustfmt, rust-analyzer, llvm-tools-preview (objcopy)
+   - Embedded: `pkgs.dfu-util`, `pkgs.probe-rs-tools` (NOT probe-rs — renamed in nixpkgs), `pkgs.cargo-binutils`
+   - Host audio: `pkgs.alsa-lib.dev`, `pkgs.pkg-config`
+   - Tooling: `pkgs.lefthook`, `pkgs.yq-go`, `pkgs.jq`
+5. **flake.lock** — run `nix flake update` after writing flake.nix to pin all inputs
+
+### Verification approach (agent-executable subset)
+
+- AC #1 (nix develop succeeds): verify by running `nix develop --print-build-logs --impure --override-input self . --command true` or equivalent dry-run
+- AC #2 (target available): check that the combined toolchain includes thumbv7em-none-eabihf stdlib
+- AC #3 (tools available): verify each package resolves in the shell expression
+- AC #4 (ALSA found by pkg-config): requires a trivial cpal crate — mark as HUMAN verification since no Cargo workspace exists yet (TASK-002 dependency). The flake itself correctly provides alsa-lib.dev + pkg-config which is sufficient.
+- AC #5 (flake.lock committed, nix flake check passes): add minimal checks.output if possible, otherwise commit updated lock file
+- AC #6 (yq-go + jq remain): explicit inclusion in packages list
+
+## Implementation order
+
+1. Write new flake.nix with fenix overlay and complete devShell
+2. Run `nix flake update` to regenerate flake.lock
+3. Verify derivation builds: `nix build .#devShells.x86_64-linux.default`
+4. Commit both files
+<!-- SECTION:PLAN:END -->
