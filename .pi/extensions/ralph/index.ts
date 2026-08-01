@@ -457,12 +457,73 @@ function tailSummary(output: string, maxLen = 240): string {
   return collapsed.length > maxLen ? `…${collapsed.slice(-maxLen)}` : collapsed;
 }
 
+/**
+ * Failures worth another attempt: the backend refused or dropped the request rather
+ * than answering it.
+ *
+ * This matters more against a local stack than a hosted one, because the endpoint is
+ * a shared, finite resource that can refuse traffic for reasons that have nothing to
+ * do with this loop. Observed live: an unrelated process on the same machine entered
+ * a spawn loop and saturated the endpoint, and ralph's next step got a LiteLLM 429 on
+ * its first call — which reads like "you are over quota" but actually meant "someone
+ * else is using the GPU". A model unload/load cycle in front of vLLM produces the
+ * same shape. In every one of those cases the request was never served, so waiting
+ * and asking again is correct; treating it as a verdict is not.
+ */
+const RETRYABLE_FAILURE_PATTERNS: RegExp[] = [
+  /\b429\b/,
+  /throttl/i,
+  /rate.?limit/i,
+  /overloaded/i,
+  /\b50[234]\b/,
+  /service.?unavailable/i,
+  /bad.?gateway/i,
+  /gateway.?time.?out/i,
+  /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|EAI_AGAIN/,
+  /socket hang up/i,
+  /fetch failed/i,
+  /connection error/i,
+  /loading model/i,
+];
+
+const RETRY_MAX_ATTEMPTS = 4;
+const RETRY_BASE_DELAY_MS = 10_000;
+const RETRY_MAX_DELAY_MS = 120_000;
+
+function isRetryableFailure(output: string): boolean {
+  return RETRYABLE_FAILURE_PATTERNS.some((re) => re.test(output));
+}
+
+/**
+ * Exponential backoff with jitter: ~10s, ~30s, ~90s, capped at two minutes.
+ *
+ * Tuned for a local backend rather than a hosted rate limit. Whether the endpoint is
+ * loading weights or busy serving someone else, recovery is on the order of tens of
+ * seconds, so a sub-second first retry would just fail again and burn an attempt. The
+ * jitter is not for thundering-herd (this loop is serial) but so repeated runs do not
+ * land on the same cadence as whatever else is talking to the same GPU.
+ */
+function retryDelayMs(attempt: number): number {
+  const exponential = Math.min(
+    RETRY_BASE_DELAY_MS * 3 ** (attempt - 1),
+    RETRY_MAX_DELAY_MS,
+  );
+  return Math.round(exponential * (0.5 + Math.random()));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    t.unref?.();
+  });
+}
+
 async function runHeadless(
   pi: ExtensionAPI,
   cwd: string,
   prompt: string,
   opts: { timeout: number; model?: string; extensions?: string[]; noSkills?: boolean },
-): Promise<{ ok: boolean; killed: boolean; output: string }> {
+): Promise<{ ok: boolean; killed: boolean; output: string; attempts: number }> {
   const args = ["-p", "--no-session", "--no-extensions"];
   // Steps that only read a ticket and make a judgment call (triage, choose) don't need any
   // project or global skill — but headless calls inherit the user's full global skill set by
@@ -477,21 +538,50 @@ async function runHeadless(
   for (const ext of opts.extensions ?? []) args.push("-e", ext);
   if (opts.model) args.push("--model", opts.model);
   args.push(prompt);
-  const { ok, killed, stdout, stderr } = await execCapture(pi, "pi", args, {
-    cwd,
-    timeout: opts.timeout,
-  });
-  return { ok, killed, output: (stdout || stderr || "").trim() };
+
+  let last = { ok: false, killed: false, output: "", attempts: 0 };
+  for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
+    const { ok, killed, stdout, stderr } = await execCapture(pi, "pi", args, {
+      cwd,
+      timeout: opts.timeout,
+    });
+    last = { ok, killed, output: (stdout || stderr || "").trim(), attempts: attempt };
+
+    if (ok) return last;
+
+    // Our own watchdog fired, meaning the step consumed its entire timeout budget
+    // rather than being refused. Retrying multiplies wall-clock by the attempt count
+    // for no new information — a step that needs longer than its timeout needs a
+    // bigger timeout, not another go. The caller sees killed=true and decides.
+    if (killed) return last;
+
+    if (attempt === RETRY_MAX_ATTEMPTS) break;
+
+    // A failure the backend authored on purpose — a bad prompt, a missing ticket, a
+    // non-zero exit from the work itself — will fail identically next time. Only
+    // transport- and capacity-shaped failures get another attempt.
+    if (!isRetryableFailure(last.output)) return last;
+
+    await sleep(retryDelayMs(attempt));
+  }
+  return last;
 }
 
 /** Prefixes a summary with a timeout marker when the subprocess was killed, so
  * .pi/ralph/history.jsonl distinguishes "hung until we killed it" from other failures. */
 function summarize(
-  result: { killed: boolean; output: string },
+  result: { killed: boolean; output: string; attempts?: number },
   maxLen?: number,
 ): string {
-  const prefix = result.killed ? "[timed out] " : "";
-  return prefix + tailSummary(result.output, maxLen);
+  const timedOut = result.killed ? "[timed out] " : "";
+  // Surfaced in history.jsonl so a step that only succeeded on the third try is
+  // distinguishable from one that worked immediately — otherwise a backend that
+  // is degrading looks identical to a healthy one right up until it fails.
+  const retried =
+    result.attempts && result.attempts > 1
+      ? `[${result.attempts} attempts] `
+      : "";
+  return timedOut + retried + tailSummary(result.output, maxLen);
 }
 
 /** Scans a headless call's final message for a line matching one of `candidates` exactly
