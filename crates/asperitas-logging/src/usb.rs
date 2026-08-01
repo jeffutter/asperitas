@@ -13,7 +13,6 @@
 use embassy_stm32::{
     self as hal,
     usb::{Config as UsbConfig, Driver},
-    Peri,
 };
 use embassy_sync::pipe::Pipe;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
@@ -67,25 +66,6 @@ pub struct UsbLoggerHandle;
 static INITIALIZED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
-// Lifetime extension helper
-// ---------------------------------------------------------------------------
-
-/// Extend a [`Peri`] borrow to `'static`.
-///
-/// # Safety
-///
-/// Peripherals are never dropped for the life of the device, so duplicating
-/// the singleton behind a promise not to construct two live drivers from it
-/// is sound. We hold the only reference; no other driver is created from these
-/// peripherals elsewhere in this binary.
-#[inline]
-unsafe fn extend_peri_to_static<T: hal::PeripheralType>(p: Peri<'_, T>) -> Peri<'static, T> {
-    // Deref to get the Copy inner value, then reconstruct with any lifetime.
-    // Same primitive used by Peri::clone_unchecked internally.
-    unsafe { Peri::new_unchecked(*p) }
-}
-
-// ---------------------------------------------------------------------------
 // Public init
 // ---------------------------------------------------------------------------
 
@@ -103,12 +83,7 @@ unsafe fn extend_peri_to_static<T: hal::PeripheralType>(p: Peri<'_, T>) -> Peri<
 /// # Panics
 ///
 /// Panics if called more than once (static cells can only be initialized once).
-pub fn init<I>(
-    usb_otg_fs: Peri<'_, hal::peripherals::USB_OTG_FS>,
-    dp: Peri<'_, hal::peripherals::PA12>,
-    dn: Peri<'_, hal::peripherals::PA11>,
-    irqs: I,
-) -> UsbLoggerHandle
+pub fn init<I>(irqs: I) -> UsbLoggerHandle
 where
     I: hal::interrupt::typelevel::Binding<
             <hal::peripherals::USB_OTG_FS as hal::usb::Instance>::Interrupt,
@@ -119,10 +94,13 @@ where
         panic!("USB logging already initialized");
     }
 
-    // Extend Peri lifetimes to 'static via the shared helper.
-    let usb_otg_fs = unsafe { extend_peri_to_static(usb_otg_fs) };
-    let dp = unsafe { extend_peri_to_static(dp) };
-    let dn = unsafe { extend_peri_to_static(dn) };
+    // Safety: peripherals are never dropped for the life of the device, and
+    // init() holds the only Peri constructed for each of these peripherals.
+    // steal() conjures a fresh 'static Peri — no two live drivers will ever
+    // exist simultaneously.
+    let usb_otg_fs = unsafe { hal::peripherals::USB_OTG_FS::steal() };
+    let dp = unsafe { hal::peripherals::PA12::steal() };
+    let dn = unsafe { hal::peripherals::PA11::steal() };
 
     // --- Configure USB driver ---
     let mut usb_config = UsbConfig::default();
@@ -191,7 +169,7 @@ where
 /// # Example
 ///
 /// ```ignore
-/// asperitas_logging::usb::init(usb, dp, dn, Irqs);
+/// asperitas_logging::usb::init(Irqs);
 /// spawner.spawn(async { asperitas_logging::usb::run().await });
 /// ```
 pub async fn run() {
