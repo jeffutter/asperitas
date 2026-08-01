@@ -4,7 +4,7 @@ title: 'Fix: add unit tests for asperitas-cli/asperitas-dsp error paths'
 status: Needs Plan
 assignee: []
 created_date: '2026-08-01 19:55'
-updated_date: '2026-08-01 21:29'
+updated_date: '2026-08-01 21:32'
 labels:
   - review-followup
 dependencies:
@@ -32,19 +32,85 @@ Found while reviewing TASK-008.01 (crates/asperitas-cli/src/wav_io.rs, crates/as
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-SETUP (read first): This is a Rust workspace with host crates (crates/asperitas-dsp, crates/asperitas-cli) and a separate embedded firmware/ workspace. ALL commands must run inside the Nix dev shell: either run 'direnv allow' once, or prefix every command with 'nix develop -c'. Work from the repository root unless told otherwise. Do not change pinned dependency versions.
+## Implementation Plan for TASK-012
 
-1. crates/asperitas-cli/src/wav_io.rs: add a `#[cfg(test)] mod tests` block. Write a small helper that writes a minimal WAV file to a temp path (use `std::env::temp_dir()` + a unique filename, or the `tempfile` crate if already a dependency — check Cargo.lock first before adding a new dependency) with a given `hound::WavSpec`, so tests can construct fixtures without needing files in the repo. Add three tests: (a) an 8-bit or 24-bit PCM WAV is rejected by `read_wav` with an error mentioning "16", (b) a mono (1-channel) WAV is rejected with an error mentioning "stereo" or "2", (c) a float-format WAV (`hound::SampleFormat::Float`) is rejected with an error mentioning "Int". Assert on `Result::is_err()` and that the error string contains the expected substring — do not assert exact wording beyond that.
+### Overview
 
-2. crates/asperitas-cli/src/process.rs: add a `#[cfg(test)] mod tests` block with one test that calls `parse_param_pairs` (make it `pub(crate)` if it is not already visible to the test module — it currently is a private fn in the same file, so `mod tests` can call it directly) with input `vec!["not_a_kv_pair".to_string()]` and asserts the result is `Err` containing "key=value".
+Add unit tests covering error paths in four files: `wav_io.rs`, `process.rs`, `gain.rs`, and `filter.rs`. All tests are inline `#[cfg(test)] mod tests` blocks — no new test files. Adds `tempfile` as a dev-dependency for `asperitas-cli` to create temporary WAV fixtures.
 
-3. crates/asperitas-dsp/src/gain.rs: add a `#[cfg(all(test, feature = "std"))] mod tests` block (the parse function is std-gated) with two tests: `parse_params_from_cli` rejects `[("bogus_key".to_string(), "1.0".to_string())]` with an error mentioning "unknown parameter", and rejects `[("gain_db".to_string(), "not_a_number".to_string())]` with an error mentioning "invalid value".
+### Step 1: Add `tempfile` dev-dependency to `asperitas-cli`
 
-4. crates/asperitas-dsp/src/filter.rs: same pattern as step 3, for `cutoff_hz`/`OnePoleLowPass::parse_params_from_cli`.
+**File:** `crates/asperitas-cli/Cargo.toml`
 
-5. Run: nix develop -c cargo test -p asperitas-cli -p asperitas-dsp --all-features (the dsp crate's tests need the std feature enabled to compile the cfg-gated test modules; asperitas-cli already depends on asperitas-dsp with the std feature on, but running -p asperitas-dsp directly needs --features std or --all-features).
+`tempfile` 3.27.0 is already in `Cargo.lock` (transitive via clap). Adding it explicitly avoids manual temp-dir path management and gives auto-cleanup on `Drop`.
 
-6. Run: nix develop -c cargo clippy -p asperitas-cli -p asperitas-dsp --all-targets --all-features -- -D warnings and fix any warnings.
+```toml
+[dev-dependencies]
+tempfile = "3"
+```
 
-7. Run: nix develop -c cargo fmt --check -p asperitas-cli -p asperitas-dsp (or cargo fmt if lefthook's fmt-check hook requires it) before committing.
+### Step 2: Add error-path tests to `wav_io.rs`
+
+**File:** `crates/asperitas-cli/src/wav_io.rs` — append a `#[cfg(test)] mod tests` block at end of file.
+
+Helper function `write_test_wav(spec)` creates a minimal 2-sample stereo WAV via `hound::WavWriter` into a `NamedTempFile`, returns the path. Three tests exercise each branch of `validate_spec`:
+
+| Test | WavSpec variation | Expected error substring |
+|---|---|---|
+| `read_wav_rejects_wrong_bit_depth` | `bits_per_sample: 8` | `"16"` |
+| `read_wav_rejects_mono` | `channels: 1` | `"stereo"` |
+| `read_wav_rejects_float_format` | `sample_format: Float` | `"Int"` |
+
+Each test calls `read_wav(&path)`, asserts `is_err()`, then checks `err.contains(...)`.
+
+### Step 3: Add error-path test to `process.rs`
+
+**File:** `crates/asperitas-cli/src/process.rs` — append a `#[cfg(test)] mod tests` block.
+
+One test: `parse_param_pairs_rejects_malformed_arg` calls `parse_param_pairs(&["not_a_kv_pair".to_string()])` and asserts the error contains `"key=value"`. No visibility change needed — `fn` is private but same-file `mod tests` can call it.
+
+### Step 4: Add error-path tests to `gain.rs`
+
+**File:** `crates/asperitas-dsp/src/gain.rs` — append a `#[cfg(all(test, feature = "std"))] mod tests` block.
+
+Two tests:
+
+| Test | Input | Expected error substring |
+|---|---|---|
+| `gain_parse_rejects_unknown_key` | `[("bogus_key", "1.0")]` | `"unknown parameter"` |
+| `gain_parse_rejects_non_numeric_value` | `[("gain_db", "not_a_number")]` | `"invalid value"` |
+
+Feature-gated because `parse_params_from_cli` is behind `#[cfg(feature = "std")]`.
+
+### Step 5: Add error-path tests to `filter.rs`
+
+**File:** `crates/asperitas-dsp/src/filter.rs` — same pattern as step 4.
+
+Two tests:
+
+| Test | Input | Expected error substring |
+|---|---|---|
+| `filter_parse_rejects_unknown_key` | `[("bogus_key", "1000.0")]` | `"unknown parameter"` |
+| `filter_parse_rejects_non_numeric_value` | `[("cutoff_hz", "not_a_number")]` | `"invalid value"` |
+
+### Step 6: Verify tests pass
+
+```bash
+nix develop -c cargo test -p asperitas-cli -p asperitas-dsp --all-features
+```
+
+The `--all-features` flag ensures `asperitas-dsp` builds with `std` enabled so its cfg-gated test modules compile.
+
+### Step 7: Run clippy and fmt
+
+```bash
+nix develop -c cargo clippy -p asperitas-cli -p asperitas-dsp --all-targets --all-features -- -D warnings
+nix develop -c cargo fmt --check -p asperitas-cli -p asperitas-dsp
+```
+
+Fix any warnings before committing.
+
+### Risk assessment
+
+**Low risk.** Purely additive — only adds test code and one dev-dependency. No production code changes. Each test exercises exactly one error branch, keeping tests focused and maintainable.
 <!-- SECTION:PLAN:END -->
