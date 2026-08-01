@@ -1,10 +1,11 @@
 ---
 id: TASK-003.01
 title: Write lefthook config and GitHub Actions workflow
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:56'
+updated_date: '2026-08-01 16:31'
 labels: []
 dependencies: []
 parent_task_id: TASK-003
