@@ -1,11 +1,11 @@
 ---
 id: TASK-003
 title: lefthook hooks and GitHub Actions CI
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-01 05:45'
-updated_date: '2026-08-01 15:40'
+updated_date: '2026-08-01 23:03'
 labels: []
 dependencies:
   - TASK-002
