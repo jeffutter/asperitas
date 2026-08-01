@@ -4,10 +4,15 @@ title: 'Integrate logging into main.rs — USB task, LED stages, panic handler'
 status: To Do
 assignee: []
 created_date: '2026-08-01 18:46'
+updated_date: '2026-08-01 18:47'
 labels:
   - task
   - planned
-dependencies: []
+dependencies:
+  - TASK-006.01.01
+  - TASK-006.01.02
+  - TASK-006.01.03
+  - TASK-006.01.04
 parent_task_id: TASK-006.01
 priority: high
 ordinal: 24000
