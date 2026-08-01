@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:44'
-updated_date: '2026-08-01 12:49'
+updated_date: '2026-08-01 12:53'
 labels:
   - planned
 dependencies: []
@@ -81,3 +81,26 @@ Replace the placeholder flake.nix with a production dev shell using fenix for th
 3. Verify derivation builds: `nix build .#devShells.x86_64-linux.default` or `nix develop --print-build-logs --command true`
 4. Commit both files
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Implementation
+
+Replaced placeholder flake.nix with a production dev shell using fenix for the Rust toolchain.
+
+### Key decisions:
+- Used individual fenix package components (f.stable.cargo, f.stable.rustc, etc.) rather than combine(), because the current fenix API (post-rewrite) does not expose combine as a function — it is a pre-built derivation. Individual components achieve the same result.
+- Target stdlib added via f.targets.thumbv7em-none-eabihf.stable.rust-std
+- llvm-tools from fenix provides rust-objcopy/rust-lld; cargo-binutils provides cargo objcopy/cargo ld wrappers
+- AC #4 (cpal compilation) deferred to TASK-002 when Cargo workspace exists; verified pkg-config finds alsa successfully
+- fenix.inputs.nixpkgs.follows = nixpkgs to ensure consistent nixpkgs version across inputs
+
+### Verification:
+- nix develop succeeds ✓
+- thumbv7em-none-eabihf in rustc target-list ✓
+- dfu-util 0.11, probe-rs 0.32.0, lefthook 2.1.10, cargo-objcopy 0.4.0 all present ✓
+- pkg-config --libs alsa returns correct path ✓
+- yq v4.53.3 (mikefarah), jq 1.8.2 both present ✓
+- nix flake check passes ✓
+<!-- SECTION:NOTES:END -->
