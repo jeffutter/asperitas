@@ -1,20 +1,10 @@
 #![no_std]
 
-/// Process a single audio sample.
-///
-/// Currently a no-op passthrough; real DSP will replace this.
-pub fn process_sample(sample: f32) -> f32 {
-    sample
-}
+pub mod processor;
+pub mod gain;
+pub mod filter;
+mod smooth;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn process_sample_passthrough() {
-        assert_eq!(process_sample(0.5), 0.5);
-        assert_eq!(process_sample(-1.0), -1.0);
-        assert_eq!(process_sample(0.0), 0.0);
-    }
-}
+pub use processor::{Frame, Processor};
+pub use gain::{Gain, GainParams};
+pub use filter::{OnePoleLowPass, FilterParams};
