@@ -8,11 +8,11 @@
 //! In your binary crate's `main.rs`:
 //!
 //! ```ignore
-//! use asperitas_logging::panic_handler as _;
+//! #[panic_handler]
+//! fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+//!     asperitas_logging::panic_handler::handle_panic(info)
+//! }
 //! ```
-//!
-//! The `as _` ensures the `#[panic_handler]` attribute is registered without
-//! creating an unused-import warning.
 //!
 //! Before any panic can occur, call [`set_panic_led`] to install the LED
 //! reference that the panic handler will use.
@@ -42,10 +42,17 @@ static mut PANIC_LED: Option<PanicLedState> = None;
 /// * `green_pin` — Green channel pin (Pod D19 = PA6)
 /// * `blue_pin` — Blue channel pin (Pod D18 = PA7)
 pub fn set_panic_led(
-    red_pin: Peri<'static, hal::peripherals::PC1>,
-    green_pin: Peri<'static, hal::peripherals::PA6>,
-    blue_pin: Peri<'static, hal::peripherals::PA7>,
+    red_pin: Peri<'_, hal::peripherals::PC1>,
+    green_pin: Peri<'_, hal::peripherals::PA6>,
+    blue_pin: Peri<'_, hal::peripherals::PA7>,
 ) {
+    // Coerce Peri lifetimes to 'static — safe because these peripherals live
+    // for the lifetime of the device (they are never dropped). This matches
+    // the pattern used by embassy-stm32's Driver constructors.
+    let red_pin: Peri<'static, hal::peripherals::PC1> = unsafe { core::mem::transmute(red_pin) };
+    let green_pin: Peri<'static, hal::peripherals::PA6> =
+        unsafe { core::mem::transmute(green_pin) };
+    let blue_pin: Peri<'static, hal::peripherals::PA7> = unsafe { core::mem::transmute(blue_pin) };
     let off = if super::led::LED_ACTIVE_LOW {
         hal::gpio::Level::High
     } else {
@@ -63,17 +70,13 @@ pub fn set_panic_led(
     });
 }
 
-/// The custom panic handler.
+/// Handle a panic — called by the binary crate's `#[panic_handler]`.
 ///
-/// This function replaces `panic-halt`. It:
+/// This function:
 /// 1. Sets the LED to red (panicked state) — always works, synchronous
 /// 2. Attempts to write the panic message over USB serial — best effort
 /// 3. Enters an infinite loop with bkpt
-//
-// NOTE: This attribute registers the function as the panic handler for the
-// binary crate that re-exports it. It can only appear once per binary.
-#[panic_handler]
-fn panic_handler(info: &PanicInfo) -> ! {
+pub fn handle_panic(info: &PanicInfo) -> ! {
     // 1. Set LED to red (panicked state) — synchronous, always works
     cortex_m::interrupt::free(|_| unsafe {
         if let Some(ref mut led) = PANIC_LED {
