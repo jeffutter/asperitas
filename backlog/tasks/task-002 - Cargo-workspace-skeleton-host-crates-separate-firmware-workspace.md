@@ -1,11 +1,11 @@
 ---
 id: TASK-002
 title: 'Cargo workspace skeleton: host crates + separate firmware workspace'
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:45'
-updated_date: '2026-08-01 13:47'
+updated_date: '2026-08-01 13:50'
 labels:
   - planned
 dependencies:
