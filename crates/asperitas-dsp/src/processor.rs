@@ -28,8 +28,10 @@ pub trait Processor {
 
     /// Process a block of frames. Provided implementation delegates to `tick`.
     /// Override only if you have a genuinely more efficient block-level algorithm.
+    ///
+    /// If `input` and `output` differ in length, only the overlapping prefix is processed;
+    /// this never panics, per the no-`Result`, real-time-safe contract above.
     fn process_block(&mut self, input: &[Frame], output: &mut [Frame]) {
-        assert_eq!(input.len(), output.len(), "input and output slices must be the same length");
         for (inp, out) in input.iter().zip(output.iter_mut()) {
             *out = self.tick(*inp);
         }
