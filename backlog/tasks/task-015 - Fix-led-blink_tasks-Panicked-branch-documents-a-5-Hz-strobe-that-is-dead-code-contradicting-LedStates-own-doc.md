@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-01 22:30'
-updated_date: '2026-08-01 22:44'
+updated_date: '2026-08-01 22:45'
 labels:
   - review-followup
 dependencies:
@@ -25,10 +25,7 @@ Found while reviewing TASK-013 (crates/asperitas-logging/src/led.rs, async fn bl
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 led.rs's blink_task has no code path that implements behavior it cannot actually reach at runtime — either delete the unreachable Panicked match arm's strobe logic (collapse it to match set_state's steady-on, or simply remove the Panicked arm from blink_task's loop since panic_handler already owns that transition exclusively) or make it reachable (e.g. panic_handler drives an explicit busy-wait strobe loop itself instead of relying on the halted async executor)
-- [ ] #2 blink_task's doc comment and LedState::Panicked's doc comment agree with each other and with the code that actually runs during a real panic — no comment claims a 5 Hz strobe unless the code path that produces it is demonstrably reachable
-- [ ] #3 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky succeeds
-- [ ] #4 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings passes
+- [ ] #1 #1 led.rs's blink_task has no code path that implements behavior it cannot actually reach at runtime — either delete the unreachable Panicked match arm's strobe logic (collapse it to match set_state's steady-on, or simply remove the Panicked arm from blink_task's loop since panic_handler already owns that transition exclusively) or make it reachable (e.g. panic_handler drives an explicit busy-wait strobe loop itself instead of relying on the halted async executor)\n#2 blink_task's doc comment and LedState::Panicked's doc comment agree with each other and with the code that actually runs during a real panic — no comment claims a 5 Hz strobe unless the code path that produces it is demonstrably reachable\n#3 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky succeeds\n#4 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings passes
 <!-- AC:END -->
 
 ## Implementation Plan
