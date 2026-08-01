@@ -55,6 +55,8 @@ the same configuration as this project — confirmed:
 - stereo in and out at 48 kHz with correct left/right channels
 - line-out to line-in loopback passes stereo audio repeatably
 
+**Block size is fixed at 32 samples, not 48.** `src/audio.rs` hardcodes `pub const BLOCK_LENGTH: usize = 32;`; it is not a field on `AudioConfig` (which only exposes `fs: Fs`), so this project cannot request a different block size without patching the vendored fork. This diverges from libDaisy's 48-sample default for the Pod — worth mentioning in the TASK-005.03 upstream report if block size ever becomes musically significant (e.g. for tight feedback/delay paths).
+
 ## Alternative / superseded BSPs
 
 - [`zlosynth/daisy`](https://github.com/zlosynth/daisy) — sync (non-async), `no_std`,
