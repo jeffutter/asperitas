@@ -42,8 +42,18 @@ frontmatter() {
   awk '/^---$/{c++; next} c==1' "$1"
 }
 
+# Least authoritative directory first, most authoritative last, because assignment
+# overwrites on ID collision and the live task must win.
+#
+# IDs are not guaranteed unique across these directories: archiving a task keeps its
+# ID and its status verbatim, so an archived stub can share an ID with a real task.
+# Observed live — an abandoned scratch task sat in archive/ as "To Do" under the same
+# ID as a completed task, and being read last it overwrote the real "Done". Everything
+# depending on that ID looked permanently blocked, so the loop quietly starved with no
+# error anywhere. `backlog doctor` cannot catch this: it only scans active and
+# completed tasks, not archive/.
 declare -A status_of
-for f in tasks/*.md completed/*.md archive/tasks/*.md; do
+for f in archive/tasks/*.md completed/*.md tasks/*.md; do
   [ -f "$f" ] || continue
   fm=$(frontmatter "$f")
   id=$(printf '%s\n' "$fm" | yq -r '.id')

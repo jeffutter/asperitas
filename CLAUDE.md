@@ -39,6 +39,20 @@ Work that is part agent and part human is **split into subtasks** (`TASK-005.01`
 `TASK-005.02`, …) rather than assigned to one or the other. A parent ticket is an
 umbrella whose only acceptance criterion is that its subtasks are done.
 
+**A parent inherits the strictest assignee among its children.** If any child is
+`@human`, the parent is `@human` too — it cannot be closed until that child is, so an
+agent picking it up can only spin. This is not hypothetical: TASK-004 was left `@agent`
+with a `@human` child, reached the execute stage, and the executor correctly reported
+that a person had to flash the board — but with no work left to do it produced no
+commit, tripped the "claimed success but no commit landed" guard, and was re-selected
+until the failure-streak guard halted the whole run.
+
+**Never leave an abandoned task in `backlog/archive/`.** Archiving preserves both the
+ID and the status, so an archived stub sharing an ID with a real task will shadow it
+when dependencies are resolved, and every dependent ticket silently looks blocked
+forever. `backlog doctor` does not catch this — it only scans active and completed
+tasks. Delete throwaways outright.
+
 The failure mode this exists to prevent: an agent marking "audio passthrough works"
 complete because it compiled, having never heard a sound. **Compiling is not evidence.**
 If a criterion says `HUMAN:`, no amount of agent work satisfies it.
