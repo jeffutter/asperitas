@@ -54,11 +54,11 @@ Property tests with `proptest`, written as a reusable suite any `Processor` impl
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `Processor` trait defined in asperitas-dsp with the shape above
-- [ ] #2 A gain and a one-pole filter processor implement it
-- [ ] #3 The property-test suite is generic over `Processor` and reusable by future implementations
-- [ ] #4 All listed invariants are covered by proptest cases and pass
-- [ ] #5 asperitas-dsp remains `#![no_std]` with no hardware dependencies
+- [x] #1 `Processor` trait defined in asperitas-dsp with the shape above
+- [x] #2 A gain and a one-pole filter processor implement it
+- [x] #3 The property-test suite is generic over `Processor` and reusable by future implementations
+- [x] #4 All listed invariants are covered by proptest cases and pass
+- [x] #5 asperitas-dsp remains `#![no_std]` with no hardware dependencies
 <!-- AC:END -->
 
 ## Implementation Plan
