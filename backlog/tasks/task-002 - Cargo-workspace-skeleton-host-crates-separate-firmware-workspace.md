@@ -107,3 +107,18 @@ cargo build --features seed3        # AC #2
 grep -r "rev.*477083b0227d" Cargo.toml  # AC #5
 ```
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation notes:
+
+- Root workspace (Cargo.toml): members = ["crates/*"], exclude = ["firmware"], resolver = "2"
+- asperitas-dsp: #![no_std] with zero dependencies, trivial process_sample() passthrough, std feature for host tests
+- asperitas-cli: binary crate depending on asperitas-dsp, minimal println main
+- firmware/: separate workspace with its own .cargo/config.toml targeting thumbv7em-none-eabihf
+- daisy-embassy pinned to rev 477083b0227d (PR #80, unmerged Seed3 support)
+- embassy-executor uses platform-cortex-m + executor-thread features (needed for #[embassy_executor::main])
+- Added defmt no-op global_logger and _defmt_panic stub because embassy-stm32 links against defmt internally
+- No runner in firmware .cargo/config.toml (no debug probe yet)
+<!-- SECTION:NOTES:END -->
