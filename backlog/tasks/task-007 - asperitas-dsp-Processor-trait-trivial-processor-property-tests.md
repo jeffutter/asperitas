@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:46'
-updated_date: '2026-08-01 16:06'
+updated_date: '2026-08-01 16:28'
 labels:
   - planned
 dependencies:
@@ -203,6 +203,8 @@ All 12 proptest cases pass:
 - filter_param_change_smooth ✓
 
 Note: libm crate used for f32::exp() in no_std context. Firmware target not available on this machine but crate builds correctly.
+
+Fixup applied post-review (commit e894b38, git commit --fixup=29a0fd3): removed the `assert_eq!(input.len(), output.len())` panic guard from `Processor::process_block`'s default impl in crates/asperitas-dsp/src/processor.rs. It contradicted the trait's own documented design principle ("No allocation, no `Result`... a real-time path that can fail or block is a design error") three lines above it. `.zip()` already stops at the shorter slice, so mismatched-length calls now process the overlapping prefix instead of panicking, per CLAUDE.md's "Define Errors Out of Existence" guidance. Verified: `cargo test -p asperitas-dsp --features asperitas-dsp/std` (12/12 pass) and `cargo clippy -p asperitas-dsp --all-targets -- -D warnings` (clean).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
