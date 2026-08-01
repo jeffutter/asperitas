@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 17:41'
-updated_date: '2026-08-01 18:10'
+updated_date: '2026-08-01 19:53'
 labels:
   - review-followup
 dependencies:
@@ -25,7 +25,7 @@ Found while reviewing TASK-005.01 (backlog/tasks/task-005.01 - Implement-audio-p
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 done:1;done:2;done:3
+- [x] #1 docs/reference/rust-daisy-stack.md documents that daisy-embassy PR #80's src/audio.rs hardcodes BLOCK_LENGTH = 32 samples and that AudioConfig exposes no block-length field
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,6 +48,8 @@ SETUP (read first): This is a Rust firmware project (firmware/, Embassy on Daisy
 
 <!-- SECTION:NOTES:BEGIN -->
 Confirmed BLOCK_LENGTH = 32 at line 13 of src/audio.rs in daisy-embassy PR #80 (commit 477083b). AudioConfig only exposes fs: Fs. Added documentation paragraph to docs/reference/rust-daisy-stack.md in the Seed3 support status section.
+
+Review (2026-08-01): AC #1 was malformed at creation time — stored as the literal placeholder text 'done:1;done:2;done:3' with an unchecked box, despite the docs change (e071e5d) correctly satisfying the ticket's actual intent (verified: docs/reference/rust-daisy-stack.md:57 now states the BLOCK_LENGTH=32 fact). Rewrote AC #1 to describe the real, observable criterion and checked it off. No code change needed — this was a ticket-metadata defect from whatever created TASK-011, not a defect in the implementation.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
