@@ -1,18 +1,14 @@
 ---
 id: TASK-006.01
 title: Implement USB CDC serial logging facade and LED boot stages
-status: In Progress
+status: Blocked
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 18:51'
+updated_date: '2026-08-01 20:12'
 labels:
   - planned
 dependencies:
-  - TASK-006.01.01
-  - TASK-006.01.02
-  - TASK-006.01.03
-  - TASK-006.01.04
   - TASK-006.01.05
 documentation:
   - docs/reference/daisy-pod.md

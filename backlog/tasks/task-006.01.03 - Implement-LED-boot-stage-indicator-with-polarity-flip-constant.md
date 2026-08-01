@@ -1,9 +1,10 @@
 ---
 id: TASK-006.01.03
 title: Implement LED boot-stage indicator with polarity-flip constant
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-01 18:45'
+updated_date: '2026-08-01 20:11'
 labels:
   - task
   - planned

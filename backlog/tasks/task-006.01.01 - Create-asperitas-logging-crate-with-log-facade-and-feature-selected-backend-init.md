@@ -3,9 +3,10 @@ id: TASK-006.01.01
 title: >-
   Create asperitas-logging crate with log facade and feature-selected backend
   init
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-01 18:44'
+updated_date: '2026-08-01 20:11'
 labels:
   - task
   - planned
