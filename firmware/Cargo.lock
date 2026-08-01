@@ -182,7 +182,7 @@ checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 [[package]]
 name = "daisy-embassy"
 version = "0.2.3"
-source = "git+https://github.com/landakram/daisy-embassy?rev=477083b0227d#477083b0227de2dee036e0bce7325caac095a8ab"
+source = "git+https://github.com/daisy-embassy/daisy-embassy?branch=master#ca9bcc9ce93e70f85670e7ad066811c923ce1918"
 dependencies = [
  "cortex-m",
  "defmt 1.1.1",
