@@ -1,10 +1,11 @@
 ---
 id: TASK-003.02
 title: Create GitHub remote and confirm first CI run is green
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-01 05:56'
+updated_date: '2026-08-01 23:03'
 labels: []
 dependencies:
   - TASK-003.01
