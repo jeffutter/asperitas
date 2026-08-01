@@ -58,10 +58,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let config = daisy_embassy::default_rcc();
     let p = hal::init(config);
-    let mut board: DaisyBoard<'_> = new_daisy_board!(p);
+    let board: DaisyBoard<'_> = new_daisy_board!(p);
 
-    // Install panic LED (consumes RGB pins PC1/PA6/PA7).
-    asperitas_logging::panic_handler::set_panic_led(
+    // Init RGB LED — single owner for boot stages + panic handler.
+    asperitas_logging::led::init(
         board.pins.d20,
         board.pins.d19,
         board.pins.d18,
@@ -94,24 +94,35 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     info!("Audio interface ready");
 
-    // Simple running indicator via onboard user LED (PC7).
-    board.user_led.on();
+    // Transition LED to Running state (steady green).
+    asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
 
     // Enter the audio callback loop. Returns Result<Infallible, sai::Error>;
     // Infallible can never be constructed, so this only exits on SAI hardware error.
-    // Run USB alongside audio using select.
+    // Run USB and LED blink alongside audio using nested selects.
     let usb_fut = asperitas_logging::usb::run();
     let audio_fut = interface.start_callback(|input, output| {
         output.copy_from_slice(input);
     });
+    let led_fut = asperitas_logging::led::blink_task();
 
-    // Run both concurrently — USB drains logs while audio processes samples.
-    // Neither should complete normally; if either does, we halt.
-    match embassy_futures::select::select(audio_fut, usb_fut).await {
-        embassy_futures::select::Either::First(Ok(_)) => unreachable!(),
-        embassy_futures::select::Either::First(Err(e)) => {
-            let _ = e;
-        }
+    // Run LED blink alongside the audio+USB pair. The blink_task never returns,
+    // so the outer select always yields the inner result (audio or USB ending).
+    match embassy_futures::select::select(
+        async {
+            match embassy_futures::select::select(audio_fut, usb_fut).await {
+                embassy_futures::select::Either::First(Ok(_)) => unreachable!(),
+                embassy_futures::select::Either::First(Err(e)) => {
+                    let _ = e;
+                }
+                embassy_futures::select::Either::Second(_) => unreachable!(),
+            }
+        },
+        led_fut,
+    )
+    .await
+    {
+        embassy_futures::select::Either::First(_) => {}
         embassy_futures::select::Either::Second(_) => unreachable!(),
     }
     #[allow(clippy::empty_loop)]
