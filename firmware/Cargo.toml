@@ -15,7 +15,7 @@ seed3 = []
 asperitas-dsp = { path = "../crates/asperitas-dsp" }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
-daisy-embassy = { git = "https://github.com/landakram/daisy-embassy", rev = "477083b0227d", features = ["seed3"] }
+daisy-embassy = { git = "https://github.com/daisy-embassy/daisy-embassy", branch = "master", features = ["seed3"] }
 embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread"] }
 embassy-stm32 = { version = "0.6.0", features = ["stm32h750ib", "memory-x", "exti"] }
 panic-halt = "0.2.0"
