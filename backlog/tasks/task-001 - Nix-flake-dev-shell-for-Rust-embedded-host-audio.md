@@ -39,4 +39,5 @@ See docs/reference/rust-daisy-stack.md for the toolchain section.
 - [ ] #3 `dfu-util --version`, `probe-rs --version`, `lefthook version`, and `cargo objcopy --version` all run inside the shell
 - [ ] #4 pkg-config finds ALSA, verified by a trivial crate depending on `cpal` compiling
 - [ ] #5 flake.lock is committed and `nix flake check` passes
+- [ ] #6 `yq` (mikefarah/yq-go, not the Python yq) and `jq` remain available — required by backlog/unblocked-todo.sh, which both Ralph loops call to resolve ticket dependencies
 <!-- AC:END -->
