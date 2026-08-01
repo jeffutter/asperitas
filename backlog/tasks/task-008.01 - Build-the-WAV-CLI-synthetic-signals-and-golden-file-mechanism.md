@@ -5,7 +5,7 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 18:20'
+updated_date: '2026-08-01 18:21'
 labels: []
 dependencies: []
 parent_task_id: TASK-008
@@ -45,162 +45,100 @@ Analysis output (impulse/frequency response, RMS, spectrogram) is a later ticket
 
 ### Overview
 
-Transform the skeleton  into a functional WAV processing tool with two subcommands (, ), a shared parameter-parsing module, synthetic signal generators, and golden-file regression tests. Adds  (CLI arg parsing) and  (WAV I/O) as dependencies.
+Transform the skeleton `asperitas-cli` into a functional WAV processing tool with two subcommands (`process`, `generate`), a shared parameter-parsing module, synthetic signal generators, and golden-file regression tests. Adds `clap 4` (CLI arg parsing) and `hound 3` (WAV I/O) as dependencies.
 
 ### Architecture Decisions
 
-**Binary name:** Keep  internally; users invoke it via . The  name stays  (with hyphen) to match the crate name convention.
+**Binary name:** Keep `asperitas-cli` internally; users invoke via `cargo run -p asperitas-cli -- <args>`. The `[[bin]]` name stays `asperitas-cli` (with hyphen) to match the crate name convention.
 
-**Parameter mapping location:** Each processor gets a  static helper method on its own type in . This keeps the mapping close to the Params definition (so future Pod/TUI hosts import it from ) while letting each processor own its own key names. The CLI dispatches to the right parser via a  on .
+**Parameter mapping location:** Each processor gets a `parse_params_from_cli(pairs: &[(String, String)]) -> Result<Self::Params, String>` static helper method on its own type in `asperitas-dsp`. This keeps the mapping close to the Params definition (so future Pod/TUI hosts import it from `asperitas-dsp`) while letting each processor own its own key names. The CLI dispatches to the right parser via a `match` on `--processor`.
 
-**Synthetic signal generation:** Lives in . Pure functions returning  mono samples. A wrapper stereo-doubles them. Deterministic: Karplus-Strong uses a fixed LCG seed. All generators output at a specified sample rate and duration.
+**Synthetic signal generation:** Lives in `asperitas-cli/src/synth.rs`. Pure functions returning `Vec<f32>` mono samples. A wrapper stereo-doubles them. Deterministic: Karplus-Strong uses a fixed LCG seed. All generators output at a specified sample rate and duration.
 
-**Golden-file storage:**  directory in the repo root. Files named by convention: . Goldens are ~160 KB each (1 s, stereo, 16-bit, 48 kHz). Six goldens total (~1 MB) — small enough for git without LFS.
+**Golden-file storage:** `audio/goldens/` directory in the repo root. Files named by convention: `{processor}_{param_digest}_{signal_type}.wav`. Goldens are ~160 KB each (1 s, stereo, 16-bit, 48 kHz). Six goldens total (~1 MB) — small enough for git without LFS.
 
 **Golden tolerance:** Per-sample absolute delta < 1e-5 (well above floating-point noise, well below audible threshold at 16-bit). Compares frame-by-frame after confirming matching length and spec.
 
 ### Files to Create/Modify
 
-#### 1.  — add dependencies
+#### 1. `crates/asperitas-cli/Cargo.toml` — add dependencies
 
-No dev-dependencies needed beyond what's already in the workspace.
+Add `clap = { version = "4", features = ["derive"] }` and `hound = "3.5"`. Also add a `[lib]` section so integration tests can import internal modules.
 
-#### 2.  — add 
+#### 2. `crates/asperitas-dsp/src/gain.rs` — add `parse_params_from_cli`
 
-Add a static helper to :
+Add a static helper to `Gain` that parses CLI key=value pairs into `GainParams`. Recognized key: `gain_db`. Returns descriptive error for unknown keys or bad values.
 
-#### 3.  — add 
+#### 3. `crates/asperitas-dsp/src/filter.rs` — add `parse_params_from_cli`
 
-Same pattern for :
+Same pattern for `OnePoleLowPass`. Recognized key: `cutoff_hz`.
 
-#### 4.  — rewrite with clap derive
+#### 4. `crates/asperitas-cli/src/lib.rs` — new library root
 
-Structure using clap's derive API:
+Minimal `pub mod synth; pub mod wav_io;` so integration tests can link against the library.
 
-:
--  — input WAV path
--  — output WAV path
--  — processor name
--  — repeated 
+#### 5. `crates/asperitas-cli/src/wav_io.rs` — new, WAV read/write helpers
 
-Wait, clap's  splits a single arg. Better: use a custom value parser or just accept  and split internally. Actually, simplest approach:
+`read_wav(path) -> Result<(WavSpec, Vec<Frame>), String>` — validates stereo + 16-bit PCM, converts i16 interleaved samples to f32 Frames scaled to [-1, 1].
 
-Main dispatch:
+`write_wav(path, spec, frames) -> Result<(), String>` — clamps f32 to ±1.0, scales to i16, writes interleaved stereo.
 
-#### 5.  — new, WAV read/write helpers
+#### 6. `crates/asperitas-cli/src/process.rs` — new, `run_process()` function
 
-Read WAV into , write  to WAV:
+Takes ProcessArgs (input path, output path, processor name, param list). Reads input WAV, dispatches to correct processor by name string, calls `set_sample_rate` with file's actual rate (AC#3), sets params via shared parser (AC#2), runs `process_block`, writes output (AC#1).
 
-Key design points:
-- Validates stereo + 16-bit PCM only (keeps it simple; mono-to-stereo conversion is a later enhancement)
-- Converts i16 ↔ f32 with proper scaling ( on read,  + clamp on write)
-- Error messages include paths for debugging
+#### 7. `crates/asperitas-cli/src/synth.rs` — new, synthetic signal generators
 
-#### 6.  — new,  function
+Three generators, all returning `Vec<f32>` mono at a given sample rate:
+- **Impulse:** single sample = 1.0, rest zeros
+- **Logarithmic sine sweep:** phase integral of log chirp, default 20 Hz → 20 kHz, 1 second
+- **Karplus-Strong pluck:** deterministic LCG-seeded noise buffer, 440 Hz default, damping 0.996, 2 seconds
 
-This satisfies AC#1 (process runs), AC#2 (shared param mapping), and AC#3 (set_sample_rate with file's actual rate).
+Plus `to_stereo(mono: &[f32]) -> Vec<Frame>` wrapper.
 
-#### 7.  — new, synthetic signal generators
+#### 8. `crates/asperitas-cli/src/generate.rs` — new, `run_generate()` function
 
-Three generators, all returning  mono at a given sample rate:
+Clap-derived args: output path, signal type (impulse/sweep/pluck), duration, sample rate. Dispatches to correct generator, stereo-doubles, writes WAV.
 
-**Impulse (Dirac delta):**
+#### 9. `crates/asperitas-cli/src/main.rs` — rewrite with clap derive
 
-**Logarithmic sine sweep:**
+Top-level Cli with `Process` and `Generate` subcommands. Dispatches to respective module functions.
 
-Default: 20 Hz → 20 kHz, 1 second.
+#### 10. `crates/asperitas-cli/tests/golden_tests.rs` — new, integration tests
 
-**Karplus-Strong plucked string:**
+Generates deterministic synthetic signals, processes them through Gain and OnePoleLowPass with default params, compares against golden WAV files in `audio/goldens/`. Uses `UPDATE_GOLDENS=1` env var for explicit opt-in regeneration (AC#5). Six test cases: gain×{impulse,sweep,pluck} and filter×{impulse,sweep,pluck}.
 
-Default: 440 Hz, damping 0.996, 2 seconds.
+#### 11. `audio/goldens/.gitkeep` — new directory marker
 
-**Stereo doubler wrapper:**
-
-#### 8.  — new,  function
-
-#### 9.  — new, integration tests
-
-**Golden regeneration:** When  is set, tests write the actual output instead of comparing. Implemented via a helper:
-
-This satisfies AC#5: goldens regenerate only with explicit 
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-
-running 12 tests
-test gain_silence_in_silence_out ... ok
-test filter_param_change_smooth ... ok
-test gain_param_change_smooth ... ok
-test filter_silence_in_silence_out ... ok
-test gain_reset_idempotent ... ok
-test filter_output_always_finite ... ok
-test gain_output_bounded ... ok
-test filter_block_equals_tick ... ok
-test gain_block_equals_tick ... ok
-test gain_output_always_finite ... ok
-test filter_output_bounded ... ok
-test filter_reset_idempotent ... ok
-
-test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.51s
-
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s.
-
-#### 10.  — new directory with 
-
-Initial commit includes . Golden WAVs are generated by running 
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s during implementation.
-
-#### 11.  — new (for test imports)
-
-Since , , etc. are in  siblings, the integration tests can't access them directly. Two options:
-- Make a  re-exporting the modules (tests link against  as a lib)
-- Duplicate the WAV read logic in tests (DRY violation)
-
-Go with option A — create a minimal :
-
-And update  to also declare :
+Golden WAVs generated during implementation via `UPDATE_GOLDENS=1 cargo test -p asperitas-cli`.
 
 ### Implementation Order
 
-1. **Cargo.toml** — add ,  dependencies +  section
-2. **lib.rs** — minimal library root exposing  and 
-3. **wav_io.rs** — read/write helpers (needed by everything downstream)
-4. **synth.rs** — signal generators (needed by  command and tests)
-5. **gain.rs / filter.rs** — add  methods in 
-6. **process.rs** —  wiring
-7. **generate.rs** —  wiring
-8. **main.rs** — clap CLI shell tying modules together
-9. **Verify build:** 
-10. **Smoke test:** generate an impulse, process it, verify output WAV is valid
-11. **golden_tests.rs** — integration tests with UPDATE_GOLDENS mechanism
-12. **Generate initial goldens:** 
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
-13. **Verify goldens pass:** 
-running 0 tests
-
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s (without UPDATE_GOLDENS)
-14. **Clippy:** 
+1. Cargo.toml — add clap, hound dependencies + [lib] section
+2. lib.rs — minimal library root exposing synth and wav_io
+3. wav_io.rs — read/write helpers (needed by everything downstream)
+4. synth.rs — signal generators (needed by generate command and tests)
+5. gain.rs / filter.rs in asperitas-dsp — add parse_params_from_cli methods
+6. process.rs — run_process() wiring
+7. generate.rs — run_generate() wiring
+8. main.rs — clap CLI shell tying modules together
+9. Verify build: `cargo build -p asperitas-cli`
+10. Smoke test: generate an impulse, process it, verify output WAV is valid
+11. golden_tests.rs — integration tests with UPDATE_GOLDENS mechanism
+12. Generate initial goldens: `UPDATE_GOLDENS=1 cargo test -p asperitas-cli`
+13. Verify goldens pass: `cargo test -p asperitas-cli` (without UPDATE_GOLDENS)
+14. Clippy: `cargo clippy -p asperitas-cli --all-targets -- -D warnings`
 
 ### Risks & Mitigations
 
 | Risk | Mitigation |
 |------|-----------|
-| Karplus-Strong buffer shift is O(n) per sample — slow for long outputs | Acceptable for test generation (not real-time). If performance matters, replace with ring buffer later. |
-| hound may not support all WAV variants (e.g., float32 WAVs) | We only read/write 16-bit PCM stereo. Explicit validation rejects others with clear errors. |
-| Golden files drift due to compiler/toolchain changes | Unlikely for integer-arithmetic-only processing (Gain and OnePoleLowPass use f32 ops, but results are deterministic across compilers for the same target). If drift occurs, investigate before regenerating. |
-| Log sweep phase integral formula may have edge cases | Clamp to reasonable defaults (f_start ≥ 20 Hz, f_end ≤ 20 kHz). Test with known-good values first. |
+| Karplus-Strong buffer shift is O(n) per sample | Acceptable for test generation (not real-time). Replace with ring buffer if needed later. |
+| hound may not support all WAV variants | We only read/write 16-bit PCM stereo. Explicit validation rejects others with clear errors. |
+| Golden files drift due to compiler changes | Unlikely for f32 ops on same target. Investigate before regenerating. |
+| Log sweep phase integral edge cases | Clamp to reasonable defaults (f_start >= 20 Hz, f_end <= 20 kHz). |
 
 ### Why No Sub-Tickets
 
-All five acceptance criteria share infrastructure (WAV I/O, CLI skeleton, synth generators). None can be independently tested until the full chain exists. The individual modules are small (<100 lines each) and ship atomically.
+All five acceptance criteria share infrastructure (WAV I/O, CLI skeleton, synth generators). None can be independently tested until the full chain exists. The individual modules are small (<100 lines each) and ship atomically, following the same pattern as TASK-007.
 <!-- SECTION:PLAN:END -->
