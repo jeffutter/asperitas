@@ -54,3 +54,9 @@ SETUP (read first): This is a Rust+embedded firmware workspace (firmware/, cross
 <!-- SECTION:NOTES:BEGIN -->
 Combined f.stable.clippy into the f.combine call (renamed rustWithTarget -> rustToolchain) so clippy-driver shares the thumbv7em-none-eabihf sysroot with rustc. Fixed two mechanical lints: removed redundant 'use defmt;' in blinky.rs and replaced .max().min() with .clamp() in gain.rs. All acceptance criteria verified — sysroots match, firmware clippy passes, host clippy clean, build + objcopy produce working binary.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+One-line flake.nix fix: added f.stable.clippy to the f.combine call so clippy-driver shares the embedded target sysroot with rustc. Removed the now-redundant standalone clippy package entry. Renamed rustWithTarget -> rustToolchain for clarity. Also fixed two mechanical clippy lints surfaced by the now-functional lint pass (redundant import in blinky.rs, manual clamp in gain.rs).
+<!-- SECTION:FINAL_SUMMARY:END -->
