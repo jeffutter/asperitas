@@ -1,10 +1,11 @@
 ---
 id: TASK-012
 title: 'Fix: add unit tests for asperitas-cli/asperitas-dsp error paths'
-status: Dev Ready
-assignee: []
+status: In Progress
+assignee:
+  - '@ralph'
 created_date: '2026-08-01 19:55'
-updated_date: '2026-08-01 21:32'
+updated_date: '2026-08-01 21:33'
 labels:
   - review-followup
 dependencies:
