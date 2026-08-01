@@ -1,0 +1,6 @@
+MEMORY
+{
+  /* CMSIS nameless 0x00000000..0x00002000 region — not mapped */
+  FLASH : ORIGIN = 0x08000000, LENGTH = 2M
+  RAM   : ORIGIN = 0x24000000, LENGTH = 1M
+}

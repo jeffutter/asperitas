@@ -1,0 +1,11 @@
+[package]
+name = "asperitas-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "asperitas-cli"
+path = "src/main.rs"
+
+[dependencies]
+asperitas-dsp = { path = "../asperitas-dsp" }
