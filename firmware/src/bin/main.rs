@@ -2,7 +2,27 @@
 #![no_main]
 
 use daisy_embassy::{DaisyBoard, hal, new_daisy_board};
-use panic_halt as _;
+use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
+use asperitas_logging::info;
+
+// Re-export the panic handler from asperitas-logging.
+// The #[panic_handler] attribute must be in the binary crate for the linker
+// to pick it up, so we define a thin wrapper here.
+#[panic_handler]
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    asperitas_logging::panic_handler::handle_panic(info)
+}
+
+// Provide _defmt_panic symbol required by embassy-stm32 / embassy-usb's
+// internal defmt usage (defmt 0.3.x). This is NOT the Rust panic handler;
+// it fires only when a defmt formatter encounters an unrecoverable error.
+#[defmt::panic_handler]
+fn defmt_panic_handler() -> ! {
+    cortex_m::asm::bkpt();
+    loop {
+        cortex_m::asm::nop();
+    }
+}
 
 // No-op defmt logger — satisfies linker symbols required by embassy-stm32's
 // internal defmt usage. Remove when adding real logging (e.g. defmt-rtt).
@@ -24,12 +44,9 @@ unsafe impl defmt::Logger for Logger {
     }
 }
 
-// defmt panic handler — loops forever (same effect as panic-halt)
-#[no_mangle]
-#[allow(clippy::empty_loop)]
-unsafe extern "C" fn _defmt_panic() -> ! {
-    loop {}
-}
+bind_interrupts!(pub struct UsbIrqs {
+    OTG_FS => usb::InterruptHandler<peripherals::USB_OTG_FS>;
+});
 
 /// Audio passthrough — input copied directly to output.
 ///
@@ -37,9 +54,27 @@ unsafe extern "C" fn _defmt_panic() -> ! {
 /// hardware-strapped on Seed3 so no I²C init needed.
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
+    info!("Booting...");
+
     let config = daisy_embassy::default_rcc();
     let p = hal::init(config);
-    let board: DaisyBoard<'_> = new_daisy_board!(p);
+    let mut board: DaisyBoard<'_> = new_daisy_board!(p);
+
+    // Install panic LED (consumes RGB pins PC1/PA6/PA7).
+    asperitas_logging::panic_handler::set_panic_led(
+        board.pins.d20,
+        board.pins.d19,
+        board.pins.d18,
+    );
+
+    // Init USB CDC serial logging.
+    let _usb_handle = asperitas_logging::usb::init(
+        board.usb_peripherals.usb_otg_fs,
+        board.usb_peripherals.pins.DP,
+        board.usb_peripherals.pins.DN,
+        UsbIrqs,
+    );
+    info!("USB logging initialized");
 
     // Prepare the audio interface (SAI + codec init + DMA buffers)
     let interface = board
@@ -57,13 +92,28 @@ async fn main(_spawner: embassy_executor::Spawner) {
         }
     };
 
+    info!("Audio interface ready");
+
+    // Simple running indicator via onboard user LED (PC7).
+    board.user_led.on();
+
     // Enter the audio callback loop. Returns Result<Infallible, sai::Error>;
     // Infallible can never be constructed, so this only exits on SAI hardware error.
-    #[allow(irrefutable_let_patterns)]
-    let Err(e) = interface.start_callback(|input, output| {
+    // Run USB alongside audio using select.
+    let usb_fut = asperitas_logging::usb::run();
+    let audio_fut = interface.start_callback(|input, output| {
         output.copy_from_slice(input);
-    }).await;
-    let _ = e;
+    });
+
+    // Run both concurrently — USB drains logs while audio processes samples.
+    // Neither should complete normally; if either does, we halt.
+    match embassy_futures::select::select(audio_fut, usb_fut).await {
+        embassy_futures::select::Either::First(Ok(_)) => unreachable!(),
+        embassy_futures::select::Either::First(Err(e)) => {
+            let _ = e;
+        }
+        embassy_futures::select::Either::Second(_) => unreachable!(),
+    }
     #[allow(clippy::empty_loop)]
     loop {}
 }

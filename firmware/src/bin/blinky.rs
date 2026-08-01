@@ -2,7 +2,26 @@
 #![no_main]
 
 use embassy_time::Timer;
-use panic_halt as _;
+use daisy_embassy::DaisyBoard;
+use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
+use asperitas_logging::info;
+
+// Re-export the panic handler from asperitas-logging.
+#[panic_handler]
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    asperitas_logging::panic_handler::handle_panic(info)
+}
+
+// Provide _defmt_panic symbol required by embassy-stm32 / embassy-usb's
+// internal defmt usage (defmt 0.3.x). This is NOT the Rust panic handler;
+// it fires only when a defmt formatter encounters an unrecoverable error.
+#[defmt::panic_handler]
+fn defmt_panic_handler() -> ! {
+    cortex_m::asm::bkpt();
+    loop {
+        cortex_m::asm::nop();
+    }
+}
 
 // No-op defmt logger — satisfies linker symbols required by embassy-stm32's
 // internal defmt usage. Remove when adding real logging (e.g. defmt-rtt).
@@ -24,11 +43,9 @@ unsafe impl defmt::Logger for Logger {
     }
 }
 
-#[no_mangle]
-#[allow(clippy::empty_loop)]
-unsafe extern "C" fn _defmt_panic() -> ! {
-    loop {}
-}
+bind_interrupts!(pub struct UsbIrqs {
+    OTG_FS => usb::InterruptHandler<peripherals::USB_OTG_FS>;
+});
 
 /// Blinky — known-good diagnostic for Seed3.
 ///
@@ -36,15 +53,41 @@ unsafe extern "C" fn _defmt_panic() -> ! {
 /// Flash via DFU; see `docs/reference/daisy-seed3.md` or run `make flash-all`.
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
+    info!("Blinky booting...");
+
     let config = daisy_embassy::default_rcc();
     let p = daisy_embassy::hal::init(config);
-    let board: daisy_embassy::DaisyBoard<'_> = daisy_embassy::new_daisy_board!(p);
+    let board: DaisyBoard<'_> = daisy_embassy::new_daisy_board!(p);
+
+    // Install panic LED (consumes RGB pins PC1/PA6/PA7).
+    asperitas_logging::panic_handler::set_panic_led(
+        board.pins.d20,
+        board.pins.d19,
+        board.pins.d18,
+    );
+
+    // Init USB CDC serial logging.
+    let _usb_handle = asperitas_logging::usb::init(
+        board.usb_peripherals.usb_otg_fs,
+        board.usb_peripherals.pins.DP,
+        board.usb_peripherals.pins.DN,
+        UsbIrqs,
+    );
+    info!("Blinky running");
+
     let mut led = board.user_led;
 
-    loop {
-        led.on();
-        Timer::after_millis(300).await;
-        led.off();
-        Timer::after_millis(300).await;
-    }
+    // Run USB alongside the blink loop.
+    let usb_fut = asperitas_logging::usb::run();
+    let blink = async {
+        loop {
+            led.on();
+            Timer::after_millis(300).await;
+            led.off();
+            Timer::after_millis(300).await;
+        }
+    };
+
+    // Neither future completes; select polls both forever.
+    let _ = embassy_futures::select::select(blink, usb_fut).await;
 }
