@@ -3,7 +3,7 @@ id: TASK-010
 title: >-
   Fix: extract duplicated defmt logger/panic boilerplate shared by
   firmware/src/bin/*.rs
-status: Needs Plan
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-08-01 14:31'
