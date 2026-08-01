@@ -1,11 +1,11 @@
 ---
 id: TASK-006.01
 title: Implement USB CDC serial logging facade and LED boot stages
-status: Dev Ready
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 21:43'
+updated_date: '2026-08-01 21:46'
 labels:
   - planned
 dependencies:
@@ -74,3 +74,9 @@ New workspace crate `crates/asperitas-logging/` provides a feature-selected logg
 3. **Flash budget:** USB descriptors + buffers add ~2-3 KB RAM. Should fit within 128 KB internal flash alongside audio passthrough. Verify binary size in integration ticket.
 4. **LED polarity unknown:** Code structured so flipping the constant fixes inversion. TASK-006.02 determines truth.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All 5 subtasks (TASK-006.01.01–05) completed. New crate crates/asperitas-logging/ provides: (1) log facade with feature-selected backends (log-usb / future log-defmt), (2) USB CDC-ACM serial backend via embassy-usb with pipe-based async drain, (3) BootLed with PreInit/Running/Panicked states and single-polarity constant, (4) panic handler with red LED + USB pipe write. Integrated into main.rs and blinky.rs. Binary sizes ~65 KB and ~50 KB respectively, well within 128 KB flash.
+<!-- SECTION:FINAL_SUMMARY:END -->
