@@ -3,7 +3,7 @@ id: TASK-015
 title: >-
   Fix: led::blink_task's Panicked branch documents a 5 Hz strobe that is dead
   code, contradicting LedState's own doc
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 22:30'
