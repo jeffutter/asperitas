@@ -6,3 +6,9 @@ edition = "2021"
 [features]
 default = []
 std = []
+
+[dependencies]
+libm = "0.2"
+
+[dev-dependencies]
+proptest = "1"

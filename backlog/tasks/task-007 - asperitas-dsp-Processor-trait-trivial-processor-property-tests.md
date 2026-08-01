@@ -1,7 +1,7 @@
 ---
 id: TASK-007
 title: 'asperitas-dsp: Processor trait, trivial processor, property tests'
-status: In Progress
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:46'
