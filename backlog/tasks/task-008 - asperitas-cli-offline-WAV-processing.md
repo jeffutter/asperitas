@@ -2,8 +2,10 @@
 id: TASK-008
 title: 'asperitas-cli: offline WAV processing'
 status: To Do
-assignee: []
+assignee:
+  - '@agent'
 created_date: '2026-08-01 05:46'
+updated_date: '2026-08-01 05:56'
 labels: []
 dependencies:
   - TASK-007
@@ -36,10 +38,5 @@ Analysis output (impulse/frequency response, RMS, spectrogram) is a later ticket
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `asperitas process in.wav out.wav` runs a Processor over a file and writes valid output
-- [ ] #2 Parameters are settable from the command line via a mapping shared with future hosts, not CLI-local
-- [ ] #3 A WAV at a sample rate other than 48 kHz is handled via `set_sample_rate`, not rejected
-- [ ] #4 The CLI can generate the synthetic test signals
-- [ ] #5 audio/ contains committed short mono 48 kHz instrument recordings and generated synthetic signals
-- [ ] #6 Golden-file tests pass, and regenerating goldens requires an explicit opt-in command
+- [ ] #1 All subtasks complete
 <!-- AC:END -->
