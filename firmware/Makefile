@@ -7,7 +7,7 @@
 # DFU flashing requires holding BOOT, tapping RESET, releasing BOOT
 # to enter the STM32 system bootloader. See docs/reference/daisy-seed3.md.
 
-BINARY  = blinky
+BINARY  = main
 FEATURES = seed3
 TARGET   = thumbv7em-none-eabihf
 
@@ -15,9 +15,21 @@ TARGET   = thumbv7em-none-eabihf
 
 all: build
 
-## Build blinky as a release binary and produce raw .bin for DFU
+## Build $(BINARY) as a release binary and produce raw .bin for DFU
+##
+## llvm-objcopy's -O binary output spans from lowest VMA to highest VMA,
+## which includes the gap between FLASH (0x08000000) and RAM (0x24000000),
+## producing a ~469 MB file. --only-section extracts only FLASH-loadable
+## sections, giving a correct ~32 KB binary for DFU flashing.
 build:
-	cargo objcopy --release --features $(FEATURES) --bin $(BINARY) -- -O binary firmware.bin
+	cargo objcopy --release --features $(FEATURES) --bin $(BINARY) -- \
+		-O binary firmware.bin \
+		--only-section=.vector_table \
+		--only-section=.text \
+		--only-section=.rodata \
+		--only-section=.data \
+		--only-section='*.sgstubs' \
+		--only-section='*.defmt*'
 
 ## Flash firmware.bin to the Seed3 via DFU
 ## Prerequisite: hold BOOT, tap RESET, release BOOT on the board
