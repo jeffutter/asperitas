@@ -3,10 +3,10 @@ id: TASK-013
 title: >-
   Fix: wire BootLed's pre-init/running/panicked LED states into firmware (AC #3
   of TASK-006.01 not actually met)
-status: To Do
+status: Needs Plan
 assignee: []
 created_date: '2026-08-01 21:55'
-updated_date: '2026-08-01 21:55'
+updated_date: '2026-08-01 21:59'
 labels:
   - review-followup
 dependencies:
