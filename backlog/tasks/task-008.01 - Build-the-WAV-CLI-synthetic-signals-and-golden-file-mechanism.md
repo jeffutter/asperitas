@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 18:22'
+updated_date: '2026-08-01 18:35'
 labels:
   - planned
 dependencies: []
@@ -32,11 +32,11 @@ Analysis output (impulse/frequency response, RMS, spectrogram) is a later ticket
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `asperitas process in.wav out.wav` runs a Processor over a file and writes valid output
-- [ ] #2 Parameters settable from the command line via a mapping shared with future hosts, not CLI-local
-- [ ] #3 A WAV at a rate other than 48 kHz is handled via `set_sample_rate`, not rejected
-- [ ] #4 The CLI generates the synthetic test signals
-- [ ] #5 Golden-file tests pass over synthetic signals, and regenerating goldens requires an explicit opt-in command
+- [x] #1 `asperitas process in.wav out.wav` runs a Processor over a file and writes valid output
+- [x] #2 Parameters settable from the command line via a mapping shared with future hosts, not CLI-local
+- [x] #3 A WAV at a rate other than 48 kHz is handled via `set_sample_rate`, not rejected
+- [x] #4 The CLI generates the synthetic test signals
+- [x] #5 Golden-file tests pass over synthetic signals, and regenerating goldens requires an explicit opt-in command
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -143,3 +143,9 @@ Golden WAVs generated during implementation via `UPDATE_GOLDENS=1 cargo test -p 
 
 All five acceptance criteria share infrastructure (WAV I/O, CLI skeleton, synth generators). None can be independently tested until the full chain exists. The individual modules are small (<100 lines each) and ship atomically, following the same pattern as TASK-007.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented WAV CLI with process/generate subcommands, synthetic signal generators (impulse, sweep, Karplus-Strong pluck), golden-file regression tests with UPDATE_GOLDENS opt-in mechanism. Parameter parsing via parse_params_from_cli on Gain and OnePoleLowPass in asperitas-dsp with std feature gate. Tolerance set to 1e-4 to account for 16-bit quantization round-trip.
+<!-- SECTION:NOTES:END -->
