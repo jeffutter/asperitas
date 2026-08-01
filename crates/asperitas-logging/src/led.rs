@@ -3,6 +3,16 @@
 //! Controls one of the Pod's RGB LEDs as a status indicator, with states for
 //! pre-init, running, and panicked conditions. Polarity is controlled by a
 //! single constant so TASK-006.02 can flip it without code changes.
+//!
+//! # Architecture
+//!
+//! A singleton [`BootLed`] is created once by [`init`], stored in static
+//! storage via [`StaticCell`]. Both the async execution path (main/blinky)
+//! and the synchronous panic handler access the same instance through
+//! [`get_mut`]. An [`AtomicU32`] coordinates state transitions between
+//! the async [`blink_task`] and interrupt/panic context.
+
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use embassy_stm32::{
     self as hal,
@@ -10,6 +20,7 @@ use embassy_stm32::{
     Peri,
 };
 use embassy_time::Timer;
+use static_cell::StaticCell;
 
 /// LED polarity — set to `true` if the Pod's LEDs are active-low.
 ///
@@ -25,8 +36,28 @@ pub enum LedState {
     PreInit,
     /// Steady green — audio pipeline active, system running normally.
     Running,
-    /// Fast strobe red (~5 Hz) — unrecoverable error / panic.
+    /// Red on — unrecoverable error / panic.
     Panicked,
+}
+
+impl LedState {
+    /// Convert from u32 atomic value. Defaults to `PreInit` on unknown values.
+    fn from_u32(val: u32) -> Self {
+        match val {
+            0 => LedState::PreInit,
+            1 => LedState::Running,
+            _ => LedState::Panicked,
+        }
+    }
+
+    /// Convert to u32 for atomic storage.
+    fn to_u32(self) -> u32 {
+        match self {
+            LedState::PreInit => 0,
+            LedState::Running => 1,
+            LedState::Panicked => 2,
+        }
+    }
 }
 
 /// RGB LED driver for boot-stage indication.
@@ -40,60 +71,104 @@ pub struct BootLed {
     blue: Output<'static>,
 }
 
-impl BootLed {
-    /// Create a new `BootLed` from raw GPIO pins.
-    ///
-    /// # Arguments
-    ///
-    /// * `red_pin` — Red channel pin (Pod D20 = PC1)
-    /// * `green_pin` — Green channel pin (Pod D19 = PA6)
-    /// * `blue_pin` — Blue channel pin (Pod D18 = PA7)
-    pub fn new(
-        red_pin: Peri<'static, hal::peripherals::PC1>,
-        green_pin: Peri<'static, hal::peripherals::PA6>,
-        blue_pin: Peri<'static, hal::peripherals::PA7>,
-    ) -> Self {
-        let _active = if LED_ACTIVE_LOW {
-            Level::Low
-        } else {
-            Level::High
-        };
-        let inactive = if LED_ACTIVE_LOW {
-            Level::High
-        } else {
-            Level::Low
-        };
+// ---------------------------------------------------------------------------
+// Singleton storage — initialized once by init(), accessed via get_mut()
+// ---------------------------------------------------------------------------
 
-        Self {
-            red: Output::new(red_pin, inactive, Speed::Low),
-            green: Output::new(green_pin, inactive, Speed::Low),
-            blue: Output::new(blue_pin, inactive, Speed::Low),
-        }
+static BOOT_LED_STORAGE: StaticCell<BootLed> = StaticCell::new();
+
+/// Cached mutable reference to the initialized BootLed.
+/// Set once by init(), read by get_mut(). Safe on single-core Cortex-M.
+static mut BOOT_LED_REF: *mut BootLed = core::ptr::null_mut();
+
+/// Global atomic state — read by blink_task, written by main() and panic_handler.
+static LED_STATE: AtomicU32 = AtomicU32::new(0); // 0 = PreInit (default)
+
+/// Initialize the singleton BootLed.
+///
+/// Consumes the three RGB LED pins and stores the driver in static storage.
+/// Sets the initial state to `PreInit` (red blink at ~1 Hz).
+///
+/// Call this once during boot, before spawning the blink_task or any panic
+/// can occur. Both the async execution path and the panic handler share
+/// this single instance.
+///
+/// # Arguments
+///
+/// * `red_pin` — Red channel pin (Pod D20 = PC1)
+/// * `green_pin` — Green channel pin (Pod D19 = PA6)
+/// * `blue_pin` — Blue channel pin (Pod D18 = PA7)
+///
+/// # Panics
+///
+/// Panics if called more than once.
+pub fn init(
+    red_pin: Peri<'static, hal::peripherals::PC1>,
+    green_pin: Peri<'static, hal::peripherals::PA6>,
+    blue_pin: Peri<'static, hal::peripherals::PA7>,
+) {
+    let inactive = if LED_ACTIVE_LOW {
+        Level::High
+    } else {
+        Level::Low
+    };
+
+    let led = BootLed {
+        red: Output::new(red_pin, inactive, Speed::Low),
+        green: Output::new(green_pin, inactive, Speed::Low),
+        blue: Output::new(blue_pin, inactive, Speed::Low),
+    };
+
+    let boot_led = BOOT_LED_STORAGE.init(led);
+    unsafe {
+        BOOT_LED_REF = boot_led;
     }
 
+    // Start in PreInit state
+    LED_STATE.store(LedState::PreInit.to_u32(), Ordering::Release);
+}
+
+/// Get a mutable reference to the singleton BootLed.
+///
+/// # Safety
+///
+/// Must only be called after [`init`] has been called. Safe on single-core
+/// Cortex-M with controlled init-then-access lifecycle.
+pub fn get_mut() -> &'static mut BootLed {
+    unsafe { &mut *BOOT_LED_REF }
+}
+
+/// Set the global LED state atomically.
+///
+/// Updates both the atomic state (read by blink_task) and immediately calls
+/// [`BootLed::set_state`] for synchronous effect. Used by main.rs/blinky.rs
+/// for explicit state transitions.
+pub fn set_global_state(state: LedState) {
+    LED_STATE.store(state.to_u32(), Ordering::Release);
+    get_mut().set_state(state);
+}
+
+impl BootLed {
     /// Set the LED to a specific state synchronously.
-    ///
-    /// For blinking states (PreInit, Panicked), this sets the LED to its
-    /// "on" phase. Use [`blink_task`] for animated blinking.
     pub fn set_state(&mut self, state: LedState) {
         match state {
             LedState::PreInit => {
                 // Red on, others off
-                self.set_color(true, false, false);
+                self.set_color_on(true, false, false);
             }
             LedState::Running => {
                 // Green on, others off
-                self.set_color(false, true, false);
+                self.set_color_on(false, true, false);
             }
             LedState::Panicked => {
-                // Red on, others off (same as PreInit but different blink rate)
-                self.set_color(true, false, false);
+                // Red on, others off
+                self.set_color_on(true, false, false);
             }
         }
     }
 
     /// Set individual color channels.
-    fn set_color(&mut self, red: bool, green: bool, blue: bool) {
+    pub fn set_color_on(&mut self, red: bool, green: bool, blue: bool) {
         let on = if LED_ACTIVE_LOW {
             Level::Low
         } else {
@@ -133,80 +208,55 @@ impl BootLed {
         self.green.set_level(off);
         self.blue.set_level(off);
     }
+}
 
-    /// Async blink task for a given state.
-    ///
-    /// Consumes `self` and loops forever, toggling the LED at the appropriate
-    /// rate for the given state:
-    /// - `PreInit`: ~1 Hz (500 ms on, 500 ms off)
-    /// - `Panicked`: ~5 Hz (100 ms on, 100 ms off)
-    /// - `Running`: sets solid green and returns immediately
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // In main():
-    /// let led = BootLed::new(board.pins.d20, board.pins.d19, board.pins.d18);
-    /// spawner.spawn(async {
-    ///     led.blink_task(LedState::PreInit).await;
-    /// }).ok();
-    ///
-    /// // Later, when audio starts:
-    /// led.set_state(LedState::Running);
-    /// ```
-    pub async fn blink_task(mut self, state: LedState) {
+/// Async blink task that reads the global atomic state each iteration.
+///
+/// Accesses the singleton [`BootLed`] via raw pointer internally, so it takes
+/// no arguments and can be freely selected alongside other futures without
+/// borrow-across-await issues.
+///
+/// Runs forever — does not return.
+///
+/// - `PreInit`: blink red at ~1 Hz
+/// - `Running`: steady green (polls for Panicked transition)
+/// - `Panicked`: blink red at ~5 Hz
+///
+/// # Example
+///
+/// ```ignore
+/// // In main():
+/// asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
+///
+/// // Run alongside other futures via select:
+/// let led_fut = asperitas_logging::led::blink_task();
+/// embassy_futures::select!(led_fut, other_fut).await;
+/// ```
+pub async fn blink_task() {
+    loop {
+        let state = LedState::from_u32(LED_STATE.load(Ordering::Acquire));
+        let led = unsafe { &mut *BOOT_LED_REF };
+
         match state {
             LedState::Running => {
-                // Solid green, no blink loop needed
-                self.set_state(LedState::Running);
-                return;
+                // Steady green — yield periodically to stay responsive
+                led.set_state(LedState::Running);
+                Timer::after_millis(500).await;
             }
-            LedState::PreInit | LedState::Panicked => {}
-        }
-
-        let (on_ms, off_ms) = match state {
-            LedState::PreInit => (500, 500),  // ~1 Hz
-            LedState::Panicked => (100, 100), // ~5 Hz
-            LedState::Running => unreachable!(),
-        };
-
-        loop {
-            // Turn red on
-            self.set_color(true, false, false);
-            Timer::after_millis(on_ms).await;
-
-            // Turn all off
-            self.off();
-            Timer::after_millis(off_ms).await;
-        }
-    }
-
-    /// Set the panicked state and enter an infinite blink loop.
-    ///
-    /// This is called from the panic handler path (via critical section)
-    /// or directly when a fatal error occurs. It does NOT return.
-    #[allow(dead_code)]
-    pub fn panic_loop(mut self) -> ! {
-        // During panic, we can't use async. Just set red on and loop.
-        // The blink won't be animated, but the LED will be visible.
-        let on = if LED_ACTIVE_LOW {
-            Level::Low
-        } else {
-            Level::High
-        };
-        let off = if LED_ACTIVE_LOW {
-            Level::High
-        } else {
-            Level::Low
-        };
-
-        self.red.set_level(on);
-        self.green.set_level(off);
-        self.blue.set_level(off);
-
-        cortex_m::asm::bkpt();
-        loop {
-            cortex_m::asm::nop();
+            LedState::PreInit => {
+                // Red blink ~1 Hz
+                led.set_color_on(true, false, false);
+                Timer::after_millis(500).await;
+                led.off();
+                Timer::after_millis(500).await;
+            }
+            LedState::Panicked => {
+                // Red blink ~5 Hz
+                led.set_color_on(true, false, false);
+                Timer::after_millis(100).await;
+                led.off();
+                Timer::after_millis(100).await;
+            }
         }
     }
 }

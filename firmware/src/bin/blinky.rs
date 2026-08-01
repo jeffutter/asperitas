@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 
-use embassy_time::Timer;
 use daisy_embassy::DaisyBoard;
 use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
 use asperitas_logging::info;
@@ -49,7 +48,9 @@ bind_interrupts!(pub struct UsbIrqs {
 
 /// Blinky — known-good diagnostic for Seed3.
 ///
-/// Toggles the onboard user LED (PC7) at ~1.6 Hz (300 ms on, 300 ms off).
+/// RGB LED (PC1/PA6/PA7) shows PreInit (red blink ~1 Hz) during boot,
+/// then transitions to Running (steady green) once USB is up.
+/// On panic, the LED turns red-on.
 /// Flash via DFU; see `docs/reference/daisy-seed3.md` or run `make flash-all`.
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
@@ -59,8 +60,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let p = daisy_embassy::hal::init(config);
     let board: DaisyBoard<'_> = daisy_embassy::new_daisy_board!(p);
 
-    // Install panic LED (consumes RGB pins PC1/PA6/PA7).
-    asperitas_logging::panic_handler::set_panic_led(
+    // Init RGB LED — single owner for boot stages + panic handler.
+    asperitas_logging::led::init(
         board.pins.d20,
         board.pins.d19,
         board.pins.d18,
@@ -75,19 +76,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
     );
     info!("Blinky running");
 
-    let mut led = board.user_led;
+    // Transition LED to Running state (steady green) after boot completes.
+    asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
 
-    // Run USB alongside the blink loop.
+    // Run USB and LED blink concurrently.
     let usb_fut = asperitas_logging::usb::run();
-    let blink = async {
-        loop {
-            led.on();
-            Timer::after_millis(300).await;
-            led.off();
-            Timer::after_millis(300).await;
-        }
-    };
+    let led_fut = asperitas_logging::led::blink_task();
 
     // Neither future completes; select polls both forever.
-    let _ = embassy_futures::select::select(blink, usb_fut).await;
+    let _ = embassy_futures::select::select(led_fut, usb_fut).await;
 }

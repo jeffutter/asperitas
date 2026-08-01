@@ -14,61 +14,12 @@
 //! }
 //! ```
 //!
-//! Before any panic can occur, call [`set_panic_led`] to install the LED
-//! reference that the panic handler will use.
+//! Before any panic can occur, call [`crate::led::init`] to initialize the
+//! shared BootLed instance. The panic handler uses the same singleton via
+//! [`crate::led::get_mut`].
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
-use embassy_stm32::{self as hal, Peri};
-
-/// Global LED state for the panic handler.
-/// Set by [`set_panic_led`] during initialization.
-struct PanicLedState {
-    red: hal::gpio::Output<'static>,
-    green: hal::gpio::Output<'static>,
-    blue: hal::gpio::Output<'static>,
-}
-
-static mut PANIC_LED: Option<PanicLedState> = None;
-
-/// Install the LED reference for the panic handler.
-///
-/// Call this after creating the boot LED pins but before any panic can occur.
-/// The panic handler will use these GPIO pins to signal a panicked state.
-///
-/// # Arguments
-///
-/// * `red_pin` — Red channel pin (Pod D20 = PC1)
-/// * `green_pin` — Green channel pin (Pod D19 = PA6)
-/// * `blue_pin` — Blue channel pin (Pod D18 = PA7)
-pub fn set_panic_led(
-    red_pin: Peri<'_, hal::peripherals::PC1>,
-    green_pin: Peri<'_, hal::peripherals::PA6>,
-    blue_pin: Peri<'_, hal::peripherals::PA7>,
-) {
-    // Coerce Peri lifetimes to 'static — safe because these peripherals live
-    // for the lifetime of the device (they are never dropped). This matches
-    // the pattern used by embassy-stm32's Driver constructors.
-    let red_pin: Peri<'static, hal::peripherals::PC1> = unsafe { core::mem::transmute(red_pin) };
-    let green_pin: Peri<'static, hal::peripherals::PA6> =
-        unsafe { core::mem::transmute(green_pin) };
-    let blue_pin: Peri<'static, hal::peripherals::PA7> = unsafe { core::mem::transmute(blue_pin) };
-    let off = if super::led::LED_ACTIVE_LOW {
-        hal::gpio::Level::High
-    } else {
-        hal::gpio::Level::Low
-    };
-
-    let led = PanicLedState {
-        red: hal::gpio::Output::new(red_pin, off, hal::gpio::Speed::Low),
-        green: hal::gpio::Output::new(green_pin, off, hal::gpio::Speed::Low),
-        blue: hal::gpio::Output::new(blue_pin, off, hal::gpio::Speed::Low),
-    };
-
-    cortex_m::interrupt::free(|_| unsafe {
-        PANIC_LED = Some(led);
-    });
-}
 
 /// Handle a panic — called by the binary crate's `#[panic_handler]`.
 ///
@@ -77,25 +28,8 @@ pub fn set_panic_led(
 /// 2. Attempts to write the panic message over USB serial — best effort
 /// 3. Enters an infinite loop with bkpt
 pub fn handle_panic(info: &PanicInfo) -> ! {
-    // 1. Set LED to red (panicked state) — synchronous, always works
-    cortex_m::interrupt::free(|_| unsafe {
-        if let Some(ref mut led) = PANIC_LED {
-            let on = if super::led::LED_ACTIVE_LOW {
-                hal::gpio::Level::Low
-            } else {
-                hal::gpio::Level::High
-            };
-            let off = if super::led::LED_ACTIVE_LOW {
-                hal::gpio::Level::High
-            } else {
-                hal::gpio::Level::Low
-            };
-
-            led.red.set_level(on);
-            led.green.set_level(off);
-            led.blue.set_level(off);
-        }
-    });
+    // 1. Set LED to panicked state via the shared BootLed — synchronous, always works
+    crate::led::set_global_state(crate::led::LedState::Panicked);
 
     // 2. Try to write panic message over USB pipe (best-effort, non-blocking)
     // During panic, the async executor is halted, so we can't use embassy-usb's
