@@ -2,8 +2,10 @@
 id: TASK-005
 title: 'Audio passthrough on Seed3, and report results to daisy-embassy PR #80'
 status: To Do
-assignee: []
+assignee:
+  - '@agent'
 created_date: '2026-08-01 05:45'
+updated_date: '2026-08-01 05:56'
 labels: []
 dependencies:
   - TASK-004
@@ -45,9 +47,5 @@ If passthrough does *not* work, we own `src/codec/tac5242.rs` in the pinned fork
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Audio plugged into the Pod's input is audible at its output, through Seed3 firmware built from this repo
-- [ ] #2 Left and right channels are verified not swapped
-- [ ] #3 Loopback (line out to line in) passes audio repeatably across resets
-- [ ] #4 A test report is posted as a comment on daisy-embassy PR #80
-- [ ] #5 Any deviation from the SAI configuration documented in docs/reference/daisy-seed3.md is corrected there
+- [ ] #1 All subtasks complete
 <!-- AC:END -->
