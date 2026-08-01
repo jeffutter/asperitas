@@ -6,6 +6,12 @@ use panic_halt as _;
 
 // No-op defmt logger — satisfies linker symbols required by embassy-stm32's
 // internal defmt usage. Remove when adding real logging (e.g. defmt-rtt).
+//
+// NOTE: This block must live in each binary crate, not in a shared lib.
+// `#[defmt::global_logger]` is a proc-macro that emits linker symbols only
+// when expanded inside the final binary crate; placing it in a lib crate
+// causes dead-code elimination to drop the struct (and its generated
+// symbols) because nothing references `Logger` by name.
 #[defmt::global_logger]
 struct Logger;
 
