@@ -1,11 +1,11 @@
 ---
 id: TASK-006.01
 title: Implement USB CDC serial logging facade and LED boot stages
-status: Needs Plan
+status: Dev Ready
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 21:38'
+updated_date: '2026-08-01 21:43'
 labels:
   - planned
 dependencies:
