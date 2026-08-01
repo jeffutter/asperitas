@@ -5,9 +5,14 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 18:36'
+updated_date: '2026-08-01 18:47'
 labels: []
-dependencies: []
+dependencies:
+  - TASK-006.01.01
+  - TASK-006.01.02
+  - TASK-006.01.03
+  - TASK-006.01.04
+  - TASK-006.01.05
 documentation:
   - docs/reference/daisy-pod.md
   - docs/reference/daisy-seed3.md
