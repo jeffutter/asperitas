@@ -73,12 +73,49 @@ exposes DFU at `0x08000000` (128 KB internal flash), which is enough for a
 reasonably-sized effect. Larger applications need the Daisy bootloader, which relocates
 the application into QSPI.
 
-Sequence: hold `BOOT`, tap `RESET`, release `BOOT` — the board enumerates as an STM32
-DFU device. Then `dfu-util -a 0 -s 0x08000000:leave -D firmware.bin`.
+### Enter DFU mode
 
-Note that `daisy-embassy`'s stock `.cargo/config.toml` sets
-`runner = 'probe-rs run --chip STM32H750IBKx'`, which assumes a probe. Without one, the
-build must be `objcopy`'d to a raw `.bin` and flashed with `dfu-util` instead.
+Hold `BOOT`, tap `RESET`, release `BOOT` — the board enumerates as an STM32 DFU device.
+Verify with `lsusb` (should show **STMicroelectronics STM32 bootloader**).
+
+### Build and flash blinky
+
+From the `firmware/` directory:
+
+```bash
+# One-shot build + flash
+make flash-all
+
+# Or step by step
+make build    # produces firmware.bin via cargo objcopy
+make flash    # dfu-util -a 0 -s 0x08000000:leave -D firmware.bin
+```
+
+Or manually:
+
+```bash
+cd firmware
+cargo objcopy --release --features seed3 --bin blinky -- -O binary firmware.bin
+dfu-util -a 0 -s 0x08000000:leave -D firmware.bin
+```
+
+The blinky binary (`firmware/src/bin/blinky.rs`) toggles the onboard user LED (PC7)
+at ~1.6 Hz (300 ms on/off). It is kept permanently as a known-good diagnostic — when
+something later goes wrong, being able to flash something that definitely works is
+worth a lot.
+
+### Notes
+
+- **`:leave` reliability:** `dfu-util :leave` is unreliable on some STM32H7 devices.
+  If the app doesn't start after flashing, power cycle (unplug/replug USB-C) or repeat
+  the BOOT+RESET dance.
+- **Binary size check:** `ls -la firmware.bin` should show < 128 KB (blinky is ~18 KB).
+- **Prerequisites:** `nix develop .` provides rustc, cargo-binutils, and dfu-util.
+  No additional setup needed.
+- **memory.x FLASH length:** declares `LENGTH = 2M` which reflects total available
+  storage (internal flash + QSPI), not just the 128 KB internal flash. This does not
+  block blinky but may need correction for larger applications that use the linker
+  more precisely.
 
 ### Debugging without a probe
 

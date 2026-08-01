@@ -1,11 +1,11 @@
 ---
 id: TASK-004.01
 title: Blinky firmware and DFU build pipeline
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:56'
-updated_date: '2026-08-01 14:20'
+updated_date: '2026-08-01 14:22'
 labels: []
 dependencies: []
 documentation:
