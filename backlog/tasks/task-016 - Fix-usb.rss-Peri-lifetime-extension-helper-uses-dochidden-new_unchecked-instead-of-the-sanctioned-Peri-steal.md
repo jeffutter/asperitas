@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 22:51'
-updated_date: '2026-08-01 23:20'
+updated_date: '2026-08-01 23:21'
 labels:
   - review-followup
   - planned
@@ -63,3 +63,9 @@ Each steal() call gets its own minimal unsafe block. The safety invariant is sta
 - cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky
 - cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Removed the generic extend_peri_to_static helper that used #[doc(hidden)] Peri::new_unchecked. Replaced it with direct T::steal() calls at each peripheral site — embassy-hal-internal's sanctioned end-user API for creating 'static Peri borrows. This also simplified init()'s signature by removing the now-unnecessary Peri<'_, T> parameters, since steal() creates fresh 'static Peris without needing passed-in borrows. Updated both call sites (main.rs, blinky.rs) and removed the unused Peri import.
+<!-- SECTION:FINAL_SUMMARY:END -->
