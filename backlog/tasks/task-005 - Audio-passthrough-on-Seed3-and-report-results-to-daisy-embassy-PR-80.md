@@ -3,9 +3,9 @@ id: TASK-005
 title: 'Audio passthrough on Seed3, and report results to daisy-embassy PR #80'
 status: To Do
 assignee:
-  - '@agent'
+  - '@human'
 created_date: '2026-08-01 05:45'
-updated_date: '2026-08-01 05:56'
+updated_date: '2026-08-01 15:40'
 labels: []
 dependencies:
   - TASK-004

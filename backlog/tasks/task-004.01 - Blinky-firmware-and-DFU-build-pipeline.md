@@ -164,3 +164,9 @@ Update the "Flashing without a debug probe" section with:
 - `make build` works end-to-end via the Makefile
 - Existing main.rs binary still compiles (no regression)
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created blinky firmware (firmware/src/bin/blinky.rs) that toggles the Seed3 user LED at ~1.6 Hz, a Makefile with build/flash targets, and fixed the flake.nix fenix toolchain configuration so thumbv7em-none-eabihf compiles correctly. Build verified: 17,614 byte binary, well under 128 KB flash limit. TASK-004.02 (@human) remains for physical board verification.
+<!-- SECTION:FINAL_SUMMARY:END -->

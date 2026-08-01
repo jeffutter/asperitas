@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:45'
-updated_date: '2026-08-01 13:50'
+updated_date: '2026-08-01 14:30'
 labels:
   - planned
 dependencies:
@@ -121,6 +121,8 @@ Implementation notes:
 - embassy-executor uses platform-cortex-m + executor-thread features (needed for #[embassy_executor::main])
 - Added defmt no-op global_logger and _defmt_panic stub because embassy-stm32 links against defmt internally
 - No runner in firmware .cargo/config.toml (no debug probe yet)
+
+Fixup applied post-review (pi review, 2026-08-01): (1) firmware/Cargo.toml pinned daisy-embassy to `daisy-embassy/daisy-embassy` instead of the ticket-specified `landakram/daisy-embassy` fork URL — corrected to match spec (both resolved the pinned SHA today via GitHub's PR-ref sharing, but only the fork URL matches what the ticket explicitly required and documented rationale exists for). (2) crates/asperitas-dsp/src/lib.rs: process_sample's parameter was named `_sample` despite being used/returned, which misleadingly reads as unused — renamed to `sample`. Both verified via `cargo build --release --features seed3` (firmware) and `cargo test -p asperitas-dsp --features asperitas-dsp/std` (host).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
