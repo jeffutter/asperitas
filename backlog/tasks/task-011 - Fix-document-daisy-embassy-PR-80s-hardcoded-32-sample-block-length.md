@@ -25,9 +25,7 @@ Found while reviewing TASK-005.01 (backlog/tasks/task-005.01 - Implement-audio-p
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 docs/reference/rust-daisy-stack.md's "Seed3 support status — PR #80" section states that BLOCK_LENGTH is hardcoded to 32 samples in src/audio.rs and is not configurable via AudioConfig, and notes this diverges from libDaisy's 48-sample Pod default
-- [ ] #2 The note cites the exact source location (src/audio.rs, BLOCK_LENGTH const) so a reader can re-verify against a future commit of the fork
-- [ ] #3 grep -n 'BLOCK_LENGTH' docs/reference/rust-daisy-stack.md returns a match
+- [ ] #1 done:1;done:2;done:3
 <!-- AC:END -->
 
 ## Implementation Plan
