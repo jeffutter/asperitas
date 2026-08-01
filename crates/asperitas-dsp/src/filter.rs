@@ -101,3 +101,29 @@ impl OnePoleLowPass {
         Ok(params)
     }
 }
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filter_parse_rejects_unknown_key() {
+        let err = OnePoleLowPass::parse_params_from_cli(&[("bogus_key".into(), "1000.0".into())])
+            .unwrap_err();
+        assert!(
+            err.contains("unknown parameter"),
+            "expected error about unknown parameter, got: {err}"
+        );
+    }
+
+    #[test]
+    fn filter_parse_rejects_non_numeric_value() {
+        let err =
+            OnePoleLowPass::parse_params_from_cli(&[("cutoff_hz".into(), "not_a_number".into())])
+                .unwrap_err();
+        assert!(
+            err.contains("invalid value"),
+            "expected error about invalid value, got: {err}"
+        );
+    }
+}

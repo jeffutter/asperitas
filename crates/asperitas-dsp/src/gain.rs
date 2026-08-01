@@ -95,3 +95,27 @@ impl Gain {
         Ok(params)
     }
 }
+
+#[cfg(all(test, feature = "std"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gain_parse_rejects_unknown_key() {
+        let err = Gain::parse_params_from_cli(&[("bogus_key".into(), "1.0".into())]).unwrap_err();
+        assert!(
+            err.contains("unknown parameter"),
+            "expected error about unknown parameter, got: {err}"
+        );
+    }
+
+    #[test]
+    fn gain_parse_rejects_non_numeric_value() {
+        let err =
+            Gain::parse_params_from_cli(&[("gain_db".into(), "not_a_number".into())]).unwrap_err();
+        assert!(
+            err.contains("invalid value"),
+            "expected error about invalid value, got: {err}"
+        );
+    }
+}

@@ -60,3 +60,17 @@ fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {
     }
     Ok(pairs)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_param_pairs_rejects_malformed_arg() {
+        let err = parse_param_pairs(&["not_a_kv_pair".to_string()]).unwrap_err();
+        assert!(
+            err.contains("key=value"),
+            "expected error to mention key=value format, got: {err}"
+        );
+    }
+}
