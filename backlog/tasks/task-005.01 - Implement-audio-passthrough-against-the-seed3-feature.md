@@ -1,11 +1,11 @@
 ---
 id: TASK-005.01
 title: Implement audio passthrough against the seed3 feature
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 14:31'
+updated_date: '2026-08-01 17:10'
 labels: []
 dependencies:
   - TASK-009
