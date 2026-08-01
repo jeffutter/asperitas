@@ -44,6 +44,7 @@ dependencies = [
  "defmt 1.1.1",
  "embassy-executor",
  "embassy-stm32",
+ "embassy-time",
  "panic-halt",
 ]
 

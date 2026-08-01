@@ -11,3 +11,4 @@
 # The rest of .pi/ (agents, prompts, skills, the extension) IS project config and
 # is tracked.
 .pi/ralph/
+firmware.bin
