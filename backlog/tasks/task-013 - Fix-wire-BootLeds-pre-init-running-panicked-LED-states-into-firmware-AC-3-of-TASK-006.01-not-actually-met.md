@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-08-01 21:55'
+updated_date: '2026-08-01 21:55'
 labels:
   - review-followup
 dependencies:
@@ -33,5 +34,5 @@ Found while reviewing TASK-006.01 / TASK-006.01.05 (crates/asperitas-logging/src
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-SETUP (read first): This is a Rust+WebAssembly... wait
+SETUP (read first): This is a Rust+WebAssembly core (crates/gql-core)...
 <!-- SECTION:PLAN:END -->
