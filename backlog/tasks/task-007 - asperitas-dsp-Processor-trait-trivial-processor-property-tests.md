@@ -2,8 +2,10 @@
 id: TASK-007
 title: 'asperitas-dsp: Processor trait, trivial processor, property tests'
 status: To Do
-assignee: []
+assignee:
+  - '@agent'
 created_date: '2026-08-01 05:46'
+updated_date: '2026-08-01 05:56'
 labels: []
 dependencies:
   - TASK-002
