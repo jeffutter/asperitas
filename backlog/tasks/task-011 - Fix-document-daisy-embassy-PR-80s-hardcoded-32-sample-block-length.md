@@ -1,11 +1,11 @@
 ---
 id: TASK-011
 title: 'Fix: document daisy-embassy PR #80''s hardcoded 32-sample block length'
-status: Dev Ready
+status: In Progress
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-08-01 17:41'
-updated_date: '2026-08-01 18:07'
+updated_date: '2026-08-01 18:08'
 labels:
   - review-followup
 dependencies:
