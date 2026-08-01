@@ -12,12 +12,16 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       f = fenix.packages.${system};
-      # Combine host + embedded target into one rustc sysroot.
+      # Combine host + embedded target into one shared sysroot.
       # Fenix's f.targets.<target>.stable.rust-std is a separate package;
       # we must merge its lib/rustlib/thumbv7em* into the main rustc.
+      # Clippy MUST be combined too — otherwise clippy-driver gets its own
+      # standalone sysroot without the thumbv7em-none-eabihf std, and
+      # `cargo clippy` fails with E0463 "can't find crate for `core`".
       # Also combine llvm-tools so cargo-objcopy finds llvm-objcopy.
-      rustWithTarget = f.combine [
+      rustToolchain = f.combine [
         f.stable.rustc
+        f.stable.clippy
         f.targets.thumbv7em-none-eabihf.stable.rust-std
         f.stable.llvm-tools
       ];
@@ -27,8 +31,7 @@
         packages = [
           # --- Rust toolchain from fenix ---
           f.stable.cargo
-          rustWithTarget
-          f.stable.clippy
+          rustToolchain
           f.stable.rustfmt
           f.stable.rust-analyzer
           f.stable.rust-src
