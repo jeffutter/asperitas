@@ -1,7 +1,7 @@
 ---
 id: TASK-004
 title: 'First light: blinky on Seed3, flashed over DFU without a probe'
-status: Dev Ready
+status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-01 05:45'
@@ -40,3 +40,9 @@ Document the exact working flash procedure (including anything the BOOT/RESET da
 <!-- AC:BEGIN -->
 - [ ] #1 All subtasks complete
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Agent work is complete: TASK-004.01 is Done (blinky builds, firmware.bin 17,614 bytes, DFU pipeline and docs in place). This umbrella cannot be closed by an agent because TASK-004.02 requires physically flashing the board and watching the LED. Reassigned @human so the loop stops selecting it; close it once TASK-004.02 is Done.
+<!-- SECTION:NOTES:END -->
