@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 18:35'
+updated_date: '2026-08-01 18:36'
 labels:
   - planned
 dependencies: []
@@ -149,3 +149,9 @@ All five acceptance criteria share infrastructure (WAV I/O, CLI skeleton, synth 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented WAV CLI with process/generate subcommands, synthetic signal generators (impulse, sweep, Karplus-Strong pluck), golden-file regression tests with UPDATE_GOLDENS opt-in mechanism. Parameter parsing via parse_params_from_cli on Gain and OnePoleLowPass in asperitas-dsp with std feature gate. Tolerance set to 1e-4 to account for 16-bit quantization round-trip.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented WAV CLI with process/generate subcommands, synthetic signal generators (impulse, sweep, Karplus-Strong pluck), golden-file regression tests with UPDATE_GOLDENS opt-in mechanism. Parameter parsing via parse_params_from_cli on Gain and OnePoleLowPass in asperitas-dsp behind std feature gate. All 5 acceptance criteria met: process works end-to-end, params shared via asperitas-dsp, sample-rate handled via set_sample_rate, synthetic signals generated from CLI, and golden tests pass with explicit regeneration command.
+<!-- SECTION:FINAL_SUMMARY:END -->
