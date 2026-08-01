@@ -1,10 +1,10 @@
 #![no_std]
 
-pub mod processor;
-pub mod gain;
 pub mod filter;
+pub mod gain;
+pub mod processor;
 mod smooth;
 
-pub use processor::{Frame, Processor};
+pub use filter::{FilterParams, OnePoleLowPass};
 pub use gain::{Gain, GainParams};
-pub use filter::{OnePoleLowPass, FilterParams};
+pub use processor::{Frame, Processor};

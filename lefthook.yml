@@ -1,0 +1,31 @@
+# lefthook config — local git hooks for Asperitas
+# Installed automatically by the nix shell (see flake.nix shellHook).
+
+pre-commit:
+  commands:
+    fmt-check:
+      run: cargo fmt --all --check
+      forward_stderr: true
+
+    clippy:
+      run: cargo clippy --workspace --all-targets -- -D warnings
+      forward_stderr: true
+
+pre-push:
+  commands:
+    fmt-check:
+      run: cargo fmt --all --check
+      forward_stderr: true
+
+    clippy:
+      run: cargo clippy --workspace --all-targets -- -D warnings
+      forward_stderr: true
+
+    test:
+      run: cargo test --workspace
+      forward_stderr: true
+
+    firmware-cross-compile:
+      root: "firmware/"
+      run: cargo build --release --features seed3
+      forward_stderr: true

@@ -50,6 +50,10 @@
           pkgs.yq-go                 # mikefarah/yq-go (NOT Python yq)
           pkgs.jq                    # JSON processing for backlog scripts
         ];
+
+        shellHook = ''
+          lefthook install
+        '';
       };
     };
 }

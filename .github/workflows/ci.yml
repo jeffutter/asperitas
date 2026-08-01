@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: cachix/install-nix-action@v31
+
+      # All checks run inside the same nix dev shell so the environment
+      # is built only once.  set -e stops at the first failure.
+      - name: fmt + clippy + test + firmware cross-compile
+        run: |
+          nix develop .#default --command bash -c '
+            set -euo pipefail
+            echo "=== cargo fmt ==="
+            cargo fmt --all --check
+
+            echo "=== cargo clippy ==="
+            cargo clippy --workspace --all-targets -- -D warnings
+
+            echo "=== cargo test ==="
+            cargo test --workspace
+
+            echo "=== firmware cross-compile ==="
+            cd firmware && cargo build --release --features seed3
+          '

@@ -66,10 +66,7 @@ impl Processor for OnePoleLowPass {
         let alpha = self.smoother.advance();
         self.prev_l = self.prev_l + alpha * (input[0] - self.prev_l);
         self.prev_r = self.prev_r + alpha * (input[1] - self.prev_r);
-        [
-            self.prev_l.clamp(-1.0, 1.0),
-            self.prev_r.clamp(-1.0, 1.0),
-        ]
+        [self.prev_l.clamp(-1.0, 1.0), self.prev_r.clamp(-1.0, 1.0)]
     }
 
     fn reset(&mut self) {

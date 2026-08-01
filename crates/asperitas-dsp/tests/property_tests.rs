@@ -2,7 +2,7 @@
 //!
 //! Run with: `cargo test -p asperitas-dsp`
 
-use asperitas_dsp::{Frame, Gain, GainParams, OnePoleLowPass, FilterParams, Processor};
+use asperitas_dsp::{FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
