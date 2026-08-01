@@ -2,8 +2,10 @@
 id: TASK-004
 title: 'First light: blinky on Seed3, flashed over DFU without a probe'
 status: To Do
-assignee: []
+assignee:
+  - '@agent'
 created_date: '2026-08-01 05:45'
+updated_date: '2026-08-01 05:56'
 labels: []
 dependencies:
   - TASK-002
@@ -36,8 +38,5 @@ Document the exact working flash procedure (including anything the BOOT/RESET da
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An LED on the Seed3 blinks under firmware built from this repo
-- [ ] #2 A single documented command sequence takes a clean checkout to a flashed board
-- [ ] #3 The blinky binary is retained in firmware/src/bin/ as a diagnostic
-- [ ] #4 docs/reference/daisy-seed3.md's flashing section reflects the actually-working procedure
+- [ ] #1 All subtasks complete
 <!-- AC:END -->
