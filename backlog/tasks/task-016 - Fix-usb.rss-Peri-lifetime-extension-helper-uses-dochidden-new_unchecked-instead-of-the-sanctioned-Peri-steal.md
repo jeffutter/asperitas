@@ -3,10 +3,11 @@ id: TASK-016
 title: >-
   Fix: usb.rs's Peri lifetime-extension helper uses #[doc(hidden)] new_unchecked
   instead of the sanctioned Peri::steal()
-status: Dev Ready
-assignee: []
+status: In Progress
+assignee:
+  - '@ralph'
 created_date: '2026-08-01 22:51'
-updated_date: '2026-08-01 23:16'
+updated_date: '2026-08-01 23:17'
 labels:
   - review-followup
   - planned
