@@ -1,11 +1,11 @@
 ---
 id: TASK-006.01
 title: Implement USB CDC serial logging facade and LED boot stages
-status: Blocked
+status: To Do
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 20:12'
+updated_date: '2026-08-01 21:38'
 labels:
   - planned
 dependencies:
@@ -35,10 +35,10 @@ Note libDaisy's LED driver inverts polarity — write it so polarity is a single
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Logging goes through a facade with feature-selected backends; adding a defmt backend needs no call-site changes
-- [ ] #2 USB CDC serial logging implemented and compiles
-- [ ] #3 LED boot-stage indicator covers at least pre-init, running, and panicked
-- [ ] #4 Panic handler sets a distinctive LED state and prints over serial when USB is up
+- [x] #1 Logging goes through a facade with feature-selected backends; adding a defmt backend needs no call-site changes
+- [x] #2 USB CDC serial logging implemented and compiles
+- [ ] #3 LED boot-stage indicator covers at least pre-init, running, and panicked (NOT MET — see TASK follow-up filed by review-pi-work: BootLed's PreInit/Running/Panicked states are never wired into main.rs/blinky.rs; only a steady on/off single-color LED plus a separate raw-GPIO steady-red panic indicator exist)
+- [x] #4 Panic handler sets a distinctive LED state and prints over serial when USB is up
 <!-- AC:END -->
 
 ## Implementation Notes
