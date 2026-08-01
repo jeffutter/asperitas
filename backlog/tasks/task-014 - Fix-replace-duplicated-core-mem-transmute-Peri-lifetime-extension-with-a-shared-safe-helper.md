@@ -3,10 +3,10 @@ id: TASK-014
 title: >-
   Fix: replace duplicated core::mem::transmute Peri-lifetime-extension with a
   shared safe helper
-status: Needs Plan
+status: Dev Ready
 assignee: []
 created_date: '2026-08-01 21:56'
-updated_date: '2026-08-01 22:24'
+updated_date: '2026-08-01 22:25'
 labels:
   - review-followup
 dependencies:
