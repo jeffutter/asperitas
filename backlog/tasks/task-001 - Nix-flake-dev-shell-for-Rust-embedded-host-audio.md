@@ -1,11 +1,11 @@
 ---
 id: TASK-001
 title: Nix flake dev shell for Rust embedded + host audio
-status: Dev Ready
+status: In Progress
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-08-01 05:44'
-updated_date: '2026-08-01 12:44'
+updated_date: '2026-08-01 12:49'
 labels:
   - planned
 dependencies: []
