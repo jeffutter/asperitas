@@ -2,7 +2,6 @@
 #![no_main]
 
 use embassy_time::Timer;
-use defmt;
 use panic_halt as _;
 
 // No-op defmt logger — satisfies linker symbols required by embassy-stm32's
@@ -20,6 +19,7 @@ unsafe impl defmt::Logger for Logger {
 }
 
 #[no_mangle]
+#[allow(clippy::empty_loop)]
 unsafe extern "C" fn _defmt_panic() -> ! {
     loop {}
 }

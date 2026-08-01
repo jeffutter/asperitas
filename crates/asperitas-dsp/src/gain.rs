@@ -50,7 +50,7 @@ impl Processor for Gain {
         // Convert dB to linear gain, clamped to prevent overflow.
         // -96 dB ≈ 2.5e-5 (practical silence), +96 dB ≈ 4e4 (clipped by saturation).
         let gain_linear = exp(params.gain_db / 20.0);
-        let gain_clamped = gain_linear.max(0.0).min(8192.0); // ~78 dB ceiling
+        let gain_clamped = gain_linear.clamp(0.0, 8192.0); // ~78 dB ceiling
         self.smoother_l.set_target(gain_clamped);
         self.smoother_r.set_target(gain_clamped);
     }
