@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:45'
-updated_date: '2026-08-01 13:04'
+updated_date: '2026-08-01 13:47'
 labels:
   - planned
 dependencies:
@@ -46,11 +46,11 @@ Firmware `.cargo/config.toml` should keep daisy-embassy's linker flags but NOT a
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `cargo build` at the repo root builds all host crates
-- [ ] #2 `cargo build --release --features seed3` inside firmware/ cross-compiles to thumbv7em-none-eabihf
-- [ ] #3 asperitas-dsp is `#![no_std]` and `cargo tree -p asperitas-dsp` shows no embassy/daisy/hardware dependency
-- [ ] #4 asperitas-dsp's tests run on host via a `std` feature
-- [ ] #5 daisy-embassy is pinned by `rev` to a specific SHA, not by branch name
+- [x] #1 `cargo build` at the repo root builds all host crates
+- [x] #2 `cargo build --release --features seed3` inside firmware/ cross-compiles to thumbv7em-none-eabihf
+- [x] #3 asperitas-dsp is `#![no_std]` and `cargo tree -p asperitas-dsp` shows no embassy/daisy/hardware dependency
+- [x] #4 asperitas-dsp's tests run on host via a `std` feature
+- [x] #5 daisy-embassy is pinned by `rev` to a specific SHA, not by branch name
 <!-- AC:END -->
 
 ## Implementation Plan
