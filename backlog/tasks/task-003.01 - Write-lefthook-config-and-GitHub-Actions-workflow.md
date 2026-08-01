@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:56'
-updated_date: '2026-08-01 16:41'
+updated_date: '2026-08-01 16:48'
 labels:
   - planned
 dependencies: []
@@ -104,3 +104,19 @@ nix develop .#default --command "cd firmware && cargo build --release --features
 nix develop .#default --command "yq '.' .github/workflows/ci.yml"
 ```
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created three configuration artifacts:
+
+1. **lefthook.yml** — pre-commit (fmt check + clippy on host workspace) and pre-push (fmt, clippy, test, firmware cross-compile to thumbv7em-none-eabihf). Uses lefthook's `root` property for the firmware subdirectory.
+
+2. **flake.nix shellHook** — runs `lefthook install` automatically when entering the nix dev shell, so a fresh clone gets hooks without manual steps.
+
+3. **.github/workflows/ci.yml** — mirrors pre-push checks via a single `nix develop` invocation (fmt, clippy, test, firmware cross-compile). Stops at first failure with `set -e`.
+
+Also fixed existing formatting violations in asperitas-dsp crate so hooks don't block on pre-existing code.
+
+Verified: pre-commit correctly rejects misformatted code; shellHook auto-installs hooks on nix shell entry; CI YAML validates cleanly.
+<!-- SECTION:FINAL_SUMMARY:END -->
