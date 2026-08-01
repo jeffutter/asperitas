@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:46'
-updated_date: '2026-08-01 15:54'
+updated_date: '2026-08-01 16:05'
 labels:
   - planned
 dependencies:
@@ -174,3 +174,33 @@ All deliverables are tightly coupled: the trait shape determines processor imple
 - **proptest strategies for f32 may generate NaN/Inf**: The `f32::from(-1.0..=1.0)` strategy in proptest includes subnormals but not NaN/Inf by default. Explicitly include them in a separate edge-case test to verify robustness.
 - **Smoothing convergence tolerance**: The discontinuity test threshold (1e-3) needs tuning. If too strict, legitimate smoothing tails fail. If too loose, unsmoothed params pass. Start conservative and adjust based on actual results.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation complete:
+
+- processor.rs: Processor trait with Frame type, tick/process_block pattern, Params associated type
+- smooth.rs: Smoother struct with time-constant-based exponential smoothing (uses libm::expf for no_std)
+- gain.rs: Gain processor with per-channel smoothing, dB→linear conversion, saturation at ±1.0
+- filter.rs: OnePoleLowPass with smoothed coefficient, standard one-pole IIR formula
+- lib.rs: #![no_std] crate root with module declarations and re-exports
+- Cargo.toml: libm 0.2 dependency, proptest 1 dev-dependency
+- tests/property_tests.rs: 12 property tests (6 per processor) covering all invariants
+
+All 12 proptest cases pass:
+- gain_output_always_finite ✓
+- gain_output_bounded ✓
+- gain_silence_in_silence_out ✓
+- gain_reset_idempotent ✓
+- gain_block_equals_tick ✓
+- gain_param_change_smooth ✓
+- filter_output_always_finite ✓
+- filter_output_bounded ✓
+- filter_silence_in_silence_out ✓
+- filter_reset_idempotent ✓
+- filter_block_equals_tick ✓
+- filter_param_change_smooth ✓
+
+Note: libm crate used for f32::exp() in no_std context. Firmware target not available on this machine but crate builds correctly.
+<!-- SECTION:NOTES:END -->
