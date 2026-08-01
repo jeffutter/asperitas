@@ -1,11 +1,11 @@
 ---
 id: TASK-004
 title: 'First light: blinky on Seed3, flashed over DFU without a probe'
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:45'
-updated_date: '2026-08-01 05:56'
+updated_date: '2026-08-01 13:52'
 labels: []
 dependencies:
   - TASK-002
