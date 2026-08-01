@@ -1,7 +1,7 @@
 ---
 id: TASK-003.01
 title: Write lefthook config and GitHub Actions workflow
-status: Needs Plan
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:56'
