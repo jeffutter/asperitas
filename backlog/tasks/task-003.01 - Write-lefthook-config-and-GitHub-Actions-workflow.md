@@ -27,10 +27,10 @@ Install hooks from the flake shellHook so a fresh clone gets them with no manual
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `lefthook install` runs automatically on entering the nix shell
-- [ ] #2 pre-commit rejects a commit containing misformatted Rust
-- [ ] #3 pre-push rejects a push whose firmware workspace does not cross-compile
-- [ ] #4 A GitHub Actions workflow exists running fmt, clippy, test, and the thumbv7em cross-compile, via the same nix flake
+- [x] #1 `lefthook install` runs automatically on entering the nix shell
+- [x] #2 pre-commit rejects a commit containing misformatted Rust
+- [x] #3 pre-push rejects a push whose firmware workspace does not cross-compile
+- [x] #4 A GitHub Actions workflow exists running fmt, clippy, test, and the thumbv7em cross-compile, via the same nix flake
 <!-- AC:END -->
 
 ## Implementation Plan
