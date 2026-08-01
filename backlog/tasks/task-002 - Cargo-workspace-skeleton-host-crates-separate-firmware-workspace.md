@@ -122,3 +122,9 @@ Implementation notes:
 - Added defmt no-op global_logger and _defmt_panic stub because embassy-stm32 links against defmt internally
 - No runner in firmware .cargo/config.toml (no debug probe yet)
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created two-workspace Cargo structure. Root workspace builds host crates (asperitas-dsp, asperitas-cli). Separate firmware/ workspace cross-compiles for Seed3 via daisy-embassy PR #80 (SHA-pinned). All 5 acceptance criteria verified: host build passes, firmware release build passes, dsp has zero hardware deps, tests run on host, dependency pinned by rev.
+<!-- SECTION:FINAL_SUMMARY:END -->
