@@ -1,11 +1,11 @@
 ---
 id: TASK-011
 title: 'Fix: document daisy-embassy PR #80''s hardcoded 32-sample block length'
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 17:41'
-updated_date: '2026-08-01 18:08'
+updated_date: '2026-08-01 18:10'
 labels:
   - review-followup
 dependencies:
@@ -43,3 +43,15 @@ SETUP (read first): This is a Rust firmware project (firmware/, Embassy on Daisy
 
 4. No code changes, no cargo build/test needed — this is a docs-only fix. Do not touch firmware/ or crates/.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Confirmed BLOCK_LENGTH = 32 at line 13 of src/audio.rs in daisy-embassy PR #80 (commit 477083b). AudioConfig only exposes fs: Fs. Added documentation paragraph to docs/reference/rust-daisy-stack.md in the Seed3 support status section.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added documentation to docs/reference/rust-daisy-stack.md noting that daisy-embassy PR #80 hardcodes BLOCK_LENGTH to 32 samples in src/audio.rs, which is not configurable via AudioConfig and diverges from libDaisy's 48-sample Pod default.
+<!-- SECTION:FINAL_SUMMARY:END -->
