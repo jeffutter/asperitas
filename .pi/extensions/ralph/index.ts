@@ -605,9 +605,36 @@ async function runHeadless(
   if (opts.model) args.push("--model", opts.model);
   args.push(prompt);
 
+  // Neutralise git's interactive editors for everything this subprocess spawns.
+  //
+  // A headless agent has no terminal, so any git command that opens an editor blocks
+  // forever on input that cannot arrive. Observed live: an executing agent ran
+  // `git rebase -i --root --onto ...` to tidy its commits, git launched nvim on the
+  // rebase todo, and the step sat there burning its entire 30-minute budget — 27
+  // minutes wall-clock for 30 seconds of CPU — while leaving .git/rebase-merge in
+  // place, which would have broken every later git operation in the repo.
+  //
+  // `false` rather than `true` for the sequence editor is deliberate. `true` accepts
+  // the todo unmodified and lets the rebase proceed, which would have turned that hang
+  // into an unattended history rewrite from the root of the branch — quieter, but
+  // worse. `false` makes git fail immediately with a clear error and clean up after
+  // itself, so the agent learns the command is unavailable and moves on.
+  //
+  // Passed via env(1) rather than pi.exec options so it applies to the whole process
+  // tree, and scoped to this spawn: the loop's own autosquash calls git directly with
+  // `-c sequence.editor=true` and must keep working. That distinction matters, because
+  // GIT_SEQUENCE_EDITOR outranks `-c sequence.editor` — setting this globally would
+  // silently disable the loop's fixup squashing.
+  const spawnArgs = [
+    "GIT_SEQUENCE_EDITOR=false",
+    "GIT_EDITOR=true",
+    "pi",
+    ...args,
+  ];
+
   let last = { ok: false, killed: false, output: "", attempts: 0 };
   for (let attempt = 1; attempt <= RETRY_MAX_ATTEMPTS; attempt++) {
-    const { ok, killed, stdout, stderr } = await execCapture(pi, "pi", args, {
+    const { ok, killed, stdout, stderr } = await execCapture(pi, "env", spawnArgs, {
       cwd,
       timeout: opts.timeout,
     });
