@@ -2,8 +2,10 @@
 id: TASK-002
 title: 'Cargo workspace skeleton: host crates + separate firmware workspace'
 status: To Do
-assignee: []
+assignee:
+  - '@agent'
 created_date: '2026-08-01 05:45'
+updated_date: '2026-08-01 05:56'
 labels: []
 dependencies:
   - TASK-001
