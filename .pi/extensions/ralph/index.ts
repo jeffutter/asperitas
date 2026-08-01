@@ -304,6 +304,72 @@ async function listHumanAssignedIds(
   return new Set(parsePlainTaskList(stdout).map((t) => t.id));
 }
 
+/**
+ * Ensures the pipeline status this loop depends on actually exists.
+ *
+ * The loop drives tickets To Do -> Needs Plan -> Dev Ready -> In Progress -> Done, but
+ * "Dev Ready" is not one of Backlog.md's defaults, so a fresh project does not have it.
+ * Without it the loop deadlocks in a way that reads like a planning failure rather than
+ * a configuration one: planning tells /backlog-planner to set "Dev Ready", backlog
+ * rejects it as invalid, the planner falls back to "To Do", the execute branch (which
+ * only fires on "In Progress" or "Dev Ready") never runs, and the ticket cycles back
+ * into the unblocked pool to be chosen again until the repeated-choice guard trips.
+ * Observed live: four iterations and eleven minutes produced three full planning passes
+ * on one ticket and zero executions.
+ *
+ * Edits only the `statuses:` line, via a targeted match rather than a YAML round-trip,
+ * so comments and formatting elsewhere in the file survive untouched. Anything that
+ * doesn't match the expected shape is left alone and reported — a loop that refuses to
+ * start beats one that silently rewrites a config it did not understand.
+ */
+async function ensureDevReadyStatus(
+  cwd: string,
+): Promise<{ ok: boolean; changed: boolean; detail: string }> {
+  const configPath = join(cwd, "backlog", "config.yml");
+  let raw: string;
+  try {
+    raw = await readFile(configPath, "utf-8");
+  } catch {
+    return { ok: false, changed: false, detail: `cannot read ${configPath}` };
+  }
+
+  const line = raw.match(/^statuses:\s*\[(.*)\]\s*$/m);
+  if (!line) {
+    return {
+      ok: false,
+      changed: false,
+      detail: `no single-line 'statuses: [...]' found in ${configPath}`,
+    };
+  }
+
+  const entries = line[1]
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const nameOf = (entry: string) => entry.replace(/^["']|["']$/g, "");
+  if (entries.some((e) => nameOf(e) === "Dev Ready")) {
+    return { ok: true, changed: false, detail: '"Dev Ready" already configured' };
+  }
+
+  // Slot it where the pipeline expects it. Falling back to the end keeps a project
+  // with a customised status list working rather than refusing to run.
+  const before = entries.findIndex((e) => nameOf(e) === "In Progress");
+  const insertAt = before === -1 ? entries.length : before;
+  entries.splice(insertAt, 0, '"Dev Ready"');
+
+  const updated = raw.replace(line[0], `statuses: [${entries.join(", ")}]`);
+  try {
+    await writeFile(configPath, updated, "utf-8");
+  } catch {
+    return { ok: false, changed: false, detail: `cannot write ${configPath}` };
+  }
+  return {
+    ok: true,
+    changed: true,
+    detail: `added "Dev Ready"${before === -1 ? " (appended)" : " before \"In Progress\""}`,
+  };
+}
+
 async function findFirstByStatus(
   pi: ExtensionAPI,
   cwd: string,
@@ -1482,6 +1548,24 @@ export default function (pi: ExtensionAPI) {
       }
 
       const cwd = ctx.cwd;
+
+      // Before anything else: the whole pipeline is unrunnable without this status, and
+      // failing here — loudly, having done nothing — is far cheaper than discovering it
+      // several planning passes deep.
+      const setup = await ensureDevReadyStatus(cwd);
+      if (!setup.ok) {
+        ctx.ui.notify(
+          `ralph cannot start: the "Dev Ready" status is required but ${setup.detail}. ` +
+            `Add "Dev Ready" to the statuses list in backlog/config.yml (between "Needs Plan" ` +
+            `and "In Progress") and try again.`,
+          "error",
+        );
+        return;
+      }
+      if (setup.changed) {
+        ctx.ui.notify(`backlog/config.yml: ${setup.detail}`, "info");
+      }
+
       activeState = createState(iterations, reviewEvery);
       await persist(cwd, activeState);
       renderWidget(ctx, activeState);
