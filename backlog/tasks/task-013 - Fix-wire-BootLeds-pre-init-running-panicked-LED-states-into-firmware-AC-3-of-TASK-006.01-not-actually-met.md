@@ -34,6 +34,7 @@ Found while reviewing TASK-006.01 / TASK-006.01.05 (crates/asperitas-logging/src
 
 ## Implementation Plan
 
+<!-- SECTION:PLAN:BEGIN -->
 ## Design Decision: Single Static BootLed with Atomic State Transitions
 
 **Problem**: `BootLed::new()` and `panic_handler::set_panic_led()` both consume the same three `Peri<'_, T>` tokens (PC1/PA6/PA7). Embassy enforces single-owner-per-peripheral — you cannot construct two independent `hal::gpio::Output` drivers on the same pins.
@@ -161,5 +162,13 @@ No changes needed — module visibility is already correct (`pub mod led` under 
 | Panicked | Red | Steady on (panic handler sets, no async available for strobe) |
 
 PreInit and Panicked share the same color (red) but differ in context: PreInit blinks while the system is alive, Panicked is steady-on with the system halted. A human observer distinguishes them by whether the device is otherwise functional (USB serial active vs frozen). This is acceptable — a strobing panic LED would require a busy-wait toggle loop in the panic handler, adding complexity for marginal diagnostic value.
+
+<!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Replaced dual LED drivers (dead BootLed + hand-rolled panic_handler GPIO) with a single StaticCell-backed singleton BootLed. Both async execution path and panic handler share the same instance via init()/get_mut(). Atomic state coordination lets blink_task() respond to PreInit→Running→Panicked transitions without mutex overhead. Deleted panic_loop(), PanicLedState, PANIC_LED, set_panic_led(), and all #[allow(dead_code)] annotations. Build and clippy pass clean.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:PLAN:END -->
