@@ -5,6 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-08-01 17:41'
+updated_date: '2026-08-01 17:41'
 labels:
   - review-followup
 dependencies:
@@ -28,3 +29,19 @@ Found while reviewing TASK-005.01 (backlog/tasks/task-005.01 - Implement-audio-p
 - [ ] #2 The note cites the exact source location (src/audio.rs, BLOCK_LENGTH const) so a reader can re-verify against a future commit of the fork
 - [ ] #3 grep -n 'BLOCK_LENGTH' docs/reference/rust-daisy-stack.md returns a match
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SETUP (read first): This is a Rust firmware project (firmware/, Embassy on Daisy Seed3) plus host-side Rust crates (crates/asperitas-dsp, crates/asperitas-cli). ALL commands must run inside the Nix dev shell: either run 'direnv allow' once, or prefix every command with 'nix develop -c'. Work from the repository root unless told otherwise. Do not change pinned dependency versions.
+
+1. Confirm the fact before writing anything: open the vendored daisy-embassy checkout for the pinned commit (find it via `find ~/.cargo/git/checkouts -maxdepth 2 -iname '*daisy-embassy*'`, then the subdirectory matching the pinned rev prefix from firmware/Cargo.toml's `daisy-embassy = { git = ..., rev = "477083b0227d" }`) and read src/audio.rs. Confirm `pub const BLOCK_LENGTH: usize = 32;` and that `AudioConfig` (same file) only has an `fs: Fs` field, no block-length field.
+
+2. Edit docs/reference/rust-daisy-stack.md. In the "## Seed3 support status — PR #80" section (after the existing "Consequence for us" paragraph, before "## Alternative / superseded BSPs"), add a new paragraph, e.g.:
+
+   "**Block size is fixed at 32 samples, not 48.** `src/audio.rs` hardcodes `pub const BLOCK_LENGTH: usize = 32;`; it is not a field on `AudioConfig` (which only exposes `fs: Fs`), so this project cannot request a different block size without patching the vendored fork. This diverges from libDaisy's 48-sample default for the Pod — worth mentioning in the TASK-005.03 upstream report if block size ever becomes musically significant (e.g. for tight feedback/delay paths)."
+
+3. Run: `nix develop -c bash -c "grep -n 'BLOCK_LENGTH' docs/reference/rust-daisy-stack.md"` — must return the new line.
+
+4. No code changes, no cargo build/test needed — this is a docs-only fix. Do not touch firmware/ or crates/.
+<!-- SECTION:PLAN:END -->
