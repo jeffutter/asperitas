@@ -1,10 +1,11 @@
 ---
 id: TASK-008.01
 title: 'Build the WAV CLI, synthetic signals, and golden-file mechanism'
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:57'
+updated_date: '2026-08-01 18:11'
 labels: []
 dependencies: []
 parent_task_id: TASK-008
