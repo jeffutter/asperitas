@@ -14,3 +14,6 @@ path = "src/main.rs"
 asperitas-dsp = { path = "../asperitas-dsp", features = ["std"] }
 clap = { version = "4", features = ["derive"] }
 hound = "3.5"
+
+[dev-dependencies]
+tempfile = "3"

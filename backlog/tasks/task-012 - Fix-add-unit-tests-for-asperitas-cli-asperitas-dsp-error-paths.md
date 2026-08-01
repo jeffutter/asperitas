@@ -1,11 +1,11 @@
 ---
 id: TASK-012
 title: 'Fix: add unit tests for asperitas-cli/asperitas-dsp error paths'
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 19:55'
-updated_date: '2026-08-01 21:33'
+updated_date: '2026-08-01 21:37'
 labels:
   - review-followup
 dependencies:
@@ -23,11 +23,11 @@ Found while reviewing TASK-008.01 (crates/asperitas-cli/src/wav_io.rs, crates/as
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 crates/asperitas-cli/src/wav_io.rs has unit tests covering validate_spec rejecting wrong bit depth, wrong channel count, and non-Int sample format
-- [ ] #2 crates/asperitas-cli/src/process.rs has a unit test covering parse_param_pairs rejecting a malformed (non key=value) argument
-- [ ] #3 crates/asperitas-dsp/src/gain.rs and crates/asperitas-dsp/src/filter.rs each have a unit test covering parse_params_from_cli rejecting an unknown key and a non-numeric value
-- [ ] #4 nix develop -c cargo test -p asperitas-cli -p asperitas-dsp passes
-- [ ] #5 nix develop -c cargo clippy -p asperitas-cli -p asperitas-dsp --all-targets -- -D warnings passes
+- [x] #1 crates/asperitas-cli/src/wav_io.rs has unit tests covering validate_spec rejecting wrong bit depth, wrong channel count, and non-Int sample format
+- [x] #2 crates/asperitas-cli/src/process.rs has a unit test covering parse_param_pairs rejecting a malformed (non key=value) argument
+- [x] #3 crates/asperitas-dsp/src/gain.rs and crates/asperitas-dsp/src/filter.rs each have a unit test covering parse_params_from_cli rejecting an unknown key and a non-numeric value
+- [x] #4 nix develop -c cargo test -p asperitas-cli -p asperitas-dsp passes
+- [x] #5 nix develop -c cargo clippy -p asperitas-cli -p asperitas-dsp --all-targets -- -D warnings passes
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -115,3 +115,15 @@ Fix any warnings before committing.
 
 **Low risk.** Purely additive — only adds test code and one dev-dependency. No production code changes. Each test exercises exactly one error branch, keeping tests focused and maintainable.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added 9 error-path unit tests across 4 files:
+- wav_io.rs: 3 tests (wrong bit depth, mono, float format)
+- process.rs: 1 test (malformed key=value)  
+- gain.rs: 2 tests (unknown key, non-numeric value)
+- filter.rs: 2 tests (unknown key, non-numeric value)
+
+All tests pass with --all-features. Clippy and fmt clean.
+<!-- SECTION:FINAL_SUMMARY:END -->

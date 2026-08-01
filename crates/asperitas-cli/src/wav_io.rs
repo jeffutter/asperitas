@@ -75,3 +75,65 @@ fn validate_spec(spec: &WavSpec) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hound::{SampleFormat, WavSpec};
+    use tempfile::NamedTempFile;
+
+    fn make_wav_path(spec: WavSpec) -> NamedTempFile {
+        let tmp = NamedTempFile::new().unwrap();
+        let mut writer = WavWriter::create(tmp.path(), spec).unwrap();
+        for _ in 0..4 {
+            writer.write_sample(0i16).unwrap();
+        }
+        writer.finalize().unwrap();
+        tmp
+    }
+
+    #[test]
+    fn validate_spec_rejects_wrong_bit_depth() {
+        let tmp = make_wav_path(WavSpec {
+            channels: 2,
+            bits_per_sample: 8,
+            sample_rate: 48000,
+            sample_format: SampleFormat::Int,
+        });
+        let err = read_wav(tmp.path().to_str().unwrap()).unwrap_err();
+        assert!(
+            err.contains("16"),
+            "expected error to mention 16-bit requirement, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_spec_rejects_mono() {
+        let tmp = make_wav_path(WavSpec {
+            channels: 1,
+            bits_per_sample: 16,
+            sample_rate: 48000,
+            sample_format: SampleFormat::Int,
+        });
+        let err = read_wav(tmp.path().to_str().unwrap()).unwrap_err();
+        assert!(
+            err.contains("stereo"),
+            "expected error to mention stereo, got: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_spec_rejects_float_format() {
+        let tmp = make_wav_path(WavSpec {
+            channels: 2,
+            bits_per_sample: 32,
+            sample_rate: 48000,
+            sample_format: SampleFormat::Float,
+        });
+        let err = read_wav(tmp.path().to_str().unwrap()).unwrap_err();
+        assert!(
+            err.contains("Int"),
+            "expected error to mention Int format, got: {err}"
+        );
+    }
+}
