@@ -11,7 +11,7 @@ export const meta = {
     {
       title: "State",
       detail:
-        "one CLI-only sweep: In Progress / Dev Ready / Needs Plan tickets, Sequence 1, priority-sorted To Do, no-ralph list",
+        "one CLI-only sweep: In Progress / Dev Ready / Needs Plan tickets, dependency-unblocked To Do, priority-sorted To Do, no-ralph list, @human-assigned list",
       model: "haiku",
     },
     { title: "Execute", detail: "run /backlog-execute on one ticket" },
@@ -28,7 +28,7 @@ export const meta = {
     {
       title: "Choose",
       detail:
-        "deterministically pick the priority-sorted To Do ticket in Sequence 1 (no unresolved deps) and move it to Needs Plan",
+        "deterministically pick the priority-sorted To Do ticket whose dependencies are all Done, not @human-assigned, and move it to Needs Plan",
       model: "haiku",
     },
   ],
@@ -64,9 +64,9 @@ const SETUP_SCHEMA = {
 // instead of a separate State call every iteration plus a second Discover
 // call only on iterations that reach Choose. All of this is pure CLI-output
 // extraction, no judgment: the script does the actual branch/target decision
-// with plain array/set logic, since asking an LLM to re-derive "is this in
-// Sequence 1?" across many candidates is exactly how TASK-96.2 — actually
-// Sequence 3 — got chosen as if it had no unresolved dependencies.
+// with plain array/set logic, since asking an LLM to re-derive "are this
+// ticket's dependencies all Done?" across many candidates is exactly how
+// TASK-96.2 — which had two unresolved ones — got chosen as if it had none.
 const STATE_SCHEMA = {
   type: "object",
   properties: {
@@ -85,11 +85,11 @@ const STATE_SCHEMA = {
       items: { type: "string" },
       description: "Ticket IDs with status Needs Plan, in list order",
     },
-    sequence1: {
+    unblockedTodo: {
       type: "array",
       items: { type: "string" },
       description:
-        "Every ticket ID listed under the 'Sequence 1:' header of `backlog sequence list --plain` (stop at the next 'Sequence N:' header). These have no unresolved (non-Done) dependencies, regardless of current status.",
+        'Every ticket ID from `./backlog/unblocked-todo.sh "To Do"`. Output lines are "ID - Title"; take the ID. These are To Do tickets whose dependencies are all Done.',
     },
     todoByPriority: {
       type: "array",
@@ -103,14 +103,21 @@ const STATE_SCHEMA = {
       description:
         'Every ticket ID from `backlog task list -s "To Do" -l no-ralph --plain` (may be empty).',
     },
+    humanOnly: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        'Every ticket ID from `backlog task list -a "@human" --plain`, across ALL statuses (the command groups by status; collect IDs from every group). These require a physical device, ears, instruments, or an owner decision, and the loop must never work them.',
+    },
   },
   required: [
     "inProgress",
     "devReady",
     "needsPlan",
-    "sequence1",
+    "unblockedTodo",
     "todoByPriority",
     "noRalph",
+    "humanOnly",
   ],
 };
 
@@ -131,18 +138,18 @@ const VERIFY_SCHEMA = {
       type: "string",
       description: "The ticket's current status field, exactly as shown",
     },
-    inSequence1: {
+    isUnblocked: {
       type: "boolean",
       description:
-        "True if the ticket ID appears under the 'Sequence 1:' header of `backlog sequence list --plain`, false if it's under Sequence 2+ (meaning it still has an unresolved dependency) or missing entirely",
+        'True if the ticket ID appears in the output of `./backlog/unblocked-todo.sh "Dev Ready"`, meaning all its dependencies are Done. False if absent (it still has an unresolved dependency).',
     },
     corrected: {
       type: "boolean",
       description:
-        "True if this call found status=Dev Ready and inSequence1=false and fixed it (edited to Blocked + note), false otherwise (including when no fix was needed)",
+        "True if this call found status=Dev Ready and isUnblocked=false and fixed it (edited to Blocked + note), false otherwise (including when no fix was needed)",
     },
   },
-  required: ["ticketId", "status", "inSequence1", "corrected"],
+  required: ["ticketId", "status", "isUnblocked", "corrected"],
 };
 
 const ACTION_SCHEMA = {
@@ -185,16 +192,17 @@ Report via structured output:
 - statuses: the final statuses list (after your edit, if any)
 - changed: true if you modified the file, false if it already had everything needed`;
 
-const STATE_PROMPT = `In the asperitas repo (repo root, no git submodules), run these six commands and report each result as a plain ID list. This is pure data extraction — no filtering, judgment, or dependency reasoning needed, the caller does that:
+const STATE_PROMPT = `In the asperitas repo (repo root, no git submodules), run these seven commands and report each result as a plain ID list. This is pure data extraction — no filtering, judgment, or dependency reasoning needed, the caller does that:
 
 1. backlog task list -s "In Progress" --plain -> inProgress
 2. backlog task list -s "Dev Ready" --plain -> devReady
 3. backlog task list -s "Needs Plan" --plain -> needsPlan
-4. backlog sequence list --plain -> sequence1: extract every ticket ID listed under the "Sequence 1:" header (stop at the next "Sequence N:" header or end of output)
+4. ./backlog/unblocked-todo.sh "To Do" -> unblockedTodo: every ticket ID from the output, which is one "ID - Title" line per ticket (take the part before the first " - "). If this command errors or is missing, report an EMPTY array and say so — do not substitute another command.
 5. backlog task list -s "To Do" --sort priority --plain -> todoByPriority: every ticket ID, in the order shown
 6. backlog task list -s "To Do" -l no-ralph --plain -> noRalph: every ticket ID shown (empty array if none)
+7. backlog task list -a "@human" --plain -> humanOnly: every ticket ID shown, from EVERY status group in the output — do not pass -s, and do not stop at the first group (empty array if none)
 
-Report all six lists via the structured output.`;
+Report all seven lists via the structured output.`;
 
 function moveToNeedsPlanPrompt(ticketId) {
   return `You're working in the asperitas repo at its root.
@@ -208,27 +216,33 @@ function verifyAndCorrectPrompt(ticketId) {
   return `You're working in the asperitas repo at its root.
 
 Run: backlog task ${ticketId} --plain
-Run: backlog sequence list --plain
+Run: ./backlog/unblocked-todo.sh "Dev Ready"
 
 Determine:
 - status: this ticket's current status field, exactly as shown
-- inSequence1: true if "${ticketId}" appears under the "Sequence 1:" header of the sequence list output, false if it's under Sequence 2+ or missing (meaning it still has an unresolved, non-Done dependency)
+- isUnblocked: true if "${ticketId}" appears in the script's output (one "ID - Title" line per ticket), false if absent — absent means it still has an unresolved, non-Done dependency
 
-If status is exactly "Dev Ready" AND inSequence1 is false, the planner was wrong to mark it ready — correct it now, in this same turn:
+If status is exactly "Dev Ready" AND isUnblocked is false, the planner was wrong to mark it ready — correct it now, in this same turn:
   backlog task edit ${ticketId} -s "Blocked"
-and append one implementation note: planning marked this Dev Ready, but it still has an unresolved dependency per \`backlog sequence list\`, so it was forced to Blocked. It should be re-checked once its dependencies are Done.
+and append one implementation note: planning marked this Dev Ready, but its dependencies are not all Done, so it was forced to Blocked. It should be re-checked once its dependencies are Done.
 
 Set corrected to true only if you made that fix just now; false otherwise (including when no fix was needed).
 
-Report via structured output: ticketId "${ticketId}", status, inSequence1, corrected.`;
+Report via structured output: ticketId "${ticketId}", status, isUnblocked, corrected.`;
 }
 
 function executePrompt(ticketId) {
   return `You're working in the asperitas repo at its root (no git submodules — commits happen directly here).
 
-Use the Skill tool to invoke "/backlog-execute ${ticketId}". This skill will claim the ticket, implement the work, mark acceptance criteria, add implementation notes/summary, set the ticket status to Done, and commit the result — all per its own instructions. If the skill determines the ticket is blocked by new/unforeseen work discovered mid-implementation, it will revert the ticket's status to "To Do".
+FIRST, a hard stop check. Run: backlog task ${ticketId} --plain
 
-Dependency readiness is already guaranteed before a ticket reaches you: the Plan phase verifies every ticket it marks "Dev Ready" is actually in Sequence 1 (no unresolved dependencies) before handing it off, so you should not need to re-check dependencies here. If you nonetheless find the ticket genuinely can't proceed, follow the skill's own blocked-handling behavior.
+If its assignee is "@human", STOP IMMEDIATELY. Do not implement it, do not mark any acceptance criterion, do not change its status. This project targets physical hardware, and @human tickets require a board plugged in, ears, instruments, or a decision that is the owner's to make — an agent can only produce a false Done. Report outcome "error" with a summary saying the ticket is @human-assigned and was skipped.
+
+Note that acceptance criteria prefixed "HUMAN:" can never be satisfied by writing code or watching a build succeed. If a ticket you are working carries one, leave it unchecked and do not mark the ticket Done.
+
+Otherwise, proceed: use the Skill tool to invoke "/backlog-execute ${ticketId}". This skill will claim the ticket, implement the work, mark acceptance criteria, add implementation notes/summary, set the ticket status to Done, and commit the result — all per its own instructions. If the skill determines the ticket is blocked by new/unforeseen work discovered mid-implementation, it will revert the ticket's status to "To Do".
+
+Dependency readiness is already guaranteed before a ticket reaches you: the Plan phase verifies every ticket it marks "Dev Ready" actually has all its dependencies Done before handing it off, so you should not need to re-check dependencies here. If you nonetheless find the ticket genuinely can't proceed, follow the skill's own blocked-handling behavior.
 
 After the skill finishes, report via structured output:
 - ticketId: "${ticketId}"
@@ -321,8 +335,30 @@ for (let i = 0; i < MAX_ITERATIONS; i++) {
     break;
   }
 
-  if (state.inProgress.length > 0 || state.devReady.length > 0) {
-    const target = state.inProgress[0] || state.devReady[0];
+  // @human tickets need a physical board, ears, instruments, or an owner
+  // decision. An agent cannot satisfy their acceptance criteria — it can only
+  // produce a false Done (compiling is not evidence that audio was heard). So
+  // they are filtered out of every branch, not just Choose: a human moving one
+  // into Dev Ready by hand must not hand it to Execute. Tickets with NO
+  // assignee stay eligible, per the project convention in CLAUDE.md.
+  const humanOnly = new Set(state.humanOnly);
+  const agentInProgress = state.inProgress.filter((id) => !humanOnly.has(id));
+  const agentDevReady = state.devReady.filter((id) => !humanOnly.has(id));
+  const agentNeedsPlan = state.needsPlan.filter((id) => !humanOnly.has(id));
+
+  const skippedHuman =
+    state.inProgress.length -
+    agentInProgress.length +
+    (state.devReady.length - agentDevReady.length) +
+    (state.needsPlan.length - agentNeedsPlan.length);
+  if (skippedHuman > 0) {
+    log(
+      `Skipping ${skippedHuman} @human-assigned ticket(s) in the active pool; they need a person, not an agent.`,
+    );
+  }
+
+  if (agentInProgress.length > 0 || agentDevReady.length > 0) {
+    const target = agentInProgress[0] || agentDevReady[0];
 
     // Backstop: if the same ticket was blocked-reverted last iteration and is
     // still the top pick, the agent failed to move it out of the Dev Ready
@@ -401,8 +437,8 @@ for (let i = 0; i < MAX_ITERATIONS; i++) {
     continue;
   }
 
-  if (state.needsPlan.length > 0) {
-    const target = state.needsPlan[0];
+  if (agentNeedsPlan.length > 0) {
+    const target = agentNeedsPlan[0];
     phase("Plan");
     log(`Iteration ${i + 1}: plan -> ${target}`);
     const outcome = await agent(planPrompt(target), {
@@ -440,34 +476,40 @@ for (let i = 0; i < MAX_ITERATIONS; i++) {
       });
       if (verify && verify.corrected) {
         log(
-          `Corrected ${target}: planner set "Dev Ready" but it still has an unresolved dependency (not in Sequence 1) — forced to "Blocked".`,
+          `Corrected ${target}: planner set "Dev Ready" but it still has an unresolved dependency — forced to "Blocked".`,
         );
         results.push({
           ticketId: target,
           phase: "plan",
           outcome: "corrected-to-blocked",
           summary:
-            "Planner marked this Dev Ready but it still has an unresolved dependency (not in Sequence 1); forced to Blocked so Execute never receives it.",
+            "Planner marked this Dev Ready but it still has an unresolved dependency; forced to Blocked so Execute never receives it.",
         });
       }
     }
     continue;
   }
 
-  // Choose: the State call above already gathered sequence1/todoByPriority/
+  // Choose: the State call above already gathered unblockedTodo/todoByPriority/
   // noRalph, so no second data-gathering round trip is needed here — just
   // the deterministic pick and (if one was found) the mutation to move it.
   phase("Choose");
-  const sequence1 = new Set(state.sequence1);
+  const unblocked = new Set(state.unblockedTodo);
   const noRalph = new Set(state.noRalph);
   const target =
-    state.todoByPriority.find((id) => sequence1.has(id) && !noRalph.has(id)) ??
-    null;
+    state.todoByPriority.find(
+      (id) => unblocked.has(id) && !noRalph.has(id) && !humanOnly.has(id),
+    ) ?? null;
 
   if (!target) {
     stopReason = "drained";
+    const blockedOnHuman = state.todoByPriority.filter(
+      (id) => unblocked.has(id) && !noRalph.has(id) && humanOnly.has(id),
+    );
     log(
-      "Backlog drained: no To Do ticket is both in Sequence 1 (no unresolved dependencies) and unlabeled no-ralph.",
+      blockedOnHuman.length > 0
+        ? `Backlog drained for agent work. ${blockedOnHuman.length} ready ticket(s) are waiting on a human: ${blockedOnHuman.join(", ")}.`
+        : "Backlog drained: no To Do ticket has all dependencies Done, is unlabeled no-ralph, and is not @human-assigned.",
     );
     break;
   }
@@ -488,7 +530,7 @@ for (let i = 0; i < MAX_ITERATIONS; i++) {
     ticketId: target,
     phase: "choose",
     outcome: "queued-for-planning",
-    summary: `Deterministically picked: highest-priority To Do ticket that is in Sequence 1 (no unresolved dependencies) and not labeled no-ralph, out of ${state.todoByPriority.length} To Do candidate(s).`,
+    summary: `Deterministically picked: highest-priority To Do ticket whose dependencies are all Done, not labeled no-ralph and not @human-assigned, out of ${state.todoByPriority.length} To Do candidate(s).`,
   });
 }
 

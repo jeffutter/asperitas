@@ -1,0 +1,13 @@
+# Rust build output — two workspaces, host at the root and firmware/ cross-compiled
+/target/
+/firmware/target/
+
+# Nix
+/result
+/result-*
+.direnv/
+
+# Ralph loop runtime state: per-run and machine-local, not project configuration.
+# The rest of .pi/ (agents, prompts, skills, the extension) IS project config and
+# is tracked.
+.pi/ralph/
