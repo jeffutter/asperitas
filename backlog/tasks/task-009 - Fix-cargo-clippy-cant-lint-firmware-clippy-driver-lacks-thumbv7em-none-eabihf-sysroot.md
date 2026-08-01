@@ -3,11 +3,11 @@ id: TASK-009
 title: >-
   Fix: cargo clippy can't lint firmware/ (clippy-driver lacks
   thumbv7em-none-eabihf sysroot)
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 14:31'
-updated_date: '2026-08-01 16:08'
+updated_date: '2026-08-01 16:11'
 labels:
   - review-followup
 dependencies:
@@ -48,3 +48,9 @@ SETUP (read first): This is a Rust+embedded firmware workspace (firmware/, cross
 8. From `firmware/`, run `nix develop <repo-root> -c cargo build --release --features seed3 --bin blinky` and confirm it still succeeds and produces a binary via `cargo objcopy` (no regression from the toolchain rewire).
 9. Commit flake.nix and flake.lock (if `nix flake check`/`nix develop` regenerated the lock) together.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Combined f.stable.clippy into the f.combine call (renamed rustWithTarget -> rustToolchain) so clippy-driver shares the thumbv7em-none-eabihf sysroot with rustc. Fixed two mechanical lints: removed redundant 'use defmt;' in blinky.rs and replaced .max().min() with .clamp() in gain.rs. All acceptance criteria verified — sysroots match, firmware clippy passes, host clippy clean, build + objcopy produce working binary.
+<!-- SECTION:NOTES:END -->
