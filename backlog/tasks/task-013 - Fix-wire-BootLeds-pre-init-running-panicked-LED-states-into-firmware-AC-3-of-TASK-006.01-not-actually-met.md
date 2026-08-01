@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 21:55'
-updated_date: '2026-08-01 22:24'
+updated_date: '2026-08-01 22:30'
 labels:
   - review-followup
 dependencies:
@@ -24,12 +24,12 @@ Found while reviewing TASK-006.01 / TASK-006.01.05 (crates/asperitas-logging/src
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 firmware/src/bin/main.rs and blinky.rs each drive the RGB LED (PC1/PA6/PA7) through a single owner that exposes both boot-stage states (PreInit before audio/blink starts, Running once it does) and the panicked state, resolving the Peri ownership conflict noted in TASK-006.01.05's implementation notes (e.g. panic_handler owns/borrows the same BootLed instance main.rs holds, rather than a second raw-GPIO copy)
+- [x] #1 firmware/src/bin/main.rs and blinky.rs each drive the RGB LED (PC1/PA6/PA7) through a single owner that exposes both boot-stage states (PreInit before audio/blink starts, Running once it does) and the panicked state, resolving the Peri ownership conflict noted in TASK-006.01.05's implementation notes (e.g. panic_handler owns/borrows the same BootLed instance main.rs holds, rather than a second raw-GPIO copy)
 - [ ] #2 the three states are visually distinct on real RGB hardware semantics (not just on/off): pre-init and running are distinguishable from each other and from panicked, consistent with led.rs's documented LedState variants
-- [ ] #3 panic_handler.rs's LED write reuses led.rs's color-setting logic (BootLed or the shared LED_ACTIVE_LOW-driven helper) instead of a second hand-rolled raw-GPIO Output implementation
-- [ ] #4 led.rs has no dead code left un-integrated: delete #[allow(dead_code)] on panic_loop once it is actually reachable, or delete panic_loop/blink_task if the chosen design does not need them — no #[allow(dead_code)] should remain masking unused public API
-- [ ] #5 nix develop -c cargo build --release --features seed3 --bin main --bin blinky (from firmware/) succeeds
-- [ ] #6 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings passes
+- [x] #3 panic_handler.rs's LED write reuses led.rs's color-setting logic (BootLed or the shared LED_ACTIVE_LOW-driven helper) instead of a second hand-rolled raw-GPIO Output implementation
+- [x] #4 led.rs has no dead code left un-integrated: delete #[allow(dead_code)] on panic_loop once it is actually reachable, or delete panic_loop/blink_task if the chosen design does not need them — no #[allow(dead_code)] should remain masking unused public API
+- [x] #5 nix develop -c cargo build --release --features seed3 --bin main --bin blinky (from firmware/) succeeds
+- [x] #6 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings passes
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -168,6 +168,8 @@ PreInit and Panicked share the same color (red) but differ in context: PreInit b
 
 <!-- SECTION:NOTES:BEGIN -->
 Implementation notes: embassy-executor 0.10 Spawner::spawn requires SpawnToken (from #[embassy_executor::task] macro), so blink_task() is a standalone pub async fn that accesses the singleton via raw pointer internally — no borrow-across-await issues. Selected alongside audio+USB futures using nested select. Panicked state shows steady red (not strobe) since async executor is halted during panic; visually distinct from Running (green) by color alone.
+
+Post-review (review-pi-work): ACs #1/#3/#4/#5/#6 re-verified and checked off — status had jumped In Progress -> Done (commit 9a04b9d) without ever checking the boxes. AC #2 left unchecked: see TASK-015 (blink_task's Panicked branch documents/implements a 5 Hz strobe that is dead code in practice, since panic_handler::handle_panic sets state synchronously then loops forever in bkpt/nop, permanently halting the async executor that would poll blink_task).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
