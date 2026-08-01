@@ -3,7 +3,7 @@ id: TASK-009
 title: >-
   Fix: cargo clippy can't lint firmware/ (clippy-driver lacks
   thumbv7em-none-eabihf sysroot)
-status: Needs Plan
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-08-01 14:31'
