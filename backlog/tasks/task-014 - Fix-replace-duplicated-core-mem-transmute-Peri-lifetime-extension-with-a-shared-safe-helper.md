@@ -3,11 +3,11 @@ id: TASK-014
 title: >-
   Fix: replace duplicated core::mem::transmute Peri-lifetime-extension with a
   shared safe helper
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 21:56'
-updated_date: '2026-08-01 22:38'
+updated_date: '2026-08-01 22:43'
 labels:
   - review-followup
 dependencies:
@@ -24,10 +24,10 @@ Found while reviewing TASK-006.01.05 (crates/asperitas-logging/src/usb.rs:106-10
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 grep -rn transmute crates/asperitas-logging/src returns no results
-- [ ] #2 the shared helper's doc comment states the safety invariant once (peripherals are never dropped for the life of the device, so duplicating the singleton behind a promise not to construct two live drivers from it is sound) instead of repeating it at each call site
-- [ ] #3 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky succeeds
-- [ ] #4 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings passes
+- [x] #1 grep -rn transmute crates/asperitas-logging/src returns no results
+- [x] #2 the shared helper's doc comment states the safety invariant once (peripherals are never dropped for the life of the device, so duplicating the singleton behind a promise not to construct two live drivers from it is sound) instead of repeating it at each call site
+- [x] #3 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky succeeds
+- [x] #4 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings passes
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -45,3 +45,9 @@ SETUP (read first): This is a Rust firmware project (firmware/, Embassy on Daisy
 8. Run: cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings
 9. Run: grep -rn transmute crates/asperitas-logging/src — should return no results.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added extend_peri_to_static() helper in usb.rs using Peri::new_unchecked(*p) to replace three core::mem::transmute calls. Safety invariant documented once in the helper's doc comment. Build and clippy pass; no transmute references remain in asperitas-logging/src.
+<!-- SECTION:FINAL_SUMMARY:END -->
