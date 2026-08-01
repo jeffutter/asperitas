@@ -6,7 +6,8 @@ assignee:
   - '@agent'
 created_date: '2026-08-01 05:44'
 updated_date: '2026-08-01 12:36'
-labels: []
+labels:
+  - planned
 dependencies: []
 documentation:
   - docs/reference/rust-daisy-stack.md
