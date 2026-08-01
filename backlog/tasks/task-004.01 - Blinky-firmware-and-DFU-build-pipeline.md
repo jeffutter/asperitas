@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:56'
-updated_date: '2026-08-01 14:00'
+updated_date: '2026-08-01 14:20'
 labels: []
 dependencies: []
 documentation:
@@ -30,7 +30,16 @@ Flash: `dfu-util -a 0 -s 0x08000000:leave -D firmware.bin`
 The agent cannot verify this works — no board access. Produce the artifact and the documented command sequence; TASK-004.02 confirms it.
 <!-- SECTION:DESCRIPTION:END -->
 
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 `cargo objcopy` produces a valid raw .bin from the firmware workspace
+- [x] #2 Blinky source retained in firmware/src/bin/ as a permanent diagnostic
+- [x] #3 The full build-and-flash command sequence is documented
+<!-- AC:END -->
+
 ## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
 <!-- PLAN:BEGIN -->
 ### Context
 
@@ -135,10 +144,23 @@ Update the "Flashing without a debug probe" section with:
 - [ ] `firmware/Makefile` targets exist and are documented
 - [ ] `docs/reference/daisy-seed3.md` updated with exact procedure
 <!-- PLAN:END -->
+<!-- SECTION:PLAN:END -->
 
-## Acceptance Criteria
-<!-- AC:BEGIN -->
-- [ ] #1 `cargo objcopy` produces a valid raw .bin from the firmware workspace
-- [ ] #2 Blinky source retained in firmware/src/bin/ as a permanent diagnostic
-- [ ] #3 The full build-and-flash command sequence is documented
-<!-- AC:END -->
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Implementation
+
+### Files created/modified
+- **firmware/src/bin/blinky.rs** — new blinky binary, toggles user LED (PC7) at ~1.6 Hz (300 ms on/off). Uses embassy-time for delays, no debug probe required.
+- **firmware/Makefile** — build/flash targets: `make build` (cargo objcopy to .bin), `make flash` (dfu-util), `make flash-all` (both), `make check`, `make clean`.
+- **firmware/Cargo.toml** — added `embassy-time = "0.5"` dependency (needed for Timer::after_millis()).
+- **flake.nix** — fixed fenix toolchain configuration. Previous version listed `f.targets.thumbv7em-none-eabihf.stable.rust-std` as a separate package, which doesn't merge the target stdlib into rustc's sysroot. Changed to `f.combine [f.stable.rustc f.targets.thumbv7em-none-eabihf.stable.rust-std f.stable.llvm-tools]` so cargo finds core/liballoc for thumbv7em-none-eabihf and llvm-objcopy for cargo-binutils.
+- **docs/reference/daisy-seed3.md** — expanded flashing section with step-by-step procedure, Makefile targets, manual commands, and notes about :leave reliability, binary size, and memory.x.
+
+### Build verification
+- `cargo build --release --features seed3 --bin blinky` compiles cleanly
+- `cargo objcopy` produces firmware.bin at **17,614 bytes** (well under 128 KB internal flash limit)
+- `make build` works end-to-end via the Makefile
+- Existing main.rs binary still compiles (no regression)
+<!-- SECTION:NOTES:END -->
