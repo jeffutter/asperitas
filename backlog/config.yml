@@ -1,6 +1,6 @@
 project_name: "Asperitas"
 default_status: "To Do"
-statuses: ["Blocked", "Backlog", "To Do", "Needs Plan", "In Progress", "Done"]
+statuses: ["Blocked", "Backlog", "To Do", "Needs Plan", "Dev Ready", "In Progress", "Done"]
 labels: []
 definition_of_done: []
 date_format: yyyy-mm-dd
