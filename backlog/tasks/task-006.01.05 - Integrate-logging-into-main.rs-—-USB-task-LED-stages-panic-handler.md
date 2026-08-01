@@ -1,10 +1,10 @@
 ---
 id: TASK-006.01.05
 title: 'Integrate logging into main.rs — USB task, LED stages, panic handler'
-status: To Do
+status: Needs Plan
 assignee: []
 created_date: '2026-08-01 18:46'
-updated_date: '2026-08-01 18:47'
+updated_date: '2026-08-01 20:34'
 labels:
   - task
   - planned
