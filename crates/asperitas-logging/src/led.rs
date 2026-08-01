@@ -219,8 +219,11 @@ impl BootLed {
 /// Runs forever — does not return.
 ///
 /// - `PreInit`: blink red at ~1 Hz
-/// - `Running`: steady green (polls for Panicked transition)
-/// - `Panicked`: blink red at ~5 Hz
+/// - `Running`: steady green (polls for state transitions)
+///
+/// Note: `Panicked` is not handled here. The panic handler sets the LED to
+/// steady red synchronously via [`set_global_state`] and then halts the
+/// async executor, so this task is never polled after a real panic.
 ///
 /// # Example
 ///
@@ -251,11 +254,11 @@ pub async fn blink_task() {
                 Timer::after_millis(500).await;
             }
             LedState::Panicked => {
-                // Red blink ~5 Hz
-                led.set_color_on(true, false, false);
-                Timer::after_millis(100).await;
-                led.off();
-                Timer::after_millis(100).await;
+                // Unreachable in practice: the panic handler sets steady red
+                // synchronously and then halts the async executor.
+                // Kept as exhaustive match arm to avoid compiler warnings.
+                led.set_state(LedState::Panicked);
+                Timer::after_millis(1000).await;
             }
         }
     }
