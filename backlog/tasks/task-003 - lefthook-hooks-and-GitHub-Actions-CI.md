@@ -3,9 +3,9 @@ id: TASK-003
 title: lefthook hooks and GitHub Actions CI
 status: To Do
 assignee:
-  - '@agent'
+  - '@human'
 created_date: '2026-08-01 05:45'
-updated_date: '2026-08-01 05:56'
+updated_date: '2026-08-01 15:40'
 labels: []
 dependencies:
   - TASK-002
