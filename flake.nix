@@ -3,25 +3,46 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    fenix.url = "github:nix-community/fenix";
+    fenix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, fenix }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
+      f = fenix.packages.${system};
     in
     {
       devShells.${system}.default = pkgs.mkShell {
-        # Minimal for now: just the tooling the backlog automation needs, so the
-        # Ralph loops stop depending on whatever happens to be installed on the
-        # host. TASK-001 replaces this with the full toolchain — Rust with the
-        # thumbv7em-none-eabihf target, dfu-util, probe-rs, cargo-binutils,
-        # lefthook, and the ALSA/pkg-config deps cpal needs.
-        packages = with pkgs; [
-          # backlog/unblocked-todo.sh parses ticket frontmatter with these to work
-          # out which tickets have all their dependencies Done.
-          yq-go
-          jq
+        packages = [
+          # --- Rust toolchain from fenix ---
+          f.stable.cargo
+          f.stable.rustc
+          f.stable.clippy
+          f.stable.rustfmt
+          f.stable.rust-analyzer
+          f.stable.rust-src
+
+          # thumbv7em-none-eabihf stdlib for the Seed3's Cortex-M7F
+          f.targets.thumbv7em-none-eabihf.stable.rust-std
+
+          # llvm-tools (provides rust-objcopy, etc.)
+          f.stable.llvm-tools
+
+          # --- Embedded tooling ---
+          pkgs.dfu-util              # probe-free flashing over Seed3 USB-C
+          pkgs.probe-rs-tools        # flash + defmt/RTT logging (when ST-Link arrives)
+          pkgs.cargo-binutils        # objcopy to produce raw .bin for DFU
+
+          # --- Host audio (ALSA + pkg-config so cpal builds) ---
+          pkgs.alsa-lib
+          pkgs.pkg-config
+
+          # --- General tooling ---
+          pkgs.lefthook              # git hooks
+          pkgs.yq-go                 # mikefarah/yq-go (NOT Python yq)
+          pkgs.jq                    # JSON processing for backlog scripts
         ];
       };
     };
