@@ -2,8 +2,10 @@
 id: TASK-003
 title: lefthook hooks and GitHub Actions CI
 status: To Do
-assignee: []
+assignee:
+  - '@agent'
 created_date: '2026-08-01 05:45'
+updated_date: '2026-08-01 05:56'
 labels: []
 dependencies:
   - TASK-002
@@ -34,9 +36,5 @@ Install the hooks from the flake's shellHook so a fresh clone gets them without 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `lefthook install` wires both hooks, and it happens automatically on entering the nix shell
-- [ ] #2 pre-commit rejects a commit containing misformatted Rust
-- [ ] #3 pre-push rejects a push whose firmware workspace does not cross-compile
-- [ ] #4 A GitHub remote exists and Actions runs fmt, clippy, test, and the thumbv7em cross-compile on push and PR
-- [ ] #5 CI uses the same nix flake as local development
+- [ ] #1 All subtasks complete
 <!-- AC:END -->
