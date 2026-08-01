@@ -3,9 +3,14 @@ name = "asperitas-cli"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "asperitas-cli"
 path = "src/main.rs"
 
 [dependencies]
-asperitas-dsp = { path = "../asperitas-dsp" }
+asperitas-dsp = { path = "../asperitas-dsp", features = ["std"] }
+clap = { version = "4", features = ["derive"] }
+hound = "3.5"

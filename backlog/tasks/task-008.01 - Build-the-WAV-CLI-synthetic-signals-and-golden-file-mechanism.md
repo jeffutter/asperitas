@@ -1,7 +1,7 @@
 ---
 id: TASK-008.01
 title: 'Build the WAV CLI, synthetic signals, and golden-file mechanism'
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 05:57'
