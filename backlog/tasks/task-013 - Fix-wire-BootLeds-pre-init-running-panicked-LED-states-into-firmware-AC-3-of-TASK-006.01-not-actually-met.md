@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 21:55'
-updated_date: '2026-08-01 22:23'
+updated_date: '2026-08-01 22:24'
 labels:
   - review-followup
 dependencies:
@@ -162,8 +162,13 @@ No changes needed — module visibility is already correct (`pub mod led` under 
 | Panicked | Red | Steady on (panic handler sets, no async available for strobe) |
 
 PreInit and Panicked share the same color (red) but differ in context: PreInit blinks while the system is alive, Panicked is steady-on with the system halted. A human observer distinguishes them by whether the device is otherwise functional (USB serial active vs frozen). This is acceptable — a strobing panic LED would require a busy-wait toggle loop in the panic handler, adding complexity for marginal diagnostic value.
-
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation notes: embassy-executor 0.10 Spawner::spawn requires SpawnToken (from #[embassy_executor::task] macro), so blink_task() is a standalone pub async fn that accesses the singleton via raw pointer internally — no borrow-across-await issues. Selected alongside audio+USB futures using nested select. Panicked state shows steady red (not strobe) since async executor is halted during panic; visually distinct from Running (green) by color alone.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
