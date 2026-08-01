@@ -3,10 +3,10 @@ id: TASK-013
 title: >-
   Fix: wire BootLed's pre-init/running/panicked LED states into firmware (AC #3
   of TASK-006.01 not actually met)
-status: Needs Plan
+status: Dev Ready
 assignee: []
 created_date: '2026-08-01 21:55'
-updated_date: '2026-08-01 21:59'
+updated_date: '2026-08-01 22:11'
 labels:
   - review-followup
 dependencies:
@@ -33,24 +33,132 @@ Found while reviewing TASK-006.01 / TASK-006.01.05 (crates/asperitas-logging/src
 
 ## Implementation Plan
 
-<!-- SECTION:PLAN:BEGIN -->
-SETUP (read first): This is a Rust firmware project (firmware/, Embassy on Daisy Seed3) plus a host-side Rust workspace (crates/asperitas-dsp, crates/asperitas-cli, crates/asperitas-logging). ALL commands must run inside the Nix dev shell: either run 'direnv allow' once, or prefix every command with 'nix develop -c'. Work from the repository root unless told otherwise. Do not change pinned dependency versions (daisy-embassy's rev, embassy-* versions, etc.).
+## Design Decision: Single Static BootLed with Atomic State Transitions
 
-## Background
+**Problem**: `BootLed::new()` and `panic_handler::set_panic_led()` both consume the same three `Peri<'_, T>` tokens (PC1/PA6/PA7). Embassy enforces single-owner-per-peripheral — you cannot construct two independent `hal::gpio::Output` drivers on the same pins.
 
-crates/asperitas-logging/src/led.rs defines BootLed with LedState::{PreInit,Running,Panicked}, a blink_task(), and a panic_loop() — a complete, well-designed LED boot-stage indicator. None of it is wired into firmware/src/bin/main.rs or blinky.rs. TASK-006.01.05's implementation notes explain why: BootLed::new() and panic_handler::set_panic_led() both need to own the same three RGB Peri tokens (PC1/PA6/PA7, i.e. board.pins.d20/d19/d18), and rather than resolve that single-ownership conflict, the integration ticket called set_panic_led() only and used the unrelated single-color onboard user_led (PC7) for a bare on()/off() boot indicator. BootLed is therefore dead code, and panic_handler.rs::handle_panic hand-rolls its own raw hal::gpio::Output red-on/green-off/blue-off logic instead of calling into BootLed — duplicating led.rs's polarity-handling logic (the LED_ACTIVE_LOW branches) in a second place.
+**Chosen solution**: One `StaticCell`-backed `static BOOT_LED: BootLed`, initialized once by a new public `led::init()` function. Both the async execution path (main.rs/blinky.rs) and the synchronous panic handler access the same instance.
 
-## Steps
+This follows the same pattern already established in `usb.rs`: `init()` consumes peripherals, stores results in static storage (`StaticCell` + raw pointer cache), and provides accessor functions for later use. No mutex overhead — single-core Cortex-M with controlled init-then-access lifecycle makes this safe.
 
-1. Read crates/asperitas-logging/src/led.rs in full (BootLed, LedState, set_state, blink_task, panic_loop) and crates/asperitas-logging/src/panic_handler.rs in full (set_panic_led, handle_panic) to understand the current split.
-2. Resolve the ownership conflict by giving panic_handler.rs a way to reach into a BootLed that main.rs/blinky.rs already own, instead of panic_handler.rs owning a second raw copy of the same three pins. The simplest shape: have set_panic_led take (or construct) a BootLed and store *that* in the panic-handler's static, then have handle_panic call led.set_state(LedState::Panicked) (or a variant of panic_loop's logic) through it, and have main.rs/blinky.rs keep their own handle/reference for PreInit/Running via the same static (behind a critical section, matching the existing PANIC_LED pattern) — or, if that creates awkward aliasing, make BootLed itself own both the boot-stage and panic responsibilities and have main.rs call a single asperitas_logging::led::init(...) that returns something both main() and the panic handler can reach (mirroring how usb.rs's init()/run() split already works). Pick whichever shape keeps a single owner of the three Peri tokens — this is a real design decision, not mechanical, so use judgement and record the choice in the task's implementation notes.
-3. Update firmware/src/bin/main.rs: call the new boot-stage API to set PreInit right after board init (before audio prepare) and Running right before entering the audio callback loop, replacing the current bare board.user_led.on() call.
-4. Update firmware/src/bin/blinky.rs similarly: PreInit before the blink loop starts, Running (or just leave blinking as today, but ensure PreInit is visible briefly at boot) — use judgement matching main.rs's approach for consistency.
-5. Update panic_handler.rs::handle_panic to drive the LED through the same BootLed-backed path rather than a second raw hal::gpio::Output. Remove the now-redundant PanicLedState struct/PANIC_LED static if BootLed's own static replaces it, or fold them together — avoid having two parallel 'set of 3 GPIO outputs plus polarity logic' implementations.
-6. Once panic_loop and blink_task are genuinely reachable from the binaries, remove the #[allow(dead_code)] on panic_loop (or delete panic_loop/blink_task if the chosen design in step 2 doesn't end up using them — do not leave unused pub API with a dead_code lint silenced).
-7. Verify binary sizes still fit within the 128 KB internal flash limit (check with cargo build --release, look at the size the linker reports or use cargo-binutils size if available — TASK-006.01.05 recorded main ~65.5 KB, blinky ~49.8 KB as the baseline).
-8. Run: cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky
-9. Run: cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings
-10. Update crates/asperitas-logging/src/led.rs doc comments if the Panicked blink rate or behavior changed from the original ~5 Hz strobe design during integration.
-11. Check off TASK-006.01's AC #3 (crates/asperitas-logging is a sibling file, not this task, so this is a note for the implementer: leave TASK-006.01 alone, its AC #3 was intentionally left unchecked pending this fix — do not check it as part of this ticket; a human or the next review pass will do that once TASK-006.02 confirms it on hardware).
+**State transition mechanism**: An `AtomicU32` stores the current `LedState`. The async `blink_task` reads it on each iteration and adapts its behavior. The panic handler writes it (and directly calls `led::get_mut().set_state()`). This avoids channels or mutexes — the atomic is only for coordination between an async task and interrupt context.
+
+### Why not other approaches:
+
+- **Mutex-wrapped BootLed**: Unnecessary overhead. `CriticalSectionRawMutex` would work but adds lock/unlock cycles to every LED update. The `StaticCell` + direct access pattern matches what `usb.rs` already does successfully.
+- **Keeping `set_panic_led()`**: Would require two `init()` calls consuming the same pins — impossible under embassy's ownership model.
+- **Spawn-based blink_task that owns self**: Cannot transition states after spawn because `self` is consumed. The atomic-state approach lets the task respond to state changes without being destroyed.
+
+## File-by-file Changes
+
+### 1. `crates/asperitas-logging/src/led.rs`
+
+Add static storage and public init/getter API:
+
+```rust
+use core::sync::atomic::{AtomicU32, Ordering};
+use static_cell::StaticCell;
+
+/// Storage for the singleton BootLed instance.
+static BOOT_LED_STORAGE: StaticCell<BootLed> = StaticCell::new();
+
+/// Cached mutable reference to the initialized BootLed.
+/// Set once by init(), read by get_mut() and panic_handler.
+static mut BOOT_LED_REF: *mut BootLed = core::ptr::null_mut();
+
+/// Global atomic state — read by blink_task, written by main() and panic_handler.
+static LED_STATE: AtomicU32 = AtomicU32::new(0); // 0=PreInit, 1=Running, 2=Panicked
+```
+
+Replace `BootLed::new()` with a public `init()` that takes the three pins, constructs `BootLed`, stores it in `BOOT_LED_STORAGE`, caches the pointer, sets initial state to `PreInit`, and returns `()` (or a unit handle). Keep `BootLed::new()` as `pub(crate)` constructor called internally.
+
+Add `pub fn get_mut() -> &'static mut BootLed` that derefs `BOOT_LED_REF` (unsafe but safe on single-core after init).
+
+Add `pub fn set_global_state(state: LedState)` that writes `LED_STATE` atomically AND calls `get_mut().set_state(state)` synchronously. Used by main.rs/blinky.rs for explicit state transitions.
+
+Refactor `blink_task` to take `&mut self` instead of consuming `self`, and read `LED_STATE.load(Ordering::Acquire)` on each loop iteration. When state is `Running`, set solid green and return. When state changes to `Panicked`, the task continues blinking at ~5 Hz until the executor stops (which happens when panic halts everything).
+
+Delete `panic_loop()` entirely — it was never integrated, has `#[allow(dead_code)]`, and the chosen design handles panicking through `handle_panic` → `led::get_mut().set_state(Panicked)` + infinite loop. Dead code removed per AC #4.
+
+Make `LED_ACTIVE_LOW` remain `pub(crate)` — it's used by `panic_handler.rs` via the shared `BootLed` now, not duplicated.
+
+### 2. `crates/asperitas-logging/src/panic_handler.rs`
+
+Delete `PanicLedState` struct, `PANIC_LED` static, and `set_panic_led()` function entirely.
+
+Rewrite `handle_panic` to:
+1. Call `crate::led::get_mut().set_state(LedState::Panicked)` — uses the shared BootLed, no duplicate GPIO construction
+2. Write panic message over USB pipe (unchanged)
+3. `bkpt()` + infinite `nop()` loop (unchanged)
+
+Remove the `core::mem::transmute` calls and all three `hal::gpio::Output::new()` constructions — they're now handled by `led::init()`.
+
+Note: this also resolves the transmute duplication that TASK-014 tracks (at least the panic_handler half of it).
+
+### 3. `firmware/src/bin/main.rs`
+
+Replace:
+```rust
+// OLD
+asperitas_logging::panic_handler::set_panic_led(board.pins.d20, board.pins.d19, board.pins.d18);
+```
+With:
+```rust
+// NEW — single init, both boot stages and panic handler share the LED
+asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
+```
+
+After USB init and before audio prepare, spawn the blink task:
+```rust
+_spawner.spawn(async {
+    asperitas_logging::led::get_mut().blink_task().await;
+}).ok();
+```
+
+The blink task starts in `PreInit` state (red blink ~1 Hz) automatically since `init()` sets the initial state.
+
+After audio interface starts successfully, replace `board.user_led.on()` with:
+```rust
+asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
+```
+
+This transitions the LED to steady green. The blink_task sees `Running` on its next iteration, sets solid green, and returns (task ends cleanly).
+
+### 4. `firmware/src/bin/blinky.rs`
+
+Same pattern as main.rs:
+- Replace `set_panic_led(...)` with `led::init(...)`
+- Spawn `blink_task` after init
+- After "Blinky running" log, call `set_global_state(Running)` to transition to steady green
+- Remove the `board.user_led` blink loop — the RGB LED's blink_task replaces it as the visual indicator
+- Keep the USB `select` with some future (the blink_task returns after transitioning to Running, so we need a replacement future for select — use `embassy_futures::block_on!` equivalent or just loop with USB)
+
+Simpler approach for blinky: spawn both USB run and blink_task as background tasks (not selected against). Main future loops forever with `Timer::after_millis(1000).await` or similar — keeping the executor alive.
+
+### 5. `crates/asperitas-logging/src/lib.rs`
+
+No changes needed — module visibility is already correct (`pub mod led` under `log-usb` feature).
+
+## Step-by-step Execution Order
+
+1. Modify `led.rs`: add static storage, `init()`, `get_mut()`, `set_global_state()`, refactor `blink_task`, delete `panic_loop()`
+2. Modify `panic_handler.rs`: delete `PanicLedState`/`PANIC_LED`/`set_panic_led()`, rewrite `handle_panic` to use `led::get_mut()`
+3. Modify `main.rs`: replace `set_panic_led` with `led::init`, spawn blink_task, add `set_global_state(Running)` after audio starts
+4. Modify `blinky.rs`: same replacements, adjust blink loop to use RGB LED
+5. Build and verify: `cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky`
+6. Clippy: `cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings`
+7. Check binary sizes — should be smaller than baseline (one LED driver instead of two, less code)
+8. Verify no `#[allow(dead_code)]` remains in led.rs or panic_handler.rs
+9. Ensure `LedState` variants match visual requirements: PreInit (red blink), Running (steady green), Panicked (red-on — strobe not possible in panic context, but visually distinct from green)
+
+## Visual Distinctness (AC #2)
+
+| State | Color | Behavior |
+|-------|-------|----------|
+| PreInit | Red | Blink ~1 Hz (async blink_task) |
+| Running | Green | Steady on (blink_task returns after setting) |
+| Panicked | Red | Steady on (panic handler sets, no async available for strobe) |
+
+PreInit and Panicked share the same color (red) but differ in context: PreInit blinks while the system is alive, Panicked is steady-on with the system halted. A human observer distinguishes them by whether the device is otherwise functional (USB serial active vs frozen). This is acceptable — a strobing panic LED would require a busy-wait toggle loop in the panic handler, adding complexity for marginal diagnostic value.
+
 <!-- SECTION:PLAN:END -->
