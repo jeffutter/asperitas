@@ -67,6 +67,25 @@ pub struct UsbLoggerHandle;
 static INITIALIZED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 // ---------------------------------------------------------------------------
+// Lifetime extension helper
+// ---------------------------------------------------------------------------
+
+/// Extend a [`Peri`] borrow to `'static`.
+///
+/// # Safety
+///
+/// Peripherals are never dropped for the life of the device, so duplicating
+/// the singleton behind a promise not to construct two live drivers from it
+/// is sound. We hold the only reference; no other driver is created from these
+/// peripherals elsewhere in this binary.
+#[inline]
+unsafe fn extend_peri_to_static<T: hal::PeripheralType>(p: Peri<'_, T>) -> Peri<'static, T> {
+    // Deref to get the Copy inner value, then reconstruct with any lifetime.
+    // Same primitive used by Peri::clone_unchecked internally.
+    unsafe { Peri::new_unchecked(*p) }
+}
+
+// ---------------------------------------------------------------------------
 // Public init
 // ---------------------------------------------------------------------------
 
@@ -100,13 +119,10 @@ where
         panic!("USB logging already initialized");
     }
 
-    // Coerce Peri lifetimes to 'static — safe because these peripherals live
-    // for the lifetime of the device (they are never dropped). This matches
-    // the pattern used by embassy-stm32's Driver constructors.
-    let usb_otg_fs: Peri<'static, hal::peripherals::USB_OTG_FS> =
-        unsafe { core::mem::transmute(usb_otg_fs) };
-    let dp: Peri<'static, hal::peripherals::PA12> = unsafe { core::mem::transmute(dp) };
-    let dn: Peri<'static, hal::peripherals::PA11> = unsafe { core::mem::transmute(dn) };
+    // Extend Peri lifetimes to 'static via the shared helper.
+    let usb_otg_fs = unsafe { extend_peri_to_static(usb_otg_fs) };
+    let dp = unsafe { extend_peri_to_static(dp) };
+    let dn = unsafe { extend_peri_to_static(dn) };
 
     // --- Configure USB driver ---
     let mut usb_config = UsbConfig::default();
