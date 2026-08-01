@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 22:30'
-updated_date: '2026-08-01 22:45'
+updated_date: '2026-08-01 22:46'
 labels:
   - review-followup
 dependencies:
@@ -43,3 +43,9 @@ SETUP (read first): This is a Rust firmware project (firmware/, Embassy on Daisy
 6. Run: cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings
 7. Re-read crates/asperitas-logging/src/led.rs top-to-bottom once more and confirm every doc comment on LedState and blink_task matches the code that runs it — this ticket exists because that invariant broke once already.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Collapsed blink_task's Panicked match arm from an unreachable ~5 Hz strobe loop (Timer::after_millis(100).await) to a steady-on no-op kept only as an exhaustive match guard. The panic handler sets red synchronously and halts the async executor, so blink_task is never polled after a real panic. Updated blink_task's doc comment to document that Panicked is handled exclusively by the panic handler — removing the misleading '~5 Hz' claim while keeping LedState::Panicked's existing 'Red on' doc correct.
+<!-- SECTION:FINAL_SUMMARY:END -->
