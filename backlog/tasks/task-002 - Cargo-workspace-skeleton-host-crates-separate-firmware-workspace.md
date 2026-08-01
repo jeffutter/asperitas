@@ -1,7 +1,7 @@
 ---
 id: TASK-002
 title: 'Cargo workspace skeleton: host crates + separate firmware workspace'
-status: Needs Plan
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:45'
