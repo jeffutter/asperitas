@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-08-01 22:51'
+updated_date: '2026-08-01 22:51'
 labels:
   - review-followup
 dependencies:
@@ -28,3 +29,20 @@ Found while reviewing TASK-014 (crates/asperitas-logging/src/usb.rs:73-86, `exte
 - [ ] #3 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky succeeds
 - [ ] #4 cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SETUP (read first): This is a Rust firmware project (firmware/, Embassy on Daisy Seed3) plus a host-side Rust workspace (crates/asperitas-dsp, crates/asperitas-cli, crates/asperitas-logging). ALL commands must run inside the Nix dev shell: either run 'direnv allow' once, or prefix every command with 'nix develop -c'. Work from the repository root unless told otherwise. Do not change pinned dependency versions.
+
+1. Read crates/asperitas-logging/src/usb.rs:66-133 (the `extend_peri_to_static` helper and its three call sites in `init()`). Read the current doc comment on `extend_peri_to_static` in full.
+2. Read the vendored embassy-hal-internal source: find ~/.cargo/registry/src -iname 'peripheral.rs' -path '*embassy-hal-internal*' and read the doc comment directly above `pub const unsafe fn new_unchecked` (it is `#[doc(hidden)]` and states "For use by HALs only... you should use `steal()` on the actual peripheral types instead"). Also read `find ~/.cargo/registry/src -iname 'macros.rs' -path '*embassy-hal-internal*'`, specifically `peripherals_definition!`, to see that `steal()` is generated as `pub const unsafe fn steal() -> Peri<'static, Self>` on each concrete peripheral type (e.g. `embassy_stm32::peripherals::PA12::steal()`), not as a method on the `PeripheralType` trait.
+3. Decide the resolution:
+   a. Preferred: drop the generic `extend_peri_to_static<T: hal::PeripheralType>` helper and call `T::steal()` directly at each of the three call sites in `init()` (`hal::peripherals::USB_OTG_FS::steal()`, `hal::peripherals::PA12::steal()`, `hal::peripherals::PA11::steal()`), each wrapped in its own small `unsafe {}` block. Since this removes the "one shared helper" structure TASK-014 established, write a single doc comment above the three calls (or a short comment block at the top of `init()`) stating the safety invariant once: peripherals are never dropped for the life of the device, and `init()` holds the only Peri constructed for each of these three peripherals for the process lifetime, so calling `steal()` here (which discards the original borrowed `Peri<'_, T>` parameter and constructs a fresh `'static` one) does not create two live drivers.
+   b. Only if (a) proves awkward for a concrete reason discovered while implementing (e.g. it materially hurts readability at the three call sites): keep the generic `extend_peri_to_static` helper but change its safety doc comment to explicitly justify using `Peri::new_unchecked` (a `#[doc(hidden)]` HAL-internal item) over `steal()` — state why `new_unchecked(*p)`, which reconstructs from the already-owned `Peri<'_, T>` argument via `Copy`, is preferred here to `steal()`'s "conjure from nothing" semantics, and why depending on a `#[doc(hidden)]` non-public-contract item is acceptable for this project. Do not choose (b) merely because it's less typing — (a) is the actually-sanctioned path and should be the default.
+4. Implement the chosen resolution in crates/asperitas-logging/src/usb.rs.
+5. Run: grep -rn 'new_unchecked' crates/asperitas-logging/src — should return no results unless (b) was chosen and justified per AC #1.
+6. Run: cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky
+7. Run: cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings
+8. Re-read crates/asperitas-logging/src/usb.rs::init() top to bottom and confirm the safety invariant is stated exactly once, not duplicated across the three call sites.
+<!-- SECTION:PLAN:END -->
