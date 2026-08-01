@@ -5,9 +5,11 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-01 05:57'
+updated_date: '2026-08-01 17:41'
 labels: []
 dependencies:
   - TASK-005.02
+  - TASK-011
 documentation:
   - docs/reference/rust-daisy-stack.md
 parent_task_id: TASK-005
@@ -31,3 +33,9 @@ Report what TASK-005.02 actually observed. If something did not work, that is ev
 <!-- AC:BEGIN -->
 - [ ] #1 HUMAN: test report posted as a comment on daisy-embassy PR #80
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added TASK-011 as a dependency (2026-08-01, via review-pi-work): the hardcoded 32-sample BLOCK_LENGTH in daisy-embassy PR #80 (vs. the 48-sample libDaisy default this project originally assumed) is worth mentioning in the upstream report — TASK-011 documents it in docs/reference/rust-daisy-stack.md first so this ticket can reference it.
+<!-- SECTION:NOTES:END -->
