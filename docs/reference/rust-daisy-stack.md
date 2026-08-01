@@ -19,7 +19,7 @@ Board selection is by Cargo feature:
 | `seed_1_1` | Seed Rev5 | WM8731 |
 | `seed_1_2` | Seed Rev7 | PCM3060 |
 | `patch_sm` | Patch SM | PCM3060 |
-| `seed3` | **Seed3 — unmerged, see below** | TAC5242 |
+| `seed3` | Seed3 | TAC5242 |
 
 Current release line is `0.3.0` (unreleased); `0.2.2` is the last published version.
 
@@ -34,20 +34,17 @@ interface.start_callback(|input, output| {
 Useful examples in the repo: `blinky.rs`, `passthrough.rs`, `triangle_wave_tx.rs`,
 `looper.rs`, `sdram.rs`, `flash.rs`, `usb_serial.rs`, `usb_midi.rs`, `usb_uac.rs`.
 
-## Seed3 support status — PR #80
+## Seed3 support status — PR #80 (merged)
 
-This is the load-bearing fact for this project.
+**PR [#80](https://github.com/daisy-embassy/daisy-embassy/pull/80) — "Add Daisy
+Seed3 TAC5242 support" — merged `2026-08-01T14:20:54Z`.**
 
-- **Issue [#79](https://github.com/daisy-embassy/daisy-embassy/issues/79)** — "Seed3
-  Support", tracking issue. Confirms same CPU, "mostly compatible".
-- **PR [#80](https://github.com/daisy-embassy/daisy-embassy/pull/80)** — "Add Daisy
-  Seed3 TAC5242 support". Opened **2026-08-01** by `landakram`.
-  - Branch: `landakram/daisy-embassy` @ `dev/seed3`, head `477083b0227d`
-  - State: **open, mergeable, no reviews**, 2 commits, 12 files, +240 / −13
-  - Adds `src/codec/tac5242.rs` and a `seed3` feature; SDRAM and pinout reused unchanged
+The `seed3` feature is now on master. Pull from `branch = "master"`; no commit SHA pin
+needed.
 
-The author's own hardware verification — **on a Seed3 in a Daisy Pod**, the same
-configuration as this project:
+Issue [#79](https://github.com/daisy-embassy/daisy-embassy/issues/79) tracks broader
+Seed3 support. The author's own hardware verification — **on a Seed3 in a Daisy Pod**,
+the same configuration as this project — confirmed:
 
 - board boots and resets reliably
 - Pod buttons, encoder, LEDs and both knobs work
@@ -57,17 +54,6 @@ configuration as this project:
   readback)
 - stereo in and out at 48 kHz with correct left/right channels
 - line-out to line-in loopback passes stereo audio repeatably
-
-**Consequence for us:** the Seed3 codec work is already done. Pin the dependency to the
-PR branch rather than writing a driver. Because the PR is brand new and unreviewed it
-may be force-pushed or reworked, so pin to the **specific commit SHA**, not the branch
-name, and revisit when it merges.
-
-**Contribution opportunity:** an unreviewed PR whose author is asking for confirmation is
-exactly where an independent test report on identical hardware has the most value. This
-is the cheapest possible route to the "contribute back upstream" goal — it costs a
-comment, not a driver. Same pattern as the existing call for `0.3.0` test reports in
-[issue #59](https://github.com/daisy-embassy/daisy-embassy/issues/59).
 
 ## Alternative / superseded BSPs
 
