@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:44'
-updated_date: '2026-08-01 06:08'
+updated_date: '2026-08-01 06:14'
 labels: []
 dependencies: []
 documentation:
@@ -39,5 +39,4 @@ See docs/reference/rust-daisy-stack.md for the toolchain section.
 - [ ] #3 `dfu-util --version`, `probe-rs --version`, `lefthook version`, and `cargo objcopy --version` all run inside the shell
 - [ ] #4 pkg-config finds ALSA, verified by a trivial crate depending on `cpal` compiling
 - [ ] #5 flake.lock is committed and `nix flake check` passes
-- [ ] #6 `yq` and `jq` are available in the shell (required by .pi/extensions/ralph/unblocked-todo.sh; currently satisfied only by the ambient system)
 <!-- AC:END -->
