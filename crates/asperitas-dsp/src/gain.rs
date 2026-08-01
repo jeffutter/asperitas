@@ -5,6 +5,9 @@ use libm::expf as exp;
 use crate::processor::{Frame, Processor};
 use crate::smooth::Smoother;
 
+#[cfg(feature = "std")]
+use std::string::String;
+
 /// Parameters for the gain processor.
 #[derive(Clone, Debug)]
 pub struct GainParams {
@@ -67,5 +70,28 @@ impl Processor for Gain {
     fn reset(&mut self) {
         self.smoother_l.snap();
         self.smoother_r.snap();
+    }
+}
+
+#[cfg(feature = "std")]
+impl Gain {
+    /// Parse CLI key=value pairs into [`GainParams`].
+    ///
+    /// Recognized keys: `gain_db`. Returns an error for unknown keys or bad values.
+    pub fn parse_params_from_cli(pairs: &[(String, String)]) -> Result<GainParams, String> {
+        let mut params = GainParams::default();
+        for (key, value) in pairs {
+            match key.as_str() {
+                "gain_db" => {
+                    params.gain_db = value
+                        .parse::<f32>()
+                        .map_err(|_| format!("invalid value for gain_db: {value}"))?;
+                }
+                _ => {
+                    return Err(format!("unknown parameter key for gain processor: {key}"));
+                }
+            }
+        }
+        Ok(params)
     }
 }

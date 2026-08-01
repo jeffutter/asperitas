@@ -5,6 +5,9 @@ use libm::expf as exp;
 use crate::processor::{Frame, Processor};
 use crate::smooth::Smoother;
 
+#[cfg(feature = "std")]
+use std::string::String;
+
 /// Parameters for the one-pole low-pass filter.
 #[derive(Clone, Debug)]
 pub struct FilterParams {
@@ -73,5 +76,28 @@ impl Processor for OnePoleLowPass {
         self.smoother.snap();
         self.prev_l = 0.0;
         self.prev_r = 0.0;
+    }
+}
+
+#[cfg(feature = "std")]
+impl OnePoleLowPass {
+    /// Parse CLI key=value pairs into [`FilterParams`].
+    ///
+    /// Recognized keys: `cutoff_hz`. Returns an error for unknown keys or bad values.
+    pub fn parse_params_from_cli(pairs: &[(String, String)]) -> Result<FilterParams, String> {
+        let mut params = FilterParams::default();
+        for (key, value) in pairs {
+            match key.as_str() {
+                "cutoff_hz" => {
+                    params.cutoff_hz = value
+                        .parse::<f32>()
+                        .map_err(|_| format!("invalid value for cutoff_hz: {value}"))?;
+                }
+                _ => {
+                    return Err(format!("unknown parameter key for filter processor: {key}"));
+                }
+            }
+        }
+        Ok(params)
     }
 }
