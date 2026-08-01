@@ -5,8 +5,9 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-01 05:46'
-updated_date: '2026-08-01 15:52'
-labels: []
+updated_date: '2026-08-01 15:53'
+labels:
+  - planned
 dependencies:
   - TASK-002
 priority: high
@@ -118,6 +119,16 @@ Replace the stub `process_sample()` with a proper `Processor` trait architecture
 
 #### 7. `crates/asperitas-dsp/tests/property_tests.rs` — new integration test
 Generic test harness using a helper function pattern:
+```rust
+fn run_properties<P, F>(make: F)
+where
+    P: Processor,
+    P::Params: Clone + Default,
+    F: Fn() -> P,
+{
+    // ... runs all six properties
+}
+```
 
 Six proptest cases:
 
