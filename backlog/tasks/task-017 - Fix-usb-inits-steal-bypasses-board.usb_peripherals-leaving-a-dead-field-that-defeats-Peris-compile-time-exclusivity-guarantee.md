@@ -3,11 +3,11 @@ id: TASK-017
 title: >-
   Fix: usb::init()'s steal() bypasses board.usb_peripherals, leaving a dead
   field that defeats Peri's compile-time exclusivity guarantee
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 23:25'
-updated_date: '2026-08-02 00:33'
+updated_date: '2026-08-02 00:34'
 labels:
   - review-followup
 dependencies:
@@ -51,3 +51,15 @@ SETUP (read first): This is a Rust embedded firmware workspace (crates/ + firmwa
    cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo build --release --features seed3 --bin main --bin blinky
    cd firmware && nix develop /home/jeffutter/src/asperitas -c cargo clippy --release --features seed3 --bin main --bin blinky -- -D warnings
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation: Added explicit discard of board.usb_peripherals at both call sites (main.rs line 66, blinky.rs line 66) with explanatory comments. Updated safety comment in usb.rs to accurately describe the invariant that callers must discard the board's copy. Verified via grep that no other code reads usb_peripherals. Release build and clippy -D warnings both clean.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Discarded board.usb_peripherals at both binary call sites and corrected the safety comment in usb::init() so Peri exclusivity is maintained by documented caller discipline rather than an inaccurate claim of sole ownership.
+<!-- SECTION:FINAL_SUMMARY:END -->
