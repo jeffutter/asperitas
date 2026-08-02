@@ -31,10 +31,33 @@ build:
 		--only-section='*.sgstubs' \
 		--only-section='*.defmt*'
 
-## Flash firmware.bin to the Seed3 via DFU
+## Flash firmware.bin to the Seed3 via DFU and start it
 ## Prerequisite: hold BOOT, tap RESET, release BOOT on the board
+##
+## `:leave` makes the bootloader jump straight to the application, so no manual
+## RESET tap is needed. Verified working on Seed3.
+##
+## dfu-util exits 74 ("Error during download get_status") even when this fully
+## succeeds: the jump tears down the USB connection that the pending GET_STATUS
+## was travelling on, so there is nothing left to answer it. The exit code is
+## therefore not a usable success signal here.
+##
+## Nor can we just ignore 74 — dfu-util also returns it for genuine I/O errors
+## during download, so `|| true` would silently swallow a failed flash. Instead
+## we judge by dfu-util's own success marker, which only appears after the image
+## is written and verified. Output is teed rather than captured so the progress
+## bars still render live.
 flash:
-	dfu-util -a 0 -s 0x08000000:leave -D firmware.bin
+	@log=$$(mktemp); \
+	dfu-util -a 0 -s 0x08000000:leave -D firmware.bin 2>&1 | tee "$$log"; \
+	if grep -q "File downloaded successfully" "$$log"; then \
+		rm -f "$$log"; \
+		printf "\nFlashed and started (dfu-util's exit-74 on leave is expected).\n"; \
+	else \
+		rm -f "$$log"; \
+		printf "\nFLASH FAILED - see dfu-util output above.\n" >&2; \
+		exit 1; \
+	fi
 
 ## Build + flash in one step
 flash-all: build flash
