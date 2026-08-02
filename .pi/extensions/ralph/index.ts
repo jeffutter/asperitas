@@ -1268,6 +1268,81 @@ async function notifyHuman(
   ).catch(() => undefined);
 }
 
+/**
+ * Drives choose -> plan -> execute -> review until the loop has a reason to stop, and
+ * `finish()`es the state with that reason.
+ *
+ * Returns true only when it stopped because the unblocked pool was empty, which is the
+ * one exit reason `runLoop` can legitimately reverse — see the comment there.
+ */
+async function runIterations(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  cwd: string,
+  state: RalphState,
+  runStartSha: string | null,
+): Promise<boolean> {
+  while (true) {
+    if (state.stopRequested) {
+      finish(state, "stopped", "stop requested");
+      return false;
+    }
+    if (state.loopCount >= state.iterations) {
+      finish(state, "done", `reached ${state.iterations} iteration(s)`);
+      return false;
+    }
+
+    if (state.executedSinceReview >= state.reviewEvery) {
+      const ok = await doReviewAndSquash(pi, ctx, cwd, state, runStartSha);
+      state.loopCount += 1;
+      await persist(cwd, state);
+      renderWidget(ctx, state);
+      if (stoppedByFailureStreak(state, "review", ok)) return false;
+      continue;
+    }
+
+    state.loopCount += 1;
+
+    const active =
+      (await findFirstByStatus(pi, cwd, "In Progress")) ??
+      (await findFirstByStatus(pi, cwd, "Dev Ready"));
+    if (active) {
+      const ok = await doExecute(pi, ctx, cwd, state, active);
+      await persist(cwd, state);
+      renderWidget(ctx, state);
+      if (stoppedByFailureStreak(state, `execute:${active.id}`, ok)) return false;
+      continue;
+    }
+
+    const needsPlan = await findFirstByStatus(pi, cwd, "Needs Plan");
+    if (needsPlan) {
+      const ok = await doPlan(pi, ctx, cwd, state, needsPlan);
+      await persist(cwd, state);
+      renderWidget(ctx, state);
+      if (stoppedByFailureStreak(state, `plan:${needsPlan.id}`, ok)) return false;
+      continue;
+    }
+
+    let unblocked = await listUnblocked(pi, cwd);
+    if (unblocked.length === 0) {
+      const promoted = await promoteUnblockedBlockedTickets(pi, ctx, cwd, state);
+      await persist(cwd, state);
+      renderWidget(ctx, state);
+      if (promoted.length > 0) unblocked = await listUnblocked(pi, cwd);
+    }
+    if (unblocked.length === 0) {
+      finish(state, "done", "no unblocked tickets remain");
+      return true;
+    }
+    const ok = await doChoose(pi, ctx, cwd, state, unblocked);
+    await persist(cwd, state);
+    renderWidget(ctx, state);
+    if (stoppedByFailureStreak(state, "choose", ok)) return false;
+    const chosenTicketId = state.history[state.history.length - 1]?.ticket;
+    if (stoppedByRepeatedChoice(state, chosenTicketId)) return false;
+  }
+}
+
 async function runLoop(
   pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
@@ -1276,67 +1351,35 @@ async function runLoop(
 ): Promise<void> {
   const runStartSha = await currentHeadSha(pi, cwd);
   try {
+    // The post-loop review can file follow-up tickets, so "the backlog is drained" is
+    // only true until that review runs. Observed live: a run stopped with "no unblocked
+    // tickets remain" while every remaining ticket was @human, its final review then
+    // filed a High-priority agent-actionable bug, and the run reported a drained backlog
+    // and exited — leaving fresh work on the floor with iterations still unspent. So when
+    // the loop drained, re-check afterwards and resume if the review created something to
+    // do. Any other exit reason (stop requested, iterations spent, a failure streak) is
+    // deliberate and must not be second-guessed here.
+    //
+    // This terminates: resuming requires a review, a review requires an execute since the
+    // last one, and every execute costs an iteration against the same `iterations` cap.
     while (true) {
-      if (state.stopRequested) {
-        finish(state, "stopped", "stop requested");
-        break;
-      }
-      if (state.loopCount >= state.iterations) {
-        finish(state, "done", `reached ${state.iterations} iteration(s)`);
-        break;
-      }
+      const drained = await runIterations(pi, ctx, cwd, state, runStartSha);
+      await runFinalReviewIfNeeded(pi, ctx, cwd, state, runStartSha);
+      if (!drained || state.stopRequested) break;
+      if (state.loopCount >= state.iterations) break;
 
-      if (state.executedSinceReview >= state.reviewEvery) {
-        const ok = await doReviewAndSquash(pi, ctx, cwd, state, runStartSha);
-        state.loopCount += 1;
-        await persist(cwd, state);
-        renderWidget(ctx, state);
-        if (stoppedByFailureStreak(state, "review", ok)) break;
-        continue;
-      }
+      const fresh = await listUnblocked(pi, cwd);
+      if (fresh.length === 0) break;
 
-      state.loopCount += 1;
-
-      const active =
-        (await findFirstByStatus(pi, cwd, "In Progress")) ??
-        (await findFirstByStatus(pi, cwd, "Dev Ready"));
-      if (active) {
-        const ok = await doExecute(pi, ctx, cwd, state, active);
-        await persist(cwd, state);
-        renderWidget(ctx, state);
-        if (stoppedByFailureStreak(state, `execute:${active.id}`, ok)) break;
-        continue;
-      }
-
-      const needsPlan = await findFirstByStatus(pi, cwd, "Needs Plan");
-      if (needsPlan) {
-        const ok = await doPlan(pi, ctx, cwd, state, needsPlan);
-        await persist(cwd, state);
-        renderWidget(ctx, state);
-        if (stoppedByFailureStreak(state, `plan:${needsPlan.id}`, ok)) break;
-        continue;
-      }
-
-      let unblocked = await listUnblocked(pi, cwd);
-      if (unblocked.length === 0) {
-        const promoted = await promoteUnblockedBlockedTickets(pi, ctx, cwd, state);
-        await persist(cwd, state);
-        renderWidget(ctx, state);
-        if (promoted.length > 0) unblocked = await listUnblocked(pi, cwd);
-      }
-      if (unblocked.length === 0) {
-        finish(state, "done", "no unblocked tickets remain");
-        break;
-      }
-      const ok = await doChoose(pi, ctx, cwd, state, unblocked);
+      state.status = "running";
+      setCurrentStep(
+        ctx,
+        state,
+        `resuming: review filed ${fresh.length} newly actionable ticket(s)`,
+      );
       await persist(cwd, state);
       renderWidget(ctx, state);
-      if (stoppedByFailureStreak(state, "choose", ok)) break;
-      const chosenTicketId = state.history[state.history.length - 1]?.ticket;
-      if (stoppedByRepeatedChoice(state, chosenTicketId)) break;
     }
-
-    await runFinalReviewIfNeeded(pi, ctx, cwd, state, runStartSha);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     finish(state, "stopped", `unexpected error: ${message}`);
