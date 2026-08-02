@@ -42,8 +42,14 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
         }
     }
 
-    // 3. Enter infinite loop
-    cortex_m::asm::bkpt();
+    // 3. Halt.
+    //
+    // No `bkpt()` here. BKPT only halts when a debugger is attached; with none
+    // present it escalates to a HardFault, whose default handler is its own
+    // infinite loop. That would discard the red LED and the pipe write above —
+    // the two things this handler exists to deliver — and leave a board that
+    // looks simply dead. This project has no debug probe (see the README), so
+    // a plain spin is the behaviour that actually preserves the diagnostics.
     loop {
         cortex_m::asm::nop();
     }
