@@ -3,57 +3,66 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
-    fenix.url = "github:nix-community/fenix";
-    fenix.inputs.nixpkgs.follows = "nixpkgs";
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, fenix }:
+  outputs = { self, nixpkgs, rust-overlay }:
     let
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
-      f = fenix.packages.${system};
-      # Combine host + embedded target into one shared sysroot.
-      # Fenix's f.targets.<target>.stable.rust-std is a separate package;
-      # we must merge its lib/rustlib/thumbv7em* into the main rustc.
-      # Clippy MUST be combined too — otherwise clippy-driver gets its own
-      # standalone sysroot without the thumbv7em-none-eabihf std, and
-      # `cargo clippy` fails with E0463 "can't find crate for `core`".
-      # Also combine llvm-tools so cargo-objcopy finds llvm-objcopy.
-      rustToolchain = f.combine [
-        f.stable.rustc
-        f.stable.clippy
-        f.targets.thumbv7em-none-eabihf.stable.rust-std
-        f.stable.llvm-tools
-      ];
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+
+      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
+        inherit system;
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default ];
+        };
+      });
     in
     {
-      devShells.${system}.default = pkgs.mkShell {
-        packages = [
-          # --- Rust toolchain from fenix ---
-          f.stable.cargo
-          rustToolchain
-          f.stable.rustfmt
-          f.stable.rust-analyzer
-          f.stable.rust-src
+      devShells = forAllSystems ({ pkgs, ... }:
+        let
+          # One toolchain covering host and embedded target. `override` folds
+          # the thumbv7em-none-eabihf std into the same sysroot as rustc and
+          # clippy-driver — building them separately gives clippy-driver its own
+          # sysroot without the embedded std, and `cargo clippy` then fails with
+          # E0463 "can't find crate for `core`".
+          # llvm-tools-preview supplies the llvm-objcopy that cargo-binutils wraps.
+          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+            targets = [ "thumbv7em-none-eabihf" ];
+            extensions = [ "rust-src" "rust-analyzer" "llvm-tools-preview" ];
+          };
+        in
+        {
+          default = pkgs.mkShell {
+            packages = [
+              # --- Rust toolchain (rustc, cargo, clippy, rustfmt + the above) ---
+              rustToolchain
 
-          # --- Embedded tooling ---
-          pkgs.dfu-util              # probe-free flashing over Seed3 USB-C
-          pkgs.probe-rs-tools        # flash + defmt/RTT logging (when ST-Link arrives)
-          pkgs.cargo-binutils        # objcopy to produce raw .bin for DFU
+              # --- Embedded tooling ---
+              pkgs.dfu-util              # probe-free flashing over Seed3 USB-C
+              pkgs.probe-rs-tools        # flash + defmt/RTT logging (when ST-Link arrives)
+              pkgs.cargo-binutils        # objcopy to produce raw .bin for DFU
 
-          # --- Host audio (ALSA + pkg-config so cpal builds) ---
-          pkgs.alsa-lib
-          pkgs.pkg-config
+              pkgs.pkg-config
 
-          # --- General tooling ---
-          pkgs.lefthook              # git hooks
-          pkgs.yq-go                 # mikefarah/yq-go (NOT Python yq)
-          pkgs.jq                    # JSON processing for backlog scripts
-        ];
+              # --- General tooling ---
+              pkgs.lefthook              # git hooks
+              pkgs.yq-go                 # mikefarah/yq-go (NOT Python yq)
+              pkgs.jq                    # JSON processing for backlog scripts
+            ]
+            # Host audio backend. On Linux cpal talks to ALSA and needs the
+            # library + its .pc file at build time. On Darwin it uses the
+            # CoreAudio/AudioToolbox frameworks, which the standard stdenv
+            # already provides — nothing extra to add here.
+            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+              pkgs.alsa-lib
+            ];
 
-        shellHook = ''
-          lefthook install
-        '';
-      };
+            shellHook = ''
+              lefthook install
+            '';
+          };
+        });
     };
 }
