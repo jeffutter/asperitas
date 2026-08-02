@@ -3,7 +3,7 @@ id: TASK-017
 title: >-
   Fix: usb::init()'s steal() bypasses board.usb_peripherals, leaving a dead
   field that defeats Peri's compile-time exclusivity guarantee
-status: Needs Plan
+status: Dev Ready
 assignee: []
 created_date: '2026-08-01 23:25'
 updated_date: '2026-08-02 00:31'
