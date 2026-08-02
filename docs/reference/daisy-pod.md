@@ -37,9 +37,30 @@ libDaisy retains Rev1/Rev2 maps only as commented-out dead code). Pin names are 
 | Knob 1 | `D21` |
 | Knob 2 | `D15` |
 
-Knobs are analog and read via ADC. The LEDs are PWM-driven; **verify drive polarity on
-first bring-up** — libDaisy's LED driver inverts, so a naive port can produce
-LEDs that are on when you expect off.
+Knobs are analog and read via ADC.
+
+### LED drive polarity: active-low (verified)
+
+**The Pod's RGB LEDs are active-low.** Driving a channel pin `Low` lights it; `High`
+turns it off. This matches libDaisy, whose LED driver inverts. `LED_ACTIVE_LOW = true`
+in `crates/asperitas-logging/src/led.rs` is therefore correct.
+
+Verified on hardware 2026-08-01 with `firmware/src/bin/ledtest.rs`, which drives
+D20/D19/D18 directly and walks a fixed five-step sequence. Observed colours were white,
+red, green, blue, black — one step out of phase with the source order, because the
+observer joins mid-cycle. Mapping back:
+
+| Step | R / G / B levels | Observed |
+|---|---|---|
+| 1 | Low, High, High | red |
+| 2 | High, Low, High | green |
+| 3 | High, High, Low | blue |
+| 4 | High, High, High | black (all off) |
+| 5 | Low, Low, Low | white (all on) |
+
+`Low` → lit in every row. Under active-high the sequence would have read as its
+complement (cyan, magenta, yellow, white, black), which is unambiguously different — so
+this is a positive identification, not an absence of contradiction.
 
 ## Defaults worth matching
 
