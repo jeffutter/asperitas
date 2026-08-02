@@ -5,6 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-01 05:57'
+updated_date: '2026-08-02 01:53'
 labels: []
 dependencies:
   - TASK-008.01
@@ -18,11 +19,27 @@ ordinal: 19000
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Requires instruments and a human playing them. An agent cannot produce this.
 
-Record short reference passages on the instruments this effect is actually for: mandolin, octave mandolin, upright bass, bass guitar, jazz guitar. Include material that exercises what a sympathetic resonator responds to — single plucked notes with long decay, fast passages, chords, and dynamic contrast between soft and hard attack.
+Record short reference passages for mandolin and octave mandolin. These are the files golden tests and ear checks run against for the rest of the project, so it is worth recording them cleanly and at consistent level.
 
-Corpus policy, so the repo stays manageable: **2–5 s per clip, mono, 48 kHz**, committed to git.
+**Format:** mono, 48 kHz WAV, ~3 seconds each, committed to `audio/`. Keep volume consistent across all clips.
 
-These are the files golden tests and ear checks run against for the rest of the project, so it is worth recording them cleanly and at consistent level.
+### Mandolin (4 clips)
+
+| File | What to play |
+|------|-------------|
+| `mandolin_single_note_soft.wav` | Single open A string, gentle pick, let ring |
+| `mandolin_single_note_hard.wav` | Same note, aggressive pick attack |
+| `mandolin_fast_run.wav` | Fast scale run (A minor: A-C-D-E over 2 beats) |
+| `mandolin_chord.wav` | Strummed D major chord, let decay |
+
+### Octave Mandolin (4 clips)
+
+| File | What to play |
+|------|-------------|
+| `octave_mandolin_single_note_soft.wav` | Single open A string, gentle pick, let ring |
+| `octave_mandolin_single_note_hard.wav` | Same note, aggressive pick attack |
+| `octave_mandolin_fast_run.wav` | Fast scale run (A minor, same as mandolin) |
+| `octave_mandolin_chord.wav` | Strummed D major chord, let decay |
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
