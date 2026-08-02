@@ -1,11 +1,11 @@
 ---
 id: TASK-005.03
 title: 'Post hardware test report to daisy-embassy PR #80'
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-01 17:41'
+updated_date: '2026-08-02 03:43'
 labels: []
 dependencies:
   - TASK-005.02
