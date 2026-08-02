@@ -60,6 +60,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let p = hal::init(config);
     let board: DaisyBoard<'_> = new_daisy_board!(p);
 
+    // Discard USB peripherals — usb::init() steals them directly via T::steal().
+    // This field must never be read; using it would create a second Peri handle
+    // for the same physical peripheral, defeating Peri's exclusivity guarantee.
+    let _ = board.usb_peripherals;
+
     // Init RGB LED — single owner for boot stages + panic handler.
     asperitas_logging::led::init(
         board.pins.d20,

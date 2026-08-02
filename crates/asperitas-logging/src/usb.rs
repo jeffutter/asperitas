@@ -94,10 +94,13 @@ where
         panic!("USB logging already initialized");
     }
 
-    // Safety: peripherals are never dropped for the life of the device, and
-    // init() holds the only Peri constructed for each of these peripherals.
-    // steal() conjures a fresh 'static Peri — no two live drivers will ever
-    // exist simultaneously.
+    // Safety: peripherals are never dropped for the life of the device.
+    // steal() conjures a fresh 'static Peri for each peripheral listed below.
+    // daisy_embassy::DaisyBoard also hands out these same peripherals via
+    // board.usb_peripherals, but callers MUST discard that field unread
+    // (as done at both call sites in main.rs and blinky.rs). That discard is
+    // the invariant that keeps steal() safe here — no two live drivers will
+    // ever exist simultaneously because the board's copy is explicitly thrown away.
     let usb_otg_fs = unsafe { hal::peripherals::USB_OTG_FS::steal() };
     let dp = unsafe { hal::peripherals::PA12::steal() };
     let dn = unsafe { hal::peripherals::PA11::steal() };
