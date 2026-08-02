@@ -98,6 +98,7 @@ dependencies = [
  "asperitas-dsp",
  "clap",
  "hound",
+ "libm",
  "tempfile",
 ]
 

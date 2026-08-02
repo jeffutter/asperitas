@@ -15,23 +15,42 @@ pub fn generate_impulse(sample_rate_hz: u32, duration_secs: f32) -> Vec<f32> {
 }
 
 /// Generate a logarithmic sine sweep from 20 Hz to 20 kHz.
+///
+/// The phase is accumulated in `f64` via `libm`, not `f32` via `std`, because this
+/// signal backs golden-file regression tests and so must be bit-reproducible.
+///
+/// Two separate things would otherwise prevent that:
+///
+/// 1. **Magnitude.** The chirp's phase integral reaches ~18,000 radians by the end of a
+///    one-second sweep. An `f32` ULP at that magnitude is ~1.1e-3 — over ten times the
+///    goldens' 1e-4 comparison tolerance — so the sample values there are decided
+///    entirely by rounding. In `f64` the ULP is ~3.6e-12 and the phase is effectively
+///    exact.
+/// 2. **Implementation.** `f32::powf`, `f32::ln`, and `f32::sin` dispatch to the
+///    platform's libm, which differs between macOS and glibc and can shift across
+///    toolchain versions. `libm` is a pure-Rust port of MUSL's implementations and is
+///    identical everywhere. `asperitas-dsp` already uses it for this reason.
+///
+/// Together those made the goldens a record of one machine's rounding behaviour. The
+/// fenix -> rust-overlay toolchain switch alone moved samples by 4 LSB at 16 bits and
+/// broke the tests without any DSP change.
 pub fn generate_sweep(sample_rate_hz: u32, duration_secs: f32) -> Vec<f32> {
     let total_samples = (sample_rate_hz as f32 * duration_secs) as usize;
     let mut buf = vec![0.0f32; total_samples];
 
-    let f_start = 20.0f32;
-    let f_end = 20_000.0f32;
-    let t = duration_secs;
-    let omega_start = 2.0 * core::f32::consts::PI * f_start;
-    let omega_end = 2.0 * core::f32::consts::PI * f_end;
+    let f_start = 20.0f64;
+    let f_end = 20_000.0f64;
+    let t = duration_secs as f64;
+    let omega_start = 2.0 * core::f64::consts::PI * f_start;
+    let omega_end = 2.0 * core::f64::consts::PI * f_end;
     let ratio = omega_end / omega_start;
-    let log_ratio = ratio.ln();
+    let log_ratio = libm::log(ratio);
 
     for (i, sample) in buf.iter_mut().enumerate() {
-        let ti = i as f32 / sample_rate_hz as f32;
-        // Phase integral of log chirp: phi(t) = omega_start * T * ((exp(r*T/t) - 1) / ln(r))
-        let phase = omega_start * t * ((ratio.powf(ti / t) - 1.0) / log_ratio);
-        *sample = phase.sin();
+        let ti = i as f64 / sample_rate_hz as f64;
+        // Phase integral of log chirp: phi(t) = omega_start * T * ((r^(t/T) - 1) / ln(r))
+        let phase = omega_start * t * ((libm::pow(ratio, ti / t) - 1.0) / log_ratio);
+        *sample = libm::sin(phase) as f32;
     }
 
     buf
