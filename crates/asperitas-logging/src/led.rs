@@ -22,11 +22,13 @@ use embassy_stm32::{
 use embassy_time::Timer;
 use static_cell::StaticCell;
 
-/// LED polarity — set to `true` if the Pod's LEDs are active-low.
+/// LED polarity — the Pod's RGB LEDs are active-low: driving a channel pin
+/// `Low` lights it, `High` turns it off. This matches libDaisy, whose LED
+/// driver also inverts.
 ///
-/// libDaisy's LED driver inverts polarity, so a naive port can produce
-/// LEDs that are on when you expect off. TASK-006.02 will determine the
-/// correct value. Defaulting to `true` (active-low) to match libDaisy.
+/// Verified on hardware 2026-08-01 via `firmware/src/bin/ledtest.rs`, which
+/// drives the channel pins directly and bypasses this constant entirely.
+/// See `docs/reference/daisy-pod.md` for the observed sequence.
 pub(crate) const LED_ACTIVE_LOW: bool = true;
 
 /// Boot-stage states for the LED indicator.

@@ -1,11 +1,11 @@
 ---
 id: TASK-004
 title: 'First light: blinky on Seed3, flashed over DFU without a probe'
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-01 05:45'
-updated_date: '2026-08-01 15:40'
+updated_date: '2026-08-01 23:40'
 labels: []
 dependencies:
   - TASK-002
@@ -38,11 +38,16 @@ Document the exact working flash procedure (including anything the BOOT/RESET da
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All subtasks complete
+- [x] #1 All subtasks complete
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Agent work is complete: TASK-004.01 is Done (blinky builds, firmware.bin 17,614 bytes, DFU pipeline and docs in place). This umbrella cannot be closed by an agent because TASK-004.02 requires physically flashing the board and watching the LED. Reassigned @human so the loop stops selecting it; close it once TASK-004.02 is Done.
+
+**Closed 2026-08-01.** TASK-004.02 is Done — the owner flashed the board and observed
+first light. First light took four fixes beyond TASK-004.01, the load-bearing one being
+that `memory.x` overstated AXI SRAM as 1M, putting the reset stack pointer past the end
+of physical RAM so every binary hard-faulted before `main`. See TASK-004.02's notes.
 <!-- SECTION:NOTES:END -->

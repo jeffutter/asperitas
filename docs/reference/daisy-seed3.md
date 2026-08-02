@@ -84,12 +84,15 @@ From the `firmware/` directory:
 
 ```bash
 # One-shot build + flash
-make flash-all
+make flash-all BINARY=blinky
 
 # Or step by step
-make build    # produces firmware.bin via cargo objcopy
-make flash    # dfu-util -a 0 -s 0x08000000:leave -D firmware.bin
+make build BINARY=blinky   # produces firmware.bin via cargo objcopy
+make flash                 # dfu-util -a 0 -s 0x08000000:leave -D firmware.bin
 ```
+
+`BINARY` defaults to `main`, so plain `make flash-all` flashes the application, not
+blinky.
 
 Or manually:
 
@@ -99,23 +102,46 @@ cargo objcopy --release --features seed3 --bin blinky -- -O binary firmware.bin
 dfu-util -a 0 -s 0x08000000:leave -D firmware.bin
 ```
 
-The blinky binary (`firmware/src/bin/blinky.rs`) toggles the onboard user LED (PC7)
-at ~1.6 Hz (300 ms on/off). It is kept permanently as a known-good diagnostic — when
-something later goes wrong, being able to flash something that definitely works is
-worth a lot.
+The blinky binary (`firmware/src/bin/blinky.rs`) drives **Pod RGB LED 1** (D20/D19/D18
+= PC1/PA6/PA7) through the shared LED state machine — it does *not* touch the Seed's
+onboard user LED. It blinks red at ~1 Hz during the pre-init window, then settles to
+**steady green** once USB is up. Boot is fast enough that in practice you see steady
+green almost immediately; a steady LED here is success, not a hang. It is kept
+permanently as a known-good diagnostic — when something later goes wrong, being able to
+flash something that definitely works is worth a lot.
+
+If the LED stays dark, flash `BINARY=ledtest` instead. It depends on nothing but clock
+init, board init, and three GPIO pins — no USB, no logging, no LED singleton — and
+cycles the RGB channels so something visibly changes under either polarity. Motion means
+the core is running and the fault is downstream.
 
 ### Notes
 
-- **`:leave` reliability:** `dfu-util :leave` is unreliable on some STM32H7 devices.
-  If the app doesn't start after flashing, power cycle (unplug/replug USB-C) or repeat
-  the BOOT+RESET dance.
+- **`:leave` works on Seed3.** Verified on hardware 2026-08-01: the bootloader jumps
+  straight to the application, no RESET tap needed. (An earlier revision of this document
+  claimed it was unreliable on STM32H7 — that was wrong, and it misdiagnosed a firmware
+  hang as a DFU problem. See the RAM note below for what was actually broken.)
+- **dfu-util exits 74 on a fully successful `:leave`.** The jump to the application tears
+  down the USB connection that the pending GET_STATUS was travelling on, so nothing is
+  left to answer it and dfu-util reports `Error during download get_status`. The exit
+  code is therefore useless as a success signal — and it can't just be ignored either,
+  since 74 is also returned for genuine download I/O errors. `make flash` keys on
+  dfu-util's own `File downloaded successfully` marker instead and prints `Flashed and
+  started` or `FLASH FAILED`; trust that line, not the dfu-util noise above it.
+- **DFU mode is not sticky.** Once a flashed app boots, the bootloader is gone. Repeat
+  BOOT+RESET before *every* flash, or dfu-util reports `No DFU capable USB device
+  available`.
 - **Binary size check:** `ls -la firmware.bin` should show < 128 KB (blinky is ~18 KB).
 - **Prerequisites:** `nix develop .` provides rustc, cargo-binutils, and dfu-util.
   No additional setup needed.
-- **memory.x FLASH length:** declares `LENGTH = 2M` which reflects total available
-  storage (internal flash + QSPI), not just the 128 KB internal flash. This does not
-  block blinky but may need correction for larger applications that use the linker
-  more precisely.
+- **memory.x RAM length is load-bearing.** AXI SRAM is **512 KB**, not 1 MB — the
+  advertised "1 MB" is the total across all domains (AXI 512K + D2 288K + D3 64K + DTCM
+  128K + ITCM 64K), and only the AXI region is contiguous at `0x24000000`. `cortex-m-rt`
+  derives the initial stack pointer from `ORIGIN + LENGTH`, so declaring 1M put SP past
+  the end of physical RAM and the first push after reset hard-faulted — before `main`,
+  in every binary, presenting as a board that simply never booted. If a board is dead in
+  a way that survives reflashing, check the first four bytes of `firmware.bin` (the
+  little-endian SP) before suspecting the DFU path.
 
 ### Debugging without a probe
 
