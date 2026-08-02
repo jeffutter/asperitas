@@ -176,19 +176,32 @@ where
 /// spawner.spawn(async { asperitas_logging::usb::run().await });
 /// ```
 pub async fn run() {
-    loop {
-        // Safe: CDC_REF and USB_DEV_REF were set by init() and point to
-        // StaticCell-backed storage that lives for 'static. Single-core Cortex-M
-        // means no concurrent access issues.
-        let cdc = unsafe { &mut *CDC_REF };
-        let usb_dev = unsafe { &mut *USB_DEV_REF };
+    // Safe: USB_DEV_REF was set by init() and points to StaticCell-backed
+    // storage that lives for 'static. Single-core Cortex-M means no concurrent
+    // access issues.
+    let usb_dev = unsafe { &mut *USB_DEV_REF };
 
-        cdc.wait_connection().await;
-        log::info!("USB connected");
+    // `usb_dev.run()` is what drives enumeration: control transfers, descriptor
+    // requests, address assignment. It must be polled CONCURRENTLY with any
+    // `wait_connection()`, never after it.
+    //
+    // Awaiting wait_connection() first deadlocks the device: wait_connection()
+    // only completes once the host has configured the device, and the host can
+    // only configure a device whose run() future is being polled to answer it.
+    // Neither side can advance, and the board never appears on the USB bus at
+    // all. This mirrors the upstream daisy-embassy usb_serial example, which
+    // joins the two futures rather than sequencing them.
+    let usb_fut = usb_dev.run();
 
-        let usb_run = usb_dev.run();
+    // Connection/drain loop — runs alongside usb_fut, not before it. Handles
+    // repeated connect/disconnect cycles without ever dropping usb_fut.
+    let drain_fut = async {
         let mut buf = [0u8; 127];
-        let drain = async {
+        loop {
+            let cdc = unsafe { &mut *CDC_REF };
+            cdc.wait_connection().await;
+            log::info!("USB connected");
+
             loop {
                 match crate::pipe().try_read(&mut buf) {
                     Ok(0) | Err(embassy_sync::pipe::TryReadError::Empty) => {
@@ -197,14 +210,15 @@ pub async fn run() {
                     Ok(n) => {
                         let cdc = unsafe { &mut *CDC_REF };
                         if cdc.write_packet(&buf[..n]).await.is_err() {
-                            break; // Connection lost
+                            break; // Connection lost — wait for reconnect.
                         }
                     }
                 }
             }
-        };
 
-        let _ = embassy_futures::select::select(usb_run, drain).await;
-        log::info!("USB disconnected");
-    }
+            log::info!("USB disconnected");
+        }
+    };
+
+    embassy_futures::join::join(usb_fut, drain_fut).await;
 }
