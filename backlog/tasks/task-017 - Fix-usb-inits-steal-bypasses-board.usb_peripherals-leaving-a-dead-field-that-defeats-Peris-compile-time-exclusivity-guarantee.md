@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-01 23:25'
-updated_date: '2026-08-02 00:34'
+updated_date: '2026-08-02 00:37'
 labels:
   - review-followup
 dependencies:
@@ -56,6 +56,8 @@ SETUP (read first): This is a Rust embedded firmware workspace (crates/ + firmwa
 
 <!-- SECTION:NOTES:BEGIN -->
 Implementation: Added explicit discard of board.usb_peripherals at both call sites (main.rs line 66, blinky.rs line 66) with explanatory comments. Updated safety comment in usb.rs to accurately describe the invariant that callers must discard the board's copy. Verified via grep that no other code reads usb_peripherals. Release build and clippy -D warnings both clean.
+
+Fixup applied post-review (commit 9d0eaa7, fixup! of 3c98cb8): the safety comment added to crates/asperitas-logging/src/usb.rs:97 contained literal backslash-n (\n) sequences instead of real line breaks — an escaping artifact from the implementation step, not a design issue. Reformatted into proper multi-line `//` comments; no wording changed. Verified cargo fmt --check, release build, and clippy -D warnings all still pass.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
