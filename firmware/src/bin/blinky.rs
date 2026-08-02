@@ -14,9 +14,10 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 // Provide _defmt_panic symbol required by embassy-stm32 / embassy-usb's
 // internal defmt usage (defmt 0.3.x). This is NOT the Rust panic handler;
 // it fires only when a defmt formatter encounters an unrecoverable error.
+// No `bkpt()`: with no debug probe attached it escalates to a HardFault
+// instead of halting, turning a diagnostic into a silent lockup.
 #[defmt::panic_handler]
 fn defmt_panic_handler() -> ! {
-    cortex_m::asm::bkpt();
     loop {
         cortex_m::asm::nop();
     }

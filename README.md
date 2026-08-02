@@ -41,20 +41,56 @@ This gives you `rustc`, `cargo`, `dfu-util`, `cargo objcopy`, `probe-rs`, and ev
 
 ```bash
 cd firmware
-make flash-all
+make flash-all BINARY=blinky
 ```
 
-This builds `src/bin/blinky.rs` and flashes it over DFU. The onboard LED (PC7) should blink at ~1.6 Hz. If nothing happens, power-cycle the USB-C cable (`:leave` in dfu-util is unreliable on some STM32H7 devices).
+This builds `src/bin/blinky.rs`, flashes it over DFU, and starts it automatically — no
+RESET tap needed.
+
+**What you should see:** blinky drives **Pod LED 1** (the RGB LED on D20/D19/D18 =
+PC1/PA6/PA7) — *not* the Seed's onboard user LED, which it never touches. The LED blinks
+red at ~1 Hz only during the brief pre-init window, then goes **steady green** once USB
+is up. Boot is fast, so in practice you'll see a steady green LED almost immediately. A
+steady LED is success, not a hang.
+
+If the LED behaviour looks inverted (green when you expect off), that's the unresolved
+polarity question — `LED_ACTIVE_LOW` in `crates/asperitas-logging/src/led.rs` is
+currently a guess pending TASK-006.02. See `docs/reference/daisy-pod.md`.
+
+The LED-independent check is USB: a running board enumerates as a CDC serial device, so
+`ls /dev/tty.usbmodem*` (macOS) or `lsusb` should show it as a serial device rather than
+"STM32 bootloader".
+
+### If the board looks completely dead
+
+A dark Pod LED is ambiguous — `led::init` leaves the LED off, and the blink task
+doesn't start until the end of boot, so any hang before that point looks identical to
+a board that never started. `src/bin/ledtest.rs` removes the ambiguity:
+
+```bash
+make flash-all BINARY=ledtest
+```
+
+It depends on nothing but clock init, board init, and three GPIO pins — no USB, no
+logging, no LED singleton — and cycles the RGB channels so that *something* visibly
+changes under either polarity. Any motion means the core is running and the fault is
+downstream; a dark LED through the whole cycle means it isn't.
 
 ### 2. Flash the main firmware
 
 ```bash
 cd firmware
-make build   # produces firmware.bin
-make flash   # flashes via DFU
+make flash-all
 ```
 
-Or combined: `make flash-all`
+`BINARY` defaults to `main`, so `make flash-all` with no override builds and flashes
+`src/bin/main.rs`. To do it in two steps — for example to build now and flash once the
+board is in DFU mode:
+
+```bash
+make build   # produces firmware.bin
+make flash   # flashes firmware.bin via DFU
+```
 
 ### Entering DFU Mode
 
@@ -62,7 +98,25 @@ Or combined: `make flash-all`
 2. Tap **RESET**
 3. Release **BOOT**
 
-Verify the board enumerates: `lsusb` should show "STMicroelectronics STM32 bootloader". After flashing, the board may need a power cycle to restart the application.
+Verify the board enumerates: `lsusb` should show "STMicroelectronics STM32 bootloader".
+
+**DFU mode is not sticky.** Once a flashed app boots, the bootloader is gone — you must
+repeat the button dance before *every* flash. Running `make flash` against a board
+that's busy running your app fails with `No DFU capable USB device available`.
+
+### Leaving DFU Mode
+
+Automatic. `make flash` passes `:leave`, so the bootloader jumps straight to the
+application.
+
+You will still see `dfu-util: Error during download get_status` on a completely
+successful flash. That's expected and harmless: the jump tears down the USB connection
+the pending status request was travelling on, so nothing is left to answer it. The
+Makefile ignores dfu-util's exit code and keys on its `File downloaded successfully`
+marker instead — it prints `Flashed and started` on success and `FLASH FAILED` on a real
+error, so trust that line rather than the dfu-util noise above it.
+
+If the app doesn't start, power-cycle the USB-C cable.
 
 ## Developing DSP Logic
 
