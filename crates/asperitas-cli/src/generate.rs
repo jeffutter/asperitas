@@ -1,7 +1,6 @@
 //! Generate synthetic test signals and write them as WAV files.
 
 use clap::Parser;
-use hound::{SampleFormat, WavSpec};
 
 use crate::synth;
 use crate::wav_io;
@@ -44,13 +43,6 @@ pub fn run_generate(args: &GenerateArgs) -> Result<(), String> {
 
     let frames = synth::to_stereo(&mono);
 
-    let spec = WavSpec {
-        channels: 2,
-        sample_rate: args.sample_rate,
-        bits_per_sample: 16,
-        sample_format: SampleFormat::Int,
-    };
-
-    wav_io::write_wav(&args.output, spec, &frames)?;
+    wav_io::write_wav(&args.output, args.sample_rate, &frames)?;
     Ok(())
 }
