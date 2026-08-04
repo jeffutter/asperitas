@@ -45,7 +45,9 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
         }
     }
 
-    wav_io::write_wav(&args.output_path, spec, &output)?;
+    // Output is always stereo regardless of the input's channel count; only the rate
+    // carries over from the input file.
+    wav_io::write_wav(&args.output_path, spec.sample_rate, &output)?;
     Ok(())
 }
 
@@ -71,6 +73,49 @@ mod tests {
         assert!(
             err.contains("key=value"),
             "expected error to mention key=value format, got: {err}"
+        );
+    }
+
+    /// Mono in, stereo out, with a header that agrees with the payload.
+    ///
+    /// Regression: the output spec was inherited from the input, so a mono file yielded
+    /// a WAV claiming one channel while `write_wav` had written two — the frame count
+    /// read back doubled and the audio played at half speed.
+    #[test]
+    fn run_process_writes_valid_stereo_from_mono_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("mono_in.wav");
+        let output = dir.path().join("out.wav");
+
+        const FRAMES: usize = 64;
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&input, spec).unwrap();
+        for i in 0..FRAMES {
+            writer.write_sample((i as i16) * 100).unwrap();
+        }
+        writer.finalize().unwrap();
+
+        run_process(&ProcessArgs {
+            input_path: input.to_str().unwrap().to_string(),
+            output_path: output.to_str().unwrap().to_string(),
+            processor_name: "gain".to_string(),
+            params: vec!["gain_db=0".to_string()],
+        })
+        .unwrap();
+
+        let reader = hound::WavReader::open(&output).unwrap();
+        let out_spec = reader.spec();
+        assert_eq!(out_spec.channels, 2, "output must be stereo");
+        assert_eq!(out_spec.sample_rate, 48_000, "rate carries over from input");
+        assert_eq!(
+            reader.len() as usize,
+            FRAMES * 2,
+            "header must agree with the interleaved stereo payload"
         );
     }
 }

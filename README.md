@@ -137,18 +137,27 @@ This uses `cpal` for real-time audio I/O. Tweak parameters in code, rerun — no
 Process a recorded WAV file through the effect:
 
 ```bash
-cargo run --bin asperitas-cli -- process --input recording.wav --output processed.wav --processor <name>
+cargo run --bin asperitas-cli -- process recording.wav processed.wav \
+  --processor filter --params cutoff_hz=800
 ```
 
-Useful for comparing parameter sets on the same source material without re-playing.
+Useful for comparing parameter sets on the same source material without re-playing. Mono
+or stereo input is accepted; output is always stereo.
+
+`audio/instruments/` holds a corpus of real mandolin and octave-mandolin recordings to run
+against — soft and hard plucks, fast runs, and chords. See [`audio/README.md`](audio/README.md),
+which also explains why those clips must not be individually normalized.
 
 ### Golden-file regression tests
 
 Freeze a known-good output WAV, then assert future changes don't silently alter it:
 
 ```bash
-cargo test  # includes golden-file comparisons within float tolerance
+cargo test                                      # includes golden comparisons within float tolerance
+UPDATE_GOLDENS=1 cargo test -p asperitas-cli    # regenerate, deliberately opt-in
 ```
+
+A golden diff means *listen to this before accepting it*, not *run the update command*.
 
 ## Debugging Without a Probe
 
