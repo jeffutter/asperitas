@@ -1,11 +1,11 @@
 ---
 id: TASK-008.02
 title: Record the instrument test corpus
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-04 21:49'
+updated_date: '2026-08-04 21:51'
 labels: []
 dependencies:
   - TASK-008.01
@@ -44,8 +44,8 @@ Record short reference passages for mandolin and octave mandolin. These are the 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: short mono 48 kHz clips recorded across the target instruments
-- [ ] #2 HUMAN: material includes long-decay plucks, fast passages, chords, and soft/hard dynamic contrast
+- [x] #1 HUMAN: short mono 48 kHz clips recorded across the target instruments
+- [x] #2 HUMAN: material includes long-decay plucks, fast passages, chords, and soft/hard dynamic contrast
 - [x] #3 Clips committed under audio/ and golden tests extended to cover them
 <!-- AC:END -->
 
