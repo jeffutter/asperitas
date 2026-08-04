@@ -1,11 +1,11 @@
 ---
 id: TASK-008
 title: 'asperitas-cli: offline WAV processing'
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-01 05:46'
-updated_date: '2026-08-01 15:40'
+updated_date: '2026-08-04 21:52'
 labels: []
 dependencies:
   - TASK-007
@@ -38,5 +38,5 @@ Analysis output (impulse/frequency response, RMS, spectrogram) is a later ticket
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All subtasks complete
+- [x] #1 All subtasks complete
 <!-- AC:END -->
