@@ -1,7 +1,7 @@
 ---
 id: TASK-006.02
 title: Verify serial output and LED polarity on hardware
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-01 05:57'
