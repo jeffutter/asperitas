@@ -45,3 +45,31 @@ Does not close TASK-006.02 or TASK-006 — both stay @human.
 - [x] #8 The three stale LED-polarity doc sites (README.md, ledtest.rs, led.rs) match the verified answer in docs/reference/daisy-pod.md
 - [x] #9 cargo test --workspace, clippy -D warnings, and fmt are clean; firmware compiles for main, panictest, and the slow-boot feature
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+All four defects fixed; both fixtures added. Compiles and lints clean, but NOTHING here is hardware-verified — that is TASK-006.02's job, and this ticket exists to make that session possible.
+
+usb.rs: added MAX_PACKET_SIZE (64), now the single source of truth for both CdcAcmClass::new and every write_packet path. The drain loop's buffer shrank 127 -> 64, closing defect 3. Added emit_blocking(), which bypasses the log pipe entirely and drives usb_dev.run() + write_packet itself under a hand-rolled poll loop with Waker::noop(), bounded by an Instant::now() deadline (EMIT_TIMEOUT = 3 s).
+
+Deliberately NOT embassy_time::Timer for that deadline: Timer::poll calls schedule_wake(.., cx.waker()) on every Pending poll (embassy-time-0.5.1/src/timer.rs), so a no-op waker in a busy loop would push into the time driver's queue thousands of times per second — and a panic raised inside #[panic_handler] recurses with no way out. Instant::now() is a bare counter read.
+
+panic_handler.rs: format_panic_message now returns ([u8; 128], usize) and the caller emits only the written prefix via msg.get(..len).unwrap_or(&[][..]), which fixes defect 4 without introducing panicking indexing. Terminator is CRLF, matching format_log_record — a raw serial terminal does not translate LF.
+
+led.rs: init() now ends with set_global_state(LedState::PreInit), so every state renders the moment it is set and boot is visible with no task running. This was defect 2, and its real cause was worse than TASK-006.02's recorded guess ('boot too fast to see the blink') — the pins were never driven at all, so an infinitely slow boot would also have shown nothing. A delay alone would not have fixed it.
+
+Also hardened set_global_state to skip the pins when BOOT_LED_REF is still null. A panic before led::init would previously have dereferenced the uninitialized singleton and faulted, discarding the very diagnostic the handler exists to deliver. Serves AC #2's intent.
+
+panictest.rs: counts down 10 s over serial (proving the ordinary pipe path) then panics at a known line. Green during countdown, red on panic, so the LED transition is a change rather than a continuation. The countdown and the PANIC: line travel by different mechanisms, so countdown text with no PANIC: line is a real, diagnosable failure.
+
+slow-boot feature: 3 s Timer before set_global_state(Running) in main.rs. Off by default; normal boots unaffected.
+
+Docs: the three stale polarity sites (README, ledtest.rs, led.rs) now match daisy-pod.md's verified active-low answer. blinky.rs's doc comment also claimed a 1 Hz pre-init blink that never happened — corrected. README gained sections for slow-boot and panictest.
+
+Ran cargo fmt over the firmware crate, which was not fmt-clean before this change (import order in main.rs/blinky.rs, plus a multi-line led::init call). Unrelated to the fix but both files were already being edited, and it makes cargo fmt --check usable as a gate.
+
+Verification: cargo test --workspace 48 passed / 0 failed; cargo clippy --workspace --all-targets -D warnings clean; cargo fmt clean in both workspaces; cargo clippy -D warnings clean for all four firmware binaries under both seed3 and 'seed3 slow-boot'. audio/ untouched, so no golden could have moved.
+
+Known pre-existing and NOT fixed: clippy::deref_addrof fires three times on the *(&raw mut LOG_PIPE) idiom (lib.rs:50, lib.rs:163, usb.rs:175) when asperitas-logging is linted directly with --features log-usb. That idiom is the deliberate way around static_mut_refs; it does not fail any build in the project's actual lint paths, because the firmware workspace treats asperitas-logging as a dependency. Left alone rather than papered over with an allow.
+<!-- SECTION:NOTES:END -->
