@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@agent'
 created_date: '2026-08-05 15:06'
-updated_date: '2026-08-05 15:07'
+updated_date: '2026-08-05 15:18'
 labels: []
 dependencies: []
 parent_task_id: TASK-006
@@ -35,13 +35,13 @@ Does not close TASK-006.02 or TASK-006 — both stay @human.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 usb::emit_blocking() delivers a panic message to the CDC endpoint without the async executor, chunked to the max packet size and bounded by a deadline so an unattached board halts rather than hangs
-- [ ] #2 The panic path never itself panics: no embassy_time::Timer, no unwrap, no indexing that can trip inside #[panic_handler]
-- [ ] #3 Max packet size is defined once and used at both the CdcAcmClass construction and every write_packet call site
-- [ ] #4 Panic messages go out with no NUL padding
-- [ ] #5 led::init drives the LED to PreInit so boot is visible without blink_task; the PreInit doc states what actually renders (steady red)
-- [ ] #6 firmware/src/bin/panictest.rs exists and panics deliberately after USB is up, flashable via make flash-all BINARY=panictest
-- [ ] #7 A slow-boot cargo feature holds the pre-init stage long enough to distinguish it from Running, and normal builds are not slowed
-- [ ] #8 The three stale LED-polarity doc sites (README.md, ledtest.rs, led.rs) match the verified answer in docs/reference/daisy-pod.md
-- [ ] #9 cargo test --workspace, clippy -D warnings, and fmt are clean; firmware compiles for main, panictest, and the slow-boot feature
+- [x] #1 usb::emit_blocking() delivers a panic message to the CDC endpoint without the async executor, chunked to the max packet size and bounded by a deadline so an unattached board halts rather than hangs
+- [x] #2 The panic path never itself panics: no embassy_time::Timer, no unwrap, no indexing that can trip inside #[panic_handler]
+- [x] #3 Max packet size is defined once and used at both the CdcAcmClass construction and every write_packet call site
+- [x] #4 Panic messages go out with no NUL padding
+- [x] #5 led::init drives the LED to PreInit so boot is visible without blink_task; the PreInit doc states what actually renders (steady red)
+- [x] #6 firmware/src/bin/panictest.rs exists and panics deliberately after USB is up, flashable via make flash-all BINARY=panictest
+- [x] #7 A slow-boot cargo feature holds the pre-init stage long enough to distinguish it from Running, and normal builds are not slowed
+- [x] #8 The three stale LED-polarity doc sites (README.md, ledtest.rs, led.rs) match the verified answer in docs/reference/daisy-pod.md
+- [x] #9 cargo test --workspace, clippy -D warnings, and fmt are clean; firmware compiles for main, panictest, and the slow-boot feature
 <!-- AC:END -->
