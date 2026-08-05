@@ -1,10 +1,11 @@
 ---
 id: TASK-005.02
 title: Verify audio in and out on real hardware
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-01 05:57'
+updated_date: '2026-08-05 14:10'
 labels: []
 dependencies:
   - TASK-005.01
@@ -26,9 +27,9 @@ The Pod's audio I/O is **line level, not hi-Z instrument level** — feed it fro
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: audio into the Pod is audible at its output
-- [ ] #2 HUMAN: left and right channels verified not swapped
-- [ ] #3 HUMAN: line-out to line-in loopback passes audio repeatably across resets
-- [ ] #4 HUMAN: board boots and resets reliably; USB connects and reconnects
-- [ ] #5 Any deviation from the SAI config in docs/reference/daisy-seed3.md is corrected there
+- [x] #1 HUMAN: audio into the Pod is audible at its output
+- [x] #2 HUMAN: left and right channels verified not swapped
+- [x] #3 HUMAN: line-out to line-in loopback passes audio repeatably across resets
+- [x] #4 HUMAN: board boots and resets reliably; USB connects and reconnects
+- [x] #5 Any deviation from the SAI config in docs/reference/daisy-seed3.md is corrected there
 <!-- AC:END -->
