@@ -2,7 +2,13 @@
 //!
 //! Controls one of the Pod's RGB LEDs as a status indicator, with states for
 //! pre-init, running, and panicked conditions. Polarity is controlled by a
-//! single constant so TASK-006.02 can flip it without code changes.
+//! single constant, [`LED_ACTIVE_LOW`].
+//!
+//! Every state renders the moment it is set, without any task running.
+//! [`blink_task`] only adds the pre-init *blink*; the underlying colour is
+//! already on the pins. This matters because a boot hang has no executor to run
+//! that task, and a dark LED cannot be told apart from a board that never
+//! started.
 //!
 //! # Architecture
 //!
@@ -34,7 +40,12 @@ pub(crate) const LED_ACTIVE_LOW: bool = true;
 /// Boot-stage states for the LED indicator.
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum LedState {
-    /// Slow blink red (~1 Hz) — firmware is starting up.
+    /// Red — firmware is starting up.
+    ///
+    /// Renders as *steady* red on its own; [`blink_task`] turns it into a ~1 Hz
+    /// blink once it is being polled. During early boot — the interval this
+    /// state exists to report — no executor is running yet, so steady red is
+    /// what you actually see.
     PreInit,
     /// Steady green — audio pipeline active, system running normally.
     Running,
@@ -88,8 +99,13 @@ static LED_STATE: AtomicU32 = AtomicU32::new(0); // 0 = PreInit (default)
 
 /// Initialize the singleton BootLed.
 ///
-/// Consumes the three RGB LED pins and stores the driver in static storage.
-/// Sets the initial state to `PreInit` (red blink at ~1 Hz).
+/// Consumes the three RGB LED pins and stores the driver in static storage,
+/// then lights [`LedState::PreInit`] — steady red — immediately.
+///
+/// Lighting it here rather than leaving that to [`blink_task`] is what makes the
+/// pre-init stage observable: a hang anywhere between this call and the end of
+/// boot never reaches the executor, so a state that only a task renders would
+/// stay dark and read as a dead board.
 ///
 /// Call this once during boot, before spawning the blink_task or any panic
 /// can occur. Both the async execution path and the panic handler share
@@ -126,8 +142,9 @@ pub fn init(
         BOOT_LED_REF = boot_led;
     }
 
-    // Start in PreInit state
-    LED_STATE.store(LedState::PreInit.to_u32(), Ordering::Release);
+    // Start in PreInit state, and drive the pins to match rather than only
+    // recording the state. `set_global_state` does both.
+    set_global_state(LedState::PreInit);
 }
 
 /// Get a mutable reference to the singleton BootLed.
@@ -142,12 +159,20 @@ pub fn get_mut() -> &'static mut BootLed {
 
 /// Set the global LED state atomically.
 ///
-/// Updates both the atomic state (read by blink_task) and immediately calls
-/// [`BootLed::set_state`] for synchronous effect. Used by main.rs/blinky.rs
-/// for explicit state transitions.
+/// Updates both the atomic state (read by blink_task) and immediately drives the
+/// pins, so the state is visible whether or not [`blink_task`] is running. Used
+/// by main.rs/blinky.rs for explicit state transitions, and by the panic handler.
+///
+/// Does nothing to the pins if [`init`] has not run — a panic that early has no
+/// LED to report through, and dereferencing the uninitialized singleton would
+/// turn the diagnostic into a fault.
 pub fn set_global_state(state: LedState) {
     LED_STATE.store(state.to_u32(), Ordering::Release);
-    get_mut().set_state(state);
+
+    let led = unsafe { BOOT_LED_REF };
+    if !led.is_null() {
+        unsafe { &mut *led }.set_state(state);
+    }
 }
 
 impl BootLed {

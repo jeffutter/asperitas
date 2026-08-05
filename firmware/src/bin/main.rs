@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
 
-use daisy_embassy::{DaisyBoard, hal, new_daisy_board};
-use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
 use asperitas_logging::info;
+use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
+use daisy_embassy::{hal, new_daisy_board, DaisyBoard};
 
 // Re-export the panic handler from asperitas-logging.
 // The #[panic_handler] attribute must be in the binary crate for the linker
@@ -67,11 +67,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let _ = board.usb_peripherals;
 
     // Init RGB LED — single owner for boot stages + panic handler.
-    asperitas_logging::led::init(
-        board.pins.d20,
-        board.pins.d19,
-        board.pins.d18,
-    );
+    asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
 
     // Init USB CDC serial logging.
     let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
@@ -94,6 +90,12 @@ async fn main(_spawner: embassy_executor::Spawner) {
     };
 
     info!("Audio interface ready");
+
+    // Linger on the pre-init red so it can actually be seen. Everything above
+    // this point takes a few milliseconds, so without the delay red → green
+    // reads as "always green" and the two stages can't be distinguished by eye.
+    #[cfg(feature = "slow-boot")]
+    embassy_time::Timer::after_secs(3).await;
 
     // Transition LED to Running state (steady green).
     asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
