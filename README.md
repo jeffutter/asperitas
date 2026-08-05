@@ -9,7 +9,7 @@ Target instruments: mandolin, octave mandolin, upright bass, bass guitar, jazz g
 ```
 asperitas/
 ├── firmware/          # Embedded firmware (Seed3 binary)
-│   ├── src/bin/       # Binaries (blinky, main)
+│   ├── src/bin/       # Binaries (main, blinky, ledtest, panictest)
 │   ├── Makefile       # Build + DFU flash targets
 │   └── memory.x       # Linker memory layout
 ├── crates/
@@ -48,33 +48,34 @@ This builds `src/bin/blinky.rs`, flashes it over DFU, and starts it automaticall
 RESET tap needed.
 
 **What you should see:** blinky drives **Pod LED 1** (the RGB LED on D20/D19/D18 =
-PC1/PA6/PA7) — *not* the Seed's onboard user LED, which it never touches. The LED blinks
-red at ~1 Hz only during the brief pre-init window, then goes **steady green** once USB
-is up. Boot is fast, so in practice you'll see a steady green LED almost immediately. A
-steady LED is success, not a hang.
-
-If the LED behaviour looks inverted (green when you expect off), that's the unresolved
-polarity question — `LED_ACTIVE_LOW` in `crates/asperitas-logging/src/led.rs` is
-currently a guess pending TASK-006.02. See `docs/reference/daisy-pod.md`.
+PC1/PA6/PA7) — *not* the Seed's onboard user LED, which it never touches. The LED is
+**red** during the pre-init window, then goes **steady green** once USB is up. Boot takes
+milliseconds, so in practice the red is a flicker and you'll see steady green almost
+immediately. A steady LED is success, not a hang.
 
 The LED-independent check is USB: a running board enumerates as a CDC serial device, so
 `ls /dev/tty.usbmodem*` (macOS) or `lsusb` should show it as a serial device rather than
 "STM32 bootloader".
 
+LED polarity is settled — the Pod's LEDs are **active-low**, verified on hardware, and
+`LED_ACTIVE_LOW = true` in `crates/asperitas-logging/src/led.rs` is correct. If colours
+read as their complement (cyan where you expect red), your board differs from the one
+characterised in `docs/reference/daisy-pod.md`.
+
 ### If the board looks completely dead
 
-A dark Pod LED is ambiguous — `led::init` leaves the LED off, and the blink task
-doesn't start until the end of boot, so any hang before that point looks identical to
-a board that never started. `src/bin/ledtest.rs` removes the ambiguity:
+A dark Pod LED means the fault is *before* `led::init` — that call lights red on its way
+out, so anything after it has a lit LED regardless of whether the executor ever runs.
+`src/bin/ledtest.rs` narrows it down further:
 
 ```bash
 make flash-all BINARY=ledtest
 ```
 
 It depends on nothing but clock init, board init, and three GPIO pins — no USB, no
-logging, no LED singleton — and cycles the RGB channels so that *something* visibly
-changes under either polarity. Any motion means the core is running and the fault is
-downstream; a dark LED through the whole cycle means it isn't.
+logging, no LED singleton, not even the polarity constant — and cycles the RGB channels so
+that *something* visibly changes under either polarity. Any motion means the core is
+running and the fault is downstream; a dark LED through the whole cycle means it isn't.
 
 ### 2. Flash the main firmware
 
@@ -163,8 +164,38 @@ A golden diff means *listen to this before accepting it*, not *run the update co
 
 No ST-Link? You still have two channels:
 
-1. **USB CDC-ACM serial** — the firmware enumerates as a serial device after booting. Connect with `screen /dev/ttyACM0 115200` (or your terminal program of choice) to see `defmt` log output.
-2. **Pod RGB LEDs** — the firmware uses LED color/pattern to indicate boot stage. Check `docs/reference/daisy-pod.md` for the pin map and polarity notes.
+1. **USB CDC-ACM serial** — the firmware enumerates as a serial device after booting. Connect with `screen /dev/ttyACM0 115200` (or your terminal program of choice) to see log output.
+2. **Pod RGB LEDs** — the firmware uses LED colour to indicate boot stage: red = pre-init, green = running, red = panicked. Check `docs/reference/daisy-pod.md` for the pin map and polarity notes.
+
+Red means both "starting up" and "panicked", which is unambiguous in context — a panic
+follows green — but see `slow-boot` below if you need to watch the boot stages closely.
+
+### Watching the boot stages
+
+Normal boot reaches green in milliseconds, so red → green is a single flicker. The
+`slow-boot` feature holds the pre-init stage for ~3 s:
+
+```bash
+make flash-all FEATURES="seed3 slow-boot"
+```
+
+Bring-up only — don't leave it enabled.
+
+### Checking the panic path
+
+A panic reports through both channels, and `src/bin/panictest.rs` panics on purpose so
+you can confirm it:
+
+```bash
+make flash-all BINARY=panictest
+screen /dev/cu.usbmodem<N> 115200     # attach within the 10 s countdown
+```
+
+Expect green with `panictest: panicking in N...` counting down, then steady red plus a
+`PANIC: <msg> at src/bin/panictest.rs:L:C` line. The countdown and the panic line travel
+by *different* mechanisms — the countdown goes through the log pipe, while the panic line
+is pushed straight to the endpoint because the executor is dead by then — so countdown
+text with no `PANIC:` line is a real failure, not a missed message.
 
 When a probe arrives, `probe-rs` restores `cargo run`-style flashing and RTT logging.
 

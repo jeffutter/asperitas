@@ -11,7 +11,13 @@
 //!
 //! The sequence drives each channel active-low in turn, then all-off, then
 //! all-on. It is written so that *some* visible change happens regardless of
-//! LED polarity, because polarity is still an open question (TASK-006.02):
+//! LED polarity, which keeps it useful as a bisect tool — it needs no polarity
+//! assumption of its own to prove the core is running.
+//!
+//! Polarity itself is settled: the LEDs are **active-low**, identified with this
+//! very sequence on 2026-08-01 (see `docs/reference/daisy-pod.md`), so in practice
+//! you should now see the left-hand column. A right-hand-column reading would mean
+//! the board differs from the one that was characterised.
 //!
 //! | Step        | If LEDs are active-low | If LEDs are active-high |
 //! |-------------|------------------------|-------------------------|

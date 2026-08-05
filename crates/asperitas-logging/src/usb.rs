@@ -10,14 +10,34 @@
 //! log::info!("msg") → FacadeLogger → Pipe (in lib.rs) → USB drain task → CDC-ACM
 //! ```
 
+use core::future::Future;
+use core::task::{Context, Waker};
+
 use embassy_stm32::{
     self as hal,
     usb::{Config as UsbConfig, Driver},
 };
 use embassy_sync::pipe::Pipe;
+use embassy_time::{Duration, Instant};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use embassy_usb::driver::EndpointError;
 use static_cell::StaticCell;
+
+/// Maximum CDC-ACM packet size, in bytes.
+///
+/// The endpoint rejects any oversize write outright rather than splitting it:
+/// `EndpointIn::write` returns `EndpointError::BufferOverflow` when
+/// `buf.len() > max_packet_size` (see `embassy-usb-synopsys-otg`). Every write
+/// path must therefore chunk to this size, so it is defined once here instead of
+/// being restated at each call site — the two copies previously disagreed, and a
+/// pipe read larger than the endpoint read back as a disconnect.
+const MAX_PACKET_SIZE: u16 = 64;
+
+/// How long [`emit_blocking`] will try before giving up.
+///
+/// Bounds the panic path against a board with no host attached: the message is
+/// lost, but the board halts with its red LED rather than spinning here forever.
+const EMIT_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Error returned when USB connection is lost.
 #[derive(Debug)]
@@ -137,7 +157,7 @@ where
         control_buf,
     );
 
-    let cdc = CdcAcmClass::new(&mut builder, cdc_state, 64);
+    let cdc = CdcAcmClass::new(&mut builder, cdc_state, MAX_PACKET_SIZE);
     let usb_device = builder.build();
 
     // Initialize static storage and cache the references.
@@ -196,7 +216,12 @@ pub async fn run() {
     // Connection/drain loop — runs alongside usb_fut, not before it. Handles
     // repeated connect/disconnect cycles without ever dropping usb_fut.
     let drain_fut = async {
-        let mut buf = [0u8; 127];
+        // Sized to the endpoint, not to the pipe. A larger buffer here lets a
+        // busy pipe hand `write_packet` more than one packet's worth, which the
+        // endpoint rejects as BufferOverflow — indistinguishable below from a
+        // genuine disconnect, so the log data was dropped and the loop fell back
+        // to waiting for a reconnect that had never happened.
+        let mut buf = [0u8; MAX_PACKET_SIZE as usize];
         loop {
             let cdc = unsafe { &mut *CDC_REF };
             cdc.wait_connection().await;
@@ -221,4 +246,68 @@ pub async fn run() {
     };
 
     embassy_futures::join::join(usb_fut, drain_fut).await;
+}
+
+/// Send `msg` to the host synchronously, without the async executor.
+///
+/// This exists for the panic handler, and the pipe-based path cannot serve it.
+/// [`run`]'s drain loop is the only thing that normally moves bytes from the log
+/// pipe to the endpoint, and it lives inside a future; a panic halts the executor
+/// for good, so anything written to the pipe afterwards sits there unread until
+/// the board is reset. This function bypasses the pipe and drives the device and
+/// the endpoint write itself.
+///
+/// It can do that because the USB interrupt handler is still installed and still
+/// firing during the panic spin, so the driver's hardware state keeps advancing.
+/// Only the *future* is missing someone to poll it, which is what the loop below
+/// provides.
+///
+/// Returns once the message is sent, or after [`EMIT_TIMEOUT`] if the host is not
+/// listening. Silently does nothing if [`init`] never ran.
+///
+/// # Panics
+///
+/// Never. This is called from `#[panic_handler]`, where a second panic recurses
+/// with no way out, so every step here is written to fail quietly instead.
+pub fn emit_blocking(msg: &[u8]) {
+    // Without init() the static cells are empty and the refs are null. A panic
+    // this early has only the LED to report through.
+    if !INITIALIZED.load(core::sync::atomic::Ordering::Acquire) {
+        return;
+    }
+
+    // Safe on the same grounds as run(): single-core, and these point at
+    // StaticCell-backed storage that lives for 'static. The executor is halted by
+    // the time we are called, so run()'s borrows are dead and cannot alias ours.
+    let usb_dev = unsafe { &mut *USB_DEV_REF };
+    let cdc = unsafe { &mut *CDC_REF };
+
+    // `usb_dev.run()` must be polled alongside the writes, not before them — it
+    // is what answers the host's control transfers, and without it the endpoint
+    // can stall part-way through a message. Same constraint as in run().
+    let device_fut = usb_dev.run();
+    let write_fut = async {
+        for chunk in msg.chunks(MAX_PACKET_SIZE as usize) {
+            if cdc.write_packet(chunk).await.is_err() {
+                return; // Host went away — nothing useful left to do.
+            }
+        }
+    };
+
+    let mut fut = core::pin::pin!(embassy_futures::select::select(device_fut, write_fut));
+
+    // Busy-poll with a no-op waker until the writes finish or we run out of time.
+    //
+    // The timeout is a plain `Instant::now()` comparison and deliberately NOT an
+    // `embassy_time::Timer`: `Timer::poll` calls `schedule_wake(.., cx.waker())`
+    // on every `Pending` poll, so using one here would push a no-op waker into
+    // the time driver's queue on every iteration of this loop. `Instant::now()`
+    // only reads a counter and cannot fail.
+    let deadline = Instant::now() + EMIT_TIMEOUT;
+    let mut cx = Context::from_waker(Waker::noop());
+    while Instant::now() < deadline {
+        if fut.as_mut().poll(&mut cx).is_ready() {
+            return;
+        }
+    }
 }

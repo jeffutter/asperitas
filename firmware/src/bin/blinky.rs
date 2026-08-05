@@ -1,9 +1,9 @@
 #![no_std]
 #![no_main]
 
-use daisy_embassy::DaisyBoard;
-use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
 use asperitas_logging::info;
+use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
+use daisy_embassy::DaisyBoard;
 
 // Re-export the panic handler from asperitas-logging.
 #[panic_handler]
@@ -49,9 +49,11 @@ bind_interrupts!(pub struct UsbIrqs {
 
 /// Blinky — known-good diagnostic for Seed3.
 ///
-/// RGB LED (PC1/PA6/PA7) shows PreInit (red blink ~1 Hz) during boot,
-/// then transitions to Running (steady green) once USB is up.
-/// On panic, the LED turns red-on.
+/// RGB LED (PC1/PA6/PA7) shows PreInit (steady red) during boot, then
+/// transitions to Running (steady green) once USB is up. Boot takes only a few
+/// milliseconds, so the red stage is a flicker in practice — `blink_task` would
+/// blink it at ~1 Hz, but it isn't running yet while the state is still PreInit.
+/// On panic, the LED turns steady red.
 /// Flash via DFU; see `docs/reference/daisy-seed3.md` or run `make flash-all`.
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
@@ -67,11 +69,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let _ = board.usb_peripherals;
 
     // Init RGB LED — single owner for boot stages + panic handler.
-    asperitas_logging::led::init(
-        board.pins.d20,
-        board.pins.d19,
-        board.pins.d18,
-    );
+    asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
 
     // Init USB CDC serial logging.
     let _usb_handle = asperitas_logging::usb::init(UsbIrqs);

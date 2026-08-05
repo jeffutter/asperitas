@@ -10,6 +10,11 @@ edition = "2021"
 [features]
 default = []
 seed3 = []
+# Hold the pre-init LED stage on screen for a few seconds before switching to
+# Running. Boot is otherwise fast enough that red → green is a single flicker,
+# which makes the two stages impossible to tell apart by eye. Bring-up only —
+# never enable for normal use.
+slow-boot = []
 
 [dependencies]
 asperitas-dsp = { path = "../crates/asperitas-dsp" }

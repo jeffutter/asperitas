@@ -1,7 +1,9 @@
-//! Custom panic handler with LED strobe and optional USB serial message.
+//! Custom panic handler with a steady red LED and a USB serial message.
 //!
-//! Replaces `panic-halt` with visible (LED) and serial feedback on panic.
-//! The LED state is always set; USB write is attempted if available.
+//! Replaces `panic-halt` with visible (LED) and serial feedback on panic. The LED
+//! is set unconditionally — a synchronous GPIO write that works even with no host
+//! attached. The serial message is then pushed straight to the CDC endpoint by
+//! [`crate::usb::emit_blocking`], bounded by a timeout.
 //!
 //! # Usage
 //!
@@ -25,22 +27,22 @@ use core::panic::PanicInfo;
 ///
 /// This function:
 /// 1. Sets the LED to red (panicked state) — always works, synchronous
-/// 2. Attempts to write the panic message over USB serial — best effort
-/// 3. Enters an infinite loop with bkpt
+/// 2. Writes the panic message over USB serial, driving the endpoint directly
+/// 3. Halts
 pub fn handle_panic(info: &PanicInfo) -> ! {
     // 1. Set LED to panicked state via the shared BootLed — synchronous, always works
     crate::led::set_global_state(crate::led::LedState::Panicked);
 
-    // 2. Try to write panic message over USB pipe (best-effort, non-blocking)
-    // During panic, the async executor is halted, so we can't use embassy-usb's
-    // async API. We attempt a synchronous pipe write. If the pipe is full or
-    // USB isn't initialized, the message is silently dropped.
-    let msg = format_panic_message(info);
-    unsafe {
-        if let Some(ref mut pipe) = *(&raw mut crate::LOG_PIPE) {
-            let _ = pipe.try_write(&msg);
-        }
-    }
+    // 2. Send the panic message over USB serial.
+    //
+    // Deliberately NOT through the log pipe. The pipe is drained by a future
+    // inside `usb::run()`, and by the time we get here the async executor is
+    // halted for good — so a pipe write is not "best effort", it is guaranteed
+    // to be discarded. `usb::emit_blocking` drives the USB device and the CDC
+    // endpoint itself, which works because the USB interrupt is still firing
+    // during the spin below. It is time-bounded and never panics.
+    let (msg, len) = format_panic_message(info);
+    crate::usb::emit_blocking(msg.get(..len).unwrap_or(&[][..]));
 
     // 3. Halt.
     //
@@ -56,7 +58,11 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
 }
 
 /// Format panic information into a fixed-size buffer.
-fn format_panic_message(info: &PanicInfo) -> [u8; 128] {
+///
+/// Returns the buffer and the number of bytes actually written. The length
+/// matters: the buffer is zero-filled, so writing all of it emits the message
+/// followed by NUL padding, which shows up as garbage on a serial terminal.
+fn format_panic_message(info: &PanicInfo) -> ([u8; 128], usize) {
     let mut buf = [0u8; 128];
 
     struct Writer<'a> {
@@ -85,7 +91,10 @@ fn format_panic_message(info: &PanicInfo) -> [u8; 128] {
     if let Some(loc) = info.location() {
         let _ = core::write!(w, " at {}:{}:{}", loc.file(), loc.line(), loc.column());
     }
-    let _ = core::write!(w, "\n");
+    // CRLF, not LF: this lands in a raw serial terminal, which does not translate
+    // a bare newline into a carriage return. Matches `format_log_record`.
+    let _ = core::write!(w, "\r\n");
 
-    buf
+    let len = w.pos;
+    (buf, len)
 }
