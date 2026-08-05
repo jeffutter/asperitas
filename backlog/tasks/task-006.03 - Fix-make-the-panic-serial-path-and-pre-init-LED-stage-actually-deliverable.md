@@ -1,7 +1,7 @@
 ---
 id: TASK-006.03
 title: 'Fix: make the panic serial path and pre-init LED stage actually deliverable'
-status: In Progress
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-08-05 15:06'
