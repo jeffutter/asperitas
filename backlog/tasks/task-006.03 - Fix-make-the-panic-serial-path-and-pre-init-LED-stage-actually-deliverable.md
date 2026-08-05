@@ -1,10 +1,11 @@
 ---
 id: TASK-006.03
 title: 'Fix: make the panic serial path and pre-init LED stage actually deliverable'
-status: To Do
+status: In Progress
 assignee:
   - '@agent'
 created_date: '2026-08-05 15:06'
+updated_date: '2026-08-05 15:07'
 labels: []
 dependencies: []
 parent_task_id: TASK-006
