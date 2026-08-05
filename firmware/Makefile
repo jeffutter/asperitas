@@ -8,6 +8,10 @@
 # to enter the STM32 system bootloader. See docs/reference/daisy-seed3.md.
 
 BINARY  = main
+# Multiple features are passed as one space-separated word, e.g.
+# `make flash-all FEATURES="seed3 slow-boot"`. Every use below must keep the
+# quotes: unquoted, the shell splits it and cargo rejects the second feature as
+# an unexpected positional argument.
 FEATURES = seed3
 TARGET   = thumbv7em-none-eabihf
 
@@ -22,7 +26,7 @@ all: build
 ## producing a ~469 MB file. --only-section extracts only FLASH-loadable
 ## sections, giving a correct ~32 KB binary for DFU flashing.
 build:
-	cargo objcopy --release --features $(FEATURES) --bin $(BINARY) -- \
+	cargo objcopy --release --features "$(FEATURES)" --bin $(BINARY) -- \
 		-O binary firmware.bin \
 		--only-section=.vector_table \
 		--only-section=.text \
@@ -64,7 +68,7 @@ flash-all: build flash
 
 ## Check compilation without producing artifacts
 check:
-	cargo check --release --features $(FEATURES) --bin $(BINARY)
+	cargo check --release --features "$(FEATURES)" --bin $(BINARY)
 
 clean:
 	cargo clean
