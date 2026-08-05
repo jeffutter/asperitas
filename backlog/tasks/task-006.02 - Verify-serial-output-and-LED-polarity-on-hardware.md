@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-01 05:57'
-updated_date: '2026-08-05 15:07'
+updated_date: '2026-08-05 16:45'
 labels: []
 dependencies:
   - TASK-006.01
@@ -29,7 +29,7 @@ LED drive polarity cannot be determined without looking at the board; flip the c
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 HUMAN: running firmware prints text visible on the host over USB CDC serial
-- [ ] #2 HUMAN: LED boot stages are visually distinguishable
+- [x] #2 HUMAN: LED boot stages are visually distinguishable
 - [ ] #3 HUMAN: a deliberate panic reaches the developer via LED state and via serial
 - [x] #4 LED drive polarity verified and documented in docs/reference/daisy-pod.md
 <!-- AC:END -->
