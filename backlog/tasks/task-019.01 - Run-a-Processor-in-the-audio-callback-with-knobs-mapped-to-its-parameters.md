@@ -1,10 +1,11 @@
 ---
 id: TASK-019.01
 title: Run a Processor in the audio callback with knobs mapped to its parameters
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-05 17:27'
+updated_date: '2026-08-07 23:53'
 labels:
   - planned
 dependencies:
