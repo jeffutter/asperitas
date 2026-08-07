@@ -26,8 +26,14 @@ jobs:
             echo "=== cargo clippy ==="
             cargo clippy --workspace --all-targets -- -D warnings
 
+            echo "=== cargo clippy (asperitas-pod pod-hw feature) ==="
+            cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings
+
             echo "=== cargo test ==="
             cargo test --workspace
+
+            echo "=== cargo test (asperitas-pod pod-hw feature) ==="
+            cargo test --workspace --features asperitas-pod/pod-hw
 
             echo "=== firmware cross-compile ==="
             cd firmware && cargo build --release --features seed3
