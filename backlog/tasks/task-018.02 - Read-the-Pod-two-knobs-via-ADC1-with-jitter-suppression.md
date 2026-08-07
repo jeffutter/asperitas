@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-07 23:42'
+updated_date: '2026-08-07 23:51'
 labels:
   - planned
 dependencies:
@@ -188,3 +188,19 @@ impl Knobs {
 - AC #5 (degenerate readings safe): Saturating cast + clamp prevents out-of-range and panic
 - AC #6 (builds + clippy): Verified in verification steps
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation notes:
+
+**Jitter suppression approach:** Hardware averaging via embassy-stm32 AdcConfig::averaging, set to Averaging::Samples16. This provides ~4x noise reduction (√16 = 4) per ST AN2834 at ~105 µs latency per read. Sequential reads of two channels take ~210 µs total, well within a 1 kHz polling budget. No software filter added — hardware averaging alone is the first line of defense; residual jitter measurement on real hardware is deferred to TASK-018.04.
+
+**Why Samples16:** Balances noise reduction against latency. At 16× averaging, conversion time is ~105 µs per channel (16 × 6.6 µs). This gives adequate settling for pot inputs without introducing noticeable lag during knob adjustment. If hardware testing shows visible jitter, bump to Samples32 or layer an EMA filter.
+
+**Sample time:** CYCLES387_5 (387.5 ADC clock cycles) — adequate for high-impedance pot sources on STM32H7 per RM0468.
+
+**Normalisation:** raw as f32 / 4095.0_f32 + clamp(0.0, 1.0). Saturating division prevents NaN/overflow. Clamp guarantees bounds even for degenerate readings. No panic possible.
+
+**Curve shaping:** Explicitly NOT included. Log/exponential taper belongs in TASK-019 parameter mapping. This BSP reports physical position only.
+<!-- SECTION:NOTES:END -->
