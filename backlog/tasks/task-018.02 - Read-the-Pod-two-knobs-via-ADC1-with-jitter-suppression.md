@@ -1,7 +1,7 @@
 ---
 id: TASK-018.02
 title: Read the Pod two knobs via ADC1 with jitter suppression
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
