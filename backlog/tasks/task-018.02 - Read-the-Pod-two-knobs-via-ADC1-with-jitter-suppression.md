@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-07 23:51'
+updated_date: '2026-08-07 23:52'
 labels:
   - planned
 dependencies:
@@ -204,3 +204,9 @@ Implementation notes:
 
 **Curve shaping:** Explicitly NOT included. Log/exponential taper belongs in TASK-019 parameter mapping. This BSP reports physical position only.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created knob.rs module in asperitas-pod crate with Knobs struct owning ADC1 + both knob pins (PC4, PC0). Normalised f32 output [0.0, 1.0] via raw/4095.0 + clamp. Hardware averaging at Samples16 for jitter suppression. Blocking read API — caller polls from control-surface task at ~1 kHz, never from audio callback. Curve shaping deferred to TASK-019 parameter mapping. All acceptance criteria verified: builds for thumbv7em-none-eabihf, cargo test and clippy pass.
+<!-- SECTION:FINAL_SUMMARY:END -->
