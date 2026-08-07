@@ -36,12 +36,12 @@ Sample at a rate the control surface needs — roughly 1 kHz is ample for a hand
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both knobs read as a normalised f32 in the inclusive range 0.0 to 1.0, monotonically increasing with physical rotation in one direction
-- [ ] #2 Knob sampling happens outside the audio callback
-- [ ] #3 ADC hardware averaging is configured, and the chosen sample count is recorded with the reasoning behind it
-- [ ] #4 The jitter-suppression approach is stated in the implementation notes; measuring the residual on real hardware is TASK-018.04
-- [ ] #5 A degenerate or out-of-range raw ADC reading cannot produce a value outside 0.0 to 1.0, and cannot panic
-- [ ] #6 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
+- [x] #1 Both knobs read as a normalised f32 in the inclusive range 0.0 to 1.0, monotonically increasing with physical rotation in one direction
+- [x] #2 Knob sampling happens outside the audio callback
+- [x] #3 ADC hardware averaging is configured, and the chosen sample count is recorded with the reasoning behind it
+- [x] #4 The jitter-suppression approach is stated in the implementation notes; measuring the residual on real hardware is TASK-018.04
+- [x] #5 A degenerate or out-of-range raw ADC reading cannot produce a value outside 0.0 to 1.0, and cannot panic
+- [x] #6 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
 <!-- AC:END -->
 
 ## Implementation Plan
