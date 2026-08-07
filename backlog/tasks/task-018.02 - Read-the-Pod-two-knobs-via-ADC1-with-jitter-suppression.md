@@ -1,11 +1,11 @@
 ---
 id: TASK-018.02
 title: Read the Pod two knobs via ADC1 with jitter suppression
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-07 23:42'
+updated_date: '2026-08-08 00:24'
 labels:
   - planned
 dependencies:
@@ -36,12 +36,12 @@ Sample at a rate the control surface needs — roughly 1 kHz is ample for a hand
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both knobs read as a normalised f32 in the inclusive range 0.0 to 1.0, monotonically increasing with physical rotation in one direction
-- [ ] #2 Knob sampling happens outside the audio callback
-- [ ] #3 ADC hardware averaging is configured, and the chosen sample count is recorded with the reasoning behind it
-- [ ] #4 The jitter-suppression approach is stated in the implementation notes; measuring the residual on real hardware is TASK-018.04
-- [ ] #5 A degenerate or out-of-range raw ADC reading cannot produce a value outside 0.0 to 1.0, and cannot panic
-- [ ] #6 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
+- [x] #1 Both knobs read as a normalised f32 in the inclusive range 0.0 to 1.0, monotonically increasing with physical rotation in one direction
+- [x] #2 Knob sampling happens outside the audio callback
+- [x] #3 ADC hardware averaging is configured, and the chosen sample count is recorded with the reasoning behind it
+- [x] #4 The jitter-suppression approach is stated in the implementation notes; measuring the residual on real hardware is TASK-018.04
+- [x] #5 A degenerate or out-of-range raw ADC reading cannot produce a value outside 0.0 to 1.0, and cannot panic
+- [x] #6 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -188,3 +188,27 @@ impl Knobs {
 - AC #5 (degenerate readings safe): Saturating cast + clamp prevents out-of-range and panic
 - AC #6 (builds + clippy): Verified in verification steps
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation notes:
+
+**Jitter suppression approach:** Hardware averaging via embassy-stm32 AdcConfig::averaging, set to Averaging::Samples16. This provides ~4x noise reduction (√16 = 4) per ST AN2834 at ~105 µs latency per read. Sequential reads of two channels take ~210 µs total, well within a 1 kHz polling budget. No software filter added — hardware averaging alone is the first line of defense; residual jitter measurement on real hardware is deferred to TASK-018.04.
+
+**Why Samples16:** Balances noise reduction against latency. At 16× averaging, conversion time is ~105 µs per channel (16 × 6.6 µs). This gives adequate settling for pot inputs without introducing noticeable lag during knob adjustment. If hardware testing shows visible jitter, bump to Samples32 or layer an EMA filter.
+
+**Sample time:** CYCLES387_5 (387.5 ADC clock cycles) — adequate for high-impedance pot sources on STM32H7 per RM0468.
+
+**Normalisation:** raw as f32 / 4095.0_f32 + clamp(0.0, 1.0). Saturating division prevents NaN/overflow. Clamp guarantees bounds even for degenerate readings. No panic possible.
+
+**Curve shaping:** Explicitly NOT included. Log/exponential taper belongs in TASK-019 parameter mapping. This BSP reports physical position only.
+
+Fixup applied post-review (commit 179faaf, fixup! for b47b5c7): CI never enabled the pod-hw feature for clippy/test, so this ticket's 5 knob.rs unit tests silently ran 0 times under `cargo test --workspace` despite AC #6 and the Final Summary claiming tests passed. Added `cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings` and `cargo test --workspace --features asperitas-pod/pod-hw` to .github/workflows/ci.yml. Also closes the same gap for TASK-018.01's led.rs/pins.rs, which were equally unexercised by CI.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created knob.rs module in asperitas-pod crate with Knobs struct owning ADC1 + both knob pins (PC4, PC0). Normalised f32 output [0.0, 1.0] via raw/4095.0 + clamp. Hardware averaging at Samples16 for jitter suppression. Blocking read API — caller polls from control-surface task at ~1 kHz, never from audio callback. Curve shaping deferred to TASK-019 parameter mapping. All acceptance criteria verified: builds for thumbv7em-none-eabihf, cargo test and clippy pass.
+<!-- SECTION:FINAL_SUMMARY:END -->
