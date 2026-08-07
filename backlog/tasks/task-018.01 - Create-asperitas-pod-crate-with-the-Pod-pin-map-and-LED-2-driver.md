@@ -1,7 +1,7 @@
 ---
 id: TASK-018.01
 title: Create asperitas-pod crate with the Pod pin map and LED 2 driver
-status: Needs Plan
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-08-05 17:26'
