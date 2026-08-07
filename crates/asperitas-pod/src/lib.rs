@@ -20,6 +20,9 @@
 pub mod pins;
 
 #[cfg(feature = "pod-hw")]
+pub mod knob;
+
+#[cfg(feature = "pod-hw")]
 pub mod led;
 
 // ---------------------------------------------------------------------------
