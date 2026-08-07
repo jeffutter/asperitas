@@ -1,11 +1,11 @@
 ---
 id: TASK-018.01
 title: Create asperitas-pod crate with the Pod pin map and LED 2 driver
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-07 23:29'
+updated_date: '2026-08-07 23:34'
 labels:
   - planned
 dependencies: []
@@ -161,3 +161,9 @@ Document in led.rs module comment:
 - [ ] Root `cargo test` passes
 - [ ] Root `cargo clippy -D warnings` passes
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created crates/asperitas-pod with Pod pin map and LED 2 driver. Crate follows asperitas-logging pattern: optional embassy-stm32 behind pod-hw feature, host builds with no features, target builds with pod-hw. Pin map covers all 10 Pod controls as Peri<'a, PXn> type aliases + PodPins struct mirroring daisy-embassy conventions. LED 2 uses GPIO on/off only (7 colours) — PA4 has no TIM alternate function so hardware PWM is impossible; documented in led.rs module comment. No references to LED 1 pins (PC1/PA6/PA7). cargo test and clippy pass.
+<!-- SECTION:FINAL_SUMMARY:END -->
