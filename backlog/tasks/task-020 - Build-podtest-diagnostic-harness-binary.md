@@ -5,7 +5,7 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-08 02:26'
-updated_date: '2026-08-08 04:00'
+updated_date: '2026-08-08 04:10'
 labels: []
 dependencies:
   - TASK-018.01
@@ -53,3 +53,9 @@ Create a `firmware/src/bin/podtest.rs` binary that streams all Pod control surfa
 - [x] #5 LED 2 cycles through colours with visual delay (~1s per step)
 - [x] #6 LED 1 remains owned by asperitas_logging for boot/panic stages
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Implementation Plan: podtest diagnostic harness binary\n\n## File created\n-  — new binary, discovered automatically by Cargo\n\n## Structure (mirrors blinky.rs)\n\n### Boilerplate\n- , \n- Re-export  as global panic handler\n-  — infinite loop with NOP (same as blinky/main)\n-  — no-op defmt logger (required by embassy-stm32)\n- \n\n### Main entry point\n\n\n### Boot sequence\n1. \n2. \n3. \n4. \n5. Discard  (USB init steals them)\n6.  — LED 1 ownership\n7. \n8. \n\n### Hardware construction\n- **Knobs:**  — pass board pins directly (no steal needed; board owns ADC1 and PodPins exposes knob pins)\n  - *Correction:* Check if  has / fields or if we need . If  doesn't expose Pod pins, use  like main.rs does.\n- **Encoder/buttons:**  — same steal-if-needed logic\n- **LED 2:**  — same pattern\n\n### Main loop (embedded in main, not a separate task)\nThe main future runs a single loop that polls everything:\n\n\n\n### Concurrent futures\nRun USB drain alongside the main polling loop:\n\n\n### Pin ownership resolution\nCheck whether  exposes Pod pins. If not (likely — daisy-embassy may only expose Seed pins), use  for each pin, matching main.rs's  pattern. Document why steal is safe (single-core Cortex-M, exclusive access).\n\n## Verification\n1.  — must compile\n2. Flash: \n3. Observe serial output matches expected format\n4. Verify LED 2 cycles through all colours\n5. Verify LED 1 still shows green (Running state) — owned by asperitas_logging
+<!-- SECTION:PLAN:END -->
