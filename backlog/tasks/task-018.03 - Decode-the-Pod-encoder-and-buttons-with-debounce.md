@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-08 01:38'
+updated_date: '2026-08-08 01:45'
 labels:
   - planned
 dependencies:
@@ -229,6 +229,12 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 3. Firmware compiles for thumbv7em-none-eabihf (type-checks with embassy-stm32 types)
 4. Design decision documented: why polling over EXTI, why 5ms debounce, why Gray-code LUT
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixup applied post-review (commit 2703d73, fixup! of 3fba24e): EncoderDecoder::update(current_state: u8) indexed the 16-entry Gray-code LUT with an unmasked input — a caller passing current_state > 3 (the function is pub) would hit an out-of-bounds array index panic. Masked input with '& 0b11' so any u8 is in range; added regression test out_of_range_state_is_masked_not_indexed_out_of_bounds. No behavior change for the only real caller (ControlSurface::poll, which always passes 0-3).
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
