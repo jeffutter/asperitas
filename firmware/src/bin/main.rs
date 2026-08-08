@@ -117,8 +117,9 @@ fn encode_block(input: &[Frame; BLOCK_LENGTH], output: &mut [u32]) {
 /// Async task that polls knobs at ~1 kHz and stores values for the audio callback.
 #[embassy_executor::task]
 async fn knob_poll_task(knob_state: &'static KnobState) {
-    // Steal ADC1 and knob pins — daisy-embassy does not consume these,
-    // so steal() is safe on single-core Cortex-M where we control all access.
+    // The Pod's knobs are wired to Seed GPIO breakout pins that `board.pins`
+    // also names (d21 == PC4, d15 == PC0). Discard them unread above in
+    // main() so this steal() is the only live Peri handle per physical pin.
     let adc1 = unsafe { hal::peripherals::ADC1::steal() };
     let knob1 = unsafe { hal::peripherals::PC4::steal() };
     let knob2 = unsafe { hal::peripherals::PC0::steal() };
@@ -143,6 +144,15 @@ async fn main(spawner: embassy_executor::Spawner) {
     // This field must never be read; using it would create a second Peri handle
     // for the same physical peripheral, defeating Peri's exclusivity guarantee.
     let _ = board.usb_peripherals;
+
+    // Discard knob pins — knob_poll_task steals ADC1/PC4/PC0 directly via
+    // Peri::steal(). These fields must not be read; keeping them alive would
+    // create duplicate Peri handles for the same physical pins, defeating
+    // Peri's exclusivity guarantee. Same invariant as `board.usb_peripherals` above.
+    let _ = (
+        board.pins.d21, // knob1 / PC4
+        board.pins.d15, // knob2 / PC0
+    );
 
     // Init RGB LED — single owner for boot stages + panic handler.
     asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
