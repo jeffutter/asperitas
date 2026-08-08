@@ -1,9 +1,16 @@
 #![no_std]
 #![no_main]
 
+use core::cell::UnsafeCell;
+
+use asperitas_dsp::filter::OnePoleLowPass;
+use asperitas_dsp::gain::Gain;
+use asperitas_dsp::processor::{Frame, Processor};
 use asperitas_logging::info;
+use asperitas_pod::knob::Knobs;
 use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
 use daisy_embassy::{hal, new_daisy_board, DaisyBoard};
+use static_cell::StaticCell;
 
 // Re-export the panic handler from asperitas-logging.
 // The #[panic_handler] attribute must be in the binary crate for the linker
@@ -49,19 +56,90 @@ bind_interrupts!(pub struct UsbIrqs {
     OTG_FS => usb::InterruptHandler<peripherals::USB_OTG_FS>;
 });
 
-/// Audio passthrough — input copied directly to output.
+/// Block size used by daisy-embassy's audio callback.
+const BLOCK_LENGTH: usize = 32;
+
+/// Shared knob readings — written by control-surface task, read by audio callback.
 ///
-/// 48 kHz, 32-sample blocks (daisy-embassy default). TAC5242 codec,
-/// hardware-strapped on Seed3 so no I²C init needed.
+/// Stored as `[f32; 2]` in static memory behind `UnsafeCell` + `cortex_m::interrupt::free`.
+/// Safe on single-core Cortex-M7: the callback runs at fixed priority, the knob
+/// task runs in the executor, and interrupt-free sections prevent concurrent access.
+struct KnobState {
+    inner: UnsafeCell<[f32; 2]>,
+}
+
+impl KnobState {
+    const fn new() -> Self {
+        Self {
+            inner: UnsafeCell::new([0.0, 0.0]),
+        }
+    }
+
+    /// Write new knob values from the polling task.
+    fn write(&self, values: [f32; 2]) {
+        unsafe { *self.inner.get() = values };
+    }
+
+    /// Read current knob values from the audio callback (inside critical section).
+    fn read(&self) -> [f32; 2] {
+        unsafe { *self.inner.get() }
+    }
+}
+
+static KNOB_STATE: StaticCell<KnobState> = StaticCell::new();
+
+/// Convert u32 codec samples to stereo frames on the stack.
+///
+/// TAC5242 delivers 32-bit left-justified signed PCM in u32 containers.
+/// Input length must be `BLOCK_LENGTH * 2` (interleaved stereo).
+/// Output is `[Frame; BLOCK_LENGTH]` with values normalized to [-1.0, 1.0].
+fn decode_block(input: &[u32], output: &mut [Frame; BLOCK_LENGTH]) {
+    for (words, frame) in input.chunks_exact(2).zip(output.iter_mut()) {
+        let left = (words[0] as i32) as f32 / i32::MAX as f32;
+        let right = (words[1] as i32) as f32 / i32::MAX as f32;
+        frame[0] = left.clamp(-1.0, 1.0);
+        frame[1] = right.clamp(-1.0, 1.0);
+    }
+}
+
+/// Convert processed stereo frames back to u32 codec samples.
+///
+/// Values are clamped to [-1.0, 1.0] and scaled to 32-bit signed range.
+fn encode_block(input: &[Frame; BLOCK_LENGTH], output: &mut [u32]) {
+    for (frame, words) in input.iter().zip(output.chunks_exact_mut(2)) {
+        let left = (frame[0].clamp(-1.0, 1.0) * i32::MAX as f32) as i32 as u32;
+        let right = (frame[1].clamp(-1.0, 1.0) * i32::MAX as f32) as i32 as u32;
+        words[0] = left;
+        words[1] = right;
+    }
+}
+
+/// Async task that polls knobs at ~1 kHz and stores values for the audio callback.
+#[embassy_executor::task]
+async fn knob_poll_task(knob_state: &'static KnobState) {
+    // Steal ADC1 and knob pins — daisy-embassy does not consume these,
+    // so steal() is safe on single-core Cortex-M where we control all access.
+    let adc1 = unsafe { hal::peripherals::ADC1::steal() };
+    let knob1 = unsafe { hal::peripherals::PC4::steal() };
+    let knob2 = unsafe { hal::peripherals::PC0::steal() };
+    let mut knobs = Knobs::new(adc1, knob1, knob2);
+
+    loop {
+        let (k1, k2) = knobs.read();
+        knob_state.write([k1, k2]);
+        embassy_time::Timer::after_millis(1).await;
+    }
+}
+
 #[embassy_executor::main]
-async fn main(_spawner: embassy_executor::Spawner) {
+async fn main(spawner: embassy_executor::Spawner) {
     info!("Booting...");
 
     let config = daisy_embassy::default_rcc();
     let p = hal::init(config);
     let board: DaisyBoard<'_> = new_daisy_board!(p);
 
-    // Discard USB peripherals — usb::init() steals them directly via T::steal().
+    // Discard USB peripherals — usb::init() steals them directly via Peri::steal().
     // This field must never be read; using it would create a second Peri handle
     // for the same physical peripheral, defeating Peri's exclusivity guarantee.
     let _ = board.usb_peripherals;
@@ -72,6 +150,17 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Init USB CDC serial logging.
     let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
     info!("USB logging initialized");
+
+    // Initialize shared knob state.
+    let knob_state = KNOB_STATE.init(KnobState::new());
+
+    // Create processors — OnePoleLowPass (knob 1) → Gain (knob 2).
+    let mut filter = OnePoleLowPass::default();
+    let mut gain = Gain::default();
+
+    // Set sample rate explicitly to match device actual (48 kHz default).
+    filter.set_sample_rate(48_000.0);
+    gain.set_sample_rate(48_000.0);
 
     // Prepare the audio interface (SAI + codec init + DMA buffers)
     let interface = board
@@ -100,12 +189,34 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Transition LED to Running state (steady green).
     asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
 
+    // Spawn knob-polling task (~1 kHz interval).
+    spawner.spawn(knob_poll_task(knob_state).expect("failed to spawn knob task"));
+
     // Enter the audio callback loop. Returns Result<Infallible, sai::Error>;
     // Infallible can never be constructed, so this only exits on SAI hardware error.
     // Run USB and LED blink alongside audio using nested selects.
     let usb_fut = asperitas_logging::usb::run();
     let audio_fut = interface.start_callback(|input, output| {
-        output.copy_from_slice(input);
+        // Read latest knob positions under critical section.
+        let knobs = cortex_m::interrupt::free(|_| knob_state.read());
+
+        // Update processor params at block rate.
+        filter.set_params(&OnePoleLowPass::params_from_normalised(knobs[0]));
+        gain.set_params(&Gain::params_from_normalised(knobs[1]));
+
+        // Decode input buffer to stack frames.
+        let mut frames_in = [Frame::default(); BLOCK_LENGTH];
+        decode_block(input, &mut frames_in);
+
+        // Process through DSP chain: low-pass filter → gain.
+        let mut frames_out = [Frame::default(); BLOCK_LENGTH];
+        filter.process_block(&frames_in, &mut frames_out);
+
+        let mut frames_processed = [Frame::default(); BLOCK_LENGTH];
+        gain.process_block(&frames_out, &mut frames_processed);
+
+        // Encode processed frames back to output buffer.
+        encode_block(&frames_processed, output);
     });
     let led_fut = asperitas_logging::led::blink_task();
 

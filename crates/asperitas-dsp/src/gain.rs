@@ -73,6 +73,21 @@ impl Processor for Gain {
     }
 }
 
+impl Gain {
+    /// Convert a normalised knob position [0.0, 1.0] to [`GainParams`].
+    ///
+    /// Uses linear taper: maps [-60 dB silence, +12 dB headroom].
+    /// At midpoint (0.5) this yields -24 dB.
+    ///
+    /// Input is clamped to [0.0, 1.0] so degenerate readings produce valid params.
+    /// NOT behind `#[cfg(feature = "std")]` — usable in no_std firmware context.
+    pub fn params_from_normalised(knob: f32) -> GainParams {
+        let n = knob.clamp(0.0, 1.0);
+        let gain_db = -60.0 + n * 72.0;
+        GainParams { gain_db }
+    }
+}
+
 #[cfg(feature = "std")]
 impl Gain {
     /// Parse CLI key=value pairs into [`GainParams`].
@@ -93,6 +108,56 @@ impl Gain {
             }
         }
         Ok(params)
+    }
+}
+
+#[cfg(test)]
+mod normalised_tests {
+    use super::*;
+
+    #[test]
+    fn params_from_normalised_min_is_minus_60db() {
+        let params = Gain::params_from_normalised(0.0);
+        assert!((params.gain_db - (-60.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn params_from_normalised_max_is_plus_12db() {
+        let params = Gain::params_from_normalised(1.0);
+        assert!((params.gain_db - 12.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn params_from_normalised_midpoint_is_minus_24db() {
+        let params = Gain::params_from_normalised(0.5);
+        assert!(
+            (params.gain_db - (-24.0)).abs() < 0.01,
+            "got {}",
+            params.gain_db
+        );
+    }
+
+    #[test]
+    fn params_from_normalised_clamps_below_zero() {
+        let params = Gain::params_from_normalised(-0.5);
+        assert!((params.gain_db - (-60.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn params_from_normalised_clamps_above_one() {
+        let params = Gain::params_from_normalised(2.0);
+        assert!((params.gain_db - 12.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn params_from_normalised_monotonic() {
+        let mut prev = f32::MIN;
+        for i in 0..=100u16 {
+            let knob = i as f32 / 100.0;
+            let gain = Gain::params_from_normalised(knob).gain_db;
+            assert!(gain >= prev, "not monotonic at knob={}", knob);
+            prev = gain;
+        }
     }
 }
 

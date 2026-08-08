@@ -54,6 +54,7 @@ version = "0.1.0"
 dependencies = [
  "asperitas-dsp",
  "asperitas-logging",
+ "asperitas-pod",
  "cortex-m",
  "cortex-m-rt",
  "daisy-embassy",
@@ -62,6 +63,7 @@ dependencies = [
  "embassy-futures",
  "embassy-stm32",
  "embassy-time",
+ "static_cell",
 ]
 
 [[package]]
@@ -76,6 +78,13 @@ dependencies = [
  "embassy-usb",
  "log",
  "static_cell",
+]
+
+[[package]]
+name = "asperitas-pod"
+version = "0.1.0"
+dependencies = [
+ "embassy-stm32",
 ]
 
 [[package]]
