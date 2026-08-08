@@ -3,10 +3,11 @@ id: TASK-021
 title: >-
   Fix: podtest polls ControlSurface at 100 Hz, 10x under its documented ~1 kHz
   contract
-status: Dev Ready
-assignee: []
+status: In Progress
+assignee:
+  - '@ralph'
 created_date: '2026-08-08 05:07'
-updated_date: '2026-08-08 05:16'
+updated_date: '2026-08-08 05:17'
 labels:
   - review-followup
   - planned
@@ -47,7 +48,7 @@ Raise the main loop to ~1 kHz to satisfy ControlSurface's documented contract, b
 
 1. **Change POLL_INTERVAL_MS** from 10 → 1 (raises loop to ~1 kHz).
 2. **Change LED_TICKS_PER_COLOR** from 100 → 1000 (keeps ~1 second LED cadence at the new rate).
-3. **Add knob logging throttle** — introduce a  counter that increments each iteration and only calls  for knob values when . Reset to 0 after wrapping. This keeps knob output at ~100 Hz while controls.poll() runs at ~1 kHz.
+3. **Add knob logging throttle** — introduce a `knob_log_tick: u32` counter that increments each iteration and only calls `info!()` for knob values when `knob_log_tick % 10 == 0`. Reset to 0 after wrapping. This keeps knob output at ~100 Hz while controls.poll() runs at ~1 kHz.
 4. **Update doc comments** — explain why POLL_INTERVAL_MS = 1 (encoder contract reference) and document the throttle factor.
-5. **Build & lint** — cargo build --release + clippy with -D warnings.
+5. **Build & lint** — `cargo build --release` + `clippy -D warnings`.
 <!-- SECTION:PLAN:END -->
