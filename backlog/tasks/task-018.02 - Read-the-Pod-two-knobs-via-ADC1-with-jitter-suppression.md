@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-07 23:52'
+updated_date: '2026-08-08 00:24'
 labels:
   - planned
 dependencies:
@@ -203,6 +203,8 @@ Implementation notes:
 **Normalisation:** raw as f32 / 4095.0_f32 + clamp(0.0, 1.0). Saturating division prevents NaN/overflow. Clamp guarantees bounds even for degenerate readings. No panic possible.
 
 **Curve shaping:** Explicitly NOT included. Log/exponential taper belongs in TASK-019 parameter mapping. This BSP reports physical position only.
+
+Fixup applied post-review (commit 179faaf, fixup! for b47b5c7): CI never enabled the pod-hw feature for clippy/test, so this ticket's 5 knob.rs unit tests silently ran 0 times under `cargo test --workspace` despite AC #6 and the Final Summary claiming tests passed. Added `cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings` and `cargo test --workspace --features asperitas-pod/pod-hw` to .github/workflows/ci.yml. Also closes the same gap for TASK-018.01's led.rs/pins.rs, which were equally unexercised by CI.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
