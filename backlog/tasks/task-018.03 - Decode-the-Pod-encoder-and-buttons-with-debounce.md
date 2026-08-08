@@ -1,11 +1,11 @@
 ---
 id: TASK-018.03
 title: Decode the Pod encoder and buttons with debounce
-status: Dev Ready
+status: In Progress
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-08 01:21'
+updated_date: '2026-08-08 01:22'
 labels:
   - planned
 dependencies:
