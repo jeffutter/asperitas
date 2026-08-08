@@ -6,7 +6,7 @@ title: >-
 status: Needs Plan
 assignee: []
 created_date: '2026-08-08 05:07'
-updated_date: '2026-08-08 05:12'
+updated_date: '2026-08-08 05:16'
 labels:
   - review-followup
 dependencies:
@@ -32,17 +32,21 @@ Found while reviewing TASK-020 (firmware/src/bin/podtest.rs:120-164, crates/aspe
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-SETUP (read first): This is a Rust embedded firmware project (firmware/, crates/) for the Daisy Seed3 in a Daisy Pod, built with embassy-stm32/embassy-executor async on no_std. ALL commands must run inside the Nix dev shell: either run 'direnv allow' once, or prefix every command with 'nix develop -c'. Work from the repository root unless told otherwise. Do not change pinned dependency versions.
+## Approach: Throttle knob logging at 1 kHz poll rate
 
-1. Read crates/asperitas-pod/src/encoder.rs lines 1-31 and the ControlSurface::poll() doc comment (~line 263-270) to confirm the ~1 kHz contract and why DEBOUNCE_TICKS=5 / the Gray-code LUT assume it.
-2. Read firmware/src/bin/podtest.rs's main loop (poll_fut, lines ~120-164). Decide between two approaches:
-   a. Raise POLL_INTERVAL_MS from 10 to 1 (both knobs.read() and controls.poll() run at ~1 kHz). Check whether logging every knob reading at 1 kHz floods the USB CDC serial line unreadably — if so, keep knob logging throttled (e.g. log every Nth read, still read/react every tick) while polling both at 1 kHz.
-   b. Split into two loop rates: poll controls.poll() (encoder/buttons) at ~1 kHz for correctness, but only read/log knobs.read() and check the LED tick counter every 10th iteration (~100 Hz), so knob logging volume is unchanged.
-   Prefer (b) if (a) makes the serial log unusable — pick whichever keeps the diagnostic tool actually readable by a human while meeting ControlSurface's documented rate.
-3. Update LED_TICKS_PER_COLOR and any tick-based counters to keep the ~1 second LED cadence correct under the new loop rate.
-4. Update the doc comment above POLL_INTERVAL_MS (and add one above the new constant if you introduce a second interval) explaining why the rate was chosen, referencing encoder.rs's documented contract.
-5. Run: nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release
-6. Run: nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest -- -D warnings
-7. Run: nix develop -c cargo fmt --manifest-path firmware/Cargo.toml --check
-8. Record the chosen approach and rationale in the task's implementation notes so TASK-018.04's human tester knows what rate to expect the diagnostic output at.
+Raise the main loop to ~1 kHz to satisfy ControlSurface's documented contract, but throttle knob-value logging to ~100 Hz so USB CDC serial remains readable. This is option (c) from the ticket description — correct polling + readable output with minimal structural complexity.
+
+### Rationale
+
+- The Gray-code LUT in encoder.rs requires ≥1 kHz polling to avoid missing detent transitions. At 100 Hz, brisk turns can produce two state changes within one 10 ms window, causing silent detent drops.
+- Knob logging at 1 kHz (~18 bytes/tick × 1000 = ~18 KB/s) would flood the terminal. Throttling to every 10th tick keeps output at the current ~100 Hz rate.
+- Alternative (split into two async tasks) adds unnecessary complexity for a diagnostic binary. A single throttled loop is simpler and has no scheduling drift concerns.
+
+### Steps
+
+1. **Change POLL_INTERVAL_MS** from 10 → 1 (raises loop to ~1 kHz).
+2. **Change LED_TICKS_PER_COLOR** from 100 → 1000 (keeps ~1 second LED cadence at the new rate).
+3. **Add knob logging throttle** — introduce a  counter that increments each iteration and only calls  for knob values when . Reset to 0 after wrapping. This keeps knob output at ~100 Hz while controls.poll() runs at ~1 kHz.
+4. **Update doc comments** — explain why POLL_INTERVAL_MS = 1 (encoder contract reference) and document the throttle factor.
+5. **Build & lint** — cargo build --release + clippy with -D warnings.
 <!-- SECTION:PLAN:END -->
