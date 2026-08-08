@@ -73,3 +73,9 @@ diagnostic binary; a single throttled loop has no scheduling drift concerns.
 - Added  counter with wrapping increment
 - Updated doc comments explaining the 1 kHz rationale and throttle factor
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Raised podtest main loop from 100 Hz to ~1 kHz to satisfy ControlSurface::poll()'s documented contract. Knob-value logging throttled to every 10th tick (~100 Hz) via KNOB_LOG_THROTTLE constant so USB CDC serial remains readable. LED color cycle adjusted to 1000 ticks to maintain ~1 second cadence.
+<!-- SECTION:FINAL_SUMMARY:END -->
