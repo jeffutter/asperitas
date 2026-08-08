@@ -3,7 +3,7 @@ id: TASK-022
 title: >-
   Fix: main.rs's board.pins.d21/d15 alias the knob_poll_task steal(), same
   hazard as TASK-020's podtest fixup
-status: Needs Plan
+status: Dev Ready
 assignee: []
 created_date: '2026-08-08 05:25'
 updated_date: '2026-08-08 05:49'
