@@ -52,3 +52,24 @@ Raise the main loop to ~1 kHz to satisfy ControlSurface's documented contract, b
 4. **Update doc comments** — explain why POLL_INTERVAL_MS = 1 (encoder contract reference) and document the throttle factor.
 5. **Build & lint** — `cargo build --release` + `clippy -D warnings`.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Decision: Raise loop to 1 kHz with throttled knob logging
+
+Chose option (c) from ticket description — raise the shared main loop to ~1 kHz
+to satisfy ControlSurface's documented contract, while throttling knob-value
+logging to every 10th tick (~100 Hz) so USB CDC serial remains readable.
+
+Splitting into two async tasks was rejected as unnecessary complexity for a
+diagnostic binary; a single throttled loop has no scheduling drift concerns.
+
+### Changes to firmware/src/bin/podtest.rs:
+- POLL_INTERVAL_MS: 10 → 1 (100 Hz → ~1 kHz)
+- LED_TICKS_PER_COLOR: 100 → 1000 (keeps ~1 sec LED cadence at new rate)
+- Added KNOB_LOG_THROTTLE = 10 constant; knob info!() guarded by
+  
+- Added  counter with wrapping increment
+- Updated doc comments explaining the 1 kHz rationale and throttle factor
+<!-- SECTION:NOTES:END -->
