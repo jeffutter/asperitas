@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-08 02:26'
-updated_date: '2026-08-08 04:27'
+updated_date: '2026-08-08 05:24'
 labels:
   - planned
 dependencies:
@@ -127,6 +127,8 @@ Implementation notes:
 - Compiled successfully in release mode; debug mode overflows FLASH due to embassy-stm32 bloat (same as other binaries)
 
 Fixup applied post-review: all 6 acceptance criteria were left unchecked despite status=Done (set in commit 50df9df, never checked in any subsequent commit). Verified each AC against the code: firmware/src/bin/podtest.rs builds clean for thumbv7em-none-eabihf in release mode, clippy -D warnings and fmt --check both pass, encoder/button/knob/LED logic matches asperitas-pod's actual APIs, and LED 1 ownership is untouched. Checked all 6 boxes. Note: AC #2's wording ('as normalised floats') doesn't literally match the implementation (permille integers, to avoid ~127KB of float-fmt code pulling into a FLASH-constrained no_std binary) but the documented Implementation Notes explain the substitution and the underlying intent (streamed knob values for sweep/jitter verification) is met.
+
+Fixup applied post-review (commit 2e63cf7, fixup! a1af49a): podtest.rs's steal() comment claimed daisy-embassy does not expose Pod pins — false. All 10 Pod pins (knobs, encoder, buttons, LED2) are also named fields on board.pins under Seed d-numbers (e.g. d26==PD11), which remained live and unread for board's full scope, aliasing the stolen Peri handles. Added explicit discard of the 10 aliased board.pins fields plus a corrected comment matching the established invariant pattern from crates/asperitas-logging/src/usb.rs and TASK-017. Verified: cargo build --release, clippy -D warnings, fmt --check all pass. Note: the parallel instance of this same issue in firmware/src/bin/main.rs (TASK-019.01, board.pins.d21/d15 aliasing the knob steal) is out of scope for this fixup and tracked separately.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
