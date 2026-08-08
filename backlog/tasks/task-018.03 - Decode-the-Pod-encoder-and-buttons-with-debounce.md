@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-08 01:45'
+updated_date: '2026-08-08 01:54'
 labels:
   - planned
 dependencies:
@@ -234,6 +234,8 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 <!-- SECTION:NOTES:BEGIN -->
 Fixup applied post-review (commit 2703d73, fixup! of 3fba24e): EncoderDecoder::update(current_state: u8) indexed the 16-entry Gray-code LUT with an unmasked input — a caller passing current_state > 3 (the function is pub) would hit an out-of-bounds array index panic. Masked input with '& 0b11' so any u8 is in range; added regression test out_of_range_state_is_masked_not_indexed_out_of_bounds. No behavior change for the only real caller (ControlSurface::poll, which always passes 0-3).
+
+Second fixup applied post-review (commit 38f4477, fixup! of 3fba24e): DebouncedSwitch.consecutive (u8) incremented unboundedly once a switch settled at a stable level, with no cap. cargo test runs in debug profile (overflow-checks=true, no project override) and CI invokes plain 'cargo test --workspace', so any future test holding a stable reading past 255 polls (trivial for a hardware-timing test like TASK-018.04) would panic on arithmetic overflow. Changed to saturating_add; added regression test long_held_stable_reading_does_not_overflow_consecutive_counter (1000 iterations).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
