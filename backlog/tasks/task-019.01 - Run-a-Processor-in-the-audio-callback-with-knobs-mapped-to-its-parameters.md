@@ -5,7 +5,7 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-05 17:27'
-updated_date: '2026-08-07 23:53'
+updated_date: '2026-08-08 00:06'
 labels:
   - planned
 dependencies:
@@ -44,3 +44,182 @@ Two facts to build against rather than assume:
 - [ ] #6 Parameters are updated at block rate, and no smoothing is duplicated in the firmware on top of the processor own
 - [ ] #7 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+## Implementation Plan
+
+### Architecture overview
+
+Replace the passthrough in firmware/src/bin/main.rs with a two-stage DSP chain: OnePoleLowPass (knob 1) → Gain (knob 2). Knob values are read by a background control-surface task at ~1 kHz and stored in static memory; the audio callback reads them at block rate via critical_section. Parameter mapping lives in asperitas-dsp next to each processor's Params definition, shared between firmware and CLI.
+
+### Step 1: Add params_from_normalised to asperitas-dsp
+
+**File: crates/asperitas-dsp/src/filter.rs**
+- Add inherent method  on 
+- Logarithmic taper: map knob [0,1] → cutoff_hz [20 Hz, 20000 Hz] using  or equivalently 
+- Clamp input to [0.0, 1.0] so degenerate readings produce valid params
+- Add unit tests (#[cfg(test)]) verifying: min=20 Hz, max≈20000 Hz, midpoint≈447 Hz (geometric mean), monotonic increase across [0,1]
+
+**File: crates/asperitas-dsp/src/gain.rs**
+- Add inherent method  on 
+- Linear mapping: gain_db = -60.0 + knob * 72.0 (range [-60 dB, +12 dB])
+- Clamp input to [0.0, 1.0]
+- Add unit tests verifying: min=-60 dB, max=+12 dB, midpoint=-24 dB, monotonic
+
+Note: These methods are NOT behind #[cfg(feature = "std")] because they take f32 input (not String), making them usable in no_std firmware context.
+
+### Step 2: Add asperitas-pod dependency to firmware
+
+**File: firmware/Cargo.toml**
+- Add 
+
+### Step 3: Rewrite firmware/src/bin/main.rs
+
+Shared state for knobs — follows asperitas-logging::led pattern (static + raw pointer):
+
+main() structure changes:
+1. After , extract ADC1 and knob pins: , , . Call  to store in static.
+2. Create processors: , . Call  on both explicitly.
+3. Spawn knob polling task (~1 kHz interval, calls  → stores  in another static).
+4. In , capture both processors and the static knob values. Inside callback:
+   - Read latest knob positions via critical_section
+   - Convert u32 input buffer →  stack array (inline loop, no alloc)
+   -  once per block
+   - 
+   -  once per block
+   - 
+   - Convert processed frames back to u32 output buffer (inline loop)
+
+Buffer conversion logic (inline, no alloc):
+
+Actually — verify the codec format first. The TAC5242 may deliver 24-bit or 32-bit samples. Check daisy-embassy codec code for the exact packing format before committing to conversion math. The existing passthrough () works byte-for-byte, so whatever format the codec delivers, round-tripping through f32 must preserve it exactly when gain=0dB and cutoff=Nyquist.
+
+### Step 4: Add static_cell dependency
+
+If not already present, add  to firmware/Cargo.toml. (Check if cortex-m already re-exports it or if embassy-stm32 brings it in transitively.)
+
+### Verification checklist
+
+- 
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 12 tests
+test gain_silence_in_silence_out ... ok
+test filter_param_change_smooth ... ok
+test gain_param_change_smooth ... ok
+test filter_silence_in_silence_out ... ok
+test gain_reset_idempotent ... ok
+test filter_output_bounded ... ok
+test gain_output_bounded ... ok
+test filter_block_equals_tick ... ok
+test gain_block_equals_tick ... ok
+test gain_output_always_finite ... ok
+test filter_reset_idempotent ... ok
+test filter_output_always_finite ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s — new unit tests pass
+-  — builds cleanly
+-  — clean
+- 
+running 4 tests
+test wav_io::tests::read_wav_widens_mono_to_stereo ... ok
+test wav_io::tests::validate_spec_rejects_more_than_two_channels ... ok
+test wav_io::tests::validate_spec_rejects_float_format ... ok
+test wav_io::tests::validate_spec_rejects_wrong_bit_depth ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 6 tests
+test process::tests::parse_param_pairs_rejects_malformed_arg ... ok
+test wav_io::tests::validate_spec_rejects_float_format ... ok
+test process::tests::run_process_writes_valid_stereo_from_mono_input ... ok
+test wav_io::tests::read_wav_widens_mono_to_stereo ... ok
+test wav_io::tests::validate_spec_rejects_wrong_bit_depth ... ok
+test wav_io::tests::validate_spec_rejects_more_than_two_channels ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 22 tests
+test golden_gain_impulse ... ok
+test golden_filter_impulse ... ok
+test golden_filter_pluck ... ok
+test golden_gain_pluck ... ok
+test golden_filter_sweep ... ok
+test golden_gain_sweep ... ok
+test golden_gain_octave_mandolin_fast_run ... ok
+test golden_filter_octave_mandolin_fast_run ... ok
+test golden_gain_mandolin_fast_run ... ok
+test golden_gain_mandolin_single_note_soft ... ok
+test golden_gain_mandolin_chord ... ok
+test golden_filter_mandolin_fast_run ... ok
+test golden_filter_octave_mandolin_single_note_soft ... ok
+test golden_filter_octave_mandolin_single_note_hard ... ok
+test golden_gain_octave_mandolin_chord ... ok
+test golden_filter_mandolin_single_note_hard ... ok
+test golden_filter_mandolin_chord ... ok
+test golden_filter_mandolin_single_note_soft ... ok
+test golden_gain_octave_mandolin_single_note_soft ... ok
+test golden_gain_octave_mandolin_single_note_hard ... ok
+test golden_gain_mandolin_single_note_hard ... ok
+test golden_filter_octave_mandolin_chord ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.10s
+
+running 4 tests
+test filter::tests::filter_parse_rejects_non_numeric_value ... ok
+test filter::tests::filter_parse_rejects_unknown_key ... ok
+test gain::tests::gain_parse_rejects_non_numeric_value ... ok
+test gain::tests::gain_parse_rejects_unknown_key ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 12 tests
+test gain_silence_in_silence_out ... ok
+test gain_param_change_smooth ... ok
+test filter_param_change_smooth ... ok
+test filter_silence_in_silence_out ... ok
+test filter_output_always_finite ... ok
+test gain_reset_idempotent ... ok
+test gain_output_bounded ... ok
+test filter_output_bounded ... ok
+test filter_block_equals_tick ... ok
+test gain_output_always_finite ... ok
+test filter_reset_idempotent ... ok
+test gain_block_equals_tick ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.46s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s (workspace) — all existing tests still pass
+- Callback performs zero heap allocation (verified by inspection — only stack arrays and static refs)
+- No fallible operations in callback (clamping handles all edge cases)
+<!-- SECTION:PLAN:END -->
