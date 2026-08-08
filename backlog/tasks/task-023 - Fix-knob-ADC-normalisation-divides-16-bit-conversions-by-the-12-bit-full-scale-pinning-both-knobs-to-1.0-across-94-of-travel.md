@@ -7,6 +7,7 @@ status: Done
 assignee:
   - '@agent'
 created_date: '2026-08-08 18:18'
+updated_date: '2026-08-08 18:18'
 labels:
   - review-followup
 dependencies:
@@ -39,10 +40,10 @@ Also restructured knob.rs to the module's existing convention (see encoder.rs): 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 knob.rs programs ADC resolution explicitly rather than relying on the reset value
-- [ ] #2 the normalisation divisor is derived from the programmed resolution, not hardcoded, and a const assertion fails the build if they disagree
-- [ ] #3 normalisation is host-testable and the tests exercise the shipped code path rather than a copy of the formula
-- [ ] #4 a regression test asserts raw 4095 normalises to ~0.0625, not 1.0
-- [ ] #5 the STM32H7 16-bit reset-value trap is recorded in docs/reference/daisy-pod.md
-- [ ] #6 cargo test -p asperitas-pod and a release build of the podtest firmware both pass
+- [x] #1 knob.rs programs ADC resolution explicitly rather than relying on the reset value
+- [x] #2 the normalisation divisor is derived from the programmed resolution, not hardcoded, and a const assertion fails the build if they disagree
+- [x] #3 normalisation is host-testable and the tests exercise the shipped code path rather than a copy of the formula
+- [x] #4 a regression test asserts raw 4095 normalises to ~0.0625, not 1.0
+- [x] #5 the STM32H7 16-bit reset-value trap is recorded in docs/reference/daisy-pod.md
+- [x] #6 cargo test -p asperitas-pod and a release build of the podtest firmware both pass
 <!-- AC:END -->
