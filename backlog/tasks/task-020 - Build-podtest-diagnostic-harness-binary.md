@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-08 02:26'
-updated_date: '2026-08-08 04:15'
+updated_date: '2026-08-08 04:19'
 labels:
   - planned
 dependencies:
@@ -110,3 +110,19 @@ Run USB drain alongside the main polling loop via embassy_futures::select::selec
 4. Verify LED 2 cycles through all colours
 5. Verify LED 1 still shows green (Running state) — owned by asperitas_logging
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation notes:
+
+- Created firmware/src/bin/podtest.rs following blinky.rs patterns (no_std, no_main, defmt logger, USB init)
+- Knob values quantised to permille (×1000 → u16) to avoid float formatting on no_std — log::info! with float fmt pulls ~127 KB of std formatting code that overflows FLASH
+- Output format: [podtest] k1=342 k2=781 (permille instead of 0.342/0.781)
+- Encoder delta logged with signed notation {:+} per spec
+- LED 2 cycles through all 8 colours (Off→Red→Green→Blue→Yellow→Cyan→Magenta→White) at ~1s intervals
+- LED 1 owned by asperitas_logging::led::init() for boot/panic stages — not touched by podtest
+- Polling runs at ~100 Hz via embassy_time::Timer::after_millis(10)
+- All Pod pins acquired via unsafe { steal() } matching main.rs knob_poll_task pattern
+- Compiled successfully in release mode; debug mode overflows FLASH due to embassy-stm32 bloat (same as other binaries)
+<!-- SECTION:NOTES:END -->
