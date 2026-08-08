@@ -62,11 +62,22 @@ const LED_COLORS: [Led2Color; 8] = [
     Led2Color::White,
 ];
 
-/// Poll interval for control surface (~100 Hz).
-const POLL_INTERVAL_MS: u64 = 10;
+/// Poll interval for control surface (~1 kHz).
+///
+/// `ControlSurface::poll()` requires ~1 kHz polling so that its Gray-code
+/// quadrature LUT sees at most one A/B transition per call. At lower rates,
+/// brisk encoder turns can produce two transitions within one window, causing
+/// silent detent drops (see `crates/asperitas-pod/src/encoder.rs`).
+const POLL_INTERVAL_MS: u64 = 1;
 
-/// Number of polls between LED colour changes (~1 second at 100 Hz).
-const LED_TICKS_PER_COLOR: u32 = 100;
+/// Throttle factor for knob-value logging over USB CDC.
+///
+/// Knob values are logged every `KNOB_LOG_THROTTLE` ticks, keeping serial
+/// output at ~100 Hz while the main loop runs at ~1 kHz.
+const KNOB_LOG_THROTTLE: u32 = 10;
+
+/// Number of polls between LED colour changes (~1 second at 1 kHz).
+const LED_TICKS_PER_COLOR: u32 = 1000;
 
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
@@ -109,8 +120,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     info!("[podtest] running");
 
-    // Main polling loop — ~100 Hz.
+    // Main polling loop — ~1 kHz (ControlSurface contract).
     let mut tick: u32 = 0;
+    let mut knob_log_tick: u32 = 0;
     let mut color_idx: usize = 0;
 
     // Set initial LED colour.
@@ -119,11 +131,15 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     let poll_fut = async {
         loop {
-            // Poll knobs — quantise to permille (×1000) to avoid float fmt on no_std.
+            // Poll knobs — throttled to ~100 Hz via KNOB_LOG_THROTTLE to keep
+            // USB CDC serial readable. Quantise to permille (×1000) to avoid
+            // float fmt on no_std.
             let (k1, k2) = knobs.read();
             let k1_i = (k1 * 1000.0) as u16;
             let k2_i = (k2 * 1000.0) as u16;
-            info!("[podtest] k1={} k2={}", k1_i, k2_i);
+            if knob_log_tick.is_multiple_of(KNOB_LOG_THROTTLE) {
+                info!("[podtest] k1={} k2={}", k1_i, k2_i);
+            }
 
             // Poll encoder and buttons.
             controls.poll(|event| match event {
@@ -150,8 +166,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 }
             });
 
-            // Cycle LED 2 every LED_TICKS_PER_COLOR ticks (~1 second).
+            // Advance counters.
             tick += 1;
+            knob_log_tick = knob_log_tick.wrapping_add(1);
+
+            // Cycle LED 2 every LED_TICKS_PER_COLOR ticks (~1 second).
             if tick >= LED_TICKS_PER_COLOR {
                 tick = 0;
                 color_idx = (color_idx + 1) % LED_COLORS.len();

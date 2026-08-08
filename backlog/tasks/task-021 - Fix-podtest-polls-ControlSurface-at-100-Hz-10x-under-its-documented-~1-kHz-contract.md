@@ -3,11 +3,11 @@ id: TASK-021
 title: >-
   Fix: podtest polls ControlSurface at 100 Hz, 10x under its documented ~1 kHz
   contract
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-08 05:07'
-updated_date: '2026-08-08 05:19'
+updated_date: '2026-08-08 05:20'
 labels:
   - review-followup
   - planned
