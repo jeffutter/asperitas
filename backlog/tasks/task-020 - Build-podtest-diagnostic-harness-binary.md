@@ -1,11 +1,11 @@
 ---
 id: TASK-020
 title: Build podtest diagnostic harness binary
-status: Dev Ready
+status: In Progress
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-08-08 02:26'
-updated_date: '2026-08-08 04:12'
+updated_date: '2026-08-08 04:15'
 labels:
   - planned
 dependencies:
