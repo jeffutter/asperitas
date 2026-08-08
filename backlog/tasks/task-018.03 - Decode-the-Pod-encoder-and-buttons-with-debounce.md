@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-08 01:22'
+updated_date: '2026-08-08 01:38'
 labels:
   - planned
 dependencies:
@@ -42,12 +42,12 @@ Gestures are out of scope. Long-press, double-click, and press-and-hold combinat
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Encoder rotation yields signed detent increments, with clockwise positive
-- [ ] #2 The encoder click and both buttons report press and release edges distinctly
-- [ ] #3 One physical press or one detent produces exactly one event — contact bounce does not double-count
-- [ ] #4 The debounce interval and the interrupt-versus-poll choice are recorded with the reasoning behind each
-- [ ] #5 All five digital inputs use the same approach — the implementation does not mix interrupt-driven and polled inputs
-- [ ] #6 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
+- [x] #1 Encoder rotation yields signed detent increments, with clockwise positive
+- [x] #2 The encoder click and both buttons report press and release edges distinctly
+- [x] #3 One physical press or one detent produces exactly one event — contact bounce does not double-count
+- [x] #4 The debounce interval and the interrupt-versus-poll choice are recorded with the reasoning behind each
+- [x] #5 All five digital inputs use the same approach — the implementation does not mix interrupt-driven and polled inputs
+- [x] #6 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
 <!-- AC:END -->
 
 ## Implementation Plan
