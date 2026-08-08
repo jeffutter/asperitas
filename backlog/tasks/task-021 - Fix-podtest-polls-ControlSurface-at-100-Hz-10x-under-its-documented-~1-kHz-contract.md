@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-08 05:07'
-updated_date: '2026-08-08 05:17'
+updated_date: '2026-08-08 05:19'
 labels:
   - review-followup
   - planned
@@ -25,10 +25,10 @@ Found while reviewing TASK-020 (firmware/src/bin/podtest.rs:120-164, crates/aspe
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 firmware/src/bin/podtest.rs polls ControlSurface at a rate consistent with crates/asperitas-pod/src/encoder.rs's documented ~1 kHz contract (either by raising the shared loop rate or by polling controls on a separate faster interval), with the choice and rationale recorded in the task's implementation notes
-- [ ] #2 knob value logging over USB CDC remains readable/parseable at whatever final rate is chosen (no line-rate flooding that breaks the terminal use case described in TASK-020)
-- [ ] #3 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release succeeds
-- [ ] #4 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest -- -D warnings passes
+- [x] #1 firmware/src/bin/podtest.rs polls ControlSurface at a rate consistent with crates/asperitas-pod/src/encoder.rs's documented ~1 kHz contract (either by raising the shared loop rate or by polling controls on a separate faster interval), with the choice and rationale recorded in the task's implementation notes
+- [x] #2 knob value logging over USB CDC remains readable/parseable at whatever final rate is chosen (no line-rate flooding that breaks the terminal use case described in TASK-020)
+- [x] #3 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release succeeds
+- [x] #4 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest -- -D warnings passes
 <!-- AC:END -->
 
 ## Implementation Plan
