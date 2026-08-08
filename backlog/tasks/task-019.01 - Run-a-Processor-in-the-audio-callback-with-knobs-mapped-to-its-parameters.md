@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:27'
-updated_date: '2026-08-08 00:14'
+updated_date: '2026-08-08 01:09'
 labels:
   - planned
 dependencies:
@@ -36,13 +36,13 @@ Two facts to build against rather than assume:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The audio callback runs a Processor from asperitas-dsp instead of copying input to output
-- [ ] #2 Both Pod knobs drive processor parameters through a mapping defined in asperitas-dsp and shared with asperitas-cli, not defined in firmware
-- [ ] #3 asperitas-cli can be driven with the same normalised knob positions as the device and produces the same parameter values, so device and desktop output are comparable on identical source material
-- [ ] #4 set_sample_rate is called with the device actual rate rather than relying on the processor default
-- [ ] #5 The callback performs no heap allocation and cannot panic at any knob position, including both extremes
-- [ ] #6 Parameters are updated at block rate, and no smoothing is duplicated in the firmware on top of the processor own
-- [ ] #7 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
+- [ ] #1 - [x] #1 The audio callback runs a Processor from asperitas-dsp instead of copying input to output
+- [x] #2 Both Pod knobs drive processor parameters through a mapping defined in asperitas-dsp and shared with asperitas-cli, not defined in firmware
+- [x] #3 asperitas-cli can be driven with the same normalised knob positions as the device and produces the same parameter values, so device and desktop output are comparable on identical source material
+- [x] #4 set_sample_rate is called with the device actual rate rather than relying on the processor default
+- [x] #5 The callback performs no heap allocation and cannot panic at any knob position, including both extremes
+- [x] #6 Parameters are updated at block rate, and no smoothing is duplicated in the firmware on top of the processor own
+- [x] #7 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
 <!-- AC:END -->
 
 ## Implementation Plan
