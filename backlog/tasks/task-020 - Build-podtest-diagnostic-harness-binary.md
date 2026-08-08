@@ -5,7 +5,7 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-08 02:26'
-updated_date: '2026-08-08 04:10'
+updated_date: '2026-08-08 04:11'
 labels: []
 dependencies:
   - TASK-018.01
@@ -57,5 +57,55 @@ Create a `firmware/src/bin/podtest.rs` binary that streams all Pod control surfa
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Implementation Plan: podtest diagnostic harness binary\n\n## File created\n-  — new binary, discovered automatically by Cargo\n\n## Structure (mirrors blinky.rs)\n\n### Boilerplate\n- , \n- Re-export  as global panic handler\n-  — infinite loop with NOP (same as blinky/main)\n-  — no-op defmt logger (required by embassy-stm32)\n- \n\n### Main entry point\n\n\n### Boot sequence\n1. \n2. \n3. \n4. \n5. Discard  (USB init steals them)\n6.  — LED 1 ownership\n7. \n8. \n\n### Hardware construction\n- **Knobs:**  — pass board pins directly (no steal needed; board owns ADC1 and PodPins exposes knob pins)\n  - *Correction:* Check if  has / fields or if we need . If  doesn't expose Pod pins, use  like main.rs does.\n- **Encoder/buttons:**  — same steal-if-needed logic\n- **LED 2:**  — same pattern\n\n### Main loop (embedded in main, not a separate task)\nThe main future runs a single loop that polls everything:\n\n\n\n### Concurrent futures\nRun USB drain alongside the main polling loop:\n\n\n### Pin ownership resolution\nCheck whether  exposes Pod pins. If not (likely — daisy-embassy may only expose Seed pins), use  for each pin, matching main.rs's  pattern. Document why steal is safe (single-core Cortex-M, exclusive access).\n\n## Verification\n1.  — must compile\n2. Flash: \n3. Observe serial output matches expected format\n4. Verify LED 2 cycles through all colours\n5. Verify LED 1 still shows green (Running state) — owned by asperitas_logging
+Implementation Plan: podtest diagnostic harness binary
+
+## File created
+- firmware/src/bin/podtest.rs — new binary, discovered automatically by Cargo
+
+## Structure (mirrors blinky.rs)
+
+### Boilerplate
+- #![no_std], #![no_main]
+- Re-export asperitas_logging::panic_handler as global panic handler
+- #[defmt::panic_handler] — infinite loop with NOP (same as blinky/main)
+- #[defmt::global_logger] struct Logger — no-op defmt logger (required by embassy-stm32)
+- bind_interrupts!(pub struct UsbIrqs { OTG_FS => usb::InterruptHandler })
+
+### Main entry point
+#[embassy_executor::main] async fn main(_spawner: embassy_executor::Spawner)
+
+### Boot sequence
+1. info!("podtest booting")
+2. let config = daisy_embassy::default_rcc()
+3. let p = daisy_embassy::hal::init(config)
+4. let board: DaisyBoard<'_> = daisy_embassy::new_daisy_board!(p)
+5. Discard board.usb_peripherals (USB init steals them)
+6. asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18) — LED 1 ownership
+7. let _usb_handle = asperitas_logging::usb::init(UsbIrqs)
+8. asperitas_logging::led::set_global_state(LedState::Running)
+
+### Hardware construction
+- Knobs: Knobs::new(adc1, knob1_pin, knob2_pin) — use unsafe { steal() } for ADC1 + pins PC4/PC0 matching main.rs pattern
+- Encoder/buttons: ControlSurface::new(enc_a, enc_b, click, button1, button2) — use unsafe { steal() } for PD11, PA0, PB6, PG9, PA2
+- LED 2: Led2::new(red_pin, green_pin, blue_pin) — use unsafe { steal() } for PB1, PA1, PA4
+
+Pin ownership: DaisyBoard does not expose Pod pins (daisy-embassy only exposes Seed pins). Use unsafe { steal() } for each pin, same as main.rs's knob_poll_task. Safe on single-core Cortex-M with exclusive access.
+
+### Main loop (embedded in main, not a separate task)
+The main future runs a single polling loop at ~100 Hz:
+
+- Poll knobs: knobs.read() returns (f32, f32), log as "[podtest] k1={:.3} k2={:.3}"
+- Poll encoder/buttons: controls.poll(|event| match event to log ENC delta, CLICK press/release, BTN1/BTN2 press/release)
+- Cycle LED 2 every 100 ticks (~1 second): iterate [Off, Red, Green, Blue, Yellow, Cyan, Magenta, White], log "[podtest] led2={:?}"
+- Tick counter tracks iterations; Timer::after_millis(10).await between iterations
+
+### Concurrent futures
+Run USB drain alongside the main polling loop via embassy_futures::select::select(poll_fut, usb_fut). The poll future is an async block containing the infinite loop.
+
+## Verification
+1. cargo build --target thumbv7em-none-eabihf --bin podtest must compile
+2. Flash: make flash-all BINARY=podtest
+3. Observe serial output matches expected format
+4. Verify LED 2 cycles through all colours
+5. Verify LED 1 still shows green (Running state) — owned by asperitas_logging
 <!-- SECTION:PLAN:END -->
