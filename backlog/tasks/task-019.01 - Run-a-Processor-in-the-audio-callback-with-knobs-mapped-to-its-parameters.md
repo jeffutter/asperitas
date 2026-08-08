@@ -1,7 +1,7 @@
 ---
 id: TASK-019.01
 title: Run a Processor in the audio callback with knobs mapped to its parameters
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:27'
