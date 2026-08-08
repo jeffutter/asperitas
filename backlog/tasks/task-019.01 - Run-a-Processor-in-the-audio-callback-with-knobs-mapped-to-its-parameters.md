@@ -151,3 +151,20 @@ transitively, or add explicitly to firmware/Cargo.toml).
 - Callback performs zero heap allocation (stack arrays + static refs only)
 - No fallible operations in callback (all paths clamp/saturate)
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented shared knob-to-parameter mapping in asperitas-dsp and rewrote firmware main.rs to run a DSP chain (OnePoleLowPass → Gain) driven by Pod knobs. Key changes:
+
+1. Added params_from_normalised methods on OnePoleLowPass (logarithmic frequency mapping: 20 Hz–20 kHz) and Gain (linear dB mapping: -60 dB to +12 dB) in asperitas-dsp, with unit tests for boundary values, clamping, and monotonicity.
+
+2. Rewrote firmware/src/bin/main.rs to replace passthrough with:
+   - Knob-polling async task (~1 kHz) reading ADC1 via asperitas-pod Knobs driver
+   - Audio callback converting u32 codec samples ↔ Frame stack arrays, processing through filter→gain chain
+   - Block-rate parameter updates via cortex_m::interrupt::free critical sections
+
+3. Added asperitas-pod dependency to firmware Cargo.toml.
+
+All acceptance criteria verified: cargo test (workspace), cargo check + clippy -D warnings for both workspace and firmware target.
+<!-- SECTION:FINAL_SUMMARY:END -->
