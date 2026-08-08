@@ -99,8 +99,28 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Transition LED 1 to Running state (steady green).
     asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
 
-    // Steal Pod hardware peripherals — daisy-embassy does not expose Pod pins,
-    // so steal() is safe on single-core Cortex-M where we control all access.
+    // The Pod's control-surface pins are wired to Seed GPIO breakout pins that
+    // `board.pins` also names (e.g. d26 == PD11, the encoder A pin below).
+    // Discard them here, unread, so the steal() calls that follow are the only
+    // live Peri handle to each physical pin — same invariant documented for
+    // `board.usb_peripherals` above and for asperitas_logging::usb::init's own
+    // steal() (crates/asperitas-logging/src/usb.rs).
+    let _ = (
+        board.pins.d21, // knob1 / PC4
+        board.pins.d15, // knob2 / PC0
+        board.pins.d26, // enc_a / PD11
+        board.pins.d25, // enc_b / PA0
+        board.pins.d13, // click / PB6
+        board.pins.d27, // button1 / PG9
+        board.pins.d28, // button2 / PA2
+        board.pins.d17, // led2 red / PB1
+        board.pins.d24, // led2 green / PA1
+        board.pins.d23, // led2 blue / PA4
+    );
+
+    // Steal Pod hardware peripherals. Safe on single-core Cortex-M because we
+    // control all access and the corresponding board.pins fields were just
+    // discarded unread above.
     let adc1 = unsafe { hal::peripherals::ADC1::steal() };
     let knob1_pin = unsafe { hal::peripherals::PC4::steal() };
     let knob2_pin = unsafe { hal::peripherals::PC0::steal() };
