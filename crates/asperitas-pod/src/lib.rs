@@ -25,6 +25,10 @@ pub mod knob;
 #[cfg(feature = "pod-hw")]
 pub mod led;
 
+// Encoder module: algorithmic logic (LUT decoder, debouncer) is always
+// available for host testing; ControlSurface requires pod-hw.
+pub mod encoder;
+
 // ---------------------------------------------------------------------------
 // Default init (no features)
 // ---------------------------------------------------------------------------
