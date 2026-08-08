@@ -126,3 +126,9 @@ Implementation notes:
 - All Pod pins acquired via unsafe { steal() } matching main.rs knob_poll_task pattern
 - Compiled successfully in release mode; debug mode overflows FLASH due to embassy-stm32 bloat (same as other binaries)
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Created firmware/src/bin/podtest.rs — a diagnostic harness binary that streams Pod control surface data over USB CDC serial at ~100 Hz. Polls knobs (permille integers), encoder delta (signed direction), button press/release events, and cycles LED 2 through all 8 colours at ~1s intervals. LED 1 remains owned by asperitas_logging for boot/panic stages. Compiles cleanly for thumbv7em-none-eabihf alongside all existing binaries.
+<!-- SECTION:FINAL_SUMMARY:END -->
