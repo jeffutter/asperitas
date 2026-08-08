@@ -3,11 +3,11 @@ id: TASK-022
 title: >-
   Fix: main.rs's board.pins.d21/d15 alias the knob_poll_task steal(), same
   hazard as TASK-020's podtest fixup
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-08 05:25'
-updated_date: '2026-08-08 05:51'
+updated_date: '2026-08-08 05:55'
 labels:
   - review-followup
   - planned
@@ -25,11 +25,11 @@ Found incidentally while reviewing TASK-020 (firmware/src/bin/podtest.rs). main.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 firmware/src/bin/main.rs explicitly discards board.pins.d21 and board.pins.d15 (unread) before or immediately after knob_poll_task's steal() calls execute, e.g. via a let _ = (board.pins.d21, board.pins.d15); statement in main()
-- [ ] #2 the comment on knob_poll_task's steal() block (main.rs:120-121) is corrected to state the real invariant: these pins are also exposed via board.pins under Seed d-numbers, and the discard in main() is what keeps the steal() sound — not that daisy-embassy 'does not consume' them
-- [ ] #3 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin main --release succeeds
-- [ ] #4 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin main -- -D warnings passes
-- [ ] #5 nix develop -c cargo fmt --manifest-path firmware/Cargo.toml --check passes
+- [x] #1 firmware/src/bin/main.rs explicitly discards board.pins.d21 and board.pins.d15 (unread) before or immediately after knob_poll_task's steal() calls execute, e.g. via a let _ = (board.pins.d21, board.pins.d15); statement in main()
+- [x] #2 the comment on knob_poll_task's steal() block (main.rs:120-121) is corrected to state the real invariant: these pins are also exposed via board.pins under Seed d-numbers, and the discard in main() is what keeps the steal() sound — not that daisy-embassy 'does not consume' them
+- [x] #3 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin main --release succeeds
+- [x] #4 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin main -- -D warnings passes
+- [x] #5 nix develop -c cargo fmt --manifest-path firmware/Cargo.toml --check passes
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -46,3 +46,11 @@ SETUP (read first): This is a Rust embedded firmware project (firmware/, crates/
 7. Run: nix develop -c cargo fmt --manifest-path firmware/Cargo.toml --check
 8. Record in the task's implementation notes that this mirrors the TASK-020 fixup (commit 2e63cf7) for the identical hazard in podtest.rs.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Mirrors TASK-020's podtest.rs fixup (commit 2e63cf7). Discarded board.pins.d21/d15 unread in main() to prevent duplicate Peri handles for PC4/PC0, which are stolen by knob_poll_task. Corrected the steal() comment to document the real invariant: the caller discards aliased fields, not that daisy-embassy avoids them.
+
+Review follow-up (pi review pass): AC checkboxes were left unchecked despite status=Done even though all 5 criteria were independently re-verified (code discard present, build/clippy/fmt all pass). Checked them off directly; no code change needed.
+<!-- SECTION:NOTES:END -->
