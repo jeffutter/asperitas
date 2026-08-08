@@ -1,10 +1,11 @@
 ---
 id: TASK-018.03
 title: Decode the Pod encoder and buttons with debounce
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-05 17:26'
+updated_date: '2026-08-08 01:14'
 labels:
   - planned
 dependencies:
