@@ -1,11 +1,11 @@
 ---
 id: TASK-019.01
 title: Run a Processor in the audio callback with knobs mapped to its parameters
-status: Dev Ready
+status: In Progress
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-08-05 17:27'
-updated_date: '2026-08-08 00:13'
+updated_date: '2026-08-08 00:14'
 labels:
   - planned
 dependencies:
