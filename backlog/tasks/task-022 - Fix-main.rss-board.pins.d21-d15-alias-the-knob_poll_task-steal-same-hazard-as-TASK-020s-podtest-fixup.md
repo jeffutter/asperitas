@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-08 05:25'
-updated_date: '2026-08-08 05:52'
+updated_date: '2026-08-08 05:54'
 labels:
   - review-followup
   - planned
@@ -25,11 +25,11 @@ Found incidentally while reviewing TASK-020 (firmware/src/bin/podtest.rs). main.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 firmware/src/bin/main.rs explicitly discards board.pins.d21 and board.pins.d15 (unread) before or immediately after knob_poll_task's steal() calls execute, e.g. via a let _ = (board.pins.d21, board.pins.d15); statement in main()
-- [ ] #2 the comment on knob_poll_task's steal() block (main.rs:120-121) is corrected to state the real invariant: these pins are also exposed via board.pins under Seed d-numbers, and the discard in main() is what keeps the steal() sound — not that daisy-embassy 'does not consume' them
-- [ ] #3 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin main --release succeeds
-- [ ] #4 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin main -- -D warnings passes
-- [ ] #5 nix develop -c cargo fmt --manifest-path firmware/Cargo.toml --check passes
+- [x] #1 firmware/src/bin/main.rs explicitly discards board.pins.d21 and board.pins.d15 (unread) before or immediately after knob_poll_task's steal() calls execute, e.g. via a let _ = (board.pins.d21, board.pins.d15); statement in main()
+- [x] #2 the comment on knob_poll_task's steal() block (main.rs:120-121) is corrected to state the real invariant: these pins are also exposed via board.pins under Seed d-numbers, and the discard in main() is what keeps the steal() sound — not that daisy-embassy 'does not consume' them
+- [x] #3 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin main --release succeeds
+- [x] #4 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin main -- -D warnings passes
+- [x] #5 nix develop -c cargo fmt --manifest-path firmware/Cargo.toml --check passes
 <!-- AC:END -->
 
 ## Implementation Plan
