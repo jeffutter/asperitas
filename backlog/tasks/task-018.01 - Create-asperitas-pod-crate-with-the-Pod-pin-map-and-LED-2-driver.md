@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-07 23:34'
+updated_date: '2026-08-08 00:24'
 labels:
   - planned
 dependencies: []
@@ -161,6 +161,12 @@ Document in led.rs module comment:
 - [ ] Root `cargo test` passes
 - [ ] Root `cargo clippy -D warnings` passes
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixup applied post-review (commit 179faaf, fixup! for b47b5c7, filed against TASK-018.02 where the symptom was concrete): this ticket's led.rs/pins.rs were never linted or built by CI either, since the pod-hw feature isn't default and firmware doesn't yet depend on asperitas-pod. CI now runs clippy and test with --features asperitas-pod/pod-hw.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
