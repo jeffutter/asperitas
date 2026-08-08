@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-08 05:25'
-updated_date: '2026-08-08 05:54'
+updated_date: '2026-08-08 05:55'
 labels:
   - review-followup
   - planned
@@ -51,4 +51,6 @@ SETUP (read first): This is a Rust embedded firmware project (firmware/, crates/
 
 <!-- SECTION:NOTES:BEGIN -->
 Mirrors TASK-020's podtest.rs fixup (commit 2e63cf7). Discarded board.pins.d21/d15 unread in main() to prevent duplicate Peri handles for PC4/PC0, which are stolen by knob_poll_task. Corrected the steal() comment to document the real invariant: the caller discards aliased fields, not that daisy-embassy avoids them.
+
+Review follow-up (pi review pass): AC checkboxes were left unchecked despite status=Done even though all 5 criteria were independently re-verified (code discard present, build/clippy/fmt all pass). Checked them off directly; no code change needed.
 <!-- SECTION:NOTES:END -->
