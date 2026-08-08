@@ -1,7 +1,7 @@
 ---
 id: TASK-018.03
 title: Decode the Pod encoder and buttons with debounce
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
@@ -229,3 +229,9 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 3. Firmware compiles for thumbv7em-none-eabihf (type-checks with embassy-stm32 types)
 4. Design decision documented: why polling over EXTI, why 5ms debounce, why Gray-code LUT
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented software quadrature decoder (Gray-code LUT with inherent self-debouncing) and debounced switch driver for all five Pod digital inputs. Uniform polling approach across encoder A/B, encoder click, button 1, and button 2. Debounce interval: 5 ms at 1 kHz poll rate. 16 host-testable unit tests verify LUT correctness, symmetry, bounce filtering, and edge emission without double-counting. Builds for thumbv7em-none-eabihf; clippy clean.
+<!-- SECTION:FINAL_SUMMARY:END -->
