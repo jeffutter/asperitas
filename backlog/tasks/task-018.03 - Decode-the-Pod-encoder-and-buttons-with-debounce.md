@@ -1,11 +1,11 @@
 ---
 id: TASK-018.03
 title: Decode the Pod encoder and buttons with debounce
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-05 17:26'
-updated_date: '2026-08-08 01:22'
+updated_date: '2026-08-08 01:54'
 labels:
   - planned
 dependencies:
@@ -42,12 +42,12 @@ Gestures are out of scope. Long-press, double-click, and press-and-hold combinat
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Encoder rotation yields signed detent increments, with clockwise positive
-- [ ] #2 The encoder click and both buttons report press and release edges distinctly
-- [ ] #3 One physical press or one detent produces exactly one event — contact bounce does not double-count
-- [ ] #4 The debounce interval and the interrupt-versus-poll choice are recorded with the reasoning behind each
-- [ ] #5 All five digital inputs use the same approach — the implementation does not mix interrupt-driven and polled inputs
-- [ ] #6 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
+- [x] #1 Encoder rotation yields signed detent increments, with clockwise positive
+- [x] #2 The encoder click and both buttons report press and release edges distinctly
+- [x] #3 One physical press or one detent produces exactly one event — contact bounce does not double-count
+- [x] #4 The debounce interval and the interrupt-versus-poll choice are recorded with the reasoning behind each
+- [x] #5 All five digital inputs use the same approach — the implementation does not mix interrupt-driven and polled inputs
+- [x] #6 Builds for thumbv7em-none-eabihf, and root cargo test and clippy with -D warnings stay green
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -229,3 +229,17 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 3. Firmware compiles for thumbv7em-none-eabihf (type-checks with embassy-stm32 types)
 4. Design decision documented: why polling over EXTI, why 5ms debounce, why Gray-code LUT
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixup applied post-review (commit 2703d73, fixup! of 3fba24e): EncoderDecoder::update(current_state: u8) indexed the 16-entry Gray-code LUT with an unmasked input — a caller passing current_state > 3 (the function is pub) would hit an out-of-bounds array index panic. Masked input with '& 0b11' so any u8 is in range; added regression test out_of_range_state_is_masked_not_indexed_out_of_bounds. No behavior change for the only real caller (ControlSurface::poll, which always passes 0-3).
+
+Second fixup applied post-review (commit 38f4477, fixup! of 3fba24e): DebouncedSwitch.consecutive (u8) incremented unboundedly once a switch settled at a stable level, with no cap. cargo test runs in debug profile (overflow-checks=true, no project override) and CI invokes plain 'cargo test --workspace', so any future test holding a stable reading past 255 polls (trivial for a hardware-timing test like TASK-018.04) would panic on arithmetic overflow. Changed to saturating_add; added regression test long_held_stable_reading_does_not_overflow_consecutive_counter (1000 iterations).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented software quadrature decoder (Gray-code LUT with inherent self-debouncing) and debounced switch driver for all five Pod digital inputs. Uniform polling approach across encoder A/B, encoder click, button 1, and button 2. Debounce interval: 5 ms at 1 kHz poll rate. 16 host-testable unit tests verify LUT correctness, symmetry, bounce filtering, and edge emission without double-counting. Builds for thumbv7em-none-eabihf; clippy clean.
+<!-- SECTION:FINAL_SUMMARY:END -->
