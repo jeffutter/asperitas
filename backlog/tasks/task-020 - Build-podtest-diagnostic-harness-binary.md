@@ -5,6 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-08-08 02:26'
+updated_date: '2026-08-08 02:27'
 labels: []
 dependencies:
   - TASK-018.01
@@ -42,3 +43,13 @@ Create a `firmware/src/bin/podtest.rs` binary that streams all Pod control surfa
 
 **Build verification:** Must compile for thumbv7em-none-eabihf alongside existing binaries. Flash with `make flash-all BINARY=podtest`.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 firmware/src/bin/podtest.rs exists and compiles for thumbv7em-none-eabihf
+- [ ] #2 Knob values stream over USB CDC serial at ~100 Hz as normalised floats
+- [ ] #3 Encoder delta events logged with signed direction
+- [ ] #4 Button press/release events logged distinctly
+- [ ] #5 LED 2 cycles through colours with visual delay (~1s per step)
+- [ ] #6 LED 1 remains owned by asperitas_logging for boot/panic stages
+<!-- AC:END -->
