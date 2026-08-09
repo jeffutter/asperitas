@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@agent'
 created_date: '2026-08-09 05:08'
-updated_date: '2026-08-09 05:35'
+updated_date: '2026-08-09 05:41'
 labels:
   - review-followup
   - planned
@@ -118,7 +118,7 @@ All changes implement a single mechanism (overrun detection + reset) applied to 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-AC #1: Added overrun detection with Ticker::reset() to both main.rs knob_poll_task and podtest.rs poll loop. When gap between iterations exceeds 2× poll period (2 ms), ticker is reset to discard backlog instead of replaying missed ticks. AC #2: Added burst_of_identical_readings_emits_edge_without_wall_clock test proving DebouncedSwitch emits on call count alone. AC #3: Updated module doc and ControlSurface::poll() doc to state the bound now guaranteed.
+Fixup applied post-review (commit 074b49d, fixup!b8be5ff): the overrun branch called ticker.reset() without awaiting anything, so the loop immediately spun through one extra zero-wait iteration (a second knobs.read()/knob_state.write() or controls.poll() call back-to-back with the legitimate catch-up tick) before the else-branch's await ever engaged. This produced two near-simultaneous polls per stall instead of the 'at most one immediate tick' the module docs and AC #1 promised. Fixed in firmware/src/bin/main.rs and firmware/src/bin/podtest.rs by always awaiting ticker.next() after the optional reset(), rather than only in the else branch. Verified via cargo build/clippy/test.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
