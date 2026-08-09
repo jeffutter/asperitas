@@ -1,7 +1,7 @@
 ---
 id: TASK-028
 title: 'Fix: Ticker overrun guard is duplicated and untested at the call site'
-status: Needs Plan
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-08-09 05:43'
