@@ -132,3 +132,9 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 <!-- SECTION:NOTES:BEGIN -->
 Extracted overrun-detection predicate into  — pure arithmetic on  types, host-testable without hardware. Both  (knob_poll_task) and  (poll loop) now import and call it. Added boundary-condition tests covering the strictly-greater-than threshold at exactly 2x period, and a stall simulation test proving the guard detects overruns without false positives on normal gaps.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Extracted the duplicated Ticker catch-up overrun guard from main.rs and podtest.rs into a shared host-testable function asperitas-pod::ticker_guard::should_reset(). Both firmware call sites now import it. Added boundary-condition tests (strictly-greater-than at 2x period) and a stall simulation test.
+<!-- SECTION:FINAL_SUMMARY:END -->
