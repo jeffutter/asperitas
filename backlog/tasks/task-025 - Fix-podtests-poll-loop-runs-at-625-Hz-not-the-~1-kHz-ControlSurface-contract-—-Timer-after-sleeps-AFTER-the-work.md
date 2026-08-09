@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@ralph'
 created_date: '2026-08-09 04:33'
-updated_date: '2026-08-09 04:49'
+updated_date: '2026-08-09 04:51'
 labels:
   - review-followup
 dependencies:
@@ -41,9 +41,9 @@ Note the 4:1 detent-ratio bug (TASK-024) is INDEPENDENT of this and is the actua
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 podtest's control-surface loop achieves a measured ~1 kHz, using a fixed-period scheduler (embassy_time::Ticker) rather than a sleep appended after the work
-- [ ] #2 firmware/src/main.rs's control-surface task is reviewed for the same after-the-work sleep pattern and corrected if present, or the task notes record why it does not apply
+- [x] #1 podtest's control-surface loop achieves a measured ~1 kHz, using a fixed-period scheduler (embassy_time::Ticker) rather than a sleep appended after the work
+- [x] #2 firmware/src/main.rs's control-surface task is reviewed for the same after-the-work sleep pattern and corrected if present, or the task notes record why it does not apply
 - [ ] #3 HUMAN: a fresh podtest capture shows a knob log line interval of ~10 ms (KNOB_LOG_THROTTLE=10 at 1 kHz), confirming the achieved rate rather than the nominal one
-- [ ] #4 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release succeeds
-- [ ] #5 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest -- -D warnings passes
+- [x] #4 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release succeeds
+- [x] #5 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest -- -D warnings passes
 <!-- AC:END -->
