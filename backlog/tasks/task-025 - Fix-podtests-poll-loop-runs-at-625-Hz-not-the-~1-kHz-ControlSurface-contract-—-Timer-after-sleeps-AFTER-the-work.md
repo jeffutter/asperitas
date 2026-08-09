@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-09 04:33'
-updated_date: '2026-08-09 04:53'
+updated_date: '2026-08-09 05:06'
 labels:
   - review-followup
 dependencies:
@@ -52,6 +52,8 @@ Note the 4:1 detent-ratio bug (TASK-024) is INDEPENDENT of this and is the actua
 
 <!-- SECTION:NOTES:BEGIN -->
 Replaced Timer::after_millis() with embassy_time::Ticker::every() in both podtest.rs and main.rs. Ticker schedules against a fixed period rather than sleeping after work, eliminating drift accumulation. AC #3 is HUMAN-marked (requires hardware capture).
+
+Fixup applied post-review (commit c52bc73, fixup! for e2f0b7d): ControlSurface::poll() and the module doc in crates/asperitas-pod/src/encoder.rs didn't state that callers must schedule with a fixed-period timer (embassy_time::Ticker::every(), not Timer::after()) to actually meet the ~1 kHz debounce-timing assumption. That knowledge only existed as comments at the two call sites (main.rs, podtest.rs) added by this ticket, not on the interface itself — a future caller reading encoder.rs's own doc would see no warning and could reintroduce the 625 Hz drift bug. Doc-only change, no behavior change; clippy/doc build verified clean.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
