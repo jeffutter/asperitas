@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@agent'
 created_date: '2026-08-09 05:08'
-updated_date: '2026-08-09 05:29'
+updated_date: '2026-08-09 05:34'
 labels:
   - review-followup
   - planned
@@ -114,3 +114,9 @@ In `crates/asperitas-pod/src/encoder.rs` test module, add a test demonstrating t
 
 All changes implement a single mechanism (overrun detection + reset) applied to two call sites plus supporting docs/tests. The work is <50 lines across 3 files and must ship atomically.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC #1: Added overrun detection with Ticker::reset() to both main.rs knob_poll_task and podtest.rs poll loop. When gap between iterations exceeds 2× poll period (2 ms), ticker is reset to discard backlog instead of replaying missed ticks. AC #2: Added burst_of_identical_readings_emits_edge_without_wall_clock test proving DebouncedSwitch emits on call count alone. AC #3: Updated module doc and ControlSurface::poll() doc to state the bound now guaranteed.
+<!-- SECTION:NOTES:END -->
