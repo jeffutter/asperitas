@@ -3,10 +3,11 @@ id: TASK-025
 title: >-
   Fix: podtest's poll loop runs at 625 Hz, not the ~1 kHz ControlSurface
   contract — Timer::after sleeps AFTER the work
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-09 04:33'
+updated_date: '2026-08-09 04:46'
 labels:
   - review-followup
 dependencies:
