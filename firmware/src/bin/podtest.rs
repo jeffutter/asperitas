@@ -235,13 +235,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
             // Bound catch-up bursts: if the executor stalled longer than twice
             // the poll period, reset the ticker to discard its backlog instead
-            // of letting next() fire all missed ticks back-to-back.
+            // of letting next() fire all missed ticks back-to-back. Always
+            // await the (possibly just-reset) ticker afterward so the loop
+            // cannot spin through an extra zero-wait iteration.
             let now = embassy_time::Instant::now();
             if now - last_tick > embassy_time::Duration::from_millis(POLL_INTERVAL_MS * 2) {
                 ticker.reset();
-            } else {
-                ticker.next().await;
             }
+            ticker.next().await;
             last_tick = now;
         }
     };
