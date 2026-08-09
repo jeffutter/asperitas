@@ -47,3 +47,9 @@ Note the 4:1 detent-ratio bug (TASK-024) is INDEPENDENT of this and is the actua
 - [x] #4 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release succeeds
 - [x] #5 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest -- -D warnings passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Replaced Timer::after_millis() with embassy_time::Ticker::every() in both podtest.rs and main.rs. Ticker schedules against a fixed period rather than sleeping after work, eliminating drift accumulation. AC #3 is HUMAN-marked (requires hardware capture).
+<!-- SECTION:NOTES:END -->
