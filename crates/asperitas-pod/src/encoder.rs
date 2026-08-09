@@ -22,12 +22,10 @@
 //!
 //! This assumes each `poll()` call is spaced ~1 ms apart in wall-clock time.
 //! Callers must drive `poll()` from a fixed-period scheduler,
-//! `embassy_time::Ticker::every()`. The call-site must also bound Ticker
-//! catch-up bursts by detecting overruns and calling `Ticker::reset()` when
-//! the gap between iterations exceeds twice the poll period (TASK-026). With
-//! this guard, a stalled executor produces at most one immediate tick rather
-//! than a back-to-back burst, preserving the temporal spacing assumption of
-//! DEBOUNCE_TICKS.
+//! `embassy_time::Ticker::every()`, and bound Ticker catch-up bursts with
+//! [`crate::ticker_guard::should_reset`] (see that module for the overrun
+//! policy) so a stalled executor cannot compress DEBOUNCE_TICKS readings
+//! into a back-to-back burst.
 
 // ---------------------------------------------------------------------------
 // Algorithmic logic — host-testable, no hardware dependency
@@ -275,14 +273,10 @@ mod hw {
         /// for debounced edges. Each event is passed to the `events` callback.
         ///
         /// Call from a control-surface task at ~1 kHz, scheduled with
-        /// `embassy_time::Ticker::every()`. The caller must bound Ticker
-        /// catch-up bursts by detecting overruns and calling `Ticker::reset()`
-        /// when the gap between iterations exceeds twice the poll period;
-        /// without this guard, a stalled executor produces back-to-back ticks
-        /// that compress DEBOUNCE_TICKS readings into sub-millisecond windows
-        /// (see module-level debounce documentation). Do NOT call from the
-        /// audio callback — GPIO reads are blocking and would disrupt audio
-        /// timing.
+        /// `embassy_time::Ticker::every()` and bounded by
+        /// [`crate::ticker_guard::should_reset`] (see module-level debounce
+        /// documentation for why this matters). Do NOT call from the audio
+        /// callback — GPIO reads are blocking and would disrupt audio timing.
         pub fn poll(&mut self, mut events: impl FnMut(super::ControlEvent)) {
             // Read encoder state: A is bit 1, B is bit 0.
             // Pin is inverted (pull-up, active-low): Low = active.
