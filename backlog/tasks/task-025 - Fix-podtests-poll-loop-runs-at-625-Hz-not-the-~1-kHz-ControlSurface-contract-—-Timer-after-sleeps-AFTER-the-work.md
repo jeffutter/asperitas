@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-09 04:33'
-updated_date: '2026-08-09 04:52'
+updated_date: '2026-08-09 04:53'
 labels:
   - review-followup
 dependencies:
@@ -53,3 +53,9 @@ Note the 4:1 detent-ratio bug (TASK-024) is INDEPENDENT of this and is the actua
 <!-- SECTION:NOTES:BEGIN -->
 Replaced Timer::after_millis() with embassy_time::Ticker::every() in both podtest.rs and main.rs. Ticker schedules against a fixed period rather than sleeping after work, eliminating drift accumulation. AC #3 is HUMAN-marked (requires hardware capture).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Replaced Timer::after_millis() with embassy_time::Ticker::every(Duration::from_millis(1)) in both podtest.rs (main poll loop) and main.rs (knob_poll_task). Ticker schedules against a fixed period, so work duration no longer accumulates drift into the poll interval. AC #3 (HUMAN: hardware capture confirming ~1 kHz) remains for human verification.
+<!-- SECTION:FINAL_SUMMARY:END -->
