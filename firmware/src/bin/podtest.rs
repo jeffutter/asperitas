@@ -68,6 +68,9 @@ const LED_COLORS: [Led2Color; 8] = [
 /// quadrature LUT sees at most one A/B transition per call. At lower rates,
 /// brisk encoder turns can produce two transitions within one window, causing
 /// silent detent drops (see `crates/asperitas-pod/src/encoder.rs`).
+///
+/// Used with `embassy_time::Ticker::every()` for fixed-period scheduling;
+/// work duration does not accumulate drift into the interval (TASK-025).
 const POLL_INTERVAL_MS: u64 = 1;
 
 /// Throttle factor for knob-value logging over USB CDC.
@@ -148,6 +151,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
     info!("[podtest] running");
 
     // Main polling loop — ~1 kHz (ControlSurface contract).
+    // Uses Ticker for fixed-period scheduling so work duration does not
+    // accumulate drift into the poll interval (see TASK-025).
+    let mut ticker = embassy_time::Ticker::every(
+        embassy_time::Duration::from_millis(POLL_INTERVAL_MS)
+    );
     let mut tick: u32 = 0;
     let mut knob_log_tick: u32 = 0;
     let mut color_idx: usize = 0;
@@ -222,7 +230,7 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 );
             }
 
-            embassy_time::Timer::after_millis(POLL_INTERVAL_MS).await;
+            ticker.next().await;
         }
     };
 

@@ -115,6 +115,9 @@ fn encode_block(input: &[Frame; BLOCK_LENGTH], output: &mut [u32]) {
 }
 
 /// Async task that polls knobs at ~1 kHz and stores values for the audio callback.
+///
+/// Uses `Ticker` for fixed-period scheduling so ADC read duration does not
+/// accumulate drift into the poll interval (TASK-025).
 #[embassy_executor::task]
 async fn knob_poll_task(knob_state: &'static KnobState) {
     // The Pod's knobs are wired to Seed GPIO breakout pins that `board.pins`
@@ -125,10 +128,12 @@ async fn knob_poll_task(knob_state: &'static KnobState) {
     let knob2 = unsafe { hal::peripherals::PC0::steal() };
     let mut knobs = Knobs::new(adc1, knob1, knob2);
 
+    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_millis(1));
+
     loop {
         let (k1, k2) = knobs.read();
         knob_state.write([k1, k2]);
-        embassy_time::Timer::after_millis(1).await;
+        ticker.next().await;
     }
 }
 
