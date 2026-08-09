@@ -37,7 +37,69 @@ libDaisy retains Rev1/Rev2 maps only as commented-out dead code). Pin names are 
 | Knob 1 | `D21` |
 | Knob 2 | `D15` |
 
-Knobs are analog and read via ADC.
+Knobs are analog and read via ADC. Knob 1 is `PC4` (ADC1_INP4), Knob 2 is `PC0`
+(ADC1_INP10).
+
+### The STM32H7 ADC resets to 16-bit, not 12-bit (verified the hard way)
+
+**`ADC_CFGR.RES` on the STM32H7 has a reset value of `0b000`, which selects 16-bit
+resolution.** A conversion therefore returns 0..65535, not 0..4095.
+
+This is a trap rather than a curiosity, because of how embassy-stm32 exposes it.
+`AdcConfig { resolution: None, .. }` does not mean "use the default 12 bits" — it means
+embassy skips the `RES` write entirely and leaves the reset value in place
+(`embassy-stm32-0.6.0/src/adc/v4.rs:222`). Pair that with the reflex of dividing by
+4095 to normalise, and every reading past 4095 — **6.25% of pot travel** — clamps to
+1.0.
+
+The symptom does not look like a scaling bug. It looks like broken pots: the knob reads
+full scale across roughly 94% of its rotation, including at the physical centre, then
+collapses to 0 in the last few degrees near one stop. A `podtest` capture of a full
+sweep showed only `0`, `1`, `3`, `208`, `363`, `757`, `800`, `1000` per mille across
+1030 samples, with just two or three intermediate values per sweep and no smooth travel
+at all.
+
+`crates/asperitas-pod/src/knob.rs` now programs the resolution explicitly and derives
+its normalisation divisor from `resolution_to_max_count()`, with a `const` assertion
+tying the two together so they cannot drift apart again silently.
+
+Note also that `Averaging::Samples16` sets the oversampling right-shift (OVSS) to match
+the sample count, so hardware averaging returns results on the same scale as a single
+conversion. Averaging does not change the full-scale count, and is not part of this
+trap.
+
+### Knob rotation direction: clockwise increases (verified)
+
+**Both pots read *higher* as they turn clockwise.** This is the conventional direction;
+nothing needs inverting in software.
+
+Verified on hardware 2026-08-08 against a corrected build, with a capture whose protocol
+fixed the starting position: each knob was turned fully clockwise to the stop first, then
+swept slowly to the opposite stop and back. Both sweeps rise on the first move and reach
+raw 65535 at the clockwise stop and raw 0 at the counter-clockwise stop.
+
+An earlier note here recorded the opposite as a suspicion. It was wrong. The inference
+came from a capture taken *through* the 12-bit-divisor bug described above, where the
+value clamps to 1.0 across 94% of travel and collapses near one stop — which reads as an
+inverted sweep when only the endpoints are visible. That is worth remembering on its own:
+**a broken normalisation can masquerade as a direction error.** Establish scaling before
+concluding anything about polarity.
+
+### Encoder detent ratio: 4 quadrature counts per physical detent (verified)
+
+**The Pod's encoder is detented at every *fourth* quadrature state, so one physical
+detent produces four A/B transitions, not one.** A decoder that emits ±1 per transition —
+as `EncoderDecoder` currently does — reports four increments per click.
+
+Measured 2026-08-08: 10 deliberate clockwise detents produced a net +40, and 10
+counter-clockwise detents a net −38. Direction is correct (clockwise is positive); only
+the ratio is wrong.
+
+Divide-by-four is therefore required, but it **must carry the remainder** rather than
+truncate per poll. Three of the ten counter-clockwise detents registered 3 transitions
+instead of 4 (contact bounce the LUT filters, and transitions arriving closer together
+than the poll period). A per-poll `delta / 4` discards those as zero; an accumulator that
+emits one detent per 4 counts and keeps the remainder does not.
 
 ### LED drive polarity: active-low (verified)
 

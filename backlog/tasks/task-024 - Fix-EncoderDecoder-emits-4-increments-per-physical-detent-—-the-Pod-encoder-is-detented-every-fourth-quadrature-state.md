@@ -32,7 +32,7 @@ DESIGN CONSTRAINT — the divide-by-four must CARRY THE REMAINDER, not truncate 
 
 Consider also the more robust 'full-step' variant used for detented encoders: emit a detent only on arrival at the rest state, using accumulated direction. That tolerates a missing intermediate transition outright rather than letting the accumulator phase-slip. Confirm the actual rest state from hardware before choosing it.
 
-Note this is separable from TASK-024 (poll rate): the 4:1 ratio is present at any poll rate. The brisk-spin segments of the same capture produced +86 and -90 against ~21-22 actual detents, i.e. counts came out HIGH not low, so there is no evidence of mass detent-dropping at 625 Hz.
+Note this is separable from TASK-025 (poll rate): the 4:1 ratio is present at any poll rate. The brisk-spin segments of the same capture produced +86 and -90 against ~21-22 actual detents, i.e. counts came out HIGH not low, so there is no evidence of mass detent-dropping at 625 Hz.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
