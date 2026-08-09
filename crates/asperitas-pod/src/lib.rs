@@ -20,10 +20,11 @@
 pub mod pins;
 
 #[cfg(feature = "pod-hw")]
-pub mod knob;
-
-#[cfg(feature = "pod-hw")]
 pub mod led;
+
+// Knob module: the ADC normalisation is always available for host testing;
+// the `Knobs` driver itself requires pod-hw.
+pub mod knob;
 
 // Encoder module: algorithmic logic (LUT decoder, debouncer) is always
 // available for host testing; ControlSurface requires pod-hw.
