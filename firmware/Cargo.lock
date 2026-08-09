@@ -85,6 +85,7 @@ name = "asperitas-pod"
 version = "0.1.0"
 dependencies = [
  "embassy-stm32",
+ "embassy-time",
 ]
 
 [[package]]

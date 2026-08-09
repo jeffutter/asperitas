@@ -30,6 +30,9 @@ pub mod knob;
 // available for host testing; ControlSurface requires pod-hw.
 pub mod encoder;
 
+// Ticker guard: pure arithmetic on Copy types, always available for host testing.
+pub mod ticker_guard;
+
 // ---------------------------------------------------------------------------
 // Default init (no features)
 // ---------------------------------------------------------------------------

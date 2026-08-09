@@ -5,6 +5,7 @@ use asperitas_logging::info;
 use asperitas_pod::encoder::{ControlEvent, ControlSurface};
 use asperitas_pod::knob::Knobs;
 use asperitas_pod::led::{Led2, Led2Color};
+use asperitas_pod::ticker_guard::should_reset;
 use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
 use daisy_embassy::{hal, new_daisy_board, DaisyBoard};
 
@@ -239,7 +240,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
             // await the (possibly just-reset) ticker afterward so the loop
             // cannot spin through an extra zero-wait iteration.
             let now = embassy_time::Instant::now();
-            if now - last_tick > embassy_time::Duration::from_millis(POLL_INTERVAL_MS * 2) {
+            if should_reset(
+                now,
+                last_tick,
+                embassy_time::Duration::from_millis(POLL_INTERVAL_MS),
+            ) {
                 ticker.reset();
             }
             ticker.next().await;

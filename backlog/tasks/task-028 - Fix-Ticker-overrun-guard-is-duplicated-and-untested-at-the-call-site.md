@@ -1,11 +1,11 @@
 ---
 id: TASK-028
 title: 'Fix: Ticker overrun guard is duplicated and untested at the call site'
-status: In Progress
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-08-09 05:43'
-updated_date: '2026-08-09 06:19'
+updated_date: '2026-08-09 06:26'
 labels:
   - review-followup
   - planned
@@ -126,3 +126,9 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 - sync hooks: ✔️(pre-commit, pre-push) — firmware builds
 - sync hooks: ✔️(pre-commit, pre-push) — no warnings
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Extracted overrun-detection predicate into  — pure arithmetic on  types, host-testable without hardware. Both  (knob_poll_task) and  (poll loop) now import and call it. Added boundary-condition tests covering the strictly-greater-than threshold at exactly 2x period, and a stall simulation test proving the guard detects overruns without false positives on normal gaps.
+<!-- SECTION:NOTES:END -->
