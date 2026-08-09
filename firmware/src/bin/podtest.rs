@@ -168,6 +168,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
         color_name(LED_COLORS[color_idx])
     );
 
+    // Bound catch-up bursts after executor stalls (TASK-026).
+    let mut last_tick = embassy_time::Instant::now();
+
     let poll_fut = async {
         loop {
             // Milliseconds since boot, stamped on every line. Without it the
@@ -230,7 +233,16 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 );
             }
 
-            ticker.next().await;
+            // Bound catch-up bursts: if the executor stalled longer than twice
+            // the poll period, reset the ticker to discard its backlog instead
+            // of letting next() fire all missed ticks back-to-back.
+            let now = embassy_time::Instant::now();
+            if now - last_tick > embassy_time::Duration::from_millis(POLL_INTERVAL_MS * 2) {
+                ticker.reset();
+            } else {
+                ticker.next().await;
+            }
+            last_tick = now;
         }
     };
 

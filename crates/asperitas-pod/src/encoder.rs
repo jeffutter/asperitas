@@ -21,11 +21,13 @@
 //! mechanical switch bounce (typically 1–10 ms).
 //!
 //! This assumes each `poll()` call is spaced ~1 ms apart in wall-clock time.
-//! Callers must drive `poll()` from a fixed-period scheduler, e.g.
-//! `embassy_time::Ticker::every()`, not `Timer::after()` (which sleeps
-//! *after* the work and drifts under load — see TASK-025). Note also that a
-//! stalled caller can make `Ticker` fire several ticks back-to-back to catch
-//! up, momentarily defeating this debounce assumption.
+//! Callers must drive `poll()` from a fixed-period scheduler,
+//! `embassy_time::Ticker::every()`. The call-site must also bound Ticker
+//! catch-up bursts by detecting overruns and calling `Ticker::reset()` when
+//! the gap between iterations exceeds twice the poll period (TASK-026). With
+//! this guard, a stalled executor produces at most one immediate tick rather
+//! than a back-to-back burst, preserving the temporal spacing assumption of
+//! DEBOUNCE_TICKS.
 
 // ---------------------------------------------------------------------------
 // Algorithmic logic — host-testable, no hardware dependency
@@ -272,11 +274,15 @@ mod hw {
         /// Samples encoder A/B for quadrature state, and all three switches
         /// for debounced edges. Each event is passed to the `events` callback.
         ///
-        /// Call from a control-surface task at ~1 kHz, scheduled with a
-        /// fixed-period timer (`embassy_time::Ticker::every()`), not
-        /// `Timer::after()` — see the module-level debounce-timing note. Do
-        /// NOT call from the audio callback — GPIO reads are blocking and
-        /// would disrupt audio timing.
+        /// Call from a control-surface task at ~1 kHz, scheduled with
+        /// `embassy_time::Ticker::every()`. The caller must bound Ticker
+        /// catch-up bursts by detecting overruns and calling `Ticker::reset()`
+        /// when the gap between iterations exceeds twice the poll period;
+        /// without this guard, a stalled executor produces back-to-back ticks
+        /// that compress DEBOUNCE_TICKS readings into sub-millisecond windows
+        /// (see module-level debounce documentation). Do NOT call from the
+        /// audio callback — GPIO reads are blocking and would disrupt audio
+        /// timing.
         pub fn poll(&mut self, mut events: impl FnMut(super::ControlEvent)) {
             // Read encoder state: A is bit 1, B is bit 0.
             // Pin is inverted (pull-up, active-low): Low = active.
@@ -564,5 +570,29 @@ mod tests {
         assert_eq!(edges[0], Edge::Press);
         assert_eq!(edges[1], Edge::Release);
         assert_eq!(edges[2], Edge::Press);
+    }
+
+    #[test]
+    fn burst_of_identical_readings_emits_edge_without_wall_clock() {
+        // Demonstrates why call-site overrun detection is necessary:
+        // DebouncedSwitch has no wall-clock awareness — if DEBOUNCE_TICKS
+        // readings arrive in rapid succession (as happens when Ticker replays
+        // a backlog after an executor stall), it emits an edge despite zero
+        // real time elapsing. The call-site guard (TASK-026) prevents this
+        // by resetting the ticker on overrun so at most one tick fires.
+        let mut sw = DebouncedSwitch::new(false);
+        // Feed DEBOUNCE_TICKS identical "pressed" readings back-to-back.
+        // In a burst scenario, these represent ~0 ms of real time,
+        // not the ~5 ms debounce window.
+        let mut edge_count = 0u32;
+        for _ in 0..DEBOUNCE_TICKS {
+            if sw.update(true).is_some() {
+                edge_count += 1;
+            }
+        }
+        // An edge was emitted based purely on call count with no temporal
+        // separation — exactly the failure mode TASK-026's call-site guard
+        // prevents in production.
+        assert_eq!(edge_count, 1, "burst input produces spurious edge");
     }
 }
