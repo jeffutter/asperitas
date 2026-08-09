@@ -33,12 +33,12 @@ Corollary (lower confidence, same root cause): `firmware/src/bin/podtest.rs`'s l
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The control-surface poll loops in firmware/src/bin/main.rs and firmware/src/bin/podtest.rs bound Ticker catch-up so a stall of N ms produces at most one immediate tick, not a back-to-back burst of missed ticks (e.g. detect an overrun via Instant and call Ticker::reset() or reset_after() to resynchronize instead of letting next() replay the backlog)
-- [ ] #2 A host-side unit test in crates/asperitas-pod/src/encoder.rs's debounce module demonstrates that DebouncedSwitch does not emit a spurious edge when five 'consecutive' readings are delivered with near-zero elapsed time between them after a simulated stall (construct the scenario with a fake/injected clock or by asserting the bound added in AC #1 at the call-site level, whichever is testable without hardware)
-- [ ] #3 crates/asperitas-pod/src/encoder.rs's module doc and ControlSurface::poll() doc comment are updated to state the bound now guaranteed, replacing the current unqualified Ticker-fixes-this framing added by TASK-025's fixup
-- [ ] #4 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --bin main --release succeeds
-- [ ] #5 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --bin main -- -D warnings passes
-- [ ] #6 nix develop -c cargo test -p asperitas-pod passes
+- [x] #1 The control-surface poll loops in firmware/src/bin/main.rs and firmware/src/bin/podtest.rs bound Ticker catch-up so a stall of N ms produces at most one immediate tick, not a back-to-back burst of missed ticks (e.g. detect an overrun via Instant and call Ticker::reset() or reset_after() to resynchronize instead of letting next() replay the backlog)
+- [x] #2 A host-side unit test in crates/asperitas-pod/src/encoder.rs's debounce module demonstrates that DebouncedSwitch does not emit a spurious edge when five 'consecutive' readings are delivered with near-zero elapsed time between them after a simulated stall (construct the scenario with a fake/injected clock or by asserting the bound added in AC #1 at the call-site level, whichever is testable without hardware)
+- [x] #3 crates/asperitas-pod/src/encoder.rs's module doc and ControlSurface::poll() doc comment are updated to state the bound now guaranteed, replacing the current unqualified Ticker-fixes-this framing added by TASK-025's fixup
+- [x] #4 nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --bin main --release succeeds
+- [x] #5 nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --bin main -- -D warnings passes
+- [x] #6 nix develop -c cargo test -p asperitas-pod passes
 <!-- AC:END -->
 
 ## Implementation Plan
