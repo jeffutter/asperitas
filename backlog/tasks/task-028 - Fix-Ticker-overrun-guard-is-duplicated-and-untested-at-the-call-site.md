@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@agent'
 created_date: '2026-08-09 05:43'
-updated_date: '2026-08-09 06:26'
+updated_date: '2026-08-09 06:33'
 labels:
   - review-followup
   - planned
@@ -131,6 +131,8 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 <!-- SECTION:NOTES:BEGIN -->
 Extracted overrun-detection predicate into  — pure arithmetic on  types, host-testable without hardware. Both  (knob_poll_task) and  (poll loop) now import and call it. Added boundary-condition tests covering the strictly-greater-than threshold at exactly 2x period, and a stall simulation test proving the guard detects overruns without false positives on normal gaps.
+
+Fixup applied post-review (2 commits): (1) rustfmt-wrapped the two should_reset() call sites in main.rs/podtest.rs and fixed podtest.rs's import order (ticker_guard was inserted before led, breaking alphabetical order) — the commit's own new code was not rustfmt-clean, and the repo's pre-commit/pre-push fmt-check silently doesn't cover firmware/ (it's excluded from the root workspace), so this landed undetected. (2) Completed Step 7 of the original plan, which was dropped: encoder.rs's module doc and poll() doc comment fully restated the overrun-guard policy (2x-period threshold, reset-then-await sequencing) instead of pointing to ticker_guard::should_reset, leaving the exact information-leakage problem this ticket was filed to fix — the *explanation* of the policy, not just the code — duplicated across three places. Both fixups verified with cargo fmt --check, cargo test -p asperitas-pod, cargo doc -p asperitas-pod --no-deps, and cargo clippy --workspace --all-targets -- -D warnings.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
