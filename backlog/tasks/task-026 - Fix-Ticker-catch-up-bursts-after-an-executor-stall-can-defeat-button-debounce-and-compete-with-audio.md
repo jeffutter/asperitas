@@ -120,3 +120,9 @@ All changes implement a single mechanism (overrun detection + reset) applied to 
 <!-- SECTION:NOTES:BEGIN -->
 AC #1: Added overrun detection with Ticker::reset() to both main.rs knob_poll_task and podtest.rs poll loop. When gap between iterations exceeds 2× poll period (2 ms), ticker is reset to discard backlog instead of replaying missed ticks. AC #2: Added burst_of_identical_readings_emits_edge_without_wall_clock test proving DebouncedSwitch emits on call count alone. AC #3: Updated module doc and ControlSurface::poll() doc to state the bound now guaranteed.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added Ticker catch-up overrun detection to both main.rs and podtest.rs poll loops. When executor stall exceeds 2× poll period (2 ms), Ticker::reset() discards the backlog instead of replaying missed ticks back-to-back. Updated encoder.rs docs to document the bound. Added burst test proving DebouncedSwitch vulnerability without call-site guard.
+<!-- SECTION:FINAL_SUMMARY:END -->
