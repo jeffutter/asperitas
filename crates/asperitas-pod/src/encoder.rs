@@ -19,6 +19,13 @@
 //! emitted only after DEBOUNCE_TICKS consecutive readings agree. At 1 kHz poll
 //! rate with DEBOUNCE_TICKS = 5, this gives ~5 ms debounce — sufficient for
 //! mechanical switch bounce (typically 1–10 ms).
+//!
+//! This assumes each `poll()` call is spaced ~1 ms apart in wall-clock time.
+//! Callers must drive `poll()` from a fixed-period scheduler, e.g.
+//! `embassy_time::Ticker::every()`, not `Timer::after()` (which sleeps
+//! *after* the work and drifts under load — see TASK-025). Note also that a
+//! stalled caller can make `Ticker` fire several ticks back-to-back to catch
+//! up, momentarily defeating this debounce assumption.
 
 // ---------------------------------------------------------------------------
 // Algorithmic logic — host-testable, no hardware dependency
@@ -265,8 +272,11 @@ mod hw {
         /// Samples encoder A/B for quadrature state, and all three switches
         /// for debounced edges. Each event is passed to the `events` callback.
         ///
-        /// Call from a control-surface task at ~1 kHz. Do NOT call from the
-        /// audio callback — GPIO reads are blocking and would disrupt audio timing.
+        /// Call from a control-surface task at ~1 kHz, scheduled with a
+        /// fixed-period timer (`embassy_time::Ticker::every()`), not
+        /// `Timer::after()` — see the module-level debounce-timing note. Do
+        /// NOT call from the audio callback — GPIO reads are blocking and
+        /// would disrupt audio timing.
         pub fn poll(&mut self, mut events: impl FnMut(super::ControlEvent)) {
             // Read encoder state: A is bit 1, B is bit 0.
             // Pin is inverted (pull-up, active-low): Low = active.
