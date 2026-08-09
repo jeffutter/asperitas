@@ -5,7 +5,7 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-08-09 05:43'
-updated_date: '2026-08-09 06:09'
+updated_date: '2026-08-09 06:18'
 labels:
   - review-followup
 dependencies:
@@ -33,31 +33,95 @@ Found while reviewing TASK-026 (firmware/src/bin/main.rs:139-153, firmware/src/b
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-SETUP (read first): This is a Rust+WebAssembly core (crates/gql-core) with a
-TypeScript/React web app (web/). ALL commands must run inside the Nix dev
-shell: either run 'direnv allow' once, or prefix every command with
-'nix develop -c'. Work from the repository root unless told otherwise. Do not
-change pinned dependency versions.
+Extract the duplicated ticker overrun guard into a shared, host-testable function in crates/asperitas-pod, then replace both firmware call sites and add boundary-condition + simulation tests.
 
-Note: this specific project has no crates/gql-core or web/ — ignore those paths in the preamble above; they are boilerplate from the review skill. The actual relevant crate is crates/asperitas-pod, and the firmware binaries are firmware/src/bin/main.rs and firmware/src/bin/podtest.rs.
+## Step 1: Add embassy-time dependency to asperitas-pod
 
-1. In crates/asperitas-pod/src/encoder.rs (or a new small module, e.g. crates/asperitas-pod/src/ticker_guard.rs, whichever fits the existing module layout better after reading lib.rs), add a pure function such as:
-   pub fn should_reset_on_overrun(now: embassy_time::Instant, last_tick: embassy_time::Instant, period: embassy_time::Duration) -> bool {
-       now - last_tick > period * 2
-   }
-   Check whether embassy_time::Instant/Duration are usable outside the hw-gated cfg in this crate today (they likely already are, since firmware/src/bin/main.rs and podtest.rs use them and depend on asperitas-pod) — if embassy_time is only a dev-dependency or feature-gated in asperitas-pod's Cargo.toml, add it as a normal dependency first and confirm it builds host-side (Instant::now() needs a time driver; for host tests you may need embassy_time's std feature — check Cargo.toml under [dev-dependencies] and asperitas-pod/Cargo.toml for existing embassy_time wiring before assuming a new feature is needed).
-2. Replace the inline gap-check-and-reset block in firmware/src/bin/main.rs's knob_poll_task (currently around lines 139-153, post-fixup) with a call to the new shared predicate: keep the reset()/next().await sequencing local to the loop (Ticker isn't Send/shareable across a free function boundary in a way that's worth abstracting — only the boolean decision should move), i.e.:
-   let now = embassy_time::Instant::now();
-   if asperitas_pod::should_reset_on_overrun(now, last_tick, embassy_time::Duration::from_millis(POLL_INTERVAL_MS)) {
-       ticker.reset();
-   }
-   ticker.next().await;
-   last_tick = now;
-3. Apply the identical change to firmware/src/bin/podtest.rs's poll loop (currently around lines 236-246, post-fixup).
-4. Add the boundary-condition unit test described in AC #2 to crates/asperitas-pod (table-test a few (gap, expected) pairs: gap == period (false), gap == 2*period (false, boundary is strictly greater-than per the existing behavior), gap == 2*period + 1 tick / 1ms (true)).
-5. For AC #3 (proving the sequencing bounds catch-up to one immediate tick, not two): this cannot use a real embassy executor without hardware, so instead write a small host-side simulation: a loop that mimics the poll task's structure using a fake/injected 'now' sequence (a Vec<Instant> or a simple counter-based clock) driving should_reset_on_overrun and counting how many 'body' executions happen with near-zero (< 1 poll period) gaps between them after a simulated large gap is injected once. Assert the count of near-zero-gap body executions immediately following the injected stall is exactly 1, not 2 — this is the regression the post-review fixup (see TASK-026's Implementation Notes, commit 074b49d/fixup!b8be5ff) corrected by hand; this test is what should have caught it.
-6. Update crates/asperitas-pod/src/encoder.rs's module doc / ControlSurface::poll() doc comment if the extraction moves the overrun-bound explanation out of the call sites and into the new shared function's doc comment — keep the two docs consistent, don't duplicate the explanation in three places now.
-7. Run: nix develop -c cargo test -p asperitas-pod
-8. Run: nix develop -c cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --bin main --release
-9. Run: nix develop -c cargo clippy --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --bin main -- -D warnings
+Add  to  . The types (, ) are plain  structs backed by u64 — usable without hardware. For host-side tests, construct values arithmetically from  + ; no time driver needed because the predicate function does not call .
+
+## Step 2: Create  module
+
+New file :
+
+embassy_time::Ticker::next()Ticker::reset()Ticker::reset()Ticker::next()
+
+Add  to  (always available, no feature gate — pure arithmetic on Copy types).
+
+## Step 3: Update  knob_poll_task
+
+Replace the inline guard block (~lines 139-153) with:
+
+Note:  stays before  (the fixup from commit 074b49d). Only the boolean predicate moves out; the sequencing semantics stay local.
+
+## Step 4: Update  poll loop
+
+Apply the identical transformation to the inline guard block (~lines 236-246):
+
+## Step 5: Add boundary-condition unit test (AC #2)
+
+In , add  with a table test:
+
+| gap_ms | period_ms | expected | reason |
+|--------|-----------|----------|--------|
+| 1      | 1         | false    | gap == period (normal) |
+| 2      | 1         | false    | gap == 2*period (boundary, strictly greater-than) |
+| 3      | 1         | true     | gap > 2*period (overrun detected) |
+| 1000   | 1         | true     | large stall |
+| 1      | 500       | false    | sub-threshold relative to long period |
+
+Construct Instants as  and . No time driver needed — pure arithmetic on u64-backed types.
+
+## Step 6: Add simulation test proving at-most-one-immediate-tick (AC #3)
+
+Write a host-side simulation that mimics the poll loop structure using fake timestamps:
+
+The key assertion: after injecting a stall timestamp, the number of subsequent iterations with gap ≤ period is exactly 1 (not 0, not 2+). This proves the  fixup prevents the cascade described in TASK-026's commit 074b49d.
+
+## Step 7: Update encoder.rs docs
+
+Move the overrun-guard explanation from the module-level doc comment and  doc into 's module docs. In , shorten the references to redirect comments like:
+
+> Callers must bound Ticker catch-up bursts using  (see that module for policy details).
+
+This avoids duplicating the explanation in three places.
+
+## Step 8: Verification
+
+Run:
+- sync hooks: ✔️(pre-push, pre-commit)
+
+running 25 tests
+test encoder::tests::all_lut_entries_valid ... ok
+test encoder::tests::bounce_both_bits_00_to_11_yields_zero ... ok
+test encoder::tests::bounce_both_bits_01_to_10_yields_zero ... ok
+test encoder::tests::burst_of_identical_readings_emits_edge_without_wall_clock ... ok
+test encoder::tests::counter_clockwise_one_detent_from_zero ... ok
+test encoder::tests::clockwise_one_detent_from_zero ... ok
+test encoder::tests::full_clockwise_cycle ... ok
+test encoder::tests::full_counter_clockwise_cycle ... ok
+test encoder::tests::lut_symmetry_clockwise_vs_counter ... ok
+test encoder::tests::long_held_stable_reading_does_not_overflow_consecutive_counter ... ok
+test encoder::tests::mixed_rotation_and_bounce_filters_bounce ... ok
+test encoder::tests::no_movement_yields_zero ... ok
+test encoder::tests::out_of_range_state_is_masked_not_indexed_out_of_bounds ... ok
+test encoder::tests::rapid_bounce_sequence_no_false_edges ... ok
+test encoder::tests::press_then_release_then_repress_no_double_count ... ok
+test encoder::tests::release_after_stable_period_emits_release ... ok
+test encoder::tests::single_bounce_pulse_does_not_emit_edge ... ok
+test encoder::tests::stable_press_emits_single_edge ... ok
+test encoder::tests::stable_state_never_emits_edge ... ok
+test knob::tests::normalize_full_range ... ok
+test knob::tests::normalize_midpoint ... ok
+test knob::tests::normalize_zero ... ok
+test knob::tests::spans_the_full_unit_interval ... ok
+test knob::tests::twelve_bit_full_scale_is_not_full_scale ... ok
+test knob::tests::monotonic_increase ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s — all tests pass including new ones
+- sync hooks: ✔️(pre-commit, pre-push) — firmware builds
+- sync hooks: ✔️(pre-commit, pre-push) — no warnings
 <!-- SECTION:PLAN:END -->
