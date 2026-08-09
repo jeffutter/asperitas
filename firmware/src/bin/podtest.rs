@@ -96,6 +96,13 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Init USB CDC serial logging.
     let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
 
+    // Linger on the pre-init red so it can actually be seen. Boot takes a few
+    // milliseconds, so without the delay red → green reads as "always green"
+    // and the two stages can't be distinguished by eye — which is exactly what
+    // TASK-018.04 AC #6 asks a human to confirm. Mirrors main.rs.
+    #[cfg(feature = "slow-boot")]
+    embassy_time::Timer::after_secs(3).await;
+
     // Transition LED 1 to Running state (steady green).
     asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
 
@@ -147,42 +154,55 @@ async fn main(_spawner: embassy_executor::Spawner) {
 
     // Set initial LED colour.
     led2.set_color(LED_COLORS[color_idx]);
-    info!("[podtest] led2={}", color_name(LED_COLORS[color_idx]));
+    info!(
+        "[podtest] t={} led2={}",
+        embassy_time::Instant::now().as_millis(),
+        color_name(LED_COLORS[color_idx])
+    );
 
     let poll_fut = async {
         loop {
-            // Poll knobs — throttled to ~100 Hz via KNOB_LOG_THROTTLE to keep
-            // USB CDC serial readable. Quantise to permille (×1000) to avoid
-            // float fmt on no_std.
-            let (k1, k2) = knobs.read();
-            let k1_i = (k1 * 1000.0) as u16;
-            let k2_i = (k2 * 1000.0) as u16;
+            // Milliseconds since boot, stamped on every line. Without it the
+            // log has no timebase: segments of a hand-run test cannot be told
+            // apart, hold durations cannot be measured, and the sample rate
+            // has to be inferred. Cheap, and it makes the capture analysable.
+            let now_ms = embassy_time::Instant::now().as_millis();
+
+            // Poll knobs — throttled via KNOB_LOG_THROTTLE to keep USB CDC
+            // serial readable.
+            //
+            // Logged as RAW ADC counts, not normalised permille. Jitter is the
+            // measurement this harness exists for (TASK-018.04 AC #2), and
+            // permille quantises to 1/1000 — coarse enough to floor the very
+            // number being measured. Full scale is 65535; see
+            // asperitas_pod::knob::POT_FULL_SCALE_COUNTS.
+            let (r1, r2) = knobs.read_raw();
             if knob_log_tick.is_multiple_of(KNOB_LOG_THROTTLE) {
-                info!("[podtest] k1={} k2={}", k1_i, k2_i);
+                info!("[podtest] t={} r1={} r2={}", now_ms, r1, r2);
             }
 
             // Poll encoder and buttons.
             controls.poll(|event| match event {
                 ControlEvent::EncoderDelta(delta) => {
-                    info!("[podtest] ENC {:+}", delta);
+                    info!("[podtest] t={} ENC {:+}", now_ms, delta);
                 }
                 ControlEvent::ClickPress => {
-                    info!("[podtest] CLICK press");
+                    info!("[podtest] t={} CLICK press", now_ms);
                 }
                 ControlEvent::ClickRelease => {
-                    info!("[podtest] CLICK release");
+                    info!("[podtest] t={} CLICK release", now_ms);
                 }
                 ControlEvent::Button1Press => {
-                    info!("[podtest] BTN1 press");
+                    info!("[podtest] t={} BTN1 press", now_ms);
                 }
                 ControlEvent::Button1Release => {
-                    info!("[podtest] BTN1 release");
+                    info!("[podtest] t={} BTN1 release", now_ms);
                 }
                 ControlEvent::Button2Press => {
-                    info!("[podtest] BTN2 press");
+                    info!("[podtest] t={} BTN2 press", now_ms);
                 }
                 ControlEvent::Button2Release => {
-                    info!("[podtest] BTN2 release");
+                    info!("[podtest] t={} BTN2 release", now_ms);
                 }
             });
 
@@ -195,7 +215,11 @@ async fn main(_spawner: embassy_executor::Spawner) {
                 tick = 0;
                 color_idx = (color_idx + 1) % LED_COLORS.len();
                 led2.set_color(LED_COLORS[color_idx]);
-                info!("[podtest] led2={}", color_name(LED_COLORS[color_idx]));
+                info!(
+                    "[podtest] t={} led2={}",
+                    embassy_time::Instant::now().as_millis(),
+                    color_name(LED_COLORS[color_idx])
+                );
             }
 
             embassy_time::Timer::after_millis(POLL_INTERVAL_MS).await;
