@@ -3,11 +3,11 @@ id: TASK-026
 title: >-
   Fix: Ticker catch-up bursts after an executor stall can defeat button debounce
   and compete with audio
-status: In Progress
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-08-09 05:08'
-updated_date: '2026-08-09 05:34'
+updated_date: '2026-08-09 05:35'
 labels:
   - review-followup
   - planned

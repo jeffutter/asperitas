@@ -114,10 +114,15 @@ fn encode_block(input: &[Frame; BLOCK_LENGTH], output: &mut [u32]) {
     }
 }
 
+/// Poll interval for control surface (~1 kHz).
+const POLL_INTERVAL_MS: u64 = 1;
+
 /// Async task that polls knobs at ~1 kHz and stores values for the audio callback.
 ///
 /// Uses `Ticker` for fixed-period scheduling so ADC read duration does not
 /// accumulate drift into the poll interval (TASK-025).
+/// Bounded catch-up (TASK-026): if the executor stalls, the ticker is reset
+/// on overrun rather than replaying missed ticks back-to-back.
 #[embassy_executor::task]
 async fn knob_poll_task(knob_state: &'static KnobState) {
     // The Pod's knobs are wired to Seed GPIO breakout pins that `board.pins`
@@ -128,12 +133,23 @@ async fn knob_poll_task(knob_state: &'static KnobState) {
     let knob2 = unsafe { hal::peripherals::PC0::steal() };
     let mut knobs = Knobs::new(adc1, knob1, knob2);
 
-    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_millis(1));
+    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_millis(POLL_INTERVAL_MS));
+    let mut last_tick = embassy_time::Instant::now();
 
     loop {
         let (k1, k2) = knobs.read();
         knob_state.write([k1, k2]);
-        ticker.next().await;
+
+        // Bound catch-up bursts: if the executor stalled longer than twice the
+        // poll period, reset the ticker to discard its backlog instead of
+        // letting next() fire all missed ticks back-to-back.
+        let now = embassy_time::Instant::now();
+        if now - last_tick > embassy_time::Duration::from_millis(POLL_INTERVAL_MS * 2) {
+            ticker.reset();
+        } else {
+            ticker.next().await;
+        }
+        last_tick = now;
     }
 }
 
