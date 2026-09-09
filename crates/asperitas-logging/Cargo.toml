@@ -23,6 +23,12 @@ embassy-sync = { version = "0.6", optional = true }
 # default features (no `log-usb`), so its tests pull embassy-sync in here rather
 # than the module depending on it. Dev-deps never reach the `firmware/` workspace,
 # which keeps `firmware/Cargo.lock` unchanged.
+#
+# `base64` joins them as the oracle for `dump`'s codec: the strict rules that make
+# corruption visible are only trustworthy because they were measured against the
+# reference implementation, so the reference belongs in the test suite and nowhere
+# else — the device-side encoder is hand-written and links nothing.
 [dev-dependencies]
 proptest = "1"
 embassy-sync = "0.6"
+base64 = "0.23"

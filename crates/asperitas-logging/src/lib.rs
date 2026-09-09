@@ -169,6 +169,13 @@ pub mod frame;
 /// so its tests must run without hardware features enabled.
 pub mod console;
 
+/// Base64 payload codec for shipping captured audio over the framed console.
+///
+/// Ungated for the same reason as [`frame`]: it is pure byte arithmetic whose equivalence
+/// with a reference implementation is proven on the host, where the oracle can be a
+/// dev-dependency.
+pub mod dump;
+
 // ---------------------------------------------------------------------------
 // Feature-gated modules
 // ---------------------------------------------------------------------------

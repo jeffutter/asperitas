@@ -3,11 +3,11 @@ id: TASK-038.02.01
 title: >-
   Add a strict canonical base64 codec to asperitas-logging with a
   reference-oracle property test
-status: Dev Ready
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 15:50'
-updated_date: '2026-09-09 15:53'
+updated_date: '2026-09-09 16:37'
 labels:
   - planned
 dependencies: []
@@ -34,11 +34,11 @@ See TASK-038.02's Implementation Notes for the measured oracle behaviour and the
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `dump` module exists in `crates/asperitas-logging`, is ungated in `lib.rs` so `cargo test --workspace` builds it on host under the crate's unconditional `#![no_std]`, and exposes `encoded_len`, `max_raw_for`, `encode`, `decode` over caller-provided buffers with no allocation.
-- [ ] #2 A proptest asserts our encoder is byte-identical to `base64 0.23`'s `STANDARD::encode_slice`, and that decode agrees with the oracle on accept/reject and on decoded bytes, over random inputs from 0 to `CHUNK_RAW + 7` bytes. `base64` appears only in `[dev-dependencies]` and `firmware/Cargo.lock` is unchanged.
-- [ ] #3 Trailing-symbol handling is proven exhaustively, not sampled: all 64 possible final symbols for a 1-byte tail and all 64 for a 2-byte tail are checked against the oracle, so non-canonical input (ignored bits nonzero) is rejected exactly as the oracle rejects it.
-- [ ] #4 Pinned golden vectors cover RFC 4648 §10 in full, 129 bytes of `0x00`, 129 bytes of `0xFF`, and a vector exercising all 64 alphabet characters plus `+`/`/` boundaries; malformed-input tests cover length-not-a-multiple-of-4, `=` inside the string, junk after padding, inner whitespace, and too-small output buffers — each as an error, never a panic.
-- [ ] #5 `cargo fmt --all --check`, `cargo clippy -p asperitas-logging --all-targets -- -D warnings`, `cargo test -p asperitas-logging`, and `cd firmware && cargo build --release --features seed3` all pass.
+- [x] #1 A `dump` module exists in `crates/asperitas-logging`, is ungated in `lib.rs` so `cargo test --workspace` builds it on host under the crate's unconditional `#![no_std]`, and exposes `encoded_len`, `max_raw_for`, `encode`, `decode` over caller-provided buffers with no allocation.
+- [x] #2 A proptest asserts our encoder is byte-identical to `base64 0.23`'s `STANDARD::encode_slice`, and that decode agrees with the oracle on accept/reject and on decoded bytes, over random inputs from 0 to `CHUNK_RAW + 7` bytes. `base64` appears only in `[dev-dependencies]` and `firmware/Cargo.lock` is unchanged.
+- [x] #3 Trailing-symbol handling is proven exhaustively, not sampled: all 64 possible final symbols for a 1-byte tail and all 64 for a 2-byte tail are checked against the oracle, so non-canonical input (ignored bits nonzero) is rejected exactly as the oracle rejects it.
+- [x] #4 Pinned golden vectors cover RFC 4648 §10 in full, 129 bytes of `0x00`, 129 bytes of `0xFF`, and a vector exercising all 64 alphabet characters plus `+`/`/` boundaries; malformed-input tests cover length-not-a-multiple-of-4, `=` inside the string, junk after padding, inner whitespace, and too-small output buffers — each as an error, never a panic.
+- [x] #5 `cargo fmt --all --check`, `cargo clippy -p asperitas-logging --all-targets -- -D warnings`, `cargo test -p asperitas-logging`, and `cd firmware && cargo build --release --features seed3` all pass.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -85,3 +85,69 @@ Implementation notes: build the inverse alphabet once with a `const fn` table (`
 ## Out of scope here
 No `AUDIO`/`AUDEND` bodies, no `CHUNK_RAW`, no assembler, nothing behind `log-usb`. Keep `dump.rs` free of `unsafe`, allocation, and `frame` internals beyond the public constants.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Shipped 2026-09-09
+
+`crates/asperitas-logging/src/dump.rs` (new, ungated in `lib.rs` next to `frame`/`console`) holds an
+allocation-free, `core`-only base64 codec: `encoded_len`, `max_raw_for`, `encode`, `decode`, plus
+`EncodeError`/`DecodeError` whose variants carry the offending offset so a caller can say *where* a
+capture broke. Decoding is driven by a `const fn`-built `[i8; 256]` inverse alphabet (`-1` invalid,
+`-2` pad), which makes validity fall out of the lookup instead of a chain of range comparisons.
+Padding legality is decided in exactly one place, `tail_shape`, so validation and decoding cannot
+drift apart on the rules that matter.
+
+`base64 = "0.23"` is a dev-dependency only, with the reason written above the section it belongs to.
+`Cargo.lock` gains `base64 0.23.1`; `firmware/Cargo.lock` is untouched (`git diff --stat` empty).
+
+### Measured oracle behaviour, confirmed rather than assumed
+Every rule in the module doc was probed against `base64 0.23.1 STANDARD` before being asserted: a
+throwaway harness printed both verdicts for 30 hand-picked strings and all 30 agreed (offsets too,
+except where our stricter length rule legitimately fires first). The harness is gone; the table it
+covered now lives in `agrees_with_the_reference_on_tricky_strings`. Two findings were worth
+recording because they are easy to get wrong:
+
+- `"AB=="` is refused by the reference as *Invalid last symbol*, not silently decoded — matching our
+  `TrailingBits`. This is why strictness buys anything: `sanitize_byte` leaves printable ASCII alone,
+  so a bit-flip in a payload's final symbol would otherwise decode cleanly into wrong audio.
+- A length violation usually masks the interesting error (`"QUJDRA==X"` fails on length, not on junk
+  after padding). The malformed-class table therefore isolates each class with strings that are a
+  whole number of groups long.
+
+### One expectation corrected while writing the tests
+A one-byte tail keeps six of twelve bits, so four symbols of the alphabet are canonical (`A`, `Q`,
+`g`, `w`) — not sixteen. The exhaustive sweep caught this by counting 4 where the comment predicted
+16; the two-byte tail really is 16 of 64. Both counts are now asserted from the bit arithmetic the
+test names.
+
+### Verification
+- `cargo test -p asperitas-logging`: 31 unit + 13 dump + 33 frame + 1 doctest, all passing. No
+  `.proptest-regressions` file appeared, because nothing ever failed a shrink.
+- `cargo fmt --all --check`, `cargo clippy -p asperitas-logging --all-targets -- -D warnings`,
+  `cargo clippy --workspace --all-targets -- -D warnings`, and the `asperitas-pod/pod-hw` variant:
+  clean.
+- `cargo test --workspace` and `cd firmware && cargo build --release --features seed3`: both exit 0.
+  The firmware build is the real no_std evidence — `dump` is ungated, so it compiles into the device
+  image even though no firmware code calls it yet.
+
+### Deliberate shape choices
+- Error *variants* are ours and are not expected to mirror the reference's wording; only the
+  accept/reject decision and the accepted bytes are comparable, and that is what the properties
+  assert.
+- `encoded_len` / `max_raw_for` clamp to `usize::MAX` instead of wrapping. Callers size buffers with
+  them, and a wrapped value would hand back a too-small buffer while reporting success.
+- An undersized output buffer is refused before any byte is written (both directions, tested).
+  Mid-string errors may leave earlier groups already decoded — documented rather than papered over
+  with a rollback nobody needs, since every caller passes a fresh chunk buffer.
+- No `CHUNK_RAW`, no `AUDIO`/`AUDEND`, nothing behind `log-usb`: those belong to .02 and .04. The
+  129-byte full-payload assertions here use the literal with a comment naming where the constant
+  will live.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Strict canonical base64 codec shipped in crates/asperitas-logging/src/dump.rs (no_std, no allocation, caller-provided buffers) with a 13-test suite in tests/console_dump.rs proving byte-identical encoding and accept/reject equivalence with base64 0.23.1 over random input, mutated input, an exhaustive sweep of all 64 final symbols for each tail shape, RFC 4648 vectors, and pinned full-payload saturation patterns. base64 is a dev-dependency only; firmware/Cargo.lock unchanged. fmt, clippy (crate, workspace, pod-hw), cargo test --workspace, and the seed3 firmware release build all pass.
+<!-- SECTION:FINAL_SUMMARY:END -->

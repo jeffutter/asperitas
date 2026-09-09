@@ -114,6 +114,7 @@ dependencies = [
 name = "asperitas-logging"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "cortex-m",
  "embassy-futures",
  "embassy-stm32",
@@ -147,6 +148,12 @@ checksum = "5deb64efa5bd81e31fcd1938615a6d98c82eafcbcd787162b6f63b91d6bac5b3"
 dependencies = [
  "rustc_version",
 ]
+
+[[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bit-set"
