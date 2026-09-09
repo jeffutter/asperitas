@@ -1,11 +1,11 @@
 ---
 id: TASK-038
 title: Generate stimulus and capture audio on-device for self-loopback measurement
-status: Dev Ready
+status: Blocked
 assignee:
-  - '@agent'
+  - '@human'
 created_date: '2026-09-09 02:12'
-updated_date: '2026-09-09 11:47'
+updated_date: '2026-09-09 11:59'
 labels:
   - planned
 dependencies:
@@ -114,6 +114,16 @@ TASK-035 consumes the stimulus/capture pair this epic produces and TASK-019.03 c
 - Deliberate dithering of stimulus waits until something has characterized the noise floor; uncharacterized truncation spurs would be reported as distortion.
 <!-- SECTION:PLAN:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Parked by agent run 2026-09-09 without implementation work: this ticket is an umbrella whose ACs are all carried by subtasks, and one of those subtasks (TASK-038.05) is @human, so per the assignment convention in CLAUDE.md the parent is @human and no agent may close it. Evidence from the files, not from statuses: all six children were To Do at pickup (backlog/tasks/task-038.*), and 'backlog task list --ready' lists .01 and .02 but never TASK-038 itself — the parent's dependency list is exactly its six children, so it is unselectable on merit.
+
+Assignee corrected @agent -> @human. This was the only remaining instance of the TASK-004 misassignment: auditing every parent with an unfinished child, TASK-018, TASK-019, TASK-027 and TASK-030 already carry @human, TASK-038 alone did not. Consequence: '~/.pi/agent/extensions/ralph/unblocked-todo.sh' filters by assignee (default agent) *and* holds back containers with an unfinished child, so it now fails this ticket twice over — verified by 'backlog/unblocked-todo.sh "Dev Ready"' returning nothing both before and after the change. The pick that sent an agent here therefore did not come from that filter; whoever selects by ID should read the assignee field first.
+
+Next actionable step belongs to the loop on the children, in plan order: TASK-038.01 and TASK-038.02 in parallel (no shared files), then .03, .04, .06, then hand .05 to a human with the bench rigged. This parent goes Done only when .01-.06 are Done, which requires .05's recorded numbers.
+<!-- SECTION:NOTES:END -->
+
 ## Comments
 
 <!-- COMMENTS:BEGIN -->
@@ -129,3 +139,9 @@ Planning on 2026-09-09 verified the ticket's premises against the code and the v
 Two hazards found that no existing document mentions, both recorded in sub-ticket notes: `sdram.init()` returns **0xC000_0000** while the driver programs its single cacheable MPU region at **0xD000_0000**, an address with nothing behind it (caches are enabled nowhere in the stack today, so accesses are uncached and coherent by accident rather than design — TASK-038.05 settles it with a reading); and the QSPI driver erases the whole sector containing any `write()` address while offering no block or chip erase, so unaligned writes destroy their neighbours.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+No agent work available in this ticket: it is an umbrella whose seven criteria are all carried by subtasks .01-.06, and .05 is @human, so the parent must be @human and cannot be closed by an agent. Reassigned @agent -> @human, set Blocked behind all six children (dependencies already recorded, left intact), and audited every other parent with an unfinished child — TASK-018/019/027/030 were already correct, making this the last live instance of the TASK-004 misassignment. Filed TASK-039 for the stale PR #80 instruction in CLAUDE.md that this ticket's planning note 4 flagged as out of scope. Implementation belongs to .01 and .02 next.
+<!-- SECTION:FINAL_SUMMARY:END -->
