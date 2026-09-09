@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:23'
-updated_date: '2026-09-09 04:09'
+updated_date: '2026-09-09 05:42'
 labels:
   - planned
 dependencies:
@@ -391,5 +391,14 @@ Also committed here: planning pass 2's edits to this file and the four child tic
 created: 2026-09-09 04:05
 ---
 Planning pass 2: all four children now carry plans and the 'planned' label (.01 codec, .02 device path, .03 docs, .04 human bench check), so nothing here needs another /backlog-planner run before execution. Found and fixed a defect in pass 1's pinned design: Pipe::try_write short-writes at every ring wrap even when the ring is empty (RingBuffer::push_buf returns only the contiguous run; free_capacity reports total), so 'check capacity then write once' would still truncate records. Measured on host against real embassy-sync 0.6.2 Pipe<_,512>: ring empty, free_capacity()==512, a 200-byte write accepted 112. That mechanism also fits the observed loss rate better than buffer pressure - one truncation per wrap is ~1 record in 10 for ~50 B lines over a 512 B ring, against the 8.78% tally in TASK-018.04. Section 2 now records the experiment (/tmp/pipecheck2, 20k randomized rounds of the corrected commit helper, all frames byte-exact), section 4 pins pre-check + bounded write loop as the fix with Channel<CriticalSectionRawMutex,Frame,N> kept as the documented fallback, and max frame is corrected to 228 B (pass 1 said 229). Spec amendment: bodies shortened by the 200-byte cap get their own 'trunc' counter instead of being counted as dropped records, so dropped_full keeps meaning exactly one thing.
+---
+
+created: 2026-09-09 05:42
+---
+Amendment from planning TASK-030.01 (every number below was re-derived and checked by mutation experiments; details in TASK-030.01.01/.02):
+
+1. §3's illustrative `*2f9e` is wrong. Correct frames under the pinned parameters (`crc16_ccitt(b"123456789") == 0x29b1`): `~I 00000042 00004567 ENC +1*9c17\r\n` (34 B), empty body `~D 00000000 00000000 *91d4\r\n` (28 B), max-size body ends `*6c90`. TASK-030.03 must use these in docs/reference/console-protocol.md, not the ones currently in §3.
+2. §3's sentence "a corrupt stream cannot produce a spurious `~` because payloads are tilde-free by construction" is false: sanitisation maps only bytes < 0x20 and 0x7F, so `~`, `*`, `|` survive inside bodies. Framing strength comes from the rigid grammar plus the CRC and, above all, the no-CR/LF invariant. Measured: exhaustive single-byte mutation over three frame shapes (~75 000 cases) accepts **zero**; weight >= 2 payload mutations reject > 99 % (about 1/232 cancellation classes exist in principle because CRC-16 is linear).
+3. Two limits §3/§5 should state, because they change what a capture summary can claim: a record whose leading `~` was lost produces **no** `bad_frames` at all (only a `seq` gap or a `STATUS` counter reveals it), and a byte-level splice between two producers legitimately yields two valid records plus one integrity failure. The guarantee is that no record is ever invented, not that nothing decodes.
 ---
 <!-- COMMENTS:END -->
