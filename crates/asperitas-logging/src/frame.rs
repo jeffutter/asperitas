@@ -51,10 +51,17 @@
 //!   records plus one integrity failure, because the frames around the splice really
 //!   are intact. The guarantee is that no record is ever *invented*, not that nothing
 //!   decodes.
+//! - Integrity is not authenticity. The checksum is affine over GF(2), so two edits
+//!   whose contributions cancel leave it correct while changing the payload — see
+//!   `crc_can_be_forged_at_weight_two` in `tests/console_frame.rs`, which constructs
+//!   such a frame and watches it validate cleanly. Counters describe what the wire did
+//!   to bytes, not who wrote them.
 //!
 //! Continuity is the decoder's and the reader's business (`seq`, plus the `BOOT`
 //! record that distinguishes a restart from loss); this module's business is that a
 //! record which validates is byte-identical to one that was written.
+//!
+//! See [`Decoder`] for the consumer half.
 //!
 //! # Offset derivation
 //!
@@ -321,6 +328,508 @@ pub fn write_whole(
 }
 
 // ---------------------------------------------------------------------------
+// Decoder — incremental, allocation-free, chunk-boundary independent
+// ---------------------------------------------------------------------------
+
+/// One validated record: its framing *and* its CRC both checked out.
+///
+/// The body borrows the decoder's delivery queue, so a [`Decoder`] hands out one record
+/// at a time and that record stays valid only until the next
+/// [`push`](Decoder::push) or [`next_record`](Decoder::next_record): use each record
+/// before asking for the next. That is deliberate — it avoids a self-referential return
+/// type and avoids making every caller supply a buffer, and both the decode example and
+/// the tests want exactly this shape. Returning owned `Vec`s instead would put an
+/// allocator on the table for no gain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Record<'a> {
+    /// Wire letter: `I`, `W`, `E`, `D` or `T`.
+    pub level: u8,
+    /// Sequence number as transmitted (8 hex digits).
+    pub seq: u32,
+    /// Milliseconds since boot as transmitted — already modulo `1e8`, so a reader
+    /// cannot distinguish a wrap from a stall on this field alone.
+    pub t_ms: u32,
+    /// Body exactly as it arrived on the wire, hence already sanitised: control bytes
+    /// and DEL show up as `'_'`, and a body longer than [`MAX_BODY`] arrives capped.
+    pub body: &'a [u8],
+}
+
+/// What a [`Decoder`] saw, in four counters that each answer one question.
+///
+/// Read these only after [`Decoder::finish`] — see there. The accounting law
+///
+/// ```text
+/// bytes_pushed == Σ consumed + discarded_bytes + buffered()
+/// ```
+/// holds after every [`push`](Decoder::push) and after `finish()`, which is what makes
+/// the summary trustworthy rather than merely plausible.
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stats {
+    /// Records that validated on framing *and* CRC.
+    pub records: u64,
+    /// Candidate start markers examined and rejected.
+    pub bad_frames: u64,
+    /// Rejections after which a later start marker was actually located. Always
+    /// `<= bad_frames`; the two differ only when corruption runs to the end of a
+    /// capture and no further marker turns up.
+    pub resyncs: u64,
+    /// Bytes dropped that never reached a validated record: inter-record junk, the
+    /// forfeited `~` of each rejected start, and windows abandoned because no start
+    /// marker ever appeared in them.
+    pub discarded_bytes: u64,
+}
+
+/// How many validated records may sit undelivered at once.
+///
+/// Delivery is a queue rather than a single slot because one chunk routinely validates
+/// several records: 4 KiB, the size TASK-032 reads, can hold 145 of the shortest legal
+/// ones. A single slot would leave [`Decoder::push`] choosing between dropping bytes it
+/// was handed and overwriting a record nobody had read yet — both ways a reader loses
+/// history without learning anything happened.
+///
+/// Overflow cannot lose anything either: with a full queue `push` stops taking input
+/// and returns a short count, so the bytes stay where the caller put them. The queue
+/// therefore sets how much a reader may batch, not how much it may lose; eight is ample
+/// for anything that drains between pushes and costs 1.7 KB of inline state.
+pub const RECORD_SLOTS: usize = 8;
+
+/// Incremental decoder for console protocol v1.
+///
+/// Feed bytes as they arrive — [`push`](Decoder::push) accepts any chunking,
+/// including one record split across ten calls — take validated records from
+/// [`next_record`](Decoder::next_record), and read [`stats`](Decoder::stats) only
+/// after calling [`finish`](Decoder::finish).
+///
+/// # Why the parse cannot wedge, and why chunking cannot change the answer
+///
+/// Two states only: scanning for a start marker, and deciding the candidate already
+/// located. Every decision uses only bytes already offered, which is what makes both
+/// the records *and* the statistics identical under any chunking — a formulation with
+/// lookahead (“resynchronise at the next `~`”, which an earlier planning pass wrote)
+/// reports different counters depending on where the chunk boundaries fell.
+///
+/// Termination comes from the grammar: a well-formed body contains no CR and no LF
+/// ([`sanitize_byte`]) and neither does the fixed-width prefix, so the first complete
+/// CRLF after a candidate start *must* be that record's terminator. A candidate that
+/// fails against it can never succeed later, so it is disqualified permanently; a
+/// window that reaches [`MAX_FRAME`] with no terminator likewise cannot hold a record,
+/// because nothing valid is longer. Each rejected byte is dropped once and each
+/// examination inspects at most [`MAX_FRAME`] bytes, so the cost per input byte is
+/// bounded independently of history. That is not plain `O(n)` in the worst case — many
+/// `~`s inside one corrupt span each get their own ≤ 228-byte examination — and no
+/// claim stronger than “bounded per byte” is being made.
+///
+/// # Resynchronisation
+///
+/// On failure the decoder advances **strictly past** the disqualified start byte and
+/// never guesses a shorter body. This refines TASK-030 §3's “discard one candidate
+/// start and retry at the next `~`”: same contract, decided locally, therefore
+/// chunk-independent. The hazard worth naming is documented upstream — ArduPilot's C
+/// MAVLink parser desynchronised permanently when a bad-CRC message happened to end in
+/// a byte equal to the STX magic, because resuming at “the next plausible-looking byte”
+/// can land *inside* the next real frame
+/// (<https://github.com/ArduPilot/pymavlink/issues/881>). Records are emitted only
+/// from fully validated frames, so a splice can cost a record but cannot invent one.
+///
+/// # Memory
+///
+/// Inline storage sized by [`MAX_FRAME`]: no allocator, no `unsafe`, and never more
+/// than [`MAX_FRAME`] undecided bytes held at once.
+///
+/// # Example
+///
+/// ```
+/// use asperitas_logging::frame::{encode, Decoder, MAX_FRAME};
+/// use asperitas_logging::Level;
+///
+/// let mut buf = [0u8; MAX_FRAME];
+/// let len = encode(Level::Info, 0x42, 4567, b"ENC +1", &mut buf).len;
+///
+/// let mut decoder = Decoder::new();
+/// decoder.push(&buf[..3]);
+/// assert!(decoder.next_record().is_none(), "three bytes decide nothing");
+/// decoder.push(&buf[3..len]);
+///
+/// let record = decoder.next_record().expect("framing and CRC both validate");
+/// assert_eq!((record.level, record.seq, record.t_ms), (b'I', 0x42, 4567));
+/// assert_eq!(record.body, b"ENC +1");
+///
+/// decoder.finish();
+/// assert_eq!(decoder.buffered(), 0, "finish() abandons the pending window");
+/// let stats = decoder.stats();
+/// assert_eq!((stats.records, stats.bad_frames, stats.discarded_bytes), (1, 0, 0));
+/// ```
+pub struct Decoder {
+    /// Sliding window; `[0..len]` is what has been offered and not yet decided.
+    buf: [u8; MAX_FRAME],
+    len: usize,
+    /// `true` while deciding the candidate at `buf[0]`; `false` while scanning for a
+    /// start marker.
+    in_candidate: bool,
+    /// Set on rejection, consumed when the next start marker is found — counting a
+    /// resynchronisation when the marker is located rather than when the rejection
+    /// happens is what keeps `resyncs` chunk-independent.
+    armed_resync: bool,
+    /// Validated records awaiting a reader, oldest at `head`.
+    queue_levels: [u8; RECORD_SLOTS],
+    queue_seqs: [u32; RECORD_SLOTS],
+    queue_times: [u32; RECORD_SLOTS],
+    queue_bodies: [[u8; MAX_BODY]; RECORD_SLOTS],
+    queue_body_lens: [usize; RECORD_SLOTS],
+    /// Queue bounds: `head <= tail <= head + RECORD_SLOTS`, both only ever increasing,
+    /// so slot index is `count % RECORD_SLOTS` without a wrap flag.
+    head: u64,
+    tail: u64,
+    stats: Stats,
+}
+
+impl Default for Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Decoder {
+    /// A decoder with no bytes offered and all counters zero.
+    pub const fn new() -> Self {
+        Self {
+            buf: [0u8; MAX_FRAME],
+            len: 0,
+            in_candidate: false,
+            armed_resync: false,
+            queue_levels: [0u8; RECORD_SLOTS],
+            queue_seqs: [0u32; RECORD_SLOTS],
+            queue_times: [0u32; RECORD_SLOTS],
+            queue_bodies: [[0u8; MAX_BODY]; RECORD_SLOTS],
+            queue_body_lens: [0usize; RECORD_SLOTS],
+            head: 0,
+            tail: 0,
+            stats: Stats {
+                records: 0,
+                bad_frames: 0,
+                resyncs: 0,
+                discarded_bytes: 0,
+            },
+        }
+    }
+
+    /// Take as many of `bytes` as the decoder can currently hold, returning how many it
+    /// took.
+    ///
+    /// Any chunking is allowed, including a record split across ten calls. Records
+    /// become available from [`next_record`](Decoder::next_record) as soon as framing
+    /// and CRC confirm them; nothing waits for a boundary the wire does not provide.
+    ///
+    /// A count shorter than `bytes.len()` means the decoder is full — either its
+    /// delivery queue is waiting to be drained or its window is holding a maximum-length
+    /// candidate — and the untouched bytes remain the caller's to submit again. Stopping
+    /// there is deliberate: taking bytes it cannot hold would mean losing records
+    /// silently, which is the very failure this protocol exists to make impossible. So
+    /// the lossless reader loop is drain, then retry:
+    ///
+    /// ```text
+    /// let mut off = 0;
+    /// while off < buf.len() {
+    ///     off += decoder.push(&buf[off..]);
+    ///     while let Some(record) = decoder.next_record() {
+    ///         emit(record);
+    ///     }
+    /// }
+    /// ```
+    pub fn push(&mut self, bytes: &[u8]) -> usize {
+        let mut pos = 0usize;
+        while pos < bytes.len() && !self.delivery_full() {
+            let take = core::cmp::min(bytes.len() - pos, MAX_FRAME - self.len);
+            if take != 0 {
+                self.buf[self.len..self.len + take].copy_from_slice(&bytes[pos..pos + take]);
+                self.len += take;
+                pos += take;
+            }
+            let before = self.len;
+            self.scan();
+            if take == 0 && self.len == before {
+                // Unreachable by construction: `scan` either decides or discards a window
+                // of MAX_FRAME, because no valid record is longer. Breaking rather than
+                // spinning keeps that reasoning checkable instead of load-bearing on a
+                // hang, and reports it through debug builds.
+                debug_assert!(
+                    false,
+                    "decoder stalled with a full {}-byte window",
+                    MAX_FRAME
+                );
+                break;
+            }
+        }
+        pos
+    }
+
+    /// Take the oldest validated record not yet delivered, if any.
+    ///
+    /// The returned body borrows this decoder, so it stays valid only until the next
+    /// [`push`](Decoder::push) or `next_record`: use each record before asking for the
+    /// next. Draining to `None` after every push is the discipline that keeps delivery
+    /// lossless; see [`RECORD_SLOTS`] for what happens when a reader does not.
+    pub fn next_record(&mut self) -> Option<Record<'_>> {
+        if self.head == self.tail {
+            return None;
+        }
+        let slot = (self.head as usize) % RECORD_SLOTS;
+        self.head += 1;
+        Some(Record {
+            level: self.queue_levels[slot],
+            seq: self.queue_seqs[slot],
+            t_ms: self.queue_times[slot],
+            body: &self.queue_bodies[slot][..self.queue_body_lens[slot]],
+        })
+    }
+
+    /// End the stream: abandon whatever window is still undecided.
+    ///
+    /// Required before reading [`stats`](Decoder::stats). The accounting law alone is
+    /// not enough for a capture summary: a stream that ends mid-record, or with
+    /// unframed terminal text after the last record, leaves those bytes sitting in
+    /// [`buffered`](Decoder::buffered) — and printing `discarded_bytes = 0` there is
+    /// precisely the lie this protocol exists to prevent. After `finish()` those bytes
+    /// are counted, `buffered()` is zero, and the law still holds.
+    pub fn finish(&mut self) {
+        self.discard_front(self.len);
+        self.in_candidate = false;
+    }
+
+    /// Bytes offered but not yet decided — the window still in play.
+    pub fn buffered(&self) -> usize {
+        self.len
+    }
+
+    /// Counters so far. Complete only after [`finish`](Decoder::finish).
+    pub fn stats(&self) -> Stats {
+        self.stats
+    }
+
+    #[cfg(test)]
+    fn delivery_full_for_test(&self) -> bool {
+        self.delivery_full()
+    }
+
+    /// Drop `n` leading bytes that never reached a validated record, charging them to
+    /// `discarded_bytes`.
+    fn discard_front(&mut self, n: usize) {
+        self.stats.discarded_bytes += n as u64;
+        self.consume_front(n);
+    }
+
+    /// Drop `n` leading bytes without charging them: either the bytes of a record that
+    /// just validated, or a window already accounted for. Keeping this separate from
+    /// [`discard_front`](Self::discard_front) is what makes the accounting law hold
+    /// after every push rather than only at the end.
+    fn consume_front(&mut self, n: usize) {
+        debug_assert!(n <= self.len);
+        self.buf.copy_within(n..self.len, 0);
+        self.len -= n;
+    }
+
+    /// Run the two-state machine until nothing more can be decided.
+    ///
+    /// Returns whether anything left the window or changed state; `push` uses that to
+    /// recognise the impossible full-window stall rather than looping on it.
+    fn scan(&mut self) {
+        loop {
+            if !self.in_candidate {
+                match find_byte(&self.buf[..self.len], b'~') {
+                    Some(i) => {
+                        if i > 0 {
+                            // Inter-record junk: counted once, here, and only here.
+                            self.discard_front(i);
+                        }
+                        self.in_candidate = true;
+                        if self.armed_resync {
+                            self.stats.resyncs += 1;
+                            self.armed_resync = false;
+                        }
+                        continue;
+                    }
+                    None => {
+                        if self.len >= MAX_FRAME {
+                            // No start marker can have been missed: every record needs
+                            // one and none is in a window this wide.
+                            self.discard_front(self.len);
+                        }
+                        return;
+                    }
+                }
+            }
+
+            match self.examine() {
+                Decision::NeedMore => return,
+                Decision::Reject => {
+                    self.stats.bad_frames += 1;
+                    // Charge the forfeited start marker itself and nothing else: the
+                    // rest of the window stays for the next scan.
+                    self.discard_front(1);
+                    self.in_candidate = false;
+                    self.armed_resync = true;
+                }
+                Decision::Accept(frame) => {
+                    self.stats.records += 1;
+                    // Queue first: the body still lives in `buf`, and consuming shifts
+                    // it away.
+                    self.enqueue(frame);
+                    self.consume_front(frame.consumed);
+                    self.in_candidate = false;
+                    if self.delivery_full() {
+                        // Hand the caller room to drain before deciding anything else;
+                        // `push` reports the rest of its input as untaken.
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Decide the candidate at `buf[0]`, deriving every offset from `q` = index of CR.
+    ///
+    /// Order matters less than completeness: cheap structural checks come first so a
+    /// corrupt span rarely reaches the CRC, but the decision is the same whichever
+    /// order they run in.
+    fn examine(&self) -> Decision {
+        let buf = &self.buf[..self.len];
+
+        // First complete CRLF at or after index 1. An unterminated CR at the very end
+        // is not a decision point — it is the “need more bytes” case.
+        let Some(q) = find_crlf(buf) else {
+            // Over-length is the only give-up condition without a CRLF: nothing valid
+            // is longer than MAX_FRAME, so a window this big is junk however it ends.
+            return if self.len >= MAX_FRAME {
+                Decision::Reject
+            } else {
+                Decision::NeedMore
+            };
+        };
+
+        // `r` is `j - start` from the derivation table: MIN_CR_OFFSET + body_len.
+        let r = q;
+        if r < MIN_CR_OFFSET || r - MIN_CR_OFFSET > MAX_BODY {
+            return Decision::Reject;
+        }
+        // `'*'` located FROM the terminator, never by searching forward: a body may
+        // legitimately contain '*'.
+        if buf[q - 5] != b'*' {
+            return Decision::Reject;
+        }
+        let Some(crc_field) = parse_hex(&buf[q - 4..q]) else {
+            return Decision::Reject;
+        };
+        if !matches!(buf[1], b'I' | b'W' | b'E' | b'D' | b'T') {
+            return Decision::Reject;
+        }
+        if buf[2] != b' ' || buf[11] != b' ' || buf[20] != b' ' {
+            return Decision::Reject;
+        }
+        let Some(seq) = parse_hex(&buf[3..11]) else {
+            return Decision::Reject;
+        };
+        let Some(t_ms) = parse_decimal(&buf[12..20]) else {
+            return Decision::Reject;
+        };
+
+        let body_end = q - 5;
+        // Four hex digits cannot exceed u16, so widening the computed CRC is lossless.
+        if u32::from(crc16_ccitt(&buf[1..body_end])) != crc_field {
+            return Decision::Reject;
+        }
+
+        Decision::Accept(Accepted {
+            level: buf[1],
+            seq,
+            t_ms,
+            body_len: body_end - PREFIX_LEN,
+            // Total bytes this record occupies: the relative CR offset plus CRLF.
+            consumed: r + 2,
+        })
+    }
+}
+
+/// Outcome of examining one candidate start.
+enum Decision {
+    /// Undecidable on the bytes offered so far; keep everything.
+    NeedMore,
+    /// This start marker cannot become a valid record, now or with more bytes.
+    Reject,
+    Accept(Accepted),
+}
+
+/// A candidate that validated: framing and CRC both agreed.
+#[derive(Clone, Copy)]
+struct Accepted {
+    level: u8,
+    seq: u32,
+    t_ms: u32,
+    body_len: usize,
+    consumed: usize,
+}
+
+impl Decoder {
+    /// True when no more records can be accepted until the caller drains.
+    fn delivery_full(&self) -> bool {
+        self.tail - self.head == RECORD_SLOTS as u64
+    }
+
+    /// Copy a freshly validated record into the delivery queue.
+    ///
+    /// Called only when [`delivery_full`](Self::delivery_full) is false, which
+    /// [`push`](Self::push) checks before taking any more input, so nothing is ever
+    /// overwritten here.
+    fn enqueue(&mut self, frame: Accepted) {
+        debug_assert!(!self.delivery_full());
+        let slot = (self.tail as usize) % RECORD_SLOTS;
+        self.tail += 1;
+        self.queue_levels[slot] = frame.level;
+        self.queue_seqs[slot] = frame.seq;
+        self.queue_times[slot] = frame.t_ms;
+        self.queue_body_lens[slot] = frame.body_len;
+        self.queue_bodies[slot][..frame.body_len]
+            .copy_from_slice(&self.buf[PREFIX_LEN..PREFIX_LEN + frame.body_len]);
+    }
+}
+
+fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
+    haystack.iter().position(|&b| b == needle)
+}
+
+/// Index of the first complete CRLF at or after index 1, or `None` if the bytes
+/// offered so far do not contain one (including the case where a trailing CR has not
+/// yet been followed by its LF).
+fn find_crlf(buf: &[u8]) -> Option<usize> {
+    (1..buf.len().saturating_sub(1)).find(|&i| buf[i] == b'\r' && buf[i + 1] == b'\n')
+}
+
+/// Lowercase hex only: uppercase is not in the grammar, and accepting it would widen
+/// what counts as a valid record beyond what the encoder can produce.
+fn parse_hex(digits: &[u8]) -> Option<u32> {
+    let mut value: u32 = 0;
+    for &byte in digits {
+        let digit = match byte {
+            b'0'..=b'9' => (byte - b'0') as u32,
+            b'a'..=b'f' => (byte - b'a' + 10) as u32,
+            _ => return None,
+        };
+        value = (value << 4) | digit;
+    }
+    Some(value)
+}
+
+fn parse_decimal(digits: &[u8]) -> Option<u32> {
+    let mut value: u32 = 0;
+    for &byte in digits {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        value = value.checked_mul(10)?.checked_add((byte - b'0') as u32)?;
+    }
+    Some(value)
+}
+
+// ---------------------------------------------------------------------------
 // Tests — host-only, default features, no hardware types
 // ---------------------------------------------------------------------------
 
@@ -498,6 +1007,208 @@ mod tests {
             "MAX_BODY exactly must not report truncation"
         );
         assert_eq!(exact.len, MAX_FRAME);
+    }
+
+    // ── Decoder: the invariants worth reading first ──────────────────
+
+    /// A delivered record in a form tests can compare without borrowing the decoder.
+    type Seen = (u8, u32, u32, Vec<u8>);
+
+    /// Feed `bytes` in chunks of `sizes`, returning every record the decoder yields.
+    ///
+    /// Chunking is expressed as a count of chunk sizes rather than as bytes so a test
+    /// can say “ten pushes” without caring where the boundaries fall.
+    fn decode_in_chunks(bytes: &[u8], sizes: &[usize]) -> Vec<Seen> {
+        let mut decoder = Decoder::new();
+        let mut out = Vec::new();
+        let mut pos = 0usize;
+        while pos < bytes.len() {
+            let take = sizes[pos % sizes.len()].max(1);
+            let end = (pos + take).min(bytes.len());
+            let mut off = pos;
+            while off < end {
+                off += decoder.push(&bytes[off..end]);
+                while let Some(r) = decoder.next_record() {
+                    out.push((r.level, r.seq, r.t_ms, r.body.to_vec()));
+                }
+            }
+            pos = end;
+        }
+        decoder.finish();
+        out
+    }
+
+    fn decode_whole(bytes: &[u8]) -> Vec<Seen> {
+        decode_in_chunks(bytes, &[usize::MAX / 2])
+    }
+
+    /// Push a whole stream and return the records plus the final counters.
+    fn decode_stats(bytes: &[u8]) -> (Vec<Seen>, Stats) {
+        let mut decoder = Decoder::new();
+        let mut out = Vec::new();
+        let mut off = 0usize;
+        while off < bytes.len() {
+            off += decoder.push(&bytes[off..]);
+            while let Some(r) = decoder.next_record() {
+                out.push((r.level, r.seq, r.t_ms, r.body.to_vec()));
+            }
+        }
+        decoder.finish();
+        (out, decoder.stats())
+    }
+
+    #[test]
+    fn decoder_returns_the_fields_a_record_was_encoded_with() {
+        let (out, enc) = encoded(Level::Warn, 0xDEAD_BEEF, 987_654, b"knob r1=0.42 ~*|");
+        let (records, stats) = decode_stats(&out[..enc.len]);
+        assert_eq!(
+            records,
+            vec![(b'W', 0xDEAD_BEEF, 987_654, b"knob r1=0.42 ~*|".to_vec())],
+            "decoded fields must match what went in"
+        );
+        assert_eq!(
+            stats,
+            Stats {
+                records: 1,
+                bad_frames: 0,
+                resyncs: 0,
+                discarded_bytes: 0
+            },
+            "a clean capture must report a clean capture"
+        );
+    }
+
+    #[test]
+    fn decoder_holds_no_more_than_one_frame_of_undecided_bytes() {
+        // A capture of pure junk is the case that would otherwise grow a reader without
+        // bound, since there is no delimiter to stop it at.
+        let mut decoder = Decoder::new();
+        for i in 0..10_000u32 {
+            decoder.push(&[b'x', b'~', (i as u8) & 0x7F, b'\r', b'\n', 0x00, 0xFF, b'*']);
+            while decoder.next_record().is_some() {}
+            assert!(
+                decoder.buffered() <= MAX_FRAME,
+                "buffered {} exceeds MAX_FRAME",
+                decoder.buffered()
+            );
+        }
+    }
+
+    #[test]
+    fn finish_moves_the_pending_window_into_discarded_bytes() {
+        // The lie TASK-030 exists to prevent: a capture that ends mid-record must not
+        // summarise as zero loss.
+        let (out, enc) = encoded(Level::Info, 1, 1, b"tail-truncated");
+        let whole = &out[..enc.len];
+        let truncated = &whole[..whole.len() - 4];
+
+        let mut decoder = Decoder::new();
+        decoder.push(truncated);
+        assert_eq!(decoder.stats().discarded_bytes, 0, "not decided yet");
+        assert_eq!(decoder.buffered(), truncated.len());
+
+        decoder.finish();
+        assert_eq!(decoder.buffered(), 0);
+        assert_eq!(decoder.stats().discarded_bytes, truncated.len() as u64);
+        assert_eq!(decoder.stats().records, 0);
+    }
+
+    #[test]
+    fn one_byte_at_a_time_decodes_identically_to_one_push() {
+        let (out, enc) = encoded(Level::Info, 5, 5, b"chunking must not matter");
+        let stream = &out[..enc.len];
+        assert_eq!(decode_in_chunks(stream, &[1]), decode_whole(stream));
+    }
+
+    /// Pump `bytes` through the decoder using the loop its own documentation prescribes,
+    /// so the test exercises the contract a reader is actually given.
+    fn pump(decoder: &mut Decoder, bytes: &[u8]) -> Vec<Seen> {
+        let mut out = Vec::new();
+        let mut off = 0usize;
+        while off < bytes.len() {
+            let before = off;
+            off += decoder.push(&bytes[off..]);
+            debug_assert!(
+                off > before || decoder.delivery_full_for_test(),
+                "no progress"
+            );
+            while let Some(r) = decoder.next_record() {
+                out.push((r.level, r.seq, r.t_ms, r.body.to_vec()));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_multi_record_chunk_reaches_a_draining_reader_with_no_loss() {
+        // Records are as short as 28 bytes, so one chunk routinely validates many of
+        // them. This is the case a single delivery slot cannot serve: it would have to
+        // either drop the input or overwrite undelivered records.
+        let mut stream = Vec::new();
+        for i in 0..200u32 {
+            let (bytes, enc) = encoded(Level::Info, i, 1_000 + i, b"x");
+            stream.extend_from_slice(&bytes[..enc.len]);
+        }
+
+        let mut decoder = Decoder::new();
+        let records = pump(&mut decoder, &stream);
+        decoder.finish();
+
+        assert_eq!(records.len(), 200, "every record in the chunk must arrive");
+        assert_eq!(
+            records.first().map(|r| r.1),
+            Some(0),
+            "and in the order written"
+        );
+        assert_eq!(records.last().map(|r| r.1), Some(199));
+        let stats = decoder.stats();
+        assert_eq!(
+            (stats.records, stats.bad_frames, stats.discarded_bytes),
+            (200, 0, 0)
+        );
+    }
+
+    #[test]
+    fn push_reports_a_short_count_rather_than_losing_records() {
+        // A reader that never drains while pushing must still lose nothing: the unread
+        // records wait in the queue, the untaken bytes stay the caller's, and the
+        // capture summary stays clean.
+        let mut stream = Vec::new();
+        for i in 0..200u32 {
+            let (bytes, enc) = encoded(Level::Info, i, 1_000 + i, b"x");
+            stream.extend_from_slice(&bytes[..enc.len]);
+        }
+
+        let mut decoder = Decoder::new();
+        let taken = decoder.push(&stream);
+        assert!(
+            taken < stream.len(),
+            "one push must refuse what it cannot hold"
+        );
+        assert_eq!(decoder.stats().records as usize, RECORD_SLOTS);
+
+        let mut records = Vec::new();
+        while let Some(r) = decoder.next_record() {
+            records.push((r.level, r.seq, r.t_ms, r.body.to_vec()));
+        }
+        records.extend(pump(&mut decoder, &stream[taken..]));
+        decoder.finish();
+
+        assert_eq!(
+            records.len(),
+            200,
+            "backpressure must cost latency, not data"
+        );
+        assert_eq!(
+            records.iter().map(|r| r.1).collect::<Vec<u32>>(),
+            (0u32..200).collect::<Vec<u32>>(),
+            "in sequence order, with none missing"
+        );
+        assert_eq!(
+            decoder.stats().discarded_bytes,
+            0,
+            "nothing may be counted lost"
+        );
     }
 
     // ── write_whole ──────────────────────────────────────────────────
