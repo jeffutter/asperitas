@@ -27,8 +27,12 @@ use base64::Engine;
 use proptest::prelude::*;
 
 use asperitas_logging::dump::{
-    self, encoded_len, max_raw_for, DecodeError, EncodeError, B64_ALPHABET,
+    self, encoded_len, max_raw_for, BodyError, DecodeError, EncodeError, B64_ALPHABET,
 };
+use asperitas_logging::frame::{
+    crc16_ccitt, Decoder, Encoded, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
+};
+use asperitas_logging::Level;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -489,5 +493,578 @@ fn size_arithmetic_holds_at_every_length() {
             "max_raw_for wrong at {raw_len}"
         );
         assert_eq!(our_decode(&encoded), Verdict::Accepted(raw));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Record grammar: pinned frames, constant header, refusals, published arithmetic
+// ---------------------------------------------------------------------------
+//
+// Everything in this section checks `AUDIO`/`AUDEND` bodies against something the encoder did not
+// compute: hand-written wire bytes, CRCs produced by a separate implementation (CPython's, quoted in
+// each row's doc comment), the catalogue's own CRC-16/CCITT-FALSE check value, and arithmetic done on
+// paper in TASK-038.02's Implementation Notes. Two of our own functions agreeing with each other
+// proves only that they share a mistake.
+
+/// Width of the `crc16` field on the wire.
+const CRC_HEX_ON_WIRE: usize = 4;
+
+/// Full wire bytes for a 129-byte chunk: block `0x1234`, 64 chunks in it, this is chunk 0, seq
+/// `0x42`, `t_ms` 4567.
+///
+/// The payload is CPython's encoding of `bytes(range(129))` (raw `0x00..=0x80`) and `8500` is
+/// CRC-16/CCITT-FALSE over `wire[1..len - 7]`:
+///
+/// ```text
+/// python3 -c 'import base64;print(base64.b64encode(bytes(range(129))).decode())'
+/// ```
+///
+/// followed by the CCITT-FALSE loop (poly `0x1021`, init `0xFFFF`, no reflection) applied to the
+/// assembled frame. 27 header + 172 payload = 199 body, 227 wire bytes.
+const GOLDEN_FULL_CHUNK: &[u8] = concat!(
+    "~I 00000042 00004567 AUDIO blk=1234 n=40 c=00 d=",
+    "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKi",
+    "ssLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVW",
+    "V1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+A*8500\r\n",
+)
+.as_bytes();
+
+/// Same record kind, final chunk of its block: 7 raw bytes, i.e. `7 % 3 == 1`, so the last group is
+/// one symbol plus `==`. Raw bytes deliberately include `0x00`, `0x7F` and `0xFF` — the values a
+/// transport that mangles bytes would mangle.
+const GOLDEN_TAIL_ONE_BYTE: &[u8] =
+    b"~I 00000043 00004568 AUDIO blk=1234 n=40 c=3f d=8J9hAH//XA==*dd85\r\n";
+
+/// And `8 % 3 == 2`: three symbols plus one `=`.
+const GOLDEN_TAIL_TWO_BYTES: &[u8] =
+    b"~I 00000044 00004569 AUDIO blk=0001 n=02 c=01 d=/wD+Af0C/AM=*8f07\r\n";
+
+/// A closing `AUDEND` for a three-chunk block whose raw bytes were `123456789`.
+///
+/// `crc16=29b1` is not ours either: `0x29b1` is the published check value for CRC-16/CCITT-FALSE,
+/// which is defined as the checksum of the ASCII string `123456789` (`frame.rs`'s own parameter
+/// table says so). The block summary therefore carries a payload checksum with an outside witness,
+/// and `238c` is the frame checksum of the row as written.
+const GOLDEN_AUDEND: &[u8] =
+    b"~I 00000045 00004570 AUDEND blk=0000 n=03 bytes=00009 crc16=29b1*238c\r\n";
+
+/// Build an `AUDIO` body, failing loudly if the chosen fields were invalid.
+fn audio_body_bytes(block_index: u32, chunks: u16, chunk_index: u16, raw: &[u8]) -> Vec<u8> {
+    let mut body = [0u8; MAX_BODY];
+    let len = dump::audio_body(block_index, chunks, chunk_index, raw, &mut body)
+        .expect("fields chosen by these tests are valid");
+    body[..len].to_vec()
+}
+
+/// Build an `AUDEND` body.
+fn audend_body_bytes(block_index: u32, chunks: u16, total_bytes: u32, crc: u16) -> Vec<u8> {
+    let mut body = [0u8; MAX_BODY];
+    let len = dump::audend_body(block_index, chunks, total_bytes, crc, &mut body)
+        .expect("fields chosen by these tests are valid");
+    body[..len].to_vec()
+}
+
+/// Frame a complete `AUDIO` record, keeping what the encoder reported about it.
+fn encoded_audio(
+    raw: &[u8],
+    block_index: u32,
+    chunks: u16,
+    chunk_index: u16,
+) -> (Vec<u8>, Encoded) {
+    let mut body = [0u8; MAX_BODY];
+    let mut frame_buf = [0u8; MAX_FRAME];
+    let enc = dump::audio_record(
+        Level::Info,
+        0x42,
+        4567,
+        block_index,
+        chunks,
+        chunk_index,
+        raw,
+        &mut body,
+        &mut frame_buf,
+    )
+    .expect("fields chosen by these tests are valid");
+    (frame_buf[..enc.len].to_vec(), enc)
+}
+
+/// The same with the fields a golden row needs, minus the bookkeeping.
+fn audio_wire(
+    level: Level,
+    seq: u32,
+    now_ms: u32,
+    block_index: u32,
+    chunks: u16,
+    chunk_index: u16,
+    raw: &[u8],
+) -> Vec<u8> {
+    let mut body = [0u8; MAX_BODY];
+    let mut frame_buf = [0u8; MAX_FRAME];
+    let enc = dump::audio_record(
+        level,
+        seq,
+        now_ms,
+        block_index,
+        chunks,
+        chunk_index,
+        raw,
+        &mut body,
+        &mut frame_buf,
+    )
+    .expect("fields chosen by these tests are valid");
+    frame_buf[..enc.len].to_vec()
+}
+
+/// `AUDEND` counterpart of [`audio_wire`].
+fn audend_wire(
+    level: Level,
+    seq: u32,
+    now_ms: u32,
+    block_index: u32,
+    chunks: u16,
+    total_bytes: u32,
+    crc: u16,
+) -> Vec<u8> {
+    let mut body = [0u8; MAX_BODY];
+    let mut frame_buf = [0u8; MAX_FRAME];
+    let enc = dump::audend_record(
+        level,
+        seq,
+        now_ms,
+        block_index,
+        chunks,
+        total_bytes,
+        crc,
+        &mut body,
+        &mut frame_buf,
+    )
+    .expect("fields chosen by these tests are valid");
+    frame_buf[..enc.len].to_vec()
+}
+
+/// Check a frame's checksum digits against a literal that came from elsewhere.
+///
+/// Both directions matter: the recomputed CRC must equal the literal, and the digits on the wire must
+/// spell that literal in lowercase. Reading only the first would let a row whose digits were edited
+/// still pass if the edit landed in the covered range too.
+fn assert_pinned_crc(wire: &[u8], expected: u16) {
+    let body_end = wire.len() - TRAILER_LEN;
+    assert_eq!(
+        crc16_ccitt(&wire[1..body_end]),
+        expected,
+        "pinned CRC no longer describes this row — recompute the literal, do not paste ours"
+    );
+    assert_eq!(
+        &wire[body_end..body_end + 5],
+        format!("*{expected:04x}").as_bytes(),
+        "checksum digits must be lowercase, matching `parse_hex`"
+    );
+}
+
+/// One validated record as the decoder delivered it, owned so it outlives the decoder's borrow.
+#[derive(Debug, PartialEq, Eq)]
+struct Seen {
+    level: u8,
+    seq: u32,
+    t_ms: u32,
+    body: Vec<u8>,
+}
+
+/// Decode a whole stream with the real [`Decoder`], collecting validated records.
+fn decode_stream(bytes: &[u8]) -> (Vec<Seen>, Stats) {
+    let mut decoder = Decoder::new();
+    let mut records = Vec::new();
+    let mut pos = 0usize;
+    while pos < bytes.len() {
+        let consumed = decoder.push(&bytes[pos..]);
+        assert_ne!(
+            consumed, 0,
+            "decoder accepted nothing while records sat undelivered"
+        );
+        pos += consumed;
+        while let Some(record) = decoder.next_record() {
+            records.push(Seen {
+                level: record.level,
+                seq: record.seq,
+                t_ms: record.t_ms,
+                body: record.body.to_vec(),
+            });
+        }
+    }
+    decoder.finish();
+    (records, decoder.stats())
+}
+
+/// Payload of an `AUDIO` body, taken at the offset the geometry claims and decoded strictly.
+fn payload_of(body: &[u8]) -> Vec<u8> {
+    assert!(
+        body.starts_with(b"AUDIO blk="),
+        "body does not open with the template it was built from: {body:?}"
+    );
+    let b64 = &body[dump::AUDIO_HEADER_LEN..];
+    let mut raw = vec![0u8; max_raw_for(b64.len())];
+    let written = dump::decode(b64, &mut raw).expect("a body we emitted decodes");
+    raw[..written].to_vec()
+}
+
+/// A full chunk produces the pinned wire bytes, and the pinned CRC still describes them.
+#[test]
+fn golden_full_chunk_frame_is_reproduced_byte_for_byte() {
+    let raw: Vec<u8> = (0..=128u8).collect();
+    assert_eq!(raw.len(), dump::CHUNK_RAW);
+
+    let body = audio_body_bytes(0x1234, 64, 0, &raw);
+    assert_eq!(
+        body.len(),
+        dump::FULL_AUDIO_BODY_LEN,
+        "a full chunk body is 199 bytes, one under MAX_BODY"
+    );
+    assert_eq!(dump::FULL_AUDIO_BODY_LEN, MAX_BODY - 1);
+    assert_eq!(body, &GOLDEN_FULL_CHUNK[21..21 + body.len()]);
+
+    let (wire, enc) = encoded_audio(&raw, 0x1234, 64, 0);
+    assert_eq!(wire, GOLDEN_FULL_CHUNK);
+    assert_eq!(wire.len(), dump::FULL_AUDIO_FRAME_LEN);
+    assert_eq!(dump::FULL_AUDIO_FRAME_LEN, PREFIX_LEN + 199 + TRAILER_LEN);
+    assert!(
+        !enc.truncated,
+        "a full chunk fits: truncation here means the budget moved"
+    );
+    assert_pinned_crc(GOLDEN_FULL_CHUNK, 0x8500);
+}
+
+/// Short final chunks reach the wire with their padding intact, for both tail shapes.
+///
+/// Only a block's last chunk exercises `=`, because 129 is a multiple of 3 — so this row pair is the
+/// grammar's entire exposure to padding, and it has to survive framing.
+#[test]
+fn golden_padded_final_chunks_survive_framing() {
+    let seven = [0xF0u8, 0x9F, 0x61, 0x00, 0x7F, 0xFF, 0x5C];
+    let eight = [0xFFu8, 0x00, 0xFE, 0x01, 0xFD, 0x02, 0xFC, 0x03];
+
+    let first = audio_wire(Level::Info, 0x43, 4568, 0x1234, 64, 63, &seven);
+    assert_eq!(first, GOLDEN_TAIL_ONE_BYTE);
+    assert_pinned_crc(GOLDEN_TAIL_ONE_BYTE, 0xdd85);
+
+    let second = audio_wire(Level::Info, 0x44, 4569, 0x0001, 2, 1, &eight);
+    assert_eq!(second, GOLDEN_TAIL_TWO_BYTES);
+    assert_pinned_crc(GOLDEN_TAIL_TWO_BYTES, 0x8f07);
+
+    // Framing sanitises body bytes, and neither `_` nor a lost pad character may appear: sample bytes
+    // are base64 before they are framed, so substitution is impossible rather than merely absent.
+    for wire in [&first, &second] {
+        assert!(
+            !wire.contains(&b'_'),
+            "sanitisation altered a base64 payload"
+        );
+        assert_eq!(
+            wire.len(),
+            PREFIX_LEN + dump::AUDIO_HEADER_LEN + dump::encoded_len(7) + TRAILER_LEN,
+            "header length must not depend on payload length"
+        );
+    }
+}
+
+/// A block summary reproduces its pinned row, including a checksum nobody here invented.
+#[test]
+fn golden_audend_frame_is_reproduced_byte_for_byte() {
+    assert_eq!(
+        crc16_ccitt(b"123456789"),
+        0x29b1,
+        "the catalogue check value is the reference for this row's payload CRC"
+    );
+
+    let body = audend_body_bytes(0x0000, 3, 9, 0x29b1);
+    assert_eq!(body, b"AUDEND blk=0000 n=03 bytes=00009 crc16=29b1");
+    assert_eq!(
+        body.len(),
+        dump::MAX_AUDEND_BODY_LEN,
+        "with every numeric field at full width this is the longest AUDEND body"
+    );
+
+    let wire = audend_wire(Level::Info, 0x45, 4570, 0x0000, 3, 9, 0x29b1);
+    assert_eq!(wire, GOLDEN_AUDEND);
+    assert_eq!(wire.len(), PREFIX_LEN + 43 + TRAILER_LEN);
+    assert_pinned_crc(GOLDEN_AUDEND, 0x238c);
+}
+
+// A constant 27-byte header for every legal field combination, so the payload always starts where
+// the geometry says it does.
+proptest! {
+    #[test]
+    fn header_is_constant_length_for_every_valid_field_combination(
+        block_index in any::<u32>(),
+        chunks in 1u16..=255u16,
+        drawn_index in any::<u16>(),
+        payload_len in 1usize..=dump::CHUNK_RAW,
+    ) {
+        // Folded rather than generated so legality cannot fail the property: the point here is what
+        // the header does, not that illegal inputs are refused (that has its own test).
+        let chunk_index = drawn_index % chunks;
+        let raw: Vec<u8> = (0..payload_len).map(|i| (i * 31 + 7) as u8).collect();
+
+        let body = audio_body_bytes(block_index, chunks, chunk_index, &raw);
+        let expected_body = dump::AUDIO_HEADER_LEN + encoded_len(payload_len);
+        if body.len() != expected_body {
+            prop_assert!(
+                false,
+                "body length drifted from the fixed header at blk={:#x} n={} c={} len={}: {} != {}",
+                block_index,
+                chunks,
+                chunk_index,
+                payload_len,
+                body.len(),
+                expected_body
+            );
+        }
+        prop_assert_eq!(
+            &body[dump::AUDIO_HEADER_LEN - 3..dump::AUDIO_HEADER_LEN],
+            b" d=",
+            "payload must begin exactly where the header ends"
+        );
+        // Four separators, four spaces, wherever the values land: no field value leaks a separator
+        // into the body and shifts where the payload starts.
+        prop_assert_eq!(
+            body[..dump::AUDIO_HEADER_LEN]
+                .iter()
+                .filter(|b| **b == b' ')
+                .count(),
+            4
+        );
+
+        if payload_len == dump::CHUNK_RAW {
+            let (_, enc) = encoded_audio(&raw, block_index, chunks, chunk_index);
+            prop_assert_eq!(enc.len, dump::FULL_AUDIO_FRAME_LEN);
+            prop_assert!(!enc.truncated);
+        }
+    }
+}
+
+/// Each oversized or empty input gets its own error, and the caller's buffers stay untouched.
+///
+/// Refusal is the contract: a shortened chunk reassembles into audio that plays back fine and
+/// measures wrong, which is the failure this codec exists to make impossible.
+#[test]
+fn refuses_instead_of_truncating() {
+    let mut body = [0xA5u8; MAX_BODY];
+    let one = [0x5Au8; 1];
+    let too_long = [0x5Au8; dump::CHUNK_RAW + 1];
+
+    // 256 is the interesting boundary: the field's modulus, not its capacity. Accepting it would
+    // write `n=00` and hand the assembler a block that claims no chunks at all.
+    assert_eq!(
+        dump::audio_body(0, 256, 0, &one, &mut body),
+        Err(BodyError::TooManyChunks { chunks: 256 })
+    );
+    assert_eq!(
+        dump::audio_body(0, 3, 3, &one, &mut body),
+        Err(BodyError::ChunkIndexOutOfRange {
+            chunk_index: 3,
+            chunks: 3
+        }),
+        "a chunk index at or past the count names a chunk the block will never send"
+    );
+    assert_eq!(
+        dump::audio_body(0, 0, 0, &one, &mut body),
+        Err(BodyError::ChunkIndexOutOfRange {
+            chunk_index: 0,
+            chunks: 0
+        }),
+        "a zero-chunk block has no chunk zero"
+    );
+    assert_eq!(
+        dump::audio_body(0, 1, 0, &[], &mut body),
+        Err(BodyError::EmptyChunk)
+    );
+    assert_eq!(
+        dump::audio_body(0, 1, 0, &too_long, &mut body),
+        Err(BodyError::ChunkTooLong {
+            len: dump::CHUNK_RAW + 1
+        })
+    );
+
+    // The summary refuses the same ways, and additionally guards the decimal field.
+    assert_eq!(
+        dump::audend_body(0, 256, 9, 0x29b1, &mut body),
+        Err(BodyError::TooManyChunks { chunks: 256 })
+    );
+    assert_eq!(
+        dump::audend_body(0, 3, (dump::MAX_BLOCK_BYTES + 1) as u32, 0x29b1, &mut body),
+        Err(BodyError::BlockTooLarge {
+            total_bytes: dump::MAX_BLOCK_BYTES + 1
+        })
+    );
+    assert_eq!(
+        body, [0xA5u8; MAX_BODY],
+        "a refusal wrote into the body buffer"
+    );
+
+    // The composites propagate instead of framing a half-built record.
+    let mut frame_buf = [0x3Cu8; MAX_FRAME];
+    assert_eq!(
+        dump::audio_record(
+            Level::Info,
+            1,
+            1,
+            0,
+            256,
+            0,
+            &one,
+            &mut body,
+            &mut frame_buf
+        ),
+        Err(BodyError::TooManyChunks { chunks: 256 })
+    );
+    assert_eq!(
+        dump::audend_record(Level::Info, 1, 1, 0, 256, 9, 0, &mut body, &mut frame_buf),
+        Err(BodyError::TooManyChunks { chunks: 256 })
+    );
+    assert_eq!(
+        frame_buf, [0x3Cu8; MAX_FRAME],
+        "a refused record left bytes in the frame buffer"
+    );
+}
+
+/// The efficiency figures documentation publishes are arithmetic on the shipped constants.
+///
+/// This is AC #6 made mechanical: change a template, a field width, or `MAX_BODY`, and one of these
+/// lines fails and names the document that went stale. The prose form of each claim lives in
+/// `dump`'s module doc and TASK-038.06's rig notes.
+///
+/// For the record: TASK-038.02 originally assumed 150 raw bytes per record. That was never reachable
+/// — `MAX_BODY` bounds the whole body, keys included — and the corrected budget table is in
+/// TASK-038.02's Implementation Notes.
+#[test]
+fn published_efficiency_matches_the_encoder() {
+    // Useful fraction: 129 raw bytes inside a 227-byte frame.
+    assert_eq!(
+        (dump::CHUNK_RAW as u32 * 1_000) / dump::FULL_AUDIO_FRAME_LEN as u32,
+        568,
+        "documentation says 0.568 useful bytes per wire byte"
+    );
+
+    // Mono 16-bit capture at 48 kHz is 96,000 B/s; a chunk holds CHUNK_RAW bytes.
+    let capture_bytes_per_s: u32 = 96_000;
+    let records_per_s = capture_bytes_per_s.div_ceil(dump::CHUNK_RAW as u32);
+    assert_eq!(
+        records_per_s, 745,
+        "documentation says a full-rate mono capture needs 745 records/s"
+    );
+
+    let wire_bytes_per_s = records_per_s * dump::FULL_AUDIO_FRAME_LEN as u32;
+    assert_eq!(
+        wire_bytes_per_s, 169_115,
+        "documentation says ~169 kB/s of console traffic for mono 16-bit capture"
+    );
+
+    // 32-bit capture doubles the sample rate in bytes and the record rate with it.
+    assert_eq!(
+        2 * wire_bytes_per_s,
+        338_230,
+        "documentation says ~338 kB/s for mono 32-bit capture"
+    );
+
+    // One block at the recommended 64 chunks, and the ceiling the grammar can describe at all.
+    assert_eq!(
+        64 * dump::CHUNK_RAW,
+        8_256,
+        "TASK-038.03's recommended block"
+    );
+    assert_eq!(
+        dump::MAX_BLOCK_BYTES,
+        32_895,
+        "`bytes` is sized for exactly this, so widening chunk geometry widens the field"
+    );
+}
+
+/// Real decoder, real framing: bodies come back intact and `blk` tells interleaved blocks apart.
+///
+/// Two blocks are sent chunk-interleaved with every field identical except the block id, which is
+/// the only thing that can possibly separate them. One payload contains every byte
+/// `sanitize_byte` would substitute, so a body that comes back decoding to those bytes proves
+/// framing never touched the samples.
+#[test]
+fn round_trips_through_the_real_decoder() {
+    let low: Vec<u8> = (0..=128u8).collect();
+    let high: Vec<u8> = (0..=128u8).rev().collect();
+    // Every control byte, plus DEL: 33 + 1 values a transport is tempted to rewrite.
+    let hostile: Vec<u8> = (0u8..=0x20).chain(std::iter::once(0x7F)).collect();
+    assert_eq!(hostile.len(), 34);
+
+    let crc_low = crc16_ccitt(&[low.as_slice(), hostile.as_slice()].concat());
+    let crc_high = crc16_ccitt(&[high.as_slice(), hostile.as_slice()].concat());
+
+    let mut stream = Vec::new();
+    stream.extend(audio_wire(Level::Info, 1, 1_000, 0x1234, 2, 0, &low));
+    stream.extend(audio_wire(Level::Info, 2, 1_001, 0x1235, 2, 0, &high));
+    stream.extend(audio_wire(Level::Info, 3, 1_002, 0x1234, 2, 1, &hostile));
+    stream.extend(audio_wire(Level::Info, 4, 1_003, 0x1235, 2, 1, &hostile));
+    stream.extend(audend_wire(
+        Level::Info,
+        5,
+        1_004,
+        0x1234,
+        2,
+        (low.len() + hostile.len()) as u32,
+        crc_low,
+    ));
+    stream.extend(audend_wire(
+        Level::Info,
+        6,
+        1_005,
+        0x1235,
+        2,
+        (high.len() + hostile.len()) as u32,
+        crc_high,
+    ));
+
+    let (records, stats) = decode_stream(&stream);
+    assert_eq!(records.len(), 6);
+    assert_eq!(stats.records, 6);
+    assert_eq!(stats.bad_frames, 0, "nothing we wrote looked broken");
+    assert_eq!(stats.resyncs, 0);
+    assert_eq!(stats.discarded_bytes, 0);
+
+    // Payloads land byte-identical, including the hostile one.
+    assert_eq!(payload_of(&records[0].body), low);
+    assert_eq!(payload_of(&records[1].body), high);
+    assert_eq!(payload_of(&records[2].body), hostile);
+    assert_eq!(payload_of(&records[3].body), hostile);
+
+    // Interleaving is legible: same `n`, same `c`, same payload, different block.
+    assert_ne!(records[2].body, records[3].body);
+    assert_eq!(
+        &records[2].body[14..],
+        &records[3].body[14..],
+        "only `blk` differs"
+    );
+    assert_eq!(&records[2].body[10..14], b"1234");
+    assert_eq!(&records[3].body[10..14], b"1235");
+
+    // Levels and sequence numbers ride through unchanged.
+    let letters: Vec<u8> = records.iter().map(|r| r.level).collect();
+    assert_eq!(letters, [b'I'; 6], "data records travel at Info");
+    let seqs: Vec<u32> = records.iter().map(|r| r.seq).collect();
+    assert_eq!(seqs, [1, 2, 3, 4, 5, 6]);
+
+    // The summaries carry the checksums over raw concatenation, so the host can verify a reassembled
+    // block against the bytes rather than against the text that carried them.
+    for (record, expected) in [(&records[4], crc_low), (&records[5], crc_high)] {
+        let summary = record
+            .body
+            .strip_prefix(b"AUDEND blk=")
+            .expect("summary body");
+        // Fixed-width fields put the checksum digits at a fixed offset from the end.
+        let digits = summary.len() - CRC_HEX_ON_WIRE;
+        assert!(
+            summary[..digits].ends_with(b" crc16="),
+            "crc16 label missing from: {}",
+            String::from_utf8_lossy(summary)
+        );
+        assert_eq!(
+            &summary[digits..],
+            format!("{expected:04x}").as_bytes(),
+            "the wire must carry the CRC of the raw block bytes, lowercase"
+        );
     }
 }

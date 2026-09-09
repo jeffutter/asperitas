@@ -249,7 +249,12 @@ const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
 /// Render `value` as exactly `dst.len()` lowercase hex digits, zero-padded, MS digit
 /// first. Width comes from the slice so the call site shows the field it fills.
-fn write_hex(value: u32, dst: &mut [u8]) {
+///
+/// `pub(crate)` so `dump` writes its own fields through the same renderer: one owner of
+/// digit formatting means the record bodies' fixed widths cannot drift apart. Digits
+/// past `dst.len()` are dropped, which is why callers mask to their field's modulus
+/// rather than relying on truncation (`dump`'s `blk` wrap is explicit about it).
+pub(crate) fn write_hex(value: u32, dst: &mut [u8]) {
     debug_assert!(dst.len() <= 8, "hex field wider than a u32");
     let n = dst.len();
     for (i, slot) in dst.iter_mut().enumerate() {
@@ -259,8 +264,9 @@ fn write_hex(value: u32, dst: &mut [u8]) {
 }
 
 /// Render `value` as exactly `dst.len()` decimal digits, zero-padded. The caller is
-/// responsible for fitting (see [`T_MS_WRAP`]).
-fn write_decimal(value: u32, dst: &mut [u8]) {
+/// responsible for fitting (see [`T_MS_WRAP`]; `dump` derives its own field width from
+/// the largest value the grammar can produce).
+pub(crate) fn write_decimal(value: u32, dst: &mut [u8]) {
     let fits = value < 10u32.pow(dst.len() as u32);
     debug_assert!(fits, "value {value} does not fit in {} digits", dst.len());
     let mut v = value;

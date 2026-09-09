@@ -3,11 +3,11 @@ id: TASK-038.02.02
 title: >-
   Define the AUDIO and AUDEND record grammar with compile-time-derived chunk
   geometry
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 15:51'
-updated_date: '2026-09-09 15:54'
+updated_date: '2026-09-09 17:26'
 labels:
   - planned
 dependencies:
@@ -34,12 +34,12 @@ Two record bodies inside v1: `AUDIO blk=<4hex> n=<2hex> c=<2hex> d=<base64>` (co
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `dump::audio_body` and `dump::audend_body` build complete record bodies into a caller-provided `[u8; MAX_BODY]`, emit constant-length headers (`AUDIO blk=` + 4 lowercase hex digits + ` n=` + 2 + ` c=` + 2 + ` d=` = 27 bytes), and refuse `chunks > MAX_CHUNKS_PER_BLOCK` (256), an empty chunk, or a chunk longer than `CHUNK_RAW` with a distinct error rather than truncating.
-- [ ] #2 `CHUNK_RAW`, the header length, and the full frame length are derived by const evaluation from the byte templates the writer actually uses, and `const _: () = assert!(...)` pins `CHUNK_RAW == 129`, full body `== 199`, and full frame `== 227`.
-- [ ] #3 One composite entry point per record kind composes body-building with `frame::encode` and returns `Encoded`, so no caller re-derives the buffer dance; `MAX_BODY`, `MAX_FRAME`, `sanitize_byte`, the record prefix, and the CRC polynomial are untouched.
-- [ ] #4 Golden rows pin complete encoded frames — a full 129-byte chunk, a short final chunk with padding, and an `AUDEND` — each checked against an independently computed CRC literal in the style of `tests/console_frame.rs:457-485`, never against the encoder that produced them.
-- [ ] #5 An arithmetic test derives useful-bytes-per-wire-byte, records/s, and wire kB/s for mono 16-bit capture at 96,000 B/s from the published constants and asserts the documented values (129/227 = 0.568, 745 records/s, ~169 kB/s), plus the mono 32-bit doubling; changing any geometry constant without updating the claim fails the test.
-- [ ] #6 The module doc carries the grammar table verbatim (field names, widths, alphabet, what the block CRC covers, why keys are abbreviated) so TASK-038.06 has one source to copy. `cargo fmt --all --check`, `cargo clippy -p asperitas-logging --all-targets -- -D warnings`, `cargo test -p asperitas-logging`, and the firmware release build pass.
+- [x] #1 `dump::audio_body` and `dump::audend_body` build complete record bodies into a caller-provided `[u8; MAX_BODY]`, emit constant-length headers (`AUDIO blk=` + 4 lowercase hex digits + ` n=` + 2 + ` c=` + 2 + ` d=` = 27 bytes), and refuse `chunks > MAX_CHUNKS_PER_BLOCK` (256), an empty chunk, or a chunk longer than `CHUNK_RAW` with a distinct error rather than truncating.
+- [x] #2 `CHUNK_RAW`, the header length, and the full frame length are derived by const evaluation from the byte templates the writer actually uses, and `const _: () = assert!(...)` pins `CHUNK_RAW == 129`, full body `== 199`, and full frame `== 227`.
+- [x] #3 One composite entry point per record kind composes body-building with `frame::encode` and returns `Encoded`, so no caller re-derives the buffer dance; `MAX_BODY`, `MAX_FRAME`, `sanitize_byte`, the record prefix, and the CRC polynomial are untouched.
+- [x] #4 Golden rows pin complete encoded frames — a full 129-byte chunk, a short final chunk with padding, and an `AUDEND` — each checked against an independently computed CRC literal in the style of `tests/console_frame.rs:457-485`, never against the encoder that produced them.
+- [x] #5 An arithmetic test derives useful-bytes-per-wire-byte, records/s, and wire kB/s for mono 16-bit capture at 96,000 B/s from the published constants and asserts the documented values (129/227 = 0.568, 745 records/s, ~169 kB/s), plus the mono 32-bit doubling; changing any geometry constant without updating the claim fails the test.
+- [x] #6 The module doc carries the grammar table verbatim (field names, widths, alphabet, what the block CRC covers, why keys are abbreviated) so TASK-038.06 has one source to copy. `cargo fmt --all --check`, `cargo clippy -p asperitas-logging --all-targets -- -D warnings`, `cargo test -p asperitas-logging`, and the firmware release build pass.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -98,3 +98,25 @@ Widen `frame.rs`'s private `write_hex` (:252) and `write_decimal` (:263) to `pub
 ## Verification
 Same four commands as TASK-038.02.01, plus confirm the pinned golden CRCs survive a clean re-run after `cargo clean -p asperitas-logging`. No `log-usb` code, no changes under `firmware/`.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Three deliberate deviations from the plan, each forced by arithmetic or by a test that caught a real bug:
+
+1. **MAX_CHUNKS_PER_BLOCK is 255, not 256.** The plan derived it as `1 << (COUNT_HEX*4)` = 256 and refused only `chunks > 256`. That modulus is not a capacity: two hex digits cannot represent 256, so accepting it emitted `n=00` — a block claiming no chunks at all, which is exactly the silent truncation this ticket forbids. `COUNT_FIELD_MODULUS` now holds 256 and the public constant is `MODULUS - 1`. Task text says 'refuse chunks > MAX_CHUNKS_PER_BLOCK (256)'; AC #1's refusal semantics hold, the boundary moved by one. Practical impact nil: the recommended block is 64 chunks.
+2. **`bytes` is fixed-width 5 decimal digits** (`bytes=00009`), sized by `decimal_width(MAX_BLOCK_BYTES)` = 5 rather than minimal-width, matching the frame prefix's own fixed-width `t_ms`. It keeps `write_decimal` as the single owner of digit formatting (the plan's requirement) and makes AUDEND body length a constant, 43 bytes. Consequence: `total_bytes > MAX_BLOCK_BYTES` has no representation, so `BodyError::BlockTooLarge` was added rather than letting the value wrap mod 100000 in release builds.
+3. **`audend_body`/`audend_record` return `Result<_, BodyError>`, not `usize`/`Encoded`.** With an infallible signature, `chunks = 300` rendered as `n=2c` — same defect as deviation 1, second record kind. TASK-038.02.04's pipe path must handle the Err arm.
+
+Found by the test suite, not by reading: `ChunkTooLong` originally surfaced from `encode` failing on the payload slice, i.e. *after* the header had been copied into the caller's buffer. The refusal left 27 bytes behind while its own doc promised otherwise. The base64 budget is now checked before writing anything, and `refuses_instead_of_truncating` asserts every refusal leaves both buffers untouched.
+
+Geometry derivation is real, not decorative: `AUDIO_HEADER_LEN`, `FULL_B64_CHARS`, `CHUNK_RAW`, `BYTES_DEC_DIGITS` and `MAX_AUDEND_BODY_LEN` are const-folded from the same `&[u8]` templates `put()` copies into the buffer, with `const _: () = assert!` pinning 27 / 172 / 129 / 255 / 5 / 199 / 227 / 43. Editing a template moves CHUNK_RAW and fails the build.
+
+Verification: cargo fmt --all --check, cargo clippy --workspace --all-targets -- -D warnings, cargo test --workspace, cd firmware && cargo build --release --features seed3 all pass. Goldens re-run clean after cargo clean -p asperitas-logging. No new dependencies: root Cargo.lock and firmware/Cargo.lock unchanged. Golden CRC literals came from CPython (base64 + a standalone CCITT-FALSE loop) and the published 0x29b1 check value, never from crc16_ccitt.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+AUDIO/AUDEND record grammar shipped in crates/asperitas-logging/src/dump.rs: audio_body/audend_body build complete bodies into a caller-provided [u8; MAX_BODY], audio_record/audend_record compose them with frame::encode, and five refusal variants refuse instead of truncating. Chunk geometry is derived at compile time from the byte templates the writer emits (AUDIO_HEADER_LEN 27, FULL_B64_CHARS 172, CHUNK_RAW 129, full body 199, full frame 227, AUDEND max body 43) and pinned by const assertions, so the published efficiency figures cannot drift from the encoder. frame.rs's write_hex/write_decimal became pub(crate) — one owner of digit formatting. Module doc now carries the normative grammar table (fields, widths, alphabet, what the block CRC covers, why keys are abbreviated, the 64-chunk recommendation) for TASK-038.06 to copy verbatim. Six new tests in tests/console_dump.rs: three golden-frame rows against hand-written wire bytes with CPython-derived and catalogue CRC literals (full chunk, both padding shapes, AUDEND), a proptest over every legal field combination proving the constant header, the refusal suite, the published-arithmetic test (0.568 useful, 745 records/s, 169 kB/s mono 16-bit, 338 kB/s mono 32-bit), and a round trip through the real frame::Decoder with two interleaved blocks and a payload containing every substitutable byte. fmt, clippy (crate and workspace), cargo test --workspace, and the seed3 firmware release build pass.
+<!-- SECTION:FINAL_SUMMARY:END -->

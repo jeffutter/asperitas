@@ -6,9 +6,10 @@
 //! base64, written for `no_std`, allocation-free, and strict enough that silent corruption cannot
 //! survive a round trip.
 //!
-//! The record grammar that carries these payloads (`AUDIO`/`AUDEND`) builds on this codec and is
-//! deliberately not here yet: with only the codec in place, its correctness is provable against a
-//! reference implementation with no framing, no pipe, and no board involved.
+//! On top of the codec sits the record grammar that carries these payloads — `AUDIO` and `AUDEND`
+//! bodies, the chunk geometry derived from them, and one composite entry point per record kind — so
+//! the efficiency figures quoted in documentation are the ones the encoder produces, not the ones a
+//! plan hoped for. See *Record grammar* below.
 //!
 //! # Why base64 and not something denser
 //!
@@ -46,6 +47,60 @@
 //! inputs, mutated inputs, and an exhaustive sweep of every possible final symbol for each tail
 //! length. Error *variants* are this module's own and are not expected to mirror the reference's
 //! wording; only the decision and the bytes are comparable.
+//!
+//! # Record grammar (normative — copy from here, not from a plan)
+//!
+//! Both records ride the v1 framing in [`crate::frame`] untouched, so what follows describes bodies
+//! only. `level`, `seq` and `t_ms` belong to the frame; nothing here reads a clock or a counter.
+//!
+//! ```text
+//! AUDIO blk=<4 hex> n=<2 hex> c=<2 hex> d=<base64>
+//! AUDEND blk=<4 hex> n=<2 hex> bytes=<5 dec> crc16=<4 hex>
+//! ```
+//!
+//! | field | width | alphabet | meaning |
+//! |---|---|---|---|
+//! | `blk` | 4 | lowercase hex | Block id. Wraps every 65,536 blocks; ordering across runs is the frame `seq`'s job, not this field's. |
+//! | `n` | 2 | lowercase hex | Chunks in this block, `1..=255`. Two digits hold no representation for 256, so a longer run starts another block. |
+//! | `c` | 2 | lowercase hex | This chunk's zero-based index, `c < n`. |
+//! | `d` | `4·⌈len/3⌉` | `[A-Za-z0-9+/]`, then mandatory `=` | Canonical base64 of the chunk's raw bytes: ≤ 172 characters ⇒ ≤ **129** raw bytes. |
+//! | `bytes` | 5, fixed | decimal | Raw bytes in the reassembled block. Fixed width like the frame's `t_ms`, so a body's shape never depends on a value. |
+//! | `crc16` | 4 | lowercase hex | CRC-16/CCITT-FALSE over the **raw concatenated block bytes in `c` order** — the samples themselves, never the base64 text and never any framing byte. |
+//!
+//! Sizes fall out of [`MAX_BODY`](crate::frame::MAX_BODY), which bounds the body *including* keys:
+//!
+//! | record | body | frame | raw payload | useful fraction |
+//! |---|---|---|---|---|
+//! | `AUDIO`, full chunk | 199 | 227 | 129 | 129 / 227 = **0.568** |
+//! | `AUDIO`, final chunk | 27 + `4·⌈len/3⌉` | 28 + that | 1…129 | lower, by padding |
+//! | `AUDEND` | 43 | 71 | — | — |
+//!
+//! Mono 16-bit capture at 96,000 B/s therefore costs 745 records/s ≈ 169 kB/s of console traffic
+//! (`tests/console_dump.rs::published_efficiency_matches_the_encoder` recomputes all of it from these
+//! constants and fails if the two disagree).
+//!
+//! **Why the keys are abbreviations.** Descriptive names (`block_index=/n_of_n=/chunk_i=`) spend 18
+//! body bytes on letters and land at 111 raw bytes, 0.487 useful; the 150 raw bytes that layout
+//! assumed were reachable fit in no header at all. Dropping keys entirely would buy 6 bytes (4.6%)
+//! and cost whoever greps a cold capture everything the names say. Payload rounds down to whole
+//! 4-character groups, so *any* header between 25 and 28 bytes yields the same 129 — the letters are
+//! free. Full budget table and rejected alternatives: TASK-038.02's Implementation Notes.
+//!
+//! **Sample bytes cannot be mangled by framing**, because they are base64 before they are framed: the
+//! alphabet is printable ASCII, so [`crate::frame::sanitize_byte`] has nothing to substitute. That is
+//! a structural property rather than a lucky accident, and
+//! `tests/console_dump.rs::round_trips_through_the_real_decoder` exercises it with payloads holding
+//! every byte a substitution would target.
+//!
+//! **Chunking recommendation for the device writer (TASK-038.03): 64 chunks per block** — 8,256 raw
+//! bytes ≈ 86 ms of mono 16-bit capture. Small enough that one lost block costs 86 ms of measurement
+//! rather than the ring, and well inside the 255 the `n` field can name.
+
+use log::Level;
+
+use crate::frame::{
+    self, write_decimal, write_hex, Encoded, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
+};
 
 /// The RFC 4648 §4 standard alphabet, in order. Index with a 6-bit value.
 pub const B64_ALPHABET: &[u8; 64] =
@@ -303,4 +358,294 @@ fn window_of(group: &[u8], at: usize) -> Result<u32, DecodeError> {
         window = window << 6 | slot as u32;
     }
     Ok(window)
+}
+
+// ---------------------------------------------------------------------------
+// Record grammar — geometry derived from the bytes the writer actually emits
+// ---------------------------------------------------------------------------
+
+/// `AUDIO blk=` — opens a chunk body.
+///
+/// Every template below is both what the writer copies into the buffer and what the field widths are
+/// computed from, so editing one moves [`CHUNK_RAW`] with it and the `const` assertions underneath
+/// turn "the documentation drifted" into a compile error. That derivation is the whole reason these
+/// are byte slices rather than a `format!` call site: a format string cannot be measured.
+const AUDIO_PREFIX: &[u8] = b"AUDIO blk=";
+/// ` n=` — chunk-count separator, shared by both record kinds so the two cannot disagree about it.
+const SEP_N: &[u8] = b" n=";
+/// ` c=` — chunk-index separator.
+const SEP_C: &[u8] = b" c=";
+/// ` d=` — payload separator; everything after it is base64.
+const SEP_D: &[u8] = b" d=";
+/// `AUDEND blk=` — opens a block-summary body.
+const AUDEND_PREFIX: &[u8] = b"AUDEND blk=";
+/// ` bytes=` — total-raw-bytes separator.
+const SEP_BYTES: &[u8] = b" bytes=";
+/// ` crc16=` — block-checksum separator.
+const SEP_CRC16: &[u8] = b" crc16=";
+
+/// Digits in `blk`: 65,536 ids before the field wraps.
+const BLK_HEX_DIGITS: usize = 4;
+/// Digits in `n` and `c`.
+const COUNT_HEX_DIGITS: usize = 2;
+/// Digits in `crc16` — the same width as the frame trailer, so the two checksums look alike on the
+/// wire and one host regex reads both.
+const CRC_HEX_DIGITS: usize = 4;
+
+/// Decimal digits needed for `value`, so a numeric field can be sized from the largest number the
+/// grammar can produce instead of from a guess.
+const fn decimal_width(value: u32) -> usize {
+    let mut digits = 1usize;
+    let mut remaining = value / 10;
+    while remaining > 0 {
+        digits += 1;
+        remaining /= 10;
+    }
+    digits
+}
+
+/// Fixed length of an `AUDIO` body's header: `AUDIO blk=` + 4 hex + ` n=` + 2 hex + ` c=` + 2 hex +
+/// ` d=`. Constant because every field is fixed-width, which is what lets the payload budget be a
+/// compile-time subtraction.
+pub const AUDIO_HEADER_LEN: usize = AUDIO_PREFIX.len()
+    + BLK_HEX_DIGITS
+    + SEP_N.len()
+    + COUNT_HEX_DIGITS
+    + SEP_C.len()
+    + COUNT_HEX_DIGITS
+    + SEP_D.len();
+
+/// Base64 characters left in the body once the header has taken its share, rounded down to a whole
+/// group — a partial group would encode nothing and waste the wire.
+const FULL_B64_CHARS: usize = (MAX_BODY - AUDIO_HEADER_LEN) / 4 * 4;
+
+/// Raw bytes carried by a full-size `AUDIO` chunk: 129.
+pub const CHUNK_RAW: usize = FULL_B64_CHARS / 4 * 3;
+
+/// Values the 2-digit `n` field cycles through.
+const COUNT_FIELD_MODULUS: usize = 1 << (COUNT_HEX_DIGITS * 4);
+
+/// Most chunks one block may hold: 255 — one less than the field's modulus, because 256 has no
+/// two-digit representation and emitting it would write `00`, handing the assembler a block that
+/// claims no chunks at all. Where TASK-038.02's notes say 256 they mean this modulus; the capacity
+/// is what a writer must stay inside.
+pub const MAX_CHUNKS_PER_BLOCK: usize = COUNT_FIELD_MODULUS - 1;
+
+/// Largest raw payload one block can describe, hence the widest value `bytes` can honestly carry.
+pub const MAX_BLOCK_BYTES: usize = MAX_CHUNKS_PER_BLOCK * CHUNK_RAW;
+
+/// Decimal digits in `bytes`: exactly enough for [`MAX_BLOCK_BYTES`], so widening the chunk geometry
+/// widens the field with it.
+const BYTES_DEC_DIGITS: usize = decimal_width(MAX_BLOCK_BYTES as u32);
+
+/// Ids the `blk` field cycles through before wrapping.
+const BLOCK_ID_MODULUS: u32 = 1 << (BLK_HEX_DIGITS * 4);
+
+/// Body length of a full-size `AUDIO` record: 199.
+pub const FULL_AUDIO_BODY_LEN: usize = AUDIO_HEADER_LEN + FULL_B64_CHARS;
+
+/// Wire length of a full-size `AUDIO` record including framing: 227.
+pub const FULL_AUDIO_FRAME_LEN: usize = PREFIX_LEN + FULL_AUDIO_BODY_LEN + TRAILER_LEN;
+
+/// Longest `AUDEND` body, counting each numeric field at full width.
+pub const MAX_AUDEND_BODY_LEN: usize = AUDEND_PREFIX.len()
+    + BLK_HEX_DIGITS
+    + SEP_N.len()
+    + COUNT_HEX_DIGITS
+    + SEP_BYTES.len()
+    + BYTES_DEC_DIGITS
+    + SEP_CRC16.len()
+    + CRC_HEX_DIGITS;
+
+// The pins. Each one restates a figure this module's documentation and TASK-038.06 publish; if a
+// template or a width changes shape, the build stops here rather than the paper going stale.
+const _: () = assert!(AUDIO_HEADER_LEN == 27);
+const _: () = assert!(FULL_B64_CHARS == 172);
+const _: () = assert!(CHUNK_RAW == 129);
+const _: () = assert!(MAX_CHUNKS_PER_BLOCK == 255);
+const _: () = assert!(BYTES_DEC_DIGITS == 5);
+const _: () = assert!(FULL_AUDIO_BODY_LEN == 199);
+const _: () = assert!(FULL_AUDIO_BODY_LEN == MAX_BODY - 1);
+const _: () = assert!(FULL_AUDIO_FRAME_LEN == 227);
+const _: () = assert!(MAX_AUDEND_BODY_LEN == 43);
+const _: () = assert!(MAX_AUDEND_BODY_LEN <= MAX_BODY);
+
+/// Why a record body could not be written. Every variant is a refusal: nothing here shortens a
+/// payload to make it fit, because a chunk that silently lost its tail reassembles into audio that
+/// sounds fine and measures wrong.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyError {
+    /// `chunks` exceeds [`MAX_CHUNKS_PER_BLOCK`]; the `n` field cannot name that many.
+    TooManyChunks { chunks: usize },
+    /// `chunk_index` is not below `chunks`, which includes `chunks == 0` — a block with no chunks has
+    /// no chunk zero to send.
+    ChunkIndexOutOfRange { chunk_index: usize, chunks: usize },
+    /// A chunk with no bytes carries no information and would decode as an empty string, which the
+    /// grammar reserves for nothing.
+    EmptyChunk,
+    /// `raw` needs more than the 172 characters the payload field owns, i.e. more than
+    /// [`CHUNK_RAW`] bytes.
+    ChunkTooLong { len: usize },
+    /// `total_bytes` exceeds [`MAX_BLOCK_BYTES`], so `bytes` has no representation for it.
+    BlockTooLarge { total_bytes: usize },
+}
+
+/// Append `template` at `at` in `dst`, returning the offset past it.
+fn put(dst: &mut [u8], at: usize, template: &[u8]) -> usize {
+    dst[at..at + template.len()].copy_from_slice(template);
+    at + template.len()
+}
+
+/// Append `value` as `digits` lowercase hex digits at `at`, returning the offset past them.
+fn put_hex(dst: &mut [u8], at: usize, value: u32, digits: usize) -> usize {
+    write_hex(value, &mut dst[at..at + digits]);
+    at + digits
+}
+
+/// Append `value` as `digits` decimal digits at `at`, returning the offset past them.
+fn put_decimal(dst: &mut [u8], at: usize, value: u32, digits: usize) -> usize {
+    write_decimal(value, &mut dst[at..at + digits]);
+    at + digits
+}
+
+/// Write an `AUDIO blk=… n=… c=… d=…` body into `out`, returning its length.
+///
+/// One chunk of one block. `chunks` is how many chunks the block will have in total, `chunk_index`
+/// this chunk's zero-based position, and `block_index` the block's id — masked to the field's
+/// modulus, so the wrap at 65,536 blocks is a documented property of the wire rather than a
+/// side effect of digit truncation.
+///
+/// Refusals come from [`BodyError`]; on any of them `out` is untouched.
+pub fn audio_body(
+    block_index: u32,
+    chunks: u16,
+    chunk_index: u16,
+    raw: &[u8],
+    out: &mut [u8; MAX_BODY],
+) -> Result<usize, BodyError> {
+    let chunks = chunks as usize;
+    let chunk_index = chunk_index as usize;
+    if chunks > MAX_CHUNKS_PER_BLOCK {
+        return Err(BodyError::TooManyChunks { chunks });
+    }
+    if chunk_index >= chunks {
+        return Err(BodyError::ChunkIndexOutOfRange {
+            chunk_index,
+            chunks,
+        });
+    }
+    if raw.is_empty() {
+        return Err(BodyError::EmptyChunk);
+    }
+    // Checked before a single byte is written, so a refusal never leaves a half-built body behind:
+    // deferring the budget check to `encode` would mean the header had already landed in the
+    // caller's buffer by the time the payload was refused.
+    let chars = encoded_len(raw.len());
+    if chars > FULL_B64_CHARS {
+        return Err(BodyError::ChunkTooLong { len: raw.len() });
+    }
+
+    let dst = &mut out[..];
+    let mut at = 0usize;
+    at = put(dst, at, AUDIO_PREFIX);
+    at = put_hex(dst, at, block_index % BLOCK_ID_MODULUS, BLK_HEX_DIGITS);
+    at = put(dst, at, SEP_N);
+    at = put_hex(dst, at, chunks as u32, COUNT_HEX_DIGITS);
+    at = put(dst, at, SEP_C);
+    at = put_hex(dst, at, chunk_index as u32, COUNT_HEX_DIGITS);
+    at = put(dst, at, SEP_D);
+
+    // The budget check above means this cannot fail; mapping rather than unwrapping keeps the
+    // refusal path free of panics regardless.
+    let written = encode(raw, &mut dst[at..at + chars])
+        .map_err(|_| BodyError::ChunkTooLong { len: raw.len() })?;
+    debug_assert_eq!(written, chars);
+    Ok(at + written)
+}
+
+/// Write an `AUDEND blk=… n=… bytes=… crc16=…` body into `out`, returning its length.
+///
+/// The block summary that closes a block: `total_bytes` is the raw byte count the chunks added up to
+/// and `crc` is [`crate::frame::crc16_ccitt`] over those raw concatenated bytes, both computed by the
+/// caller that assembled the block. Nothing here touches either — the device computes the checksum as
+/// it fills a ring, and the host recomputes it from what it received, so this function's job ends at
+/// formatting.
+pub fn audend_body(
+    block_index: u32,
+    chunks: u16,
+    total_bytes: u32,
+    crc: u16,
+    out: &mut [u8; MAX_BODY],
+) -> Result<usize, BodyError> {
+    let chunks = chunks as usize;
+    if chunks > MAX_CHUNKS_PER_BLOCK {
+        return Err(BodyError::TooManyChunks { chunks });
+    }
+    if total_bytes as usize > MAX_BLOCK_BYTES {
+        return Err(BodyError::BlockTooLarge {
+            total_bytes: total_bytes as usize,
+        });
+    }
+
+    let dst = &mut out[..];
+    let mut at = 0usize;
+    at = put(dst, at, AUDEND_PREFIX);
+    at = put_hex(dst, at, block_index % BLOCK_ID_MODULUS, BLK_HEX_DIGITS);
+    at = put(dst, at, SEP_N);
+    at = put_hex(dst, at, chunks as u32, COUNT_HEX_DIGITS);
+    at = put(dst, at, SEP_BYTES);
+    at = put_decimal(dst, at, total_bytes, BYTES_DEC_DIGITS);
+    at = put(dst, at, SEP_CRC16);
+    at = put_hex(dst, at, u32::from(crc), CRC_HEX_DIGITS);
+    Ok(at)
+}
+
+/// Build and frame a complete `AUDIO` record, returning what landed in `frame`.
+///
+/// The composite callers should reach for: it does the body and [`frame::encode`] in one step, so no
+/// caller re-derives the two-buffer dance. Both buffers are explicit rather than a hidden static
+/// because the device supplies `frame` from the existing `RECORD_BUFS` (TASK-030.02's lock-guarded
+/// set) and pays nothing on the stack for it.
+///
+/// `level` is the caller's, and [`Level::Info`] is what BOOT and STATUS use: these are
+/// device-generated facts about a capture, not diagnostics, and the Debug filter that quiets chatter
+/// should not quietly silence a measurement. The decoder accepts all five letters, so a caller that
+/// wants dumps filtered with verbose logging may pass [`Level::Debug`] instead.
+#[allow(clippy::too_many_arguments)] // Nine inputs, seven of which are the record: the two records
+                                     // describe one block and get read side by side, so folding fields
+                                     // into a struct would hide `blk`/`n`/`c` behind a name without
+                                     // shortening what a caller must actually supply.
+pub fn audio_record(
+    level: Level,
+    seq: u32,
+    now_ms: u32,
+    block_index: u32,
+    chunks: u16,
+    chunk_index: u16,
+    raw: &[u8],
+    body: &mut [u8; MAX_BODY],
+    frame_buf: &mut [u8; MAX_FRAME],
+) -> Result<Encoded, BodyError> {
+    let len = audio_body(block_index, chunks, chunk_index, raw, body)?;
+    Ok(frame::encode(level, seq, now_ms, &body[..len], frame_buf))
+}
+
+/// Build and frame a complete `AUDEND` record, returning what landed in `frame`.
+///
+/// The composite counterpart of [`audio_record`], with the same reasoning about buffers and level.
+#[allow(clippy::too_many_arguments)] // Same reasoning as [`audio_record`]; the parameter lists mirror
+                                     // each other field for field on purpose.
+pub fn audend_record(
+    level: Level,
+    seq: u32,
+    now_ms: u32,
+    block_index: u32,
+    chunks: u16,
+    total_bytes: u32,
+    crc: u16,
+    body: &mut [u8; MAX_BODY],
+    frame_buf: &mut [u8; MAX_FRAME],
+) -> Result<Encoded, BodyError> {
+    let len = audend_body(block_index, chunks, total_bytes, crc, body)?;
+    Ok(frame::encode(level, seq, now_ms, &body[..len], frame_buf))
 }
