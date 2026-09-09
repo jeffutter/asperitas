@@ -3,11 +3,11 @@ id: TASK-030
 title: >-
   Make USB console log records self-verifying so capture loss cannot masquerade
   as data
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:23'
-updated_date: '2026-09-09 01:37'
+updated_date: '2026-09-09 02:26'
 labels: []
 dependencies: []
 documentation:

@@ -3,11 +3,11 @@ id: TASK-029.01
 title: >-
   Add transition-gated raw A/B encoder logging to podtest so a capture can
   record per-detent clusters and rest state
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-09-09 01:25'
-updated_date: '2026-09-09 02:23'
+updated_date: '2026-09-09 02:24'
 labels:
   - planned
 dependencies: []
@@ -165,3 +165,17 @@ No hard dependency is imposed on purpose: TASK-030 is a transport project, and g
 Related: **TASK-031** (host-side rig runner producing integrity-checked captures) will eventually read these files programmatically, so keep the line format trivially parseable — fixed field order, space-separated, no alignment padding.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Observability only, as scoped: podtest now shows the raw quadrature walk next to the decoded detent count, so one board session can measure per-detent transition clusters and the encoder's rest state.
+
+Landed: EncoderDecoder::state() and ControlSurface::encoder_state() (pod-hw) as read-only accessors; '[podtest] t=<ms> ENCRAW AB=<bits>' emitted once per state change in podtest, labels as ASCII bit pairs so 00 01 11 10 reads as a clockwise cycle; rate arithmetic encoded as constants (4 lines/detent x 10 detents/s = 40 lines/s worst case, zero while still) with a compile-time assertion against the ~58 lines/s where the 2026-08-08 capture lost ~8.8% of its lines; one new host test on the accessor's range guarantee. Diff is purely additive -- ENCODER_LUT, drain_detents, poll()'s signature and ControlEvent are untouched, so decoding cannot have changed behaviour.
+
+Verified locally: cargo fmt --all --check; clippy --workspace --all-targets -D warnings with and without asperitas-pod/pod-hw; cargo test --workspace with and without pod-hw (36 pod tests); firmware release build for thumbv7em-none-eabihf --bin podtest; and 'ENCRAW AB=' present in the linked ELF via strings, so the line really ships rather than being optimised out.
+
+Not verified, deliberately: this ticket cannot claim the log works. Whether the lines arrive intact over USB CDC, whether a cluster is legible in a real capture, and what the rest state actually is -- all need the board and belong to TASK-029, which owns the capture session. TASK-030 (self-verifying records) has not landed, so these lines ride the transport that already lost ~8.8% once; I left the plain info! format (parseable, fixed field order) and put the loss-tolerance protocol -- turn each direction twice and compare runs -- plus the fallbacks (drop the timestamp, coalesce per cluster) in both this ticket's notes and TASK-029's notes.
+
+One environment finding worth passing on: another pi session is working in this same working tree concurrently (it reformatted podtest.rs's ticker call and two markdown tables in docs/reference/daisy-pod.md mid-run, and it is committing other tickets here). I reverted the podtest.rs formatting hunk so this commit contains only my work and left the docs reformat uncommitted for that session to take, staged only my two files, and did not amend HEAD afterwards because backlog auto-commits task edits and HEAD was therefore not mine to rewrite.
+<!-- SECTION:FINAL_SUMMARY:END -->
