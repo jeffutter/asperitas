@@ -85,13 +85,13 @@ pub struct BootLed {
 }
 
 // ---------------------------------------------------------------------------
-// Singleton storage — initialized once by init(), accessed via get_mut()
+// Singleton storage — initialized once by init(), accessed via with_led()
 // ---------------------------------------------------------------------------
 
 static BOOT_LED_STORAGE: StaticCell<BootLed> = StaticCell::new();
 
-/// Cached mutable reference to the initialized BootLed.
-/// Set once by init(), read by get_mut(). Safe on single-core Cortex-M.
+/// Cached pointer to the initialized BootLed. Set once by [`init`], read by [`with_led`].
+/// Null until then, which is how a panic that early stays a diagnostic instead of a fault.
 static mut BOOT_LED_REF: *mut BootLed = core::ptr::null_mut();
 
 /// Global atomic state — read by blink_task, written by main() and panic_handler.
@@ -138,8 +138,11 @@ pub fn init(
     };
 
     let boot_led = BOOT_LED_STORAGE.init(led);
+    // Safety: written once, here, before anything can read it back. `addr_of_mut!` rather
+    // than assigning to the static directly so no reference to a `static mut` is ever
+    // created — the form the `static_mut_refs` lint sanctions.
     unsafe {
-        BOOT_LED_REF = boot_led;
+        core::ptr::write(core::ptr::addr_of_mut!(BOOT_LED_REF), boot_led);
     }
 
     // Start in PreInit state, and drive the pins to match rather than only
@@ -147,14 +150,23 @@ pub fn init(
     set_global_state(LedState::PreInit);
 }
 
-/// Get a mutable reference to the singleton BootLed.
+/// Drive the singleton LED, if [`init`] has run, returning what the closure produced.
 ///
-/// # Safety
+/// The borrow ends when the closure returns, so no `&mut BootLed` is ever held across an
+/// `.await`. That is the whole reason this is a callback rather than `fn get_mut() ->
+/// &'static mut BootLed`: [`blink_task`] yields between LED operations, and a held
+/// reference would sit aliased while [`set_global_state`] — called from other tasks, and
+/// from the panic handler — drove the same pins.
 ///
-/// Must only be called after [`init`] has been called. Safe on single-core
-/// Cortex-M with controlled init-then-access lifecycle.
-pub fn get_mut() -> &'static mut BootLed {
-    unsafe { &mut *BOOT_LED_REF }
+/// Points at [`BOOT_LED_STORAGE`], which lives for `'static`, on a single core.
+fn with_led<R>(f: impl FnOnce(&mut BootLed) -> R) -> Option<R> {
+    let led_ptr = unsafe { core::ptr::read_volatile(core::ptr::addr_of_mut!(BOOT_LED_REF)) };
+    if led_ptr.is_null() {
+        return None;
+    }
+    // Safety: non-null and pointing at BOOT_LED_STORAGE, which lives for 'static; single
+    // core, and the closure's borrow cannot outlive this call.
+    Some(f(unsafe { &mut *led_ptr }))
 }
 
 /// Set the global LED state atomically.
@@ -169,10 +181,7 @@ pub fn get_mut() -> &'static mut BootLed {
 pub fn set_global_state(state: LedState) {
     LED_STATE.store(state.to_u32(), Ordering::Release);
 
-    let led = unsafe { BOOT_LED_REF };
-    if !led.is_null() {
-        unsafe { &mut *led }.set_state(state);
-    }
+    let _ = with_led(|led| led.set_state(state));
 }
 
 impl BootLed {
@@ -239,9 +248,9 @@ impl BootLed {
 
 /// Async blink task that reads the global atomic state each iteration.
 ///
-/// Accesses the singleton [`BootLed`] via raw pointer internally, so it takes
-/// no arguments and can be freely selected alongside other futures without
-/// borrow-across-await issues.
+/// Drives the singleton [`BootLed`] through [`with_led`], so it takes no arguments, can be
+/// freely selected alongside other futures without borrow-across-await issues, and never
+/// holds the LED while [`set_global_state`] wants it.
 ///
 /// Runs forever — does not return.
 ///
@@ -265,26 +274,25 @@ impl BootLed {
 pub async fn blink_task() {
     loop {
         let state = LedState::from_u32(LED_STATE.load(Ordering::Acquire));
-        let led = unsafe { &mut *BOOT_LED_REF };
 
         match state {
             LedState::Running => {
                 // Steady green — yield periodically to stay responsive
-                led.set_state(LedState::Running);
+                with_led(|led| led.set_state(LedState::Running));
                 Timer::after_millis(500).await;
             }
             LedState::PreInit => {
                 // Red blink ~1 Hz
-                led.set_color_on(true, false, false);
+                with_led(|led| led.set_color_on(true, false, false));
                 Timer::after_millis(500).await;
-                led.off();
+                with_led(|led| led.off());
                 Timer::after_millis(500).await;
             }
             LedState::Panicked => {
                 // Unreachable in practice: the panic handler sets steady red
                 // synchronously and then halts the async executor.
                 // Kept as exhaustive match arm to avoid compiler warnings.
-                led.set_state(LedState::Panicked);
+                with_led(|led| led.set_state(LedState::Panicked));
                 Timer::after_millis(1000).await;
             }
         }

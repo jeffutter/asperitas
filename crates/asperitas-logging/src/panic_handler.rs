@@ -17,17 +17,27 @@
 //! ```
 //!
 //! Before any panic can occur, call [`crate::led::init`] to initialize the
-//! shared BootLed instance. The panic handler uses the same singleton via
-//! [`crate::led::get_mut`].
+//! shared BootLed instance. The panic handler drives it through
+//! [`crate::led::set_global_state`], which needs no initialized singleton to be safe.
 
 use core::fmt::Write;
 use core::panic::PanicInfo;
+
+use crate::TruncWriter;
+
+/// Size of the panic message buffer, in bytes.
+///
+/// A local on the panic stack, so it stays small on purpose: the alternative is a
+/// 228-byte `MAX_FRAME` array, and this handler runs on a stack that may already be
+/// nearly exhausted.
+const PANIC_MSG_BUF: usize = 128;
 
 /// Handle a panic — called by the binary crate's `#[panic_handler]`.
 ///
 /// This function:
 /// 1. Sets the LED to red (panicked state) — always works, synchronous
-/// 2. Writes the panic message over USB serial, driving the endpoint directly
+/// 2. Writes the panic message over USB serial as one framed record, driving the endpoint
+///    directly
 /// 3. Halts
 pub fn handle_panic(info: &PanicInfo) -> ! {
     // 1. Set LED to panicked state via the shared BootLed — synchronous, always works
@@ -38,11 +48,12 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
     // Deliberately NOT through the log pipe. The pipe is drained by a future
     // inside `usb::run()`, and by the time we get here the async executor is
     // halted for good — so a pipe write is not "best effort", it is guaranteed
-    // to be discarded. `usb::emit_blocking` drives the USB device and the CDC
-    // endpoint itself, which works because the USB interrupt is still firing
-    // during the spin below. It is time-bounded and never panics.
+    // to be discarded. `usb::emit_panic_record` frames the text as a console v1
+    // record and then drives the CDC endpoint itself, which works because the USB
+    // interrupt is still firing during the spin below. It is time-bounded, takes
+    // no lock, allocates nothing, and never panics.
     let (msg, len) = format_panic_message(info);
-    crate::usb::emit_blocking(msg.get(..len).unwrap_or(&[][..]));
+    crate::usb::emit_panic_record(msg.get(..len).unwrap_or(&[][..]));
 
     // 3. Halt.
     //
@@ -62,39 +73,18 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
 /// Returns the buffer and the number of bytes actually written. The length
 /// matters: the buffer is zero-filled, so writing all of it emits the message
 /// followed by NUL padding, which shows up as garbage on a serial terminal.
-fn format_panic_message(info: &PanicInfo) -> ([u8; 128], usize) {
-    let mut buf = [0u8; 128];
+fn format_panic_message(info: &PanicInfo) -> ([u8; PANIC_MSG_BUF], usize) {
+    let mut buf = [0u8; PANIC_MSG_BUF];
 
-    struct Writer<'a> {
-        buf: &'a mut [u8],
-        pos: usize,
-    }
-
-    impl Write for Writer<'_> {
-        fn write_str(&mut self, s: &str) -> core::fmt::Result {
-            let available = self.buf.len() - self.pos;
-            let len = s.len().min(available);
-            if len == 0 {
-                return Err(core::fmt::Error);
-            }
-            self.buf[self.pos..self.pos + len].copy_from_slice(&s.as_bytes()[..len]);
-            self.pos += len;
-            Ok(())
-        }
-    }
-
-    let mut w = Writer {
-        buf: &mut buf,
-        pos: 0,
-    };
+    let mut w = TruncWriter::new(&mut buf);
     let _ = core::write!(w, "PANIC: {}", info.message());
     if let Some(loc) = info.location() {
         let _ = core::write!(w, " at {}:{}:{}", loc.file(), loc.line(), loc.column());
     }
-    // CRLF, not LF: this lands in a raw serial terminal, which does not translate
-    // a bare newline into a carriage return. Matches `format_log_record`.
-    let _ = core::write!(w, "\r\n");
+    // No trailing CRLF: this text becomes the *body* of a framed record, and the frame
+    // supplies the delimiter. A CR or LF inside a body would only be neutralised to `_`
+    // by the sanitiser, so the line break belongs to the framing and nowhere else.
 
-    let len = w.pos;
+    let len = w.filled();
     (buf, len)
 }

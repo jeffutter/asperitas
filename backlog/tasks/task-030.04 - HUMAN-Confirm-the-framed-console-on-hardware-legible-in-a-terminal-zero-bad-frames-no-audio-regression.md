@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 03:25'
-updated_date: '2026-09-09 04:02'
+updated_date: '2026-09-09 09:17'
 labels:
   - planned
 dependencies:
@@ -45,6 +45,7 @@ ticket with the offending timestamps rather than checking a box.
 - [ ] #4 HUMAN: Record the numbers in this ticket notes: decoded record count, achieved records per second, device-reported drop counters from the STATUS records, and host-side integrity failures.
 - [ ] #5 HUMAN: With logging running, confirm audio output through main.rs is free of clicks, dropouts or pitch artefacts attributable to the logging path, or state explicitly that the bench was not rigged for audio at that moment.
 - [ ] #6 HUMAN: If any criterion above fails, file a bug ticket carrying the offending timestamps from the capture rather than checking the box.
+- [ ] #7 HUMAN: Confirm the captured raw file ends on a complete record rather than a truncated tail - the trailing-full-packet case no host test can see - and note the byte length of the last record modulo 64.
 <!-- AC:END -->
 
 ## Implementation Plan

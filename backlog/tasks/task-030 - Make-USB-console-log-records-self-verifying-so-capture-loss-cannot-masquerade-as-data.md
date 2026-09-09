@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:23'
-updated_date: '2026-09-09 05:42'
+updated_date: '2026-09-09 09:15'
 labels:
   - planned
 dependencies:
@@ -400,5 +400,59 @@ Amendment from planning TASK-030.01 (every number below was re-derived and check
 1. §3's illustrative `*2f9e` is wrong. Correct frames under the pinned parameters (`crc16_ccitt(b"123456789") == 0x29b1`): `~I 00000042 00004567 ENC +1*9c17\r\n` (34 B), empty body `~D 00000000 00000000 *91d4\r\n` (28 B), max-size body ends `*6c90`. TASK-030.03 must use these in docs/reference/console-protocol.md, not the ones currently in §3.
 2. §3's sentence "a corrupt stream cannot produce a spurious `~` because payloads are tilde-free by construction" is false: sanitisation maps only bytes < 0x20 and 0x7F, so `~`, `*`, `|` survive inside bodies. Framing strength comes from the rigid grammar plus the CRC and, above all, the no-CR/LF invariant. Measured: exhaustive single-byte mutation over three frame shapes (~75 000 cases) accepts **zero**; weight >= 2 payload mutations reject > 99 % (about 1/232 cancellation classes exist in principle because CRC-16 is linear).
 3. Two limits §3/§5 should state, because they change what a capture summary can claim: a record whose leading `~` was lost produces **no** `bad_frames` at all (only a `seq` gap or a `STATUS` counter reveals it), and a byte-level splice between two producers legitimately yields two valid records plus one integrity failure. The guarantee is that no record is ever invented, not that nothing decodes.
+---
+
+created: 2026-09-09 09:15
+---
+Amendment from planning TASK-030.02 (every claim below was checked against the vendored crate sources at
+the resolved versions, not recalled):
+
+1. **§4's "one buffer, not two" is not implementable against the codec TASK-030.01 shipped.**
+   `frame::encode(body: &[u8], out: &mut [u8; MAX_FRAME])` takes two disjoint borrows, so "format the body
+   at `FRAME_BUF[21..]`, sanitise in place, then write the prefix backwards into `[0..21]`" cannot be
+   expressed without aliasing `out` with itself. And `encode` *always* copies + sanitises from its source
+   (`frame.rs:195-197`), so the saving the one-buffer idea was protecting is not real: the cost of a
+   separate body buffer is one extra ≤256 B copy, well under a microsecond at 480 MHz against a 667 µs audio
+   block period. Two buffers it is. Rewriting `encode` for in-place use would reopen a finished,
+   property-tested module for a rounding error. Related trap: `Encoded::truncated` is computed from the
+   *input* length (`frame.rs:216`), so a formatter capped at exactly `MAX_BODY` would make the `trunc`
+   counter unable to ever fire — the format buffer stays larger than 200 bytes.
+
+2. **§4's "never hand `write_packet` a zero-length chunk" is inverted for the *final* packet, and the
+   planned 256-byte drain read makes the bad case routine.** Verbatim,
+   `embassy-usb-0.6.0/src/class/cdc_acm.rs:90-93`: "If you write a packet that is exactly `max_packet_size`
+   bytes long, it won't be processed by the host operating system until a subsequent shorter packet is sent.
+   A zero-length packet (ZLP) can be sent if there is no other data to send. This is because USB bulk
+   transactions must be terminated with a short packet, even if the bulk endpoint is used for stream-like
+   data." `CdcAcmClass::write_packet` does nothing about it (`cdc_acm.rs:332-334`); embassy's own classes
+   handle it by hand (`hid.rs:332-339`, `cdc_ncm/mod.rs:423-426`), and `write_packet(&[])` really does arm a
+   0-byte transfer on this hardware (`embassy-usb-synopsys-otg-0.3.3/src/lib.rs:1313`, `:1374-1397`). With a
+   256-byte read chunked into 64-byte packets, roughly one flush in 64 ends exactly on a full-size packet
+   and its bytes sit in the host driver until the next record arrives — at end of session they never
+   arrive. That is our own new truncation mechanism, in the ticket whose purpose is to remove truncation,
+   and framing would only faithfully report it as a seq gap. §4's rule becomes: **never park while the last
+   packet handed to the endpoint was exactly 64 bytes**, mirrored in `emit_blocking`. Board confirmation
+   stays with the human checks: TASK-030.04 gained an AC that the capture ends on a complete record, and
+   TASK-030.03 gained one to document the rule for reader authors.
+
+3. **§5's counters need saturating semantics.** They are cumulative-since-boot and the host differences
+   successive STATUS records for rates; a wrapped `bytes_dropped` (reachable: ~24 days of sustained dropping
+   at ring capacity) reads as a huge negative rate. Loss counters saturate at `u32::MAX`. `seq` is the
+   exception and keeps wrapping mod 2^32 to match its 8-hex-digit field — a saturated seq would emit a
+   duplicate sequence number, a wrapped one is recoverable by modular subtraction.
+
+4. **No microsecond measurement of the locked region is possible in this crate**, so §8's risk 1 stays a
+   static bound plus TASK-030.04's ears: the time driver runs at 32 768 Hz (`tick-hz-32_768`, selected by
+   daisy-embassy's `embassy-time` features), i.e. ~30.5 µs per tick, coarser than the ~20–40 µs window worth
+   measuring, and cortex-m 0.7 has no DWT/CYCCNT driver. Real numbers belong with the probe work
+   (TASK-036/037) or a GPIO toggle on the bench. If a future pass instruments it, report ticks and name the
+   tick duration — never a `_us` field derived from a 30 µs clock.
+
+5. Pass 2's §4 coordinates had drifted (LOG_PIPE `lib.rs:149-151`→`158-162`, `pipe()`
+   `156-164`→`164-175`, drain loop `usb.rs:213-247`→`218-246`, `emit_blocking` call
+   `panic_handler.rs:41`→`:45`, and the BufferOverflow-as-disconnect trap is the dead
+   `impl From<EndpointError> for Disconnected` at `usb.rs:42-53`, not the doc comment at `:26-33`). Corrected
+   inline in the child plan; `.02` also gained ACs #10 (short-packet termination), #11 (saturation vs seq
+   wrap) and #12 (STATUS layout and debounce as pure, host-tested functions). No change to §3's wire grammar.
 ---
 <!-- COMMENTS:END -->

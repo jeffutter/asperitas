@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-09 03:25'
-updated_date: '2026-09-09 03:27'
+updated_date: '2026-09-09 09:16'
 labels:
   - planned
 dependencies:
@@ -33,6 +33,7 @@ Parent: TASK-030, acceptance criterion #7. Write console protocol v1 down where 
 - [ ] #4 It records that the leading byte is reserved device-to-host and a different one for host-initiated commands, pointing at TASK-032, and states the measured ~8.8% baseline this replaces along with the caveat that its raw capture no longer exists.
 - [ ] #5 README.md debugging instructions describe what a plain terminal now shows, keep the panictest countdown and PANIC procedure meaningful, and give the console_decode command for checking a saved capture plus a pointer to TASK-031.
 - [ ] #6 Every field name, width and counter in both documents was checked against the shipped frame.rs and the emission site rather than transcribed from this ticket, and cargo fmt --all --check passes.
+- [ ] #7 It records the USB short-packet rule: that the device terminates every bulk transaction with a short packet or zero-length packet, why an exactly-64-byte final packet would otherwise sit unseen in the host's driver buffer, and that a reader may legitimately observe zero-length reads.
 <!-- AC:END -->
 
 ## Implementation Plan
