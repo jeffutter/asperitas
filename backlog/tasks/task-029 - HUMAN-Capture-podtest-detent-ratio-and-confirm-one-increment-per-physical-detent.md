@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 00:27'
-updated_date: '2026-09-09 01:32'
+updated_date: '2026-09-09 02:23'
 labels:
   - review-followup
 dependencies:
@@ -48,6 +48,10 @@ Can share one board session with TASK-027, which needs a fresh podtest capture f
 Dependencies updated 2026-09-09 to include TASK-031. This ticket keeps its @human assignment — turning ten deliberate detents in each direction is actuation, not analysis, and no rig exists for it. But criterion #1's capture should be taken through the rig runner rather than by hand once TASK-031 lands, so the detent counts rest on integrity-checked records instead of a serial transcript that loses roughly 8.8% of its lines. Criterion #3's cluster arithmetic is agent work either way.
 
 The bench left rigged by TASK-027.01 can be reused for this session; both need a fresh podtest capture and neither needs anything touched in between.
+
+TASK-029.01 landed: podtest now emits '[podtest] t=<ms> ENCRAW AB=<bits>' once per raw 2-bit encoder state change, alongside the existing decoded 'ENC {:+}' detent line. Reading a capture: a physical click is the run of ENCRAW lines between two stable stretches (expect up to 4, e.g. 00->01->11->10 clockwise); the state held while nothing is turning is the mechanical rest position, and the first ENCRAW line after boot reports the state the harness booted in.
+
+TASK-030 (self-verifying log records) has NOT landed, so these lines ride the same USB CDC path that lost ~8.8% of the 2026-08-08 capture's lines. A dropped line inside a burst is indistinguishable from a transition that never happened, so do not read one run's cluster length as final: turn each direction at least twice and compare the runs, and record the comparison here. If the runs disagree, the capture lost lines -- report it rather than concluding the ratio or cluster shape, and mention it so TASK-029.01's fallback (drop the ENCRAW timestamp, or coalesce a burst into one line per cluster) can be taken.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

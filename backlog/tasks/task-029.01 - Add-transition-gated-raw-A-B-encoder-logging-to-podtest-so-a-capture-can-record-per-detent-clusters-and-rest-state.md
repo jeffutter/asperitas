@@ -3,11 +3,11 @@ id: TASK-029.01
 title: >-
   Add transition-gated raw A/B encoder logging to podtest so a capture can
   record per-detent clusters and rest state
-status: Dev Ready
+status: In Progress
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 01:25'
-updated_date: '2026-09-09 01:39'
+updated_date: '2026-09-09 02:23'
 labels:
   - planned
 dependencies: []
@@ -58,10 +58,10 @@ Out of scope: changing the decoder, `ControlEvent`, or any log line other than t
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 podtest emits one encoder line per raw 2-bit state CHANGE (timestamp + A/B state), and no encoder line while the shaft is still; the existing decoded ENC delta line is kept
-- [ ] #2 worst-case encoder log rate during deliberate detents is stated in the new constant's doc comment and is below the ~58 lines/s at which the 2026-08-08 capture lost 8.8% of lines
-- [ ] #3 decoder behaviour is unchanged: the raw state reaches the log through a read-only path (accessor or extra poll callback value) with no change to ControlEvent or ENCODER_LUT
-- [ ] #4 cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings passes and cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release succeeds
+- [x] #1 podtest emits one encoder line per raw 2-bit state CHANGE (timestamp + A/B state), and no encoder line while the shaft is still; the existing decoded ENC delta line is kept
+- [x] #2 worst-case encoder log rate during deliberate detents is stated in the new constant's doc comment and is below the ~58 lines/s at which the 2026-08-08 capture lost 8.8% of lines
+- [x] #3 decoder behaviour is unchanged: the raw state reaches the log through a read-only path (accessor or extra poll callback value) with no change to ControlEvent or ENCODER_LUT
+- [x] #4 cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings passes and cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release succeeds
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -133,6 +133,20 @@ hardware confirmation to TASK-029, which owns the capture session. Update
 `docs/reference/daisy-pod.md` only if the capture afterwards records a new fact (rest state); the
 harness itself does not need its own doc section.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented (all four gates green locally):
+
+- crates/asperitas-pod/src/encoder.rs: EncoderDecoder::state() -> u8 returns previous_state, the last quadrature state update() latched (A=bit1, B=bit0, always 0..=3 because update masks before storing). Purely additive; ENCODER_LUT, drain_detents and ControlEvent untouched. New host test state_reports_last_accepted_quadrature_state_in_range covers fresh/at-rest/masked-input cases (36 pod tests pass).
+- Same file, pod-hw module: ControlSurface::encoder_state() delegates to the decoder, documented diagnostic-only and valid only after poll(). Does not change poll()'s signature or its callback contract.
+- firmware/src/bin/podtest.rs: after controls.poll(), one line per raw STATE CHANGE: '[podtest] t=<ms> ENCRAW AB=<bits>', labels from ENCRAW_STATE_LABELS = ["00","01","10","11"] so a capture reads as the Gray walk (00 01 11 10 = clockwise). last_enc_state starts None, so the very first line records the state the harness boots in; between bursts the held value is the mechanical rest position. The decoded 'ENC {:+}' line is unchanged and still precedes each burst.
+- Rate gate: ENCRAW_MAX_LINES_PER_DETENT(4) x ENCRAW_MAX_DETENTS_PER_SECOND(10) = ENCRAW_WORST_CASE_LINES_PER_SECOND(40), documented against the ~58 lines/s where the 2026-08-08 capture lost ~8.8% of 13968 lines, with an explicit note that the figure is approximate and shared with ~100 knob lines/s, so 40/s is 'same order as a rate that already survived', not proven headroom. A const assert keeps the comparison true if either assumption is retuned. Zero lines while the shaft is still.
+- TASK-030 has NOT landed, so ENCRAW stays a plain info! line in the existing format (fixed field order, space-separated, no padding, per TASK-031's parseability need). Fallback if a capture shows loss: drop the timestamp from ENCRAW, or coalesce a burst into one line per cluster.
+- Gates: cargo fmt --all --check; clippy --workspace --all-targets -D warnings (with and without asperitas-pod/pod-hw); cargo test --workspace (with and without pod-hw); cargo build --manifest-path firmware/Cargo.toml --target thumbv7em-none-eabihf --bin podtest --release. Also confirmed 'ENCRAW AB=' survives into the linked ELF (strings), so the line is really in the shipped binary.
+- Evidence limit, stated plainly: compiling is not evidence. Nothing here proves the lines arrive intact over USB CDC or that clusters are legible on a real capture -- AC #1 and AC #2 are established by construction plus inspection only. TASK-029 owns the board confirmation, including whether transport loss cuts a 4-transition cluster down to 3.
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 
