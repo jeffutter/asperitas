@@ -1,11 +1,11 @@
 ---
 id: TASK-036.01
 title: Add probe-rs flashing targets and release DWARF line tables
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 21:42'
-updated_date: '2026-09-09 22:03'
+updated_date: '2026-09-09 22:43'
 labels:
   - planned
 dependencies: []
@@ -36,13 +36,13 @@ Nothing here needs the physical probe. The target is verified by expanding it (`
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 firmware/Makefile gains `probe-flash` (program, verify read-back, reset, then exit) and `probe-log` (attach and stream RTT/defmt without reflashing), both driving the built ELF at target/thumbv7em-none-eabihf/release/$(BINARY) with --chip STM32H750IBKx, --connect-under-reset and --verify; `make -n probe-flash probe-log` shows fully expanded commands with no unset variables.
-- [ ] #2 build, flash, flash-all and check behave exactly as before, and firmware.bin is byte-for-byte the same size as the baseline recorded before [profile.release] was introduced.
-- [ ] #3 [profile.release] debug = "line-tables-only" is set in firmware/Cargo.toml with a comment naming the reason; strip, panic and lto are left at their defaults.
-- [ ] #4 Running `make probe-flash` with no probe attached reaches a successful cargo build and fails only at probe discovery, with probe-rs reporting No debug probes were found. — no clap argument-parse error and no missing-artifact error.
-- [ ] #5 A `clippy` target lints the firmware workspace for thumbv7em-none-eabihf with -D warnings and passes on the default feature set (TASK-009 made this possible; neither CI nor lefthook runs firmware clippy today, so the target is the only place it happens).
-- [ ] #6 PROBE_EXTRA lets a person add or override flags from the command line without editing the Makefile, and the header comment records why: --connect-under-reset has open reliability reports specifically against the ST-Link V3 MINIE (probe-rs #3516), so the documented fallback is a flag change such as PROBE_EXTRA="--speed 1000", not a rewrite.
-- [ ] #7 flake.nix comment above pkgs.probe-rs-tools no longer describes the probe as still to arrive, and nix eval .#devShells.aarch64-darwin.default still succeeds after the edit.
+- [x] #1 firmware/Makefile gains `probe-flash` (program, verify read-back, reset, then exit) and `probe-log` (attach and stream RTT/defmt without reflashing), both driving the built ELF at target/thumbv7em-none-eabihf/release/$(BINARY) with --chip STM32H750IBKx, --connect-under-reset and --verify; `make -n probe-flash probe-log` shows fully expanded commands with no unset variables.
+- [x] #2 build, flash, flash-all and check behave exactly as before, and firmware.bin is byte-for-byte the same size as the baseline recorded before [profile.release] was introduced.
+- [x] #3 [profile.release] debug = "line-tables-only" is set in firmware/Cargo.toml with a comment naming the reason; strip, panic and lto are left at their defaults.
+- [x] #4 Running `make probe-flash` with no probe attached reaches a successful cargo build and fails only at probe discovery, with probe-rs reporting No debug probes were found. — no clap argument-parse error and no missing-artifact error.
+- [x] #5 A `clippy` target lints the firmware workspace for thumbv7em-none-eabihf with -D warnings and passes on the default feature set (TASK-009 made this possible; neither CI nor lefthook runs firmware clippy today, so the target is the only place it happens).
+- [x] #6 PROBE_EXTRA lets a person add or override flags from the command line without editing the Makefile, and the header comment records why: --connect-under-reset has open reliability reports specifically against the ST-Link V3 MINIE (probe-rs #3516), so the documented fallback is a flag change such as PROBE_EXTRA="--speed 1000", not a rewrite.
+- [x] #7 flake.nix comment above pkgs.probe-rs-tools no longer describes the probe as still to arrive, and nix eval .#devShells.aarch64-darwin.default still succeeds after the edit.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -180,3 +180,23 @@ in README, which is TASK-036.04's file.
 Anything requiring the probe physically present (TASK-037); `DEFMT_LOG` plumbing (TASK-036.03);
 panic-probe; gdb/openocd.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Baseline (step 0, before [profile.release]): firmware.bin = 88101 bytes, sha256 9496851d604706d3... After adding debug="line-tables-only": 88101 bytes again, sha256 e3b68f4ba6e403d8... — same size, different bytes. Explained rather than hand-waved: llvm-size on both ELFs gives .text 72680 -> 72688 (+8), .rodata 14224 -> 14224, .vector_table 664, .data 404 unchanged; every .debug_* section is non-ALLOC (VMA/LMA 0, TYPE DEBUG) so objcopy's --only-section list excludes all ~3 MB of it. The +8 in .text shifts .rodata by 16 and re-links every address, which is why 76904 of 88101 bytes differ while the total does not. So 'costs nothing in flash' is right about DWARF and slightly wrong about codegen perturbation; the Cargo.toml comment states the measurement instead of the claim.
+
+Verified: make -n probe-flash/probe-log/probe-run expand with no empty variables (PROBE_EXTRA intentionally empty); DFU path untouched — extracted HEAD's Makefile and diffed `make -n build flash flash-all check` output against the new one: identical. make check rc=0. make clippy rc=0 on default features and with FEATURES="seed3 slow-boot" (quoted convention holds). nix eval .#devShells.aarch64-darwin.default -> derivation, rc=0. Chip string confirmed against the pinned toolchain: probe-rs chip info STM32H750IBKx -> NVM 0x08000000..0x08020000 (128 KiB), RAM 0x24000000..0x24080000 (512 KiB), matching memory.x. Artifact really is target/thumbv7em-none-eabihf/release/main.
+
+Two places where this ticket's wording and reality differ, both harmless:
+1. AC#4 quotes 'No debug probes were found.' — that is probe-rs list's wording. probe-rs download says 'Error: No connected probes were found.' Same failure mode, purely discovery: cargo build finished first, no clap usage error, no missing-artifact error, make exits 2.
+2. AC#1 asks for --connect-under-reset and --verify on both new targets. --verify only exists on probe-rs download (attach has no such flag) and Step 4 of the plan deliberately keeps probe-log reset-free, since it attaches to an already-flashed board. probe-log therefore takes ELF + --chip + PROBE_EXTRA only.
+
+Pre-existing defect found, NOT caused by and NOT fixed here: probe-rs run/attach fail before probe discovery with 'defmt version found, but no `.defmt` section'. Reproduced identically against the pre-change baseline ELF. firmware/Cargo.lock carries defmt 0.3.100 (direct) and 1.1.1 (transitive); the ELF has 100 .defmt.error.* item sections from 1.x and a 1.x version marker but no consolidated .defmt section for probe-rs 0.32 to decode. Recorded as notes on TASK-036.03 (whose AC#3 unifies onto defmt 1) and TASK-037 (so nobody reads it as an ST-Link fault at the bench) rather than filing a duplicate ticket.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Additive probe path, DFU untouched. firmware/Makefile gains CHIP/ELF/PROBE_EXTRA and five targets — build-elf, probe-flash (download + --verify + --reset, then exit), probe-run, probe-log (attach, no reflash/reset), clippy (-D warnings) — with a header block recording why each shape was chosen: ELF rather than firmware.bin so defmt metadata cannot drift from the image, probe-rs download over cargo flash to keep one artifact path, real read-back verification instead of dfu-util's grep idiom, probe-flash as the loop's command and probe-run/probe-log as the human ones, no runner in .cargo/config.toml on purpose, and the single-128 KB-sector erase caveat. PROBE_EXTRA is the documented escape hatch for the ST-Link V3 MINIE attach-under-reset reports (probe-rs #3516). [profile.release] debug="line-tables-only" gives probe-rs something to symbolicate; measured cost is 8 bytes of .text and zero DWARF in flash. flake.nix stops describing the probe as future. All seven ACs checked and verified without hardware; nothing here touches silicon — that stays TASK-037.
+<!-- SECTION:FINAL_SUMMARY:END -->

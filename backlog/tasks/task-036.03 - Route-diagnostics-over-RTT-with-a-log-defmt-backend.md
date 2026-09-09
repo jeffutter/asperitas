@@ -5,7 +5,7 @@ status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-09 21:42'
-updated_date: '2026-09-09 22:01'
+updated_date: '2026-09-09 22:40'
 labels:
   - planned
 dependencies:
@@ -219,3 +219,9 @@ Makefile variable for an env var that already works.
 * TASK-040's `write_whole` stall assertion lives on the USB path only; the defmt bridge shares no
   code with it.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Discovered while landing TASK-036.01 (no probe needed to see it): `probe-rs run` and `probe-rs attach` both abort BEFORE probe discovery with 'Failed to parse defmt data / defmt version found, but no `.defmt` section - check your linker configuration'. Reproduce offline against any built firmware ELF: `probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx`. Evidence: firmware/Cargo.lock resolves TWO defmt majors (0.3.100 direct, 1.1.1 transitive via daisy-embassy/embassy-stm32); the ELF carries 100 `.defmt.error.{json}` item sections from 1.x plus a 1.x version marker, but no consolidated `.defmt` section, which is what probe-rs 0.32 decodes from. AC#3 (unify onto defmt 1) is probably the fix, but verify the consolidated `.defmt` section actually appears afterwards — if it does not, defmt 1.x needs its linker fragment on the link line (firmware/.cargo/config.toml currently passes only -Tlink.x). Until this clears, probe-run/probe-log cannot stream anything even with the ST-Link attached.
+<!-- SECTION:NOTES:END -->

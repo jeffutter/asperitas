@@ -41,7 +41,11 @@
 
               # --- Embedded tooling ---
               pkgs.dfu-util              # probe-free flashing over Seed3 USB-C
-              pkgs.probe-rs-tools        # flash + defmt/RTT logging (when ST-Link arrives)
+              # ELF-based flashing, RTT + defmt logging; drives the `probe-*`
+              # targets in firmware/Makefile. Lock pins probe-rs-tools 0.32.0.
+              # No udev rules here: this flake ships devShells only, and Darwin
+              # needs no rule for an ST-Link (the Linux caveat lives in README).
+              pkgs.probe-rs-tools
               pkgs.cargo-binutils        # objcopy to produce raw .bin for DFU
 
               pkgs.pkg-config

@@ -16,6 +16,18 @@ seed3 = []
 # never enable for normal use.
 slow-boot = []
 
+[profile.release]
+# probe-rs decodes symbols, backtraces and defmt locations from DWARF; without it a
+# release image yields bare addresses and probe-run/probe-rs decline to unwind one.
+# The DWARF itself costs no flash: it lives in non-ALLOC `.debug_*` sections, which
+# `make build`'s --only-section list leaves out. Measured both ways, firmware.bin is
+# 88101 bytes either way — not identical bytes, though: turning on debuginfo perturbs
+# codegen enough to move .text by 8 bytes, which re-shuffles every linked address.
+# Deliberately no `strip`, `panic` or `lto`: the custom #[panic_handler] assumes the
+# default unwinding strategy, and changing it is a call to make after someone has seen
+# a real backtrace (TASK-037).
+debug = "line-tables-only"
+
 [dependencies]
 asperitas-dsp = { path = "../crates/asperitas-dsp" }
 asperitas-pod = { path = "../crates/asperitas-pod", features = ["pod-hw"] }

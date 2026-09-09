@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-09-09 01:31'
+updated_date: '2026-09-09 22:41'
 labels: []
 dependencies:
   - TASK-036
@@ -32,3 +32,9 @@ This is also the only mechanism that recovers a board whose firmware hangs befor
 - [ ] #4 HUMAN: a deliberately faulted or hung binary is recovered by re-attaching under reset, demonstrating recovery when USB is dead — the case the software restart command cannot serve.
 - [ ] #5 HUMAN: probe firmware version is recorded, since probe-rs requires ST-Link V3 firmware 3.2 or newer, along with measured attach time, flash time, log throughput, and anything flaky observed.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From TASK-036.01: `make probe-run` and `make probe-log` currently abort before they ever look for a probe — 'defmt version found, but no `.defmt` section'. So an RTT logging failure at the bench is not evidence about the ST-Link; check that error string first and see TASK-036.03's notes. `make probe-flash` is unaffected: it builds, then fails only at probe discovery ('Error: No connected probes were found.' — probe-rs 0.32 download wording; the 'No debug probes were found.' string belongs to `probe-rs list`).
+<!-- SECTION:NOTES:END -->
