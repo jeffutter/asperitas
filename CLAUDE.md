@@ -19,9 +19,9 @@ code.
   audio I/O is line level, not hi-Z instrument level** — a gain-staging trap that reads
   as a DSP bug.
 - **[docs/reference/rust-daisy-stack.md](docs/reference/rust-daisy-stack.md)** — crate
-  landscape and, critically, the status of **daisy-embassy PR #80**, which supplies
-  Seed3 support and is currently unmerged. Pin to its commit SHA. Time-sensitive;
-  re-check before relying on it.
+  landscape and, critically, the status of **daisy-embassy PR #80**, which supplied
+  Seed3 support and merged on 2026-08-01, so the `seed3` feature is on `master` and no
+  commit SHA pin is needed. Time-sensitive; re-check the doc before relying on it.
 
 ## Ticket assignment convention — @agent vs @human
 
