@@ -7,6 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-09 05:08'
+updated_date: '2026-09-09 01:35'
 labels:
   - review-followup
 dependencies:
@@ -30,8 +31,13 @@ Correct axis: per this project's CLAUDE.md, "If a criterion says HUMAN:, no amou
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: a fresh podtest capture (same protocol as the 2026-08-08 captures referenced in TASK-018.04 and TASK-025 — flash podtest, let it run, record USB CDC serial output) shows a knob log line interval of ~10 ms (KNOB_LOG_THROTTLE=10 at a true 1 kHz poll rate), not the ~16 ms (625 Hz) measured before TASK-025
-- [ ] #2 HUMAN: the capture also confirms no back-to-back burst of knob log lines with near-zero interval appears (the failure mode TASK-026 was written to bound) — if one is observed, record the timestamps and file a new bug ticket rather than checking this AC
-- [ ] #3 TASK-025's AC #3 is checked via backlog task_edit once this ticket's measurement confirms the rate
-- [ ] #4 The measured interval (median and any observed spread) is recorded in this ticket's implementation notes as a number, per this project's established convention (see TASK-018.04's jitter measurements) — not just pass/fail
+- [ ] #1 Both subtasks are done: TASK-027.01 (flash podtest and leave the bench rigged for scripted capture) and TASK-027.02 (measure the achieved poll rate and check for catch-up bursts from a scripted capture).
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Restructured 2026-09-09 into an umbrella with two subtasks. The original four criteria were measurements — take a capture, compute a median interval, check for bursts, report the number — carrying HUMAN: prefixes only because no unattended capture path existed. TASK-030 and TASK-031 create that path, so the measurement moved to TASK-027.02 where an agent can carry it, and what genuinely needs hands (flashing over DFU, leaving the bench cabled) stayed as TASK-027.01.
+
+This ticket stays @human under the parent-inherits-strictest rule and cannot close until TASK-027.01 does. The measurement criteria themselves no longer ask a person to do arithmetic.
+<!-- SECTION:NOTES:END -->

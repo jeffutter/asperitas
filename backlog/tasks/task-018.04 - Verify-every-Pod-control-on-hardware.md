@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
-updated_date: '2026-08-09 04:42'
+updated_date: '2026-09-09 01:37'
 labels: []
 dependencies:
   - TASK-018.01
@@ -83,4 +83,13 @@ TWO DEFECTS FOUND OUTSIDE THE ACs:
 - ~8.8% of log lines are truncated over USB CDC (1226 of 13968, directly counted). info! is not atomic against the CDC buffer. This ate two button-press lines and corrupted knob samples — one line read r2=298 mid-number, which nearly got reported as an ADC glitch. NOT YET TICKETED. It degrades every future hardware capture, which is this project's only verification mechanism.
 
 BLOCKING THIS TICKET: AC #3 only. All other criteria are satisfied.
+
+Root cause of the 8.8% line corruption found 2026-09-09 while planning the automation rig, in crates/asperitas-logging/src/usb.rs. Two defects, both silent:
+
+1. usb_pipe_write() treats Pipe::try_write's Ok(n) as unconditional success. When the 512-byte IN pipe is full, try_write returns Ok(n) with n less than the requested length, and that short write is never checked or retried — so the remainder of a record is dropped mid-line. Every line that straddled a buffer boundary lost its tail, which is exactly the observed shape: truncated knob lines missing their L/R fields, encoder lines cut after ENC, button lines losing BTN1/BTN2.
+2. The pipe is RawMutex-based NoopRawMutex, so nothing excludes concurrent producers. FORMAT_BUF is a shared static mutable buffer, so two tasks logging at once can interleave or overwrite each other's formatting.
+
+Together these explain why ~1226 of 13968 lines were unreadable and why the loss was concentrated on the highest-rate records. Fix tracked as TASK-030 (atomic-or-drop plus magic/length/CRC framing), with the host reader in TASK-031 and hardware confirmation in TASK-033.
+
+Consequence for this ticket's own evidence: the capture quoted above is trustworthy for what it does contain, but its counts are lower bounds. A re-capture through the fixed transport is worth doing before treating 13968 lines and zero drop counters as the last word.
 <!-- SECTION:NOTES:END -->

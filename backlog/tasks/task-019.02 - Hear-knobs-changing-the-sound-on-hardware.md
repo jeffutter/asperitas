@@ -5,10 +5,11 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
+updated_date: '2026-09-09 01:36'
 labels: []
 dependencies:
   - TASK-019.01
-  - TASK-018.04
+  - TASK-019.03
 documentation:
   - docs/reference/daisy-pod.md
 parent_task_id: TASK-019
@@ -33,12 +34,20 @@ If TASK-018.04 recorded knob jitter, this is where you find out whether that num
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: turning knob 1 audibly changes the sound in the expected direction across its full travel
-- [ ] #2 HUMAN: turning knob 2 audibly changes its parameter across its full travel
-- [ ] #3 HUMAN: no zipper noise, stepping, or crackle while a knob is in motion
-- [ ] #4 HUMAN: knob jitter is not audible as unwanted modulation when a knob is held still
-- [ ] #5 HUMAN: no dropouts, glitches, or underruns across several minutes of continuous audio, including while knobs are being moved
-- [ ] #6 HUMAN: device output and asperitas-cli output agree to the ear on the same source file with the same parameter values
-- [ ] #7 HUMAN: behaviour survives a reset and a power cycle
-- [ ] #8 Any gain-staging or mapping finding worth keeping is written into docs/reference/daisy-pod.md or the shared mapping documentation
+- [ ] #1 HUMAN: turning knob 1 audibly changes the sound in the intended direction across its full travel, and the character of the change is what the mapping was meant to produce — not merely that some change occurs
+- [ ] #2 HUMAN: turning knob 2 does the same for its mapped parameter
+- [ ] #3 HUMAN: no zipper noise, stepping or crackle is audible by ear while a knob moves at playing speed, confirming that the automated detector's threshold from TASK-019.03 matches what a person actually hears
+- [ ] #4 HUMAN: no unwanted modulation is audible while a knob is held still at an arbitrary position
+- [ ] #5 HUMAN: behaviour survives unplugging and restoring power
+- [ ] #6 Any gain-staging or mapping finding worth keeping is written into docs/reference/daisy-pod.md or the shared mapping documentation
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Restructured 2026-09-09: three of the original eight criteria were measurements rather than listening tests and moved to TASK-019.03, which the rig can run unattended — monotonic response across knob travel (was #1/#2), absence of dropouts and glitches over minutes of running (was #5), and agreement between device output and asperitas-cli on the same source file (was #6).
+
+What stays here is what a number would only stand in for: whether the change has the intended musical character, whether the artefacts the detector is tuned against are actually audible, and whether behaviour survives a power cycle. Surviving a software restart moved to TASK-033, since that ticket exercises the host-initiated restart command.
+
+Depends on TASK-019.03 so measurements pass before anyone is asked to listen — there is no point spending ears on a mapping a script can already show is non-monotonic.
+<!-- SECTION:NOTES:END -->
