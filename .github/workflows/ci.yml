@@ -35,6 +35,11 @@ jobs:
             echo "=== cargo test (asperitas-pod pod-hw feature) ==="
             cargo test --workspace --features asperitas-pod/pod-hw
 
+            # Exit code is the verdict: 0 means every block the synthetic captures promised, they
+            # proved. Runs the shipped read/decode/assemble path, so no board is attached.
+            echo "=== dump_reassemble --selftest ==="
+            cargo run -p asperitas-logging --example dump_reassemble -- --selftest
+
             echo "=== firmware cross-compile ==="
             cd firmware && cargo build --release --features seed3
           '
