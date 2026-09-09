@@ -5,7 +5,13 @@ edition = "2021"
 
 [features]
 default = []
-log-usb = ["dep:embassy-usb", "dep:embassy-stm32", "dep:embassy-futures", "dep:embassy-time", "dep:static_cell", "dep:embassy-sync"]
+# Boot-stage LED indicator + the shared panic handler. Needs GPIO, a timer for the
+# pre-init blink, and a singleton cell — but no transport. `log-usb` enables this.
+boot-led = ["dep:embassy-stm32", "dep:embassy-time", "dep:static_cell"]
+# USB CDC-ACM serial transport. The three `dep:` entries `boot-led` also lists are
+# repeated deliberately: this feature stays honest about what it needs even if
+# `boot-led` changes later.
+log-usb = ["boot-led", "dep:embassy-usb", "dep:embassy-stm32", "dep:embassy-futures", "dep:embassy-time", "dep:static_cell", "dep:embassy-sync"]
 
 [dependencies]
 log = { version = "0.4", default-features = false }

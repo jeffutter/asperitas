@@ -11,6 +11,18 @@
 //!
 //! When no backend feature is enabled, logging falls back to a no-op logger.
 //!
+//! # Diagnostics features
+//!
+//! The non-logging diagnostics are selected by their own feature rather than by whichever
+//! transport happens to be on:
+//!
+//! - `boot-led` — the `led` boot-stage indicator and the shared `panic_handler`
+//!
+//! `log-usb` enables `boot-led`, so a configuration with the serial transport keeps the LED
+//! and the panic handler. Enabling `boot-led` alone serves the board that dies before any host
+//! attaches: there is nobody to receive bytes, but a colour on a pin still says how far boot
+//! got.
+//!
 //! # Record path (`log-usb`)
 //!
 //! ```text
@@ -46,8 +58,8 @@ pub(crate) enum Backend {
 impl Backend {
     /// Deliver one record.
     ///
-    /// The `NoOp` arm is the state before [`usb::init`] switches the backend: those
-    /// records vanish **uncounted**, because there is no console yet to attribute them
+    /// The `NoOp` arm is the state before anything has switched the backend away from it —
+    /// for the USB transport, that is [`usb::init`]. Those records vanish **uncounted**, because there is no console yet to attribute them
     /// to. Counting them would make `sent + dropped_full` disagree with what the host can
     /// ever see, for a reason nobody watching a capture can act on. Leave it that way;
     /// do not file it as a counter bug.
@@ -183,10 +195,12 @@ pub mod dump;
 #[cfg(feature = "log-usb")]
 pub mod usb;
 
-#[cfg(feature = "log-usb")]
+/// Boot-stage LED indicator and its blink task. See the module docs.
+#[cfg(feature = "boot-led")]
 pub mod led;
 
-#[cfg(feature = "log-usb")]
+/// Shared `#[panic_handler]` body. See the module docs.
+#[cfg(feature = "boot-led")]
 pub mod panic_handler;
 
 // ---------------------------------------------------------------------------
