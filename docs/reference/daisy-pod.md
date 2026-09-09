@@ -85,21 +85,43 @@ inverted sweep when only the endpoints are visible. That is worth remembering on
 **a broken normalisation can masquerade as a direction error.** Establish scaling before
 concluding anything about polarity.
 
-### Encoder detent ratio: 4 quadrature counts per physical detent (verified)
+### Encoder detent ratio: 4 quadrature transitions per physical detent (verified)
 
 **The Pod's encoder is detented at every *fourth* quadrature state, so one physical
-detent produces four A/B transitions, not one.** A decoder that emits ±1 per transition —
-as `EncoderDecoder` currently does — reports four increments per click.
+detent produces four A/B transitions, not one.** A decoder that emits ±1 per transition
+reports four increments per click.
 
 Measured 2026-08-08: 10 deliberate clockwise detents produced a net +40, and 10
-counter-clockwise detents a net −38. Direction is correct (clockwise is positive); only
-the ratio is wrong.
+counter-clockwise detents a net −38, with per-detent clusters
+`[4,4,3,4,4,3,4,4,4,4,4]` and `[-4,-4,-3,-4,-4,-4,-3,-4,-3,-4]`. Direction is correct
+(clockwise is positive); only the ratio was wrong. Note that neither cluster array sums
+to its stated net (+42 against +40, −37 against −38) — the record is aggregate, and the
+host tests assert carry invariants rather than those totals.
 
-Divide-by-four is therefore required, but it **must carry the remainder** rather than
-truncate per poll. Three of the ten counter-clockwise detents registered 3 transitions
-instead of 4 (contact bounce the LUT filters, and transitions arriving closer together
-than the poll period). A per-poll `delta / 4` discards those as zero; an accumulator that
-emits one detent per 4 counts and keeps the remainder does not.
+**Shipped as of TASK-024 (2026-09-09):** `QUARTER_STEPS_PER_DETENT = 4` in
+`crates/asperitas-pod/src/encoder.rs`. `EncoderDecoder::update()` still counts raw
+transitions; `EncoderDecoder::drain_detents()` converts them to whole detents and is what
+`ControlSurface::poll()` calls, so `ControlEvent::EncoderDelta` carries detents.
+
+Two properties of that conversion are load-bearing:
+
+- **The remainder is carried across drains, not truncated per poll.** Three of the ten
+  counter-clockwise detents registered 3 counted transitions instead of 4 — contact bounce
+  the transition table filters, plus two edges arriving closer together than the poll
+  period, which the decoder sees as a both-bits change and counts as nothing. Draining
+  keeps those quarter-steps, so the next click completes sooner.
+- **Truncation is toward zero** (plain Rust `/`), never `div_euclid`: `(-3).div_euclid(4)`
+  is `-1`, which would report a detent whose four transitions never arrived. Toward zero,
+  a detent is never fabricated and the retained remainder keeps the rotation's sign.
+
+What this rules out and what it does not: the divide-by-four removes the 4× unit error at
+any poll rate, but it cannot invent a transition that was never sampled. A click whose
+transitions straddle one poll window contributes fewer than four counts and therefore
+**defers** a step rather than losing one — replaying the recorded counter-clockwise run
+through the decoder reports nine detents for ten clicks and retains the leftover
+quarter-step. Whether that deficit survives at the corrected ~1 kHz poll rate is
+TASK-029's question, on hardware, with TASK-029.01's raw A/B logging supplying the
+per-transition data this capture never recorded.
 
 ### LED drive polarity: active-low (verified)
 

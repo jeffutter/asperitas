@@ -196,6 +196,9 @@ async fn main(_spawner: embassy_executor::Spawner) {
             // Poll encoder and buttons.
             controls.poll(|event| match event {
                 ControlEvent::EncoderDelta(delta) => {
+                    // Units are physical DETENTS, not quadrature transitions:
+                    // one per click, clockwise positive (TASK-024). TASK-029's
+                    // capture reads this ratio off the board.
                     info!("[podtest] t={} ENC {:+}", now_ms, delta);
                 }
                 ControlEvent::ClickPress => {

@@ -3,7 +3,7 @@ id: TASK-024
 title: >-
   Fix: EncoderDecoder emits 4 increments per physical detent — the Pod encoder
   is detented every fourth quadrature state
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-08-09 04:32'
