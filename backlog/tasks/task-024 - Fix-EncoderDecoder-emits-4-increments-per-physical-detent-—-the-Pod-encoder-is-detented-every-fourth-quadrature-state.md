@@ -7,11 +7,11 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-08-09 04:32'
+updated_date: '2026-09-09 00:18'
 labels:
   - review-followup
 dependencies:
   - TASK-018.03
-  - TASK-018.04
 documentation:
   - docs/reference/daisy-pod.md
 priority: high
@@ -43,3 +43,15 @@ Note this is separable from TASK-025 (poll rate): the 4:1 ratio is present at an
 - [ ] #4 HUMAN: a fresh podtest capture shows 10 deliberate detents producing a net +10 clockwise and -10 counter-clockwise
 - [ ] #5 docs/reference/daisy-pod.md's encoder detent-ratio section is updated to record the fix
 <!-- AC:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: pi
+created: 2026-09-09 00:18
+---
+Dependency on TASK-018.04 removed 2026-09-09. It deadlocked: 018.04 AC #3 ('the encoder produces one increment per physical detent in both directions') is the very behaviour this ticket exists to fix, so 018.04 could never be verified while the bug stood, and this ticket could never unblock until 018.04 was Done. Neither could ever close. TASK-018.03 (Done) is the real prerequisite — it shipped the decoder being fixed here.
+
+Remaining hazard, unresolved deliberately: AC #4 is prefixed HUMAN and cannot be satisfied by agent work, while this ticket is assigned @agent. Per this repo's CLAUDE.md the mixed case should be split rather than left in one ticket; left as it stands, the autonomous loop will pick this up, land the code, be unable to check AC #4, revert status, get re-picked, and halt on the repeated-choice guard. See TASK-025/TASK-027 for how the same shape was handled after the fact.
+---
+<!-- COMMENTS:END -->
