@@ -124,6 +124,17 @@ pub(crate) fn install_logger() {
 }
 
 // ---------------------------------------------------------------------------
+// Ungated modules — pure logic, no hardware types, host-testable by default
+// ---------------------------------------------------------------------------
+
+/// Console protocol v1: self-verifying framed log records.
+///
+/// Deliberately **not** behind `log-usb`: the codec is pure byte arithmetic that
+/// CI must exercise on the host (`cargo test --workspace` builds this crate with
+/// default features, i.e. without any backend).
+pub mod frame;
+
+// ---------------------------------------------------------------------------
 // Feature-gated modules
 // ---------------------------------------------------------------------------
 

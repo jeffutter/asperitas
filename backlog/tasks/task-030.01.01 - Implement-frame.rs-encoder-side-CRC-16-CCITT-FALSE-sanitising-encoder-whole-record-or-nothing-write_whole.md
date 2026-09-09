@@ -3,11 +3,11 @@ id: TASK-030.01.01
 title: >-
   Implement frame.rs encoder side: CRC-16/CCITT-FALSE, sanitising encoder,
   whole-record-or-nothing write_whole
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 05:36'
-updated_date: '2026-09-09 05:42'
+updated_date: '2026-09-09 06:13'
 labels:
   - task
   - planned
@@ -33,12 +33,12 @@ Everything must build and test on the host with the crate's **default** features
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `frame.rs` is declared `pub mod frame;` outside every `#[cfg]`, compiles under the crate's default features (`log-usb` off), and names no cortex-m/embassy/hardware type in any non-dev path, so `cargo test -p asperitas-logging` runs its unit tests on the host.
-- [ ] #2 `crc16_ccitt(b"123456789") == 0x29b1`, with poly 0x1021 / init 0xFFFF / refin=false / refout=false / xorout=0 pinned in the doc comment alongside the alias CRC-16/IBM-3740 and the note that the CCITT name is a misnomer trap.
-- [ ] #3 encode() reproduces all five golden frames from the plan byte-for-byte (check vector, 34 B `ENC +1`, 28 B empty body, 43 B t_ms-modulo + UTF-8 case, 228 B max body), and the const assertions `MAX_FRAME == 228` and `MIN_CR_OFFSET + MAX_BODY + 2 == MAX_FRAME` hold.
-- [ ] #4 Bodies are sanitised (< 0x20 and 0x7F become `_`, bytes >= 0x80 untouched) and capped at MAX_BODY **before** the CRC, so a truncated record still validates its own checksum; `Encoded::truncated` is true only when the input exceeded the cap; printable punctuation including `~`, `*`, `|` survives.
-- [ ] #5 `write_whole` returns false having called the sink zero times when free_capacity < frame len, and true only after every byte reached the sink; a host test drives a real `Pipe<NoopRawMutex, 512>` across the ring wrap (fill 400, drain 400, commit a 200-byte frame accepted whole) plus >= 20 000 randomized producer/consumer rounds whose committed bytes match the bytes read back exactly.
-- [ ] #6 fmt, both clippy invocations with `-D warnings`, both `cargo test --workspace` invocations, and the firmware cross-compile all pass, and `firmware/Cargo.lock` shows no diff.
+- [x] #1 `frame.rs` is declared `pub mod frame;` outside every `#[cfg]`, compiles under the crate's default features (`log-usb` off), and names no cortex-m/embassy/hardware type in any non-dev path, so `cargo test -p asperitas-logging` runs its unit tests on the host.
+- [x] #2 `crc16_ccitt(b"123456789") == 0x29b1`, with poly 0x1021 / init 0xFFFF / refin=false / refout=false / xorout=0 pinned in the doc comment alongside the alias CRC-16/IBM-3740 and the note that the CCITT name is a misnomer trap.
+- [x] #3 encode() reproduces all five golden frames from the plan byte-for-byte (check vector, 34 B `ENC +1`, 28 B empty body, 43 B t_ms-modulo + UTF-8 case, 228 B max body), and the const assertions `MAX_FRAME == 228` and `MIN_CR_OFFSET + MAX_BODY + 2 == MAX_FRAME` hold.
+- [x] #4 Bodies are sanitised (< 0x20 and 0x7F become `_`, bytes >= 0x80 untouched) and capped at MAX_BODY **before** the CRC, so a truncated record still validates its own checksum; `Encoded::truncated` is true only when the input exceeded the cap; printable punctuation including `~`, `*`, `|` survives.
+- [x] #5 `write_whole` returns false having called the sink zero times when free_capacity < frame len, and true only after every byte reached the sink; a host test drives a real `Pipe<NoopRawMutex, 512>` across the ring wrap (fill 400, drain 400, commit a 200-byte frame accepted whole) plus >= 20 000 randomized producer/consumer rounds whose committed bytes match the bytes read back exactly.
+- [x] #6 fmt, both clippy invocations with `-D warnings`, both `cargo test --workspace` invocations, and the firmware cross-compile all pass, and `firmware/Cargo.lock` shows no diff.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -251,3 +251,22 @@ cd firmware && cargo build --release --features seed3
 Compiling is not evidence. The evidence for this child is the five golden frames, the truncation test whose
 CRC still validates, and a `write_whole` suite that drives a real embassy ring buffer across the wrap.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented in crates/asperitas-logging/src/frame.rs (producer half) + pub mod frame in lib.rs, outside every cfg; [dev-dependencies] proptest/embassy-sync added to Cargo.toml (root Cargo.lock gained one dependency-list line; firmware/Cargo.lock shows no diff).
+
+Evidence (cargo test -p asperitas-logging, default features, log-usb off): 15 unit tests green.
+- crc16_ccitt(b"123456789") == 0x29b1 and crc("") == 0xFFFF.
+- All five golden frames byte-exact: ~I 00000042 00004567 ENC +1*9c17 (34 B), ~D 00000000 00000000 *91d4 (28 B), ~W deadbeef 76980377 knob r2=298 U+2713*b321 (43 B, pins t_ms modulo AND UTF-8 pass-through), max body -> *6c90 at exactly 228 B, plus a per-level letter test covering E/W/I/D/T. Re-derived independently against /tmp/refmodel.py before writing the literals; none copied from prose.
+- Sanitiser: b"cr\r\nlf\x00\x7f~*|" -> cr__lf__~*| (~ * | survive); full sweep asserts 0x20..0x7E and 0x80..0xFF untouched, 0x00..0x1F and 0x7F -> '_'.
+- Capping: 300-byte body -> len == MAX_FRAME, truncated == true, and the shipped CRC recomputed over out[1..len-7] matches the transmitted digits (cap happens before the CRC); exactly MAX_BODY gives truncated == false.
+- write_whole: refusal path asserts zero sink calls; success path driven one byte per call; ring-wrap test uses a real embassy-sync Pipe<NoopRawMutex, 512> (fill 400, drain 400, free_capacity()==512, commit a 200-byte encoded frame whole, read back byte-exact). A separate test pins the embassy behaviour the loop depends on: raw try_write of 200 into that 'empty' ring accepts 112. Randomized rounds: 20 000 producer/consumer rounds, commits and drops both exercised, committed bytes == bytes read back exactly.
+
+Two deviations from the plan, both verified rather than assumed:
+1. Plan section 6 item 5 asked for `static PIPE: Pipe<NoopRawMutex, 512>`. That does not compile: blocking_mutex::Mutex is Sync only when R: Sync, and NoopRawMutex is !Sync (PhantomData<*mut ()>). The pipe is therefore a test-local borrowed for the test's duration. On target the static form works because CriticalSectionRawMutex has an explicit unsafe impl Sync (and it cannot link on host anyway).
+2. Claimed with status only, assignee left @agent, because CLAUDE.md's @agent/@human convention overrides the skill's '-a @ralph'; backlog/unblocked-todo.sh filters on @agent.
+
+Gates: cargo fmt --all --check clean; clippy --workspace --all-targets -D warnings clean (both with and without asperitas-pod/pod-hw); cargo test --workspace green; firmware release cross-compile with seed3 finished; firmware/Cargo.lock unchanged.
+<!-- SECTION:NOTES:END -->
