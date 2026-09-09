@@ -199,7 +199,12 @@ pub mod panic_handler;
 /// ring holds nine maximum-size frames, against a 512 B ring that held two and dropped
 /// records during ordinary task-switch latency. Beyond that, more buffering mostly means a
 /// stalled host replays stale bytes for longer.
-#[cfg(feature = "log-usb")]
+///
+/// Deliberately **not** behind `log-usb`: it is a bare integer with no dependency on
+/// `embassy_sync`, and the host suite that proves the dump headroom rule
+/// (`tests/console_dump.rs`) has to sweep the same ring the device builds. Gating it would
+/// force that test to restate 2048 as its own constant, where the two could disagree in
+/// silence. The static that does carry a type-level dependency, `LOG_PIPE`, stays gated.
 pub const LOG_PIPE_SIZE: usize = 2048;
 
 /// The log pipe: [`emit`] commits framed records, [`usb`]'s drain task empties it.
@@ -349,6 +354,110 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
     emit(Level::Info, |body| {
         console::status_body(body, snap, LOG_PIPE.free_capacity())
     });
+}
+
+/// Commit one pre-built audio-dump body as a framed record, or refuse it whole.
+///
+/// The only route by which dump traffic reaches [`LOG_PIPE`], and the only place
+/// [`dump::dump_fits`]'s headroom rule is acted on. Synchronous and non-blocking: it either
+/// commits or returns `false` having written nothing, so a caller on a timer can retry it
+/// without risking a deadlock in whatever context it runs (TASK-038.03 owns that retry
+/// loop, and keeps the dump task off the audio `InterruptExecutor`).
+///
+/// # Why each step sits where it does
+///
+/// - **The clock is read before the lock**, as [`emit`] does it, keeping the timer driver's
+///   own locking out of the IRQ-off window. A millisecond of skew is invisible in a
+///   millisecond field; sequence order is not, so `seq` is taken inside.
+/// - **The lock is not optional.** Log records are emitted from arbitrary context including
+///   the audio callback, so an interrupt can preempt a producer that does not hold
+///   [`RECORD_BUFS`], and two interleaved `write_whole` calls splice two frames into the
+///   ring. While the lock is held the consumer still runs — it runs with interrupts enabled,
+///   so free capacity can only *grow* here. That is what makes the capacity check below
+///   sound rather than optimistic, and it is why `write_whole`'s stall assertion cannot fire
+///   on this path.
+/// - **`dump_fits` is consulted before `take_seq`.** Refusals therefore consume no sequence
+///   number, by construction rather than by discipline: a retry loop cannot manufacture `seq`
+///   gaps that a host would read as loss. The predicate is tested exhaustively across the
+///   ring's whole capacity range on the host, so the decision itself is proven even though
+///   nothing behind `log-usb` is reachable from CI (see the coverage note below).
+/// - **Committed dumps do consume `seq` and do bump `records_sent`.** Those records really
+///   occupy the wire, and `seq` continuity must keep meaning loss for the audio stream to be
+///   trustworthy; TASK-038.06 documents the resulting mixed-record rate for bench operators.
+/// - **Refusals bump neither `dropped_full` nor `bytes_dropped`.** Those counters mean "a
+///   record was thrown away", and a retry is not that. If dump stalls ever need their own
+///   counter they belong to TASK-038.03's starvation counters, not these.
+/// - **`Pipe::write` / `Pipe::write_all` are not used.** Either strands a partial frame in
+///   the ring whenever capacity falls short of the frame, and the pipe has one shared
+///   `write_waker` woken only on the full→non-full transition, so a stranded prefix wakes
+///   nobody. See TASK-038.02's notes on `ready_send`, which embassy-sync 0.6.2 does not have.
+///
+/// # What CI can and cannot reach
+///
+/// `cargo test --workspace` builds this crate without `log-usb`, and on the host no
+/// `critical-section` implementation is registered, so this function does not merely fail to
+/// run there — it fails to *link*. What CI proves is the predicate ([`dump::dump_fits`],
+/// exhaustively, against a real `embassy_sync` ring: see `tests/console_dump.rs`) and the
+/// shape this function mirrors from [`emit`]. What only the firmware release build
+/// (`cd firmware && cargo build --release --features seed3`) proves is that the arrangement
+/// type-checks at all. Neither reaches runtime behaviour on hardware; TASK-038.05 is the
+/// human-run check of that.
+///
+/// A body longer than [`frame::MAX_BODY`] is refused outright rather than shipped shortened:
+/// a chunk whose tail silently vanished reassembles into audio that measures wrong, and the
+/// block CRC catching it afterwards is not the same thing as not sending it. Every builder in
+/// [`dump`] writes into a `[u8; frame::MAX_BODY]` window, so reaching this branch is a caller
+/// bug — hence the debug assertion alongside the refusal.
+#[cfg(feature = "log-usb")]
+pub fn try_emit_dump(body: &[u8]) -> bool {
+    let now_ms = embassy_time::Instant::now().as_millis() as u32;
+
+    RECORD_BUFS.lock(|cell| {
+        // Safety: the only route to these buffers is this mutex, the core is single-core,
+        // and the reference never escapes this closure.
+        let bufs = unsafe { &mut *cell.get() };
+
+        if body.len() > frame::MAX_BODY {
+            debug_assert!(
+                false,
+                "dump body of {} bytes exceeds MAX_BODY; refusing rather than shipping a shortened chunk",
+                body.len(),
+            );
+            return false;
+        }
+
+        // The headroom rule, asked before anything is spent: no `seq`, no counter, no byte.
+        if !dump::dump_fits(body.len(), LOG_PIPE.free_capacity()) {
+            return false;
+        }
+
+        let seq = console::CONSOLE.take_seq();
+        let encoded = frame::encode(Level::Info, seq, now_ms, body, &mut bufs.frame);
+        debug_assert!(
+            !encoded.truncated,
+            "a body checked against MAX_BODY cannot arrive truncated"
+        );
+
+        let framed = &bufs.frame[..encoded.len];
+        if !frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
+            LOG_PIPE.try_write(chunk).ok()
+        }) {
+            // Unreachable while the lock holds the producer contract: free capacity cannot
+            // shrink here, and the pre-check above already paid the reserve. Reaching it means
+            // the sink broke that contract, and then a record genuinely was lost — so this one
+            // path does count, unlike a headroom refusal.
+            debug_assert!(
+                false,
+                "pipe refused a {}-byte frame the headroom rule had already admitted",
+                framed.len(),
+            );
+            console::CONSOLE.record_dropped_for_space(framed.len());
+            return false;
+        }
+
+        console::CONSOLE.record_committed();
+        true
+    })
 }
 
 // ---------------------------------------------------------------------------

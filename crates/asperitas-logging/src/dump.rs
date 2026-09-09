@@ -476,6 +476,59 @@ const _: () = assert!(FULL_AUDIO_FRAME_LEN == 227);
 const _: () = assert!(MAX_AUDEND_BODY_LEN == 43);
 const _: () = assert!(MAX_AUDEND_BODY_LEN <= MAX_BODY);
 
+// ---------------------------------------------------------------------------
+// Pipe headroom policy
+// ---------------------------------------------------------------------------
+
+/// Bytes at the tail of the log pipe that no dump commit may take: one maximum-size
+/// record, so a `log::info!` or a `STATUS` record can always be committed.
+///
+/// A dump is bulk storage being shipped after the fact; a log record is the instrument's
+/// only live explanation of what it is doing. Letting the former fill the ring would make
+/// every drop counter read during a dump measure the traffic the dump crowded out, which
+/// is the opposite of evidence. The reserve is therefore a property of the protocol, not a
+/// tunable: there is deliberately no capacity argument anywhere in this module, because a
+/// parameter here would be a decision the caller did not make.
+///
+/// [`RESERVE`] is [`MAX_FRAME`] rather than the 227 bytes an `AUDIO` frame needs, so the
+/// reservation holds for *any* record the codec can produce, including a full-body `AUDEND`
+/// or a log line the writer never anticipated.
+pub const RESERVE: usize = MAX_FRAME;
+
+/// Whether committing a dump body of `body_len` bytes leaves at least [`RESERVE`] free.
+///
+/// Pure and `no_std`: one comparison over values the caller already has, so the whole
+/// headroom rule is decidable on the host while the code that acts on it stays on the
+/// device. `body_len` is the *body*, not the frame — the prefix and trailer are this
+/// function's business, which is what keeps a caller from reserving for one and comparing
+/// against the other.
+///
+/// # Post-condition
+///
+/// After any commit this admitted, at least [`RESERVE`] bytes remain free in the pipe —
+/// stated as a post-condition rather than a probability, and checked exhaustively against
+/// a real `embassy_sync` ring in `tests/console_dump.rs`.
+///
+/// `saturating_sub` keeps the comparison total where `free_capacity < RESERVE`: the ring is
+/// inside its own reserve, so nothing may be committed and the answer is `false`, computed
+/// without underflow. It is not a clamp hiding an interesting case — the sub-`RESERVE`
+/// region is exactly where a dump must stop, and
+/// `tests/console_dump.rs::a_dump_can_never_take_the_last_max_frame` sweeps it.
+///
+/// A `body_len` above [`MAX_BODY`] describes a record the codec cannot build, and yields
+/// `false` for every capacity the ring can report; the device's one dump commit path,
+/// `try_emit_dump`, refuses such a body outright instead of shipping a shortened chunk.
+pub const fn dump_fits(body_len: usize, free_capacity: usize) -> bool {
+    let frame_len = PREFIX_LEN + body_len + TRAILER_LEN;
+    frame_len <= free_capacity.saturating_sub(RESERVE)
+}
+
+// Geometry the headroom rule depends on, pinned rather than assumed: the reserve is one
+// maximum frame, so a full dump frame must be strictly smaller than it or the reservation
+// would admit frames it cannot pay for.
+const _: () = assert!(FULL_AUDIO_FRAME_LEN < RESERVE);
+const _: () = assert!(RESERVE == PREFIX_LEN + MAX_BODY + TRAILER_LEN);
+
 /// Why a record body could not be written. Every variant is a refusal: nothing here shortens a
 /// payload to make it fit, because a chunk that silently lost its tail reassembles into audio that
 /// sounds fine and measures wrong.
