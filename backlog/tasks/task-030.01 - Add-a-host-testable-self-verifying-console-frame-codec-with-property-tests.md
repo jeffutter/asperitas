@@ -1,11 +1,11 @@
 ---
 id: TASK-030.01
 title: Add a host-testable self-verifying console frame codec with property tests
-status: Dev Ready
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 03:24'
-updated_date: '2026-09-09 05:43'
+updated_date: '2026-09-09 08:18'
 labels:
   - planned
 dependencies:
@@ -57,14 +57,14 @@ record whose text differs from what was encoded.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 crates/asperitas-logging/src/frame.rs compiles with the crate default features (no log-usb) and references no hardware, embassy, or cortex-m type, so cargo test -p asperitas-logging exercises it on the host.
-- [ ] #2 The encoder turns (level, seq, now_ms, body) into exactly one record in the TASK-030 §3 v1 grammar, appending CRC-16/CCITT-FALSE over the documented byte range; a unit test pins the 123456789 -> 0x29b1 check vector.
-- [ ] #3 Bodies are sanitised so CR, LF, other control bytes and 0x7F cannot forge a delimiter, and are capped at 200 bytes: an over-long body ships shortened with a valid CRC and sets the truncated flag the caller counts as `trunc`, never as a dropped record and never as an unterminated record.
-- [ ] #4 The decoder accepts arbitrary chunk boundaries across calls and yields only records whose framing and CRC both validate, exposing counts of decoded records, integrity failures, resynchronisations, and discarded bytes.
-- [ ] #5 proptest coverage includes round-trip identity for arbitrary bodies, never panicking on arbitrary input bytes, truncation at every offset, single-byte mutation in every field position, records concatenated with the delimiter removed, and two producers interleaved into one stream: no forged record is ever accepted as valid.
-- [ ] #6 examples/console_decode.rs reads raw capture bytes from a file or stdin and prints decoded records plus summary counts, working with no board attached.
-- [ ] #7 cargo fmt --all --check, both clippy invocations with -D warnings, and cargo test --workspace pass.
-- [ ] #8 frame::write_whole is the single whole-record-or-nothing commit helper shared by the device and the tests: it refuses a frame larger than the reported free capacity without writing any bytes, and a host test drives it against a real embassy-sync Pipe<NoopRawMutex, 512> across the ring-wrap condition (fill 400, drain 400, commit 200) asserting byte-exact concatenation of committed frames over randomized producer/consumer rounds.
+- [x] #1 crates/asperitas-logging/src/frame.rs compiles with the crate default features (no log-usb) and references no hardware, embassy, or cortex-m type, so cargo test -p asperitas-logging exercises it on the host.
+- [x] #2 The encoder turns (level, seq, now_ms, body) into exactly one record in the TASK-030 §3 v1 grammar, appending CRC-16/CCITT-FALSE over the documented byte range; a unit test pins the 123456789 -> 0x29b1 check vector.
+- [x] #3 Bodies are sanitised so CR, LF, other control bytes and 0x7F cannot forge a delimiter, and are capped at 200 bytes: an over-long body ships shortened with a valid CRC and sets the truncated flag the caller counts as `trunc`, never as a dropped record and never as an unterminated record.
+- [x] #4 The decoder accepts arbitrary chunk boundaries across calls and yields only records whose framing and CRC both validate, exposing counts of decoded records, integrity failures, resynchronisations, and discarded bytes.
+- [x] #5 proptest coverage includes round-trip identity for arbitrary bodies, never panicking on arbitrary input bytes, truncation at every offset, single-byte mutation in every field position, records concatenated with the delimiter removed, and two producers interleaved into one stream: no forged record is ever accepted as valid.
+- [x] #6 examples/console_decode.rs reads raw capture bytes from a file or stdin and prints decoded records plus summary counts, working with no board attached.
+- [x] #7 cargo fmt --all --check, both clippy invocations with -D warnings, and cargo test --workspace pass.
+- [x] #8 frame::write_whole is the single whole-record-or-nothing commit helper shared by the device and the tests: it refuses a frame larger than the reported free capacity without writing any bytes, and a host test drives it against a real embassy-sync Pipe<NoopRawMutex, 512> across the ring-wrap condition (fill 400, drain 400, commit 200) asserting byte-exact concatenation of committed frames over randomized producer/consumer rounds.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -152,3 +152,9 @@ Compiling is not evidence. The evidence is: five byte-exact golden frames, a tru
 exhaustive single-byte mutation that never decodes, chunk-independence, the canonical counter table, and a
 `write_whole` suite that drives a real embassy ring buffer across the wrap.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Umbrella closed by its two children, both @agent and Done: TASK-030.01.01 (commit 79783d4 - constants, CRC-16/CCITT-FALSE, sanitising/capping encoder, write_whole) and TASK-030.01.02 (commit ae46b59 - incremental Decoder, examples/console_decode.rs, 33-test adversarial suite). Criteria 1/2/3/8 rest on .01's evidence in its own notes; 4/5/6 on .02's; 7 was re-run at .02's commit: fmt clean, clippy -D warnings clean with and without asperitas-pod/pod-hw, cargo test --workspace green in both feature configurations, firmware release cross-compile with seed3 finished. No child of this parent is @human - the hardware confirmation lives in TASK-030.04, a sibling under TASK-030.
+<!-- SECTION:NOTES:END -->
