@@ -83,6 +83,48 @@ const KNOB_LOG_THROTTLE: u32 = 10;
 /// Number of polls between LED colour changes (~1 second at 1 kHz).
 const LED_TICKS_PER_COLOR: u32 = 1000;
 
+/// State changes one physical detent can put on the wire at most.
+///
+/// A click walks the Gray cycle through four states (`00→01→11→10`) and
+/// `ENCRAW` logs one line per *change*, so four is the ceiling per click; a
+/// shaft at rest contributes none, which is what makes the raw walk cheap
+/// enough to always have available.
+const ENCRAW_MAX_LINES_PER_DETENT: u32 = 4;
+
+/// Deliberate detents per second a hand can turn while keeping the clicks
+/// discrete — the fast end of what TASK-029's capture protocol asks for.
+const ENCRAW_MAX_DETENTS_PER_SECOND: u32 = 10;
+
+/// Worst-case `ENCRAW` rate during deliberate turning: 4 lines/detent × 10
+/// detents/s = **40 lines/s**, against the ~58 lines/s at which the 2026-08-08
+/// capture lost about 8.8% of its lines (13968 delivered over 240 s, measured
+/// across all line types — see
+/// `backlog/tasks/task-018.04 - Verify-every-Pod-control-on-hardware.md`).
+///
+/// That loss figure is approximate and was incurred by a stream that also
+/// carries knob lines at ~100/s, so read 40/s as "the same order as a rate this
+/// transport has already survived", not as proven headroom. The assertion below
+/// keeps the gate honest if either assumption above is ever retuned.
+///
+/// If a capture does show garbled or missing `ENCRAW` lines, drop the timestamp
+/// (the decoded line just above each one carries it) or coalesce a burst into
+/// one line per cluster.
+const ENCRAW_WORST_CASE_LINES_PER_SECOND: u32 =
+    ENCRAW_MAX_LINES_PER_DETENT * ENCRAW_MAX_DETENTS_PER_SECOND;
+
+// Logging every tick would be ~1000 lines/s; gating on state change holds the
+// encoder stream under the rate where the USB CDC path started dropping lines.
+const _: () = assert!(ENCRAW_WORST_CASE_LINES_PER_SECOND < 58);
+
+/// The 2-bit quadrature state spelled A-then-B for `ENCRAW` lines, indexed by
+/// state (A as bit 1, B as bit 0).
+///
+/// ASCII bits rather than a decimal number because the Gray walk is the thing
+/// being read off a capture: `00 01 11 10` reads as a clockwise cycle at a
+/// glance, which is how TASK-029 measures per-detent cluster shape and the
+/// shaft's mechanical rest state.
+const ENCRAW_STATE_LABELS: [&str; 4] = ["00", "01", "10", "11"];
+
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
     info!("[podtest] booting");
@@ -161,6 +203,10 @@ async fn main(_spawner: embassy_executor::Spawner) {
     let mut knob_log_tick: u32 = 0;
     let mut color_idx: usize = 0;
 
+    // Last raw encoder state logged, `None` until the first poll so the state
+    // the harness boots in is recorded — that's the rest position too.
+    let mut last_enc_state: Option<u8> = None;
+
     // Set initial LED colour.
     led2.set_color(LED_COLORS[color_idx]);
     info!(
@@ -220,6 +266,22 @@ async fn main(_spawner: embassy_executor::Spawner) {
                     info!("[podtest] t={} BTN2 release", now_ms);
                 }
             });
+
+            // Raw quadrature walk: one line per STATE CHANGE, never per tick
+            // (see ENCRAW_WORST_CASE_LINES_PER_SECOND for the rate arithmetic).
+            // The decoded `ENC {:+}` line says how many detents arrived; this
+            // says what the shaft did, which is the only way to see a click's
+            // cluster size or what state it rests between clicks. Field order
+            // is fixed and space-separated so host tooling can parse it.
+            let enc_state = controls.encoder_state();
+            if last_enc_state != Some(enc_state) {
+                info!(
+                    "[podtest] t={} ENCRAW AB={}",
+                    now_ms,
+                    ENCRAW_STATE_LABELS[usize::from(enc_state)]
+                );
+                last_enc_state = Some(enc_state);
+            }
 
             // Advance counters.
             tick += 1;

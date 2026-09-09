@@ -164,6 +164,18 @@ impl EncoderDecoder {
         self.previous_state = current_state;
     }
 
+    /// The last quadrature state accepted by [`Self::update`], A as bit 1 and
+    /// B as bit 0.
+    ///
+    /// Diagnostic-only: this is exactly the state the LUT consumed on the
+    /// previous call, so a harness can follow the raw Gray walk without
+    /// reaching into the decoder or changing what it emits. Always in `0..=3`,
+    /// because `update` masks before storing — log formatters may index a label
+    /// table with it directly.
+    pub fn state(&self) -> u8 {
+        self.previous_state
+    }
+
     /// Drain whole detents accumulated since the last call, keeping the
     /// leftover quarter-steps for the next one.
     ///
@@ -370,6 +382,19 @@ mod hw {
                 });
             }
         }
+
+        /// The raw 2-bit encoder state latched by the most recent [`Self::poll`]
+        /// (A as bit 1, B as bit 0).
+        ///
+        /// Diagnostic-only, and valid only after a `poll()`: before the first
+        /// one it is the decoder's zero initialisation rather than a reading.
+        /// Exposed so a harness can log quadrature transitions alongside the
+        /// decoded ones; the decoder itself is untouched, so decoding and the
+        /// events `poll()` yields are identical whether or not anyone reads
+        /// this.
+        pub fn encoder_state(&self) -> u8 {
+            self.encoder.state()
+        }
     }
 }
 
@@ -385,6 +410,29 @@ mod tests {
     use super::*;
 
     // ── EncoderDecoder LUT tests ──────────────────────────────────────
+
+    #[test]
+    fn state_reports_last_accepted_quadrature_state_in_range() {
+        // The raw-state accessor exists for logging that indexes a four-entry
+        // label table with it, so an out-of-range value would panic inside a
+        // capture rather than merely look odd.
+        let mut dec = EncoderDecoder::new();
+        assert_eq!(
+            dec.state(),
+            0b00,
+            "fresh decoder reports the reference state"
+        );
+
+        dec.update(0b11);
+        assert_eq!(dec.state(), 0b11, "reports what update() just latched");
+
+        dec.update(0b1101_0100);
+        assert_eq!(
+            dec.state(),
+            0b00,
+            "high bits are masked away before storing"
+        );
+    }
 
     #[test]
     fn one_transition_is_a_quarter_step_and_does_not_emit() {
