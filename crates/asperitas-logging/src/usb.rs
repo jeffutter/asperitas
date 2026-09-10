@@ -19,10 +19,11 @@ use embassy_stm32::{
     self as hal,
     usb::{Config as UsbConfig, Driver},
 };
-use embassy_time::{Duration, Instant};
+use embassy_time::Instant;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
 use static_cell::StaticCell;
 
+use crate::spin_budget::{cycle_count, SpinBudget};
 use crate::{console, frame};
 
 /// Maximum CDC-ACM packet size, in bytes.
@@ -44,11 +45,9 @@ const MAX_PACKET_SIZE: u16 = 64;
 /// BufferOverflow rule above cannot be reached from here.
 const DRAIN_BUF_SIZE: usize = 256;
 
-/// How long [`emit_blocking`] will try before giving up.
-///
-/// Bounds the panic path against a board with no host attached: the message is
-/// lost, but the board halts with its red LED rather than spinning here forever.
-const EMIT_TIMEOUT: Duration = Duration::from_secs(3);
+// The panic-path spin budget (`EMIT_TIMEOUT_CYCLES`, `EMIT_TIMEOUT_MAX_POLLS`) lives in
+// `crate::spin_budget` beside the code that enforces it; `emit_blocking` only asks it for a
+// budget.
 
 // ---------------------------------------------------------------------------
 // Static state — initialized once by init(), consumed by run()
@@ -122,6 +121,11 @@ fn usb_dev() -> &'static mut embassy_usb::UsbDevice<'static, UsbDrv> {
 }
 
 /// Milliseconds since boot, truncated to the width of the wire's `t_ms` field.
+///
+/// Stamps from the same GP16 time driver the panic-path spin refuses to trust, so under the
+/// identical condition — the time-driver ISR unable to run — this field goes stale. That is
+/// cosmetic: loss detection keys on `seq`, not `t_ms`, and the frame CRC does not care. A
+/// wrong millisecond on a final record is a nuisance; an unbounded spin is not.
 fn now_ms() -> u32 {
     Instant::now().as_millis() as u32
 }
@@ -372,8 +376,16 @@ pub fn emit_panic_record(body: &[u8]) {
 /// daisy-seed3.md` records its own opposite hazard, a stalled RTT host), which is why the
 /// USB path is the fragile twin.
 ///
-/// Returns once the bytes are sent, or after [`EMIT_TIMEOUT`] if the host is not
-/// listening. Silently does nothing if [`init`] never ran.
+/// Returns once the bytes are sent, or once the `SpinBudget` is spent — processor cycles
+/// (`EMIT_TIMEOUT_CYCLES`) or poll iterations (`EMIT_TIMEOUT_MAX_POLLS`), whichever expires
+/// first — if the host is not listening. Silently does nothing if [`init`] never ran.
+///
+/// Two assumptions live here and they are distinct, because conflating them is how the
+/// clock bug survived review. The *transport* assumption is the one above: CDC needs a live
+/// USB interrupt to advance the write future, and this function does not make interrupts
+/// live. The *clock* assumption used to be "the time-driver ISR runs", which the old
+/// `embassy_time` deadline shared with the transport; the budget now counts processor cycles and
+/// poll iterations instead, so only the transport assumption remains.
 ///
 /// # Panics
 ///
@@ -413,16 +425,13 @@ pub fn emit_blocking(msg: &[u8]) {
 
     let mut fut = core::pin::pin!(embassy_futures::select::select(device_fut, write_fut));
 
-    // Busy-poll with a no-op waker until the writes finish or we run out of time.
-    //
-    // The timeout is a plain `Instant::now()` comparison and deliberately NOT an
-    // `embassy_time::Timer`: `Timer::poll` calls `schedule_wake(.., cx.waker())` on every
-    // `Pending` poll, so using one here would push a no-op waker into the time driver's
-    // queue on every iteration of this loop. `Instant::now()` only reads a counter and
-    // cannot fail.
-    let deadline = Instant::now() + EMIT_TIMEOUT;
+    // Busy-poll with a no-op waker until the writes finish or the spin budget is spent.
+    // The budget reads DWT's cycle counter and a poll ceiling rather than `embassy_time`
+    // for reasons spelled out on `EMIT_TIMEOUT_CYCLES` in `crate::spin_budget` — including
+    // why this must not regress to an `embassy_time::Timer` or any other time-driver read.
     let mut cx = Context::from_waker(Waker::noop());
-    while Instant::now() < deadline {
+    let mut budget = SpinBudget::start();
+    while !budget.expired(cycle_count()) {
         if fut.as_mut().poll(&mut cx).is_ready() {
             return;
         }

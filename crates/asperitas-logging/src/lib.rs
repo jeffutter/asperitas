@@ -221,6 +221,12 @@ pub mod dump;
 // Feature-gated modules
 // ---------------------------------------------------------------------------
 
+// Gated on `any(feature = "log-usb", test)` rather than `log-usb` alone: its arithmetic
+// must be testable under default features, which is the only configuration CI's
+// `cargo test --workspace` builds. See the module docs.
+#[cfg(any(feature = "log-usb", test))]
+mod spin_budget;
+
 #[cfg(feature = "log-usb")]
 pub mod usb;
 

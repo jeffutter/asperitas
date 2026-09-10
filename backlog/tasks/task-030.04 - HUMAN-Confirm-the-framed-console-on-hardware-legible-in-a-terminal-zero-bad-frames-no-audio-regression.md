@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 03:25'
-updated_date: '2026-09-10 12:31'
+updated_date: '2026-09-10 13:34'
 labels:
   - planned
 dependencies:
@@ -85,6 +85,12 @@ Why this exists next to TASK-033: TASK-033 also waits on TASK-032's control chan
 check a bad v1 decision would not be discovered until the rig runner and the command protocol were already
 built on top of it.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Bench observation requested from TASK-046 (now done): when you rig the console capture and flash panictest, note (a) whether the PANIC: record still arrives over CDC, and (b) roughly how long the pre-halt pause is before the red LED. That single observation distinguishes the two branches of the new spin budget: ~3 s means DWT CYCCNT counts on real silicon after TRCENA+LAR unlock (cycle bound fired); milliseconds means the DWT stayed locked and the budget reported itself spent immediately. Either way the board halts rather than spinning forever; we just want to know which path ran. Source-level evidence cannot answer this — it needs a probe-free board and a stopwatch.
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 

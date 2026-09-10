@@ -62,8 +62,9 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
     // record and then drives the CDC endpoint itself. That route assumes interrupts are
     // still live when it runs — the USB interrupt must still be firing for the driver to
     // advance — and it does not make them live; keeping every record-path panic outside the
-    // record lock is what keeps the assumption true. The emit is time-bounded, takes no
-    // lock, allocates nothing, and never panics.
+    // record lock is what keeps the assumption true. The emit is time-bounded by processor
+    // cycles rather than by the time driver — it needs no interrupt to know when to stop —
+    // takes no lock, allocates nothing, and never panics.
     #[cfg(feature = "log-usb")]
     {
         let (msg, len) = format_panic_message(info);
