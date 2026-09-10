@@ -2,7 +2,7 @@
 //!
 //! Controls one of the Pod's RGB LEDs as a status indicator, with states for
 //! pre-init, running, and panicked conditions. Polarity is controlled by a
-//! single constant, [`LED_ACTIVE_LOW`].
+//! single constant, `LED_ACTIVE_LOW`.
 //!
 //! Every state renders the moment it is set, without any task running.
 //! [`blink_task`] only adds the pre-init *blink*; the underlying colour is
@@ -14,8 +14,9 @@
 //!
 //! A singleton [`BootLed`] is created once by [`init`], stored in static
 //! storage via [`StaticCell`]. Both the async execution path (main/blinky)
-//! and the synchronous panic handler access the same instance through
-//! [`get_mut`]. An [`AtomicU32`] coordinates state transitions between
+//! and the synchronous panic handler access the same instance through the
+//! `with_led` callback, which hands the LED to a closure instead of handing it out. An
+//! [`AtomicU32`] coordinates state transitions between
 //! the async [`blink_task`] and interrupt/panic context.
 
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -248,7 +249,7 @@ impl BootLed {
 
 /// Async blink task that reads the global atomic state each iteration.
 ///
-/// Drives the singleton [`BootLed`] through [`with_led`], so it takes no arguments, can be
+/// Drives the singleton [`BootLed`] through `with_led`, so it takes no arguments, can be
 /// freely selected alongside other futures without borrow-across-await issues, and never
 /// holds the LED while [`set_global_state`] wants it.
 ///

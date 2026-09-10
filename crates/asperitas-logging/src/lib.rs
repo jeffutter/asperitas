@@ -17,7 +17,7 @@
 //! framed console: the capture tooling parses that stream's sequence numbers and loss counters,
 //! which defmt cannot carry. RTT is not idle in that configuration — daisy-embassy and
 //! embassy-stm32 call `defmt::info!` directly, so driver chatter reaches the probe as soon as
-//! `defmt-rtt` is linked in the binary, whatever [`Backend`] says. Records from `log::info!`
+//! `defmt-rtt` is linked in the binary, whatever the selected `Backend` says. Records from `log::info!`
 //! therefore land on USB while `defmt::info!` from a driver lands on RTT. That split is the
 //! design, not a misconfiguration.
 //!
@@ -44,7 +44,7 @@
 //! the whole record in the ring or none of it — the one way that rule can break is a sink
 //! that stalls mid-frame, which exits through the panic handler instead of the normal
 //! return path. That is what lets a capture distinguish "this record was never generated"
-//! from "this record was lost". See [`emit`] and [`frame::write_whole`].
+//! from "this record was lost". See the crate-private `emit()` and [`frame::write_whole`].
 
 #![no_std]
 
@@ -118,9 +118,10 @@ pub(crate) fn set_backend_usb() {
 
 /// Switch logging to the defmt backend.
 ///
-/// Unlike [`set_backend_usb`] there is no device to wait for: RTT is a couple of statics in
-/// RAM that exist from the first instruction, which is why this is the only channel that can
-/// speak during the pre-USB window. Callers reach it through [`init`]; it stays public because
+/// Unlike the `log-usb` backend switch `set_backend_usb()` there is no device to wait for: RTT
+/// is a couple of statics in RAM that exist from the first instruction, which is why this is the
+/// only channel that can speak during the pre-USB window. Callers reach it through the
+/// crate-level `init()`, which exists only when `log-usb` is off; it stays public because
 /// a binary that wants RTT before anything else can call it directly.
 #[cfg(feature = "log-defmt")]
 pub fn set_backend_defmt() {
@@ -243,7 +244,7 @@ pub mod panic_handler;
 /// silence. The static that does carry a type-level dependency, `LOG_PIPE`, stays gated.
 pub const LOG_PIPE_SIZE: usize = 2048;
 
-/// The log pipe: [`emit`] commits framed records, [`usb`]'s drain task empties it.
+/// The log pipe: the crate-private `emit()` commits framed records, [`usb`]'s drain task empties it.
 ///
 /// A plain immutable `static`, because `Pipe`'s methods all take `&self` and its own
 /// `CriticalSectionRawMutex` serialises them. The previous `Option` reached through
@@ -514,12 +515,12 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 ///
 /// # Why each step sits where it does
 ///
-/// - **The clock is read before the lock**, as [`emit`] does it, keeping the timer driver's
+/// - **The clock is read before the lock**, as the crate-private `emit()` does it, keeping the timer driver's
 ///   own locking out of the IRQ-off window. A millisecond of skew is invisible in a
 ///   millisecond field; sequence order is not, so `seq` is taken inside.
 /// - **The lock is not optional.** Log records are emitted from arbitrary context including
 ///   the audio callback, so an interrupt can preempt a producer that does not hold
-///   [`RECORD_BUFS`], and two interleaved `write_whole` calls splice two frames into the
+///   `RECORD_BUFS`, and two interleaved `write_whole` calls splice two frames into the
 ///   ring. While the lock is held the consumer does *not* run: `RECORD_BUFS` is a
 ///   `CriticalSectionRawMutex`, which masks interrupts globally for its duration, so
 ///   `usb::run()`'s drain task cannot move a byte and free capacity is *frozen* — not merely
@@ -552,7 +553,7 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 /// `critical-section` implementation is registered, so this function does not merely fail to
 /// run there — it fails to *link*. What CI proves is the predicate ([`dump::dump_fits`],
 /// exhaustively, against a real `embassy_sync` ring: see `tests/console_dump.rs`) and the
-/// shape this function mirrors from [`emit`]. What only the firmware release build
+/// shape this function mirrors from `emit()`. What only the firmware release build
 /// (`cd firmware && cargo build --release --features seed3`) proves is that the arrangement
 /// type-checks at all. Neither reaches runtime behaviour on hardware; TASK-038.05 is the
 /// human-run check of that.
@@ -627,7 +628,7 @@ pub fn try_emit_dump(body: &[u8]) -> bool {
 /// Initialize the logging facade with whichever backend this build has.
 ///
 /// The entry point for every configuration except the USB console, which initializes itself
-/// ([`usb::init`] installs the logger as part of bringing up the device). Picks defmt when
+/// (`usb::init` installs the logger as part of bringing up the device). Picks defmt when
 /// `log-defmt` is on — RTT needs no device, so there is nothing to wait for — and a no-op
 /// otherwise, in which case every message is silently dropped.
 pub fn init() {

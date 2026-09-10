@@ -1,7 +1,7 @@
 //! USB CDC-ACM serial logging backend.
 //!
 //! Implements logging over the Seed3's onboard USB-C using the CDC-ACM class. Records are
-//! committed to a framed ring by [`crate::emit`] and carried to the host by [`run`]'s drain
+//! committed to a framed ring by the crate-private `emit()` and carried to the host by [`run`]'s drain
 //! task, which is the only thing that touches the endpoint under normal operation.
 //!
 //! # Architecture
@@ -335,7 +335,7 @@ pub async fn run() {
 /// `PANIC:` line validates like every other record and stays legible in a raw terminal, so
 /// the README's "read the last line" procedure still means what it says.
 ///
-/// Built in [`PANIC_FRAME`] **without taking the record lock**, and allocating nothing: the
+/// Built in the static `PANIC_FRAME` **without taking the record lock**, and allocating nothing: the
 /// executor may have died part-way through holding it, and the panic handler runs on a
 /// stack that may be nearly exhausted. Sharing the buffer is acceptable for the same reason
 /// — with the executor halted nothing else is formatting, and the one theoretical overlap

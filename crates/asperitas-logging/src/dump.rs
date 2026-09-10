@@ -78,7 +78,7 @@
 //! | `bytes` | 5, fixed | decimal | Raw bytes in the reassembled block. Fixed width like the frame's `t_ms`, so a body's shape never depends on a value. |
 //! | `crc16` | 4 | lowercase hex | CRC-16/CCITT-FALSE over the **raw concatenated block bytes in `c` order** — the samples themselves, never the base64 text and never any framing byte. |
 //!
-//! Sizes fall out of [`MAX_BODY`](crate::frame::MAX_BODY), which bounds the body *including* keys:
+//! Sizes fall out of [`crate::frame::MAX_BODY`], which bounds the body *including* keys:
 //!
 //! | record | body | frame | raw payload | useful fraction |
 //! |---|---|---|---|---|
