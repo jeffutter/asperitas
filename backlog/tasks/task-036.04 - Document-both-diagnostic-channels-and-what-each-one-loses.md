@@ -5,7 +5,7 @@ status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-09 21:42'
-updated_date: '2026-09-09 22:01'
+updated_date: '2026-09-10 02:29'
 labels:
   - planned
 dependencies:
@@ -149,3 +149,9 @@ a screwdriver.
 * Do not touch CLAUDE.md's summary of these documents in passing; if its one-line description goes
   stale, that is its own small ticket.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+From TASK-036.03: when documenting the RTT channel, lead with the filter default. `DEFMT_LOG` unset makes defmt-macros compile every non-ERROR call to nothing (defmt-macros-1.1.1 src/function_like/log/env_filter.rs:34), so a plain `make build FEATURES="seed3 log-defmt" NO_DEFAULT=1` image has no INFO frames and an attach looks like a dead channel. The facade's runtime set_max_level cannot compensate. Working form: `DEFMT_LOG=info make probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1`. Also: only a log-defmt ELF loads under probe-rs at all (build.rs adds -Tdefmt.x; console-only ELFs are rejected before probe discovery). Both facts are already in crates/asperitas-logging/src/defmt_log.rs and the firmware/Makefile preamble.
+<!-- SECTION:NOTES:END -->
