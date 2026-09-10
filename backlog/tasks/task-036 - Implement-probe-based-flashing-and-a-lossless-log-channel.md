@@ -5,7 +5,7 @@ status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-09-09 22:08'
+updated_date: '2026-09-10 21:15'
 labels:
   - planned
 dependencies:
@@ -13,6 +13,8 @@ dependencies:
   - TASK-036.02
   - TASK-036.03
   - TASK-036.04
+  - TASK-036.05
+  - TASK-036.06
 references:
   - 'https://probe.rs/docs/getting-started/probe-setup/'
 documentation:
@@ -39,12 +41,12 @@ Physical unknowns are deliberately not resolved here and belong to TASK-037: the
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A make target flashes over the probe using attach-under-reset, so no BOOT or RESET interaction is needed, and verifies what was written.
-- [ ] #2 Existing DFU targets keep working unchanged — the probe path is additive and a board with no probe attached is still flashable.
-- [ ] #3 defmt over RTT is selectable behind a Cargo feature, the existing USB console facade remains selectable, and binaries selecting neither still build.
-- [ ] #4 The probe configuration compiles for thumbv7em-none-eabihf and is clippy-clean, which is verifiable without a board.
-- [ ] #5 Panic diagnostics reach the host over RTT when that feature is selected, at code level; hardware confirmation belongs to TASK-037.
-- [ ] #6 docs/reference/daisy-seed3.md's debugging sections describe both channels and say which to reach for, and rust-daisy-stack.md's toolchain note reflects the probe as available rather than aspirational.
+- [x] #1 A make target flashes over the probe using attach-under-reset, so no BOOT or RESET interaction is needed, and verifies what was written.
+- [x] #2 Existing DFU targets keep working unchanged — the probe path is additive and a board with no probe attached is still flashable.
+- [x] #3 defmt over RTT is selectable behind a Cargo feature, the existing USB console facade remains selectable, and binaries selecting neither still build.
+- [x] #4 The probe configuration compiles for thumbv7em-none-eabihf and is clippy-clean, which is verifiable without a board.
+- [x] #5 Panic diagnostics reach the host over RTT when that feature is selected, at code level; hardware confirmation belongs to TASK-037.
+- [x] #6 docs/reference/daisy-seed3.md's debugging sections describe both channels and say which to reach for, and rust-daisy-stack.md's toolchain note reflects the probe as available rather than aspirational.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -130,7 +132,72 @@ clippy into CI; carrying the framed console over plain RTT instead of defmt — 
 anyway, since defmt-rtt declares `_SEGGER_RTT` itself precisely so `rtt-target` cannot coexist with
 it; and the v1 console grammar documentation owned by TASK-030.03, which .04 must extend rather
 than rewrite.
+
+## Integration pass RAN 2026-09-10 — outcome, and what now gates promotion
+
+The five steps above were executed; measurements and the criterion→leaf attribution are in
+Implementation Notes. All six acceptance criteria are checked. Summary of the verdict: **the four
+original leaves delivered what they claimed**, verified against source rather than their own notes —
+`make -n` expansions, a 0-line diff on the DFU path, the four-configuration matrix, every host gate,
+and an audit finding no false probe claim or broken anchor left by `.04`.
+
+Promotion to `Dev Ready` is **still withheld**, for one reason that did not exist when this plan was
+written: the pass surfaced two gaps, filed as `TASK-036.05` and `TASK-036.06`, both `@agent`, both
+planned and Dev Ready.
+
+* `.05` matters because the RTT backend's cfg pairs are compiled by *no unattended gate* — CI and
+  lefthook only ever build `log-usb` and `--features seed3`. Criterion #4 is true today and nothing
+  keeps it true, which is how a later agent breaks defmt with eight green gates.
+* `.06` matters because TASK-037 spends the scarcest resource here (a person at the bench) and would
+  walk in without three things it will need: the fact that V3-class probes skip custom reset
+  sequences so under-reset failing is expected, a Makefile variable to drop that flag, and the
+  D-cache↔RTT trap that any future caching change springs silently.
+
+So this umbrella stays where its own convention put it — `Blocked`, `planned`, fully delegated. When
+`.05` and `.06` are Done: re-run steps 2 and 3 of the integration list (the DFU-expansion diff and
+the host gates, since `.05` edits both gate definitions), confirm nothing else moved, then promote.
+Do not promote while either leaf is open — by ordinal this parent sorts ahead of every child, and
+Execute takes the first Dev Ready ticket without re-checking dependencies, which is the TASK-004
+spin recorded in CLAUDE.md.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Integration verification pass — measured 2026-09-10, `nix develop .#default`, all inside one detached run
+
+Every number below is from this machine, not from a leaf's notes.
+
+| Check | Result |
+|---|---|
+| `make -n probe-flash probe-log probe-run` | rc=0 each; fully expanded, only `$(PROBE_EXTRA)` empty by design |
+| DFU path unchanged | `make -n build flash flash-all check` vs the same expansion against HEAD's Makefile in a scratch dir: **diff = 0 lines** |
+| Four-config matrix (`seed3` / `+log-defmt` NO_DEFAULT / `log-usb log-defmt` / neither) | all rc=0; firmware.bin 88613 / 48084 / 91148 / 45009 bytes |
+| `make clippy FEATURES="seed3"` and `FEATURES="seed3 log-defmt" NO_DEFAULT=1` | rc=0 both (warnings fatal, thumbv7em) |
+| Root `cargo fmt --all --check` | rc=0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | rc=0 |
+| `cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings` | rc=0 |
+| `cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings` | rc=0 |
+| `cargo test --workspace` | rc=0, every suite ok (largest 41 passed) |
+| `cargo run -p asperitas-logging --example dump_reassemble -- --selftest` | rc=0, 9 cases |
+| New, for TASK-036.05: `cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings` | rc=0 today — nothing runs it unattended |
+
+## Acceptance criteria → delivering leaf
+
+* #1 `.01` — `probe-rs download $(ELF) --chip STM32H750IBKx --connect-under-reset --verify --reset` (Makefile:153). Literal AC miss, accepted: `--verify` does not exist on `probe-rs attach`, so `probe-log` (Makefile:169) carries neither flag — attaching must not reset a running board. Recorded in `.01`'s notes and daisy-seed3.md:379.
+* #2 `.01` — proven by the 0-line expansion diff above, plus `build`/`flash` bodies byte-identical since `3b18693`.
+* #3 `.03` — `firmware/Cargo.toml` `default = ["log-usb"]`, `log-defmt = [... , "dep:defmt-rtt"]`; the fourth matrix row (neither backend) built at 45009 bytes.
+* #4 `.03` — both clippy invocations rc=0. Durability is now TASK-036.05, because no CI or hook command compiles these cfg pairs.
+* #5 `.02`+`.03` — `panic_handler.rs:68-86`: USB emit under `cfg(log-defmt)`-independent gate, defmt emit under `cfg(feature = "log-defmt")`, then halt. Exactly one Rust `#[panic_handler]` per binary and defmt 1.1.1 ships none, so no double-emitted panic text. Hardware proof stays TASK-037.
+* #6 `.04` — audited: no false future-tense probe claim survives in docs/ or README (the old "when one is available" / "restores cargo run-style" / "requires an ST-Link probe" wording is gone), zero broken anchors across rust-daisy-stack.md:109,111 and daisy-seed3.md's internal links, printed commands match `make -n` apart from make's trailing spaces.
+
+## Deviations worth naming
+
+* `firmware.bin` for `FEATURES="seed3"` is **88613 bytes**, not the 88101 `.01` recorded. Not a regression: firmware gained code in `e60de88`, `fec97a5`, `d7918df` etc. after `.01`. The invariant `.01` actually established — DWARF costs no flash — still holds; re-measure per change, don't chase a frozen byte count.
+* Two defmt majors remain in `firmware/Cargo.lock` (0.3.100 shim + 1.1.1). Unavoidable today: `stm32-metapac 21.0.0` and `embassy-net-driver 0.2.0` still ask for 0.3. The shim's own lock entry depends only on defmt 1.1.1, so exactly one encoder owns the wire format — which is what `.03` needed.
+* Release ELFs carry more than line tables: `.debug_info` ~997 KB, `.debug_aranges`, `.debug_pubnames`, even though `-C debuginfo=line-tables-only` is provably the flag passed and no env override exists in flake.nix or either cargo config. Harmless — all of it is non-ALLOC, and `firmware.bin` is the same size either way — so no ticket: the Cargo.toml comment's claim ("costs no flash") is true and was re-confirmed here. If someone later wants a smaller ELF, that's a new question.
+* Bare `make probe-flash` (default FEATURES) fails at *image load*, not probe discovery: a console-only ELF has no consolidated `.defmt` section, so probe-rs declines before looking for a probe. Already documented in the Makefile preamble and daisy-seed3.md; the working form is `DEFMT_LOG=info make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1`.
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 
@@ -138,5 +205,10 @@ than rewrite.
 created: 2026-09-09 22:08
 ---
 Planning complete: work fully delegated to TASK-036.01-.04, all Dev Ready. Status left at Blocked deliberately — see Implementation Plan §"What this umbrella is". Do not promote to Dev Ready until all four leaves are Done and the integration pass has run.
+---
+
+created: 2026-09-10 21:15
+---
+Planning round 2026-09-10: found all four leaves already Done, so this run performed the gated integration verification instead of fresh planning — results in Implementation Notes, all six ACs checked with their delivering leaf named. Two gaps surfaced and filed as TASK-036.05 (no unattended gate compiles the log-defmt cfg pairs) and TASK-036.06 (bench-facing facts unwritten + no way to drop --connect-under-reset from probe-flash). Status deliberately NOT promoted to Dev Ready: the umbrella still has two open children and sorts ahead of them by ordinal. Promote only after both land and the DFU-expansion diff plus host gates are re-run.
 ---
 <!-- COMMENTS:END -->
