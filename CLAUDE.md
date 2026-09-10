@@ -11,9 +11,14 @@ code.
 
 - **[docs/reference/daisy-seed3.md](docs/reference/daisy-seed3.md)** — Seed3 hardware.
   What differs from earlier Seeds (only the codec and USB-C), the exact SAI
-  configuration, DFU flashing without a debug probe, and why **the TAC5242 codec is
-  hardware-strapped rather than I²C-configured**. Also records that libDaisy (C++) has
-  no Seed3 support at all, so "prove it in C++ first" is not an available fallback.
+  configuration, and why **the TAC5242 codec is hardware-strapped rather than
+  I²C-configured**. Two flashing routes and two log channels:
+  **DFU over the onboard USB-C** or **an ST-Link probe on the SWD pads**, logged over
+  the **framed USB console** or **`defmt`/RTT** through that probe.
+  The probe is the way into a board that never brings USB up, but its claims stay
+  unmeasured until TASK-037, and RTT keeps no loss ledger, so a drop count from the
+  console does not describe an RTT capture. Also records that libDaisy (C++) has no
+  Seed3 support at all, so "prove it in C++ first" is not an available fallback.
 - **[docs/reference/daisy-pod.md](docs/reference/daisy-pod.md)** — Pod control pin map
   (knobs, encoder, buttons, RGB LEDs), libDaisy's defaults, and the fact that **Pod
   audio I/O is line level, not hi-Z instrument level** — a gain-staging trap that reads
