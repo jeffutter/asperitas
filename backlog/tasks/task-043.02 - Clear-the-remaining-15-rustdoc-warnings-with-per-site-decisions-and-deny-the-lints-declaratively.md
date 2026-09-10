@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-10 09:17'
-updated_date: '2026-09-10 09:20'
+updated_date: '2026-09-10 14:36'
 labels:
   - planned
 dependencies:
@@ -77,3 +77,12 @@ Verification order: apply A and B, run the three doc commands (AC #1), then C wi
 <!-- SECTION:NOTES:BEGIN -->
 Judgement call left open deliberately, for the owner: `emit` is named by public documentation five times (crate root twice, LOG_PIPE, try_emit_dump x3) plus once as `crate::emit` in usb.rs. Making it `pub` would keep all six as live hyperlinks and clear six of the fifteen warnings on its own. This plan does not do that. `emit(level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usize)` is the record-commit path; publishing it lets a binary commit a framed record without going through the `log` facade, on a device whose whole correctness argument is that every commit happens in one critical section. If the owner decides the crate should expose it after all, the change is: make `emit` `pub`, then restore the six links exactly as they read today. Same reasoning, smaller stakes, applies to `with_led` (a callback that exists precisely so no `&'static mut BootLed` escapes) and to `LED_ACTIVE_LOW` (publishing a polarity boolean invites a second, disagreeable copy). Neither is worth widening the API surface of a no_std crate for a hyperlink.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-10 14:36
+---
+Recounted while re-planning TASK-043.01 (HEAD b830069, rustc/cargo 1.97.1). After 043.01 lands, the device feature set leaves **14** warnings, not 15: site B.7 (usb.rs emit_blocking -> [`EMIT_TIMEOUT`]) no longer exists — commit b830069 moved the panic spin budget into spin_budget.rs and reworded that doc so EMIT_TIMEOUT_CYCLES / EMIT_TIMEOUT_MAX_POLLS are code text, not links. Site A.4's dump.rs:75 is now :81 once 043.01 inserts its new section; your plan already says to locate by quoted text, so that one self-heals. Measured baselines for the record: default 7 -> 4, boot-led,log-usb,log-defmt 23 -> 14, --all-features 23 -> 14. Two of 043.01's restored-span warnings survive into your list with changed shape: led.rs:5 becomes "links to private item `LED_ACTIVE_LOW`" and led.rs:18 stays an unresolved `get_mut` (your B.8/B.9 cover both).
+---
+<!-- COMMENTS:END -->
