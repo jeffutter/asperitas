@@ -3,11 +3,13 @@ id: TASK-045
 title: >-
   Fix: write_whole's caller-contract panic can permanently mask interrupts,
   silencing the panic text it exists to deliver
-status: To Do
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-10 07:02'
+updated_date: '2026-09-10 08:11'
 labels:
+  - planned
   - review-followup
 dependencies:
   - TASK-040
@@ -38,142 +40,145 @@ Found while reviewing TASK-040 (crates/asperitas-logging/src/frame.rs write_whol
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-SETUP (read first): This is a Rust embedded-audio project (crates/*, firmware/) targeting the Daisy Seed3 in a Daisy Pod. ALL commands must run inside the Nix dev shell: prefix every command with 'nix develop -c'. Work from the repository root unless told otherwise. Do not change pinned dependency versions.
+SETUP (read first): Rust embedded project (crates/*, firmware/) targeting the Daisy Seed3 (`thumbv7em-none-eabihf`). Prefix every command with `nix develop -c`; work from the repository root. Touch no dependency versions. This ticket is one atomic change — do NOT split it into commits per file; the signature change breaks every call site until all land.
 
-## 1. Facts established by this review pass -- do not re-research
+## 0. What this plan changes relative to the review-pass draft
 
-- RECORD_BUFS (lib.rs:290-292) is an embassy_sync blocking_mutex::Mutex<CriticalSectionRawMutex, ...>. Its lock() (embassy_sync) calls critical_section::with internally, which on cortex-m masks PRIMASK for the closure's duration and restores it via a Guard whose Drop calls critical_section::release() -- see ~/.cargo/registry/src/*/critical-section-1.2.0/src/lib.rs around fn with().
-- Guard::drop() only runs if the closure returns normally (including via early return) or unwinds. This target's panic strategy is abort, confirmed by: nix develop -c rustc --print cfg --target thumbv7em-none-eabihf | grep panic -> panic="abort". Under abort, a panic! inside the closure calls the #[panic_handler] directly with no unwinding, so Guard::drop() (and therefore critical_section::release()) never runs. PRIMASK stays masked forever after such a panic.
-- write_whole (frame.rs, currently ~303-341) panics from inside its `write` closure's stall arm. Both call sites (lib.rs emit() at ~322-357, try_emit_dump() at ~461-503) invoke write_whole from inside RECORD_BUFS.lock(|cell| {...}), so a stall panic fires inside the critical section.
-- panic_handler::handle_panic() (panic_handler.rs) runs after any panic, unconditionally, and under log-usb calls usb::emit_panic_record -> usb::emit_blocking (usb.rs ~341-381), whose doc comment states it works 'because the USB interrupt handler is still installed and still firing during the panic spin'. If PRIMASK is masked (per above), that is false, and emit_blocking's spin loop will exhaust EMIT_TIMEOUT with no USB progress -- the panic text never reaches the host. Only crate::led::set_global_state (synchronous GPIO, called before the USB emit) reliably reaches the user in this specific scenario.
-- usb.rs's emit_panic_record doc comment already states the invariant this breaks: 'the one theoretical overlap (a panic raised inside the commit critical section) cannot happen in release, where nothing in that region panics.' That was true before TASK-040 (debug_assert! was a release no-op) and is false after it.
-- lib.rs's try_emit_dump doc block (~409-444) contains: 'While the lock is held the consumer still runs -- it runs with interrupts enabled, so free capacity can only *grow* here.' This is wrong given CriticalSectionRawMutex: the consumer (usb::run()'s drain task) cannot run at all while the lock is held, because it needs the USB interrupt (masked) or the executor (single-threaded, and emit()/try_emit_dump() may themselves run from an interrupt context) to make progress. The code is not buggy -- capacity is frozen, not growing, during the lock, which is an even safer invariant for the pre-check -- but the stated reasoning is wrong and must be corrected.
+The draft written into this ticket when it was filed is correct about the mechanism and roughly right about the fix, but it has three defects this plan fixes. Do not re-follow the draft where they disagree:
 
-## 2. The fix -- move the panic outside the critical section
+1. **It missed two call sites of `write_whole`.** Besides `lib.rs:346` and `lib.rs:492`, `write_whole` is called by its own test module (`frame.rs:1233-1289`, plus the `commit()` helper at `frame.rs:1303-1312`) and by the integration suite `crates/asperitas-logging/tests/console_dump.rs:1956-1960` (`commit_frame`, used at lines 2072, 2209, 2222, 2284, 2300). Miss those and AC#9's `cargo test --workspace` fails to *compile*.
+2. **Its line numbers are stale.** Actual: `frame.rs` doc 283-319 + fn 320-341; `emit()` doc 298-320 + fn 321-355 (call site 346); `try_emit_dump()` doc 409-460 + fn 461-511 (call site 492).
+3. **It proposed `(bool, bool)` tuple returns from the lock closures and duplicated the stall panic at both call sites.** Prefer the single-owner shape in §2b below; it puts the "never panic inside the record lock" rule in exactly one place so a future third caller cannot forget it. Inline-at-both-sites remains an acceptable fallback (§2b).
 
-Change write_whole so it never panics; instead it returns an outcome the caller inspects and acts on only after RECORD_BUFS.lock() has returned (i.e. after the critical section has been exited normally, restoring PRIMASK via Guard::drop).
+Also added here: `#[must_use]` on the new outcome type (§2a), hoisting one oversized-body check out of the critical section (§2c), the `emit()` inline comment that makes the same false claim as the `try_emit_dump` doc block (§4), and the two residual hazards found while planning, which are ticketed separately and deliberately NOT part of this ticket (§7).
 
-### 2a. crates/asperitas-logging/src/frame.rs
+## 1. Facts established by two research passes — do not re-research
 
-Replace write_whole's `-> bool` return with a small outcome enum. Suggested shape (naming may be adjusted for consistency with the rest of the file's style, but keep three variants with this meaning):
+- `RECORD_BUFS` = `embassy_sync::blocking_mutex::Mutex<CriticalSectionRawMutex, UnsafeCell<RecordBufs>>`, `lib.rs:289-296`, `#[cfg(feature = "log-usb")]`. Same mutex type on `LOG_PIPE`, `lib.rs:271-275`. The `critical-section` impl is cortex-m's `critical-section-single-core` (`crates/asperitas-logging/Cargo.toml:23`, non-optional; arch-gated inside cortex-m, which is why host builds compile but `log-usb` code fails to *link* there).
+- `critical-section::with` releases via a private `Guard`'s `Drop`; upstream documents *"This function panics if the given closure `f` panics. In this case the critical section is released before unwinding."* This target is `panic="abort"` (`rustc --print cfg --target thumbv7em-none-eabihf` → `panic="abort"`; `firmware/Cargo.toml` `[profile.release]` deliberately sets no `panic` key), so there is no unwinding, the guard never drops, `critical_section::release()` never runs, and PRIMASK stays set for the life of the program. Confirmed mechanism, not speculation.
+- Do **not** "fix" this by calling `cortex_m::interrupt::enable()` before panicking: it is documented `# Safety: Do not call this function inside an interrupt::free critical section`, and PRIMASK semantics are already contested upstream (rust-embedded/cortex-m#196). Moving the panic outside the lock is the only route inside the published contract.
+- Panic flow: `#[panic_handler]` → `asperitas_logging::panic_handler::handle_panic` (`panic_handler.rs:52`) → LED first (`:54`, synchronous GPIO, works masked) → under `log-usb`, `usb::emit_panic_record` (`:66-69`) → `usb::emit_blocking` (`usb.rs:376-424`), whose doc at `usb.rs:364-367` asserts *"the USB interrupt handler is still installed and still firing during the panic spin"* → halt `loop { nop }` (`:93-95`). With PRIMASK stuck set that assumption is false, so the text is silently dropped. That is the bug.
+- `emit_blocking`'s timeout is `EMIT_TIMEOUT = 3 s` (`usb.rs:47-51`) compared against `embassy_time::Instant::now()` (`usb.rs:417-419`). See §7 — that clock itself depends on an ISR.
+- **Every `emit()` call site today runs on the thread-mode executor with interrupts enabled before entering the lock.** Verified: no logging from any ISR body in `firmware/` or `crates/`; daisy-embassy's "audio callback" is an async loop on the thread executor, not an IRQ; there is no `InterruptExecutor` anywhere in the workspace; `daisy-embassy`'s `info!` in `audio.rs:170` is `defmt::info`, not `log`. The only explicit masking call in firmware is `firmware/src/bin/main.rs:269` `cortex_m::interrupt::free(|_| knob_state.read())`, which logs nothing. So AC#5's premise holds after this fix; scope its wording to "interrupts are live when the panic fires", not "this emitter can wake a masked core".
+- `console::CONSOLE.record_committed()` (`console.rs:119`), `record_dropped_for_space(usize)` (`console.rs:125`), `take_seq()` (`console.rs:114`) are `AtomicU32` ops that take **no lock** (`console.rs:77-79`: they exist to be snapshotted without touching the record lock). They may move in or out of the closure freely; only `take_seq()` must stay *inside*, because seq-inside-the-lock is what makes numeric order equal wire order (`console.rs:110-112`).
+- Host reachability: `emit()` / `try_emit_dump()` are `#[cfg(feature = "log-usb")]` and do not link on host (`lib.rs:445-454`, `tests/console_dump.rs:2039-2043`). No host test touches them. Therefore the panic itself is not host-testable; asserting the returned outcome is the available substitute — the same substitution `std::sync` poisoning and embassy-sync's explicitly poisoning-free `RawMutex` make, and the standard `#[test]`-needs-`std` split.
+- Baseline at HEAD (measured, so failures below are yours): `cargo fmt --all --check` clean, `cargo clippy -p asperitas-logging --all-targets -- -D warnings` clean, `cargo test -p asperitas-logging` green, `cargo test --workspace` green.
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum WriteOutcome {
-        /// The whole frame was committed to the sink.
-        Committed,
-        /// The frame did not fit against the pre-check; nothing was written.
-        RefusedForSpace,
-        /// The sink stalled after the capacity pre-check passed and after some
-        /// progress -- a caller-contract violation. The CALLER must panic on this
-        /// variant, and only after releasing any lock/critical section it holds
-        /// during the call, so the project's fail-loud panic path (LED + serial)
-        /// can run with interrupts still live. See emit()/try_emit_dump() in lib.rs.
-        Stalled,
-    }
+## 2. The fix
 
-    pub fn write_whole(
-        frame: &[u8],
-        free_capacity: usize,
-        mut write: impl FnMut(&[u8]) -> Option<usize>,
-    ) -> WriteOutcome {
-        if frame.len() > free_capacity {
-            return WriteOutcome::RefusedForSpace;
-        }
-        let mut written = 0usize;
-        while written < frame.len() {
-            match write(&frame[written..]) {
-                Some(n) if n > 0 => written += n,
-                _ => return WriteOutcome::Stalled,
-            }
-        }
-        WriteOutcome::Committed
-    }
+### 2a. `crates/asperitas-logging/src/frame.rs` — `write_whole` reports, never panics
 
-Rewrite the doc comment section currently titled '# A stall after the pre-check panics, in every profile' to state: write_whole itself never panics; a stall after the pre-check is reported as WriteOutcome::Stalled, and the caller is contractually required to panic on it, but only once it is no longer holding whatever lock/critical section protected the call -- because panicking while interrupts are masked (this target's panic strategy is abort; a panic inside a critical_section::with closure never restores PRIMASK) would leave the board silently deaf on top of dead. Reference emit()/try_emit_dump() as the enforcement points.
+Replace `-> bool` (fn at 320-341) with a public outcome type matching this crate's enum style (`dump.rs:123,131,535,807,846` all use `#[derive(Debug, Clone, Copy, PartialEq, Eq)] pub enum` with documented variants):
 
-### 2b. crates/asperitas-logging/src/lib.rs -- emit()
+```rust
+/// What one [`write_whole`] call did to its sink. Ignoring this value is a bug: the
+/// `Stalled` variant is how a broken sink reaches the fail-loud path.
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// Every byte of the frame is in the sink, contiguously and in order.
+    Committed,
+    /// The frame did not fit the capacity pre-check. `write` was called zero times.
+    RefusedForSpace,
+    /// The sink stopped accepting bytes **after** the pre-check passed — a violation of
+    /// the caller's contract. `write_whole` does not panic on it: see the doc section
+    /// below for why the panic belongs to the caller, and where it may fire.
+    Stalled,
+}
+```
 
-Around line 322-357. Change the RECORD_BUFS.lock(|cell| {...}) closure so it returns a bool ('stalled') instead of (), matching write_whole's new outcome:
+Body becomes: `RefusedForSpace` on the pre-check, `Stalled` from the `None`/`Some(0)` arm (delete the `panic!` at 334-336), `Committed` on loop exit.
 
-    let stalled = RECORD_BUFS.lock(|cell| {
-        // ...unchanged setup (seq, fill, encode)...
-        let framed = &bufs.frame[..encoded.len];
-        match frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
-            LOG_PIPE.try_write(chunk).ok()
-        }) {
-            frame::WriteOutcome::Committed => {
-                console::CONSOLE.record_committed();
-                false
-            }
-            frame::WriteOutcome::RefusedForSpace => {
-                console::CONSOLE.record_dropped_for_space(framed.len());
-                false
-            }
-            frame::WriteOutcome::Stalled => true,
-        }
+Keep `Stalled` payload-free. Today's message interpolates the sink's return value (`{stalled:?}`); losing that `None` vs `Some(0)` distinction costs nothing actionable and keeps the API honest about not expressing partial writes. The caller's message names the call site instead (§2b).
+
+Rewrite the doc comment (283-319) — two separate paragraphs need it:
+
+- **283-293 (the opening).** It currently claims *"Exactly two outcomes"* and *"There is no third outcome and no partial-write count on purpose"*. Both become false. New framing: three outcomes; what whole-record-or-nothing actually guarantees is that a truncated record is *detectable downstream by the CRC/framing*, not that nothing reached the sink — on `Stalled`, some bytes genuinely did land, and that is precisely the case framing exists to expose rather than hide. Keep the reserve/commit comparison to the Linux ring buffer / `prb_reserve` / bitdrift (still accurate); keep the "# Why the loop is required, not defensive" section (295-304) untouched — the short-write measurement there stands.
+- **306-319 (the stall section).** Retitle away from *"A stall after the pre-check panics, in every profile"*. State: `write_whole` never panics; a stall is reported as `WriteOutcome::Stalled`; the caller MUST panic on it — loudly, in every profile, because `debug_assert!` would vanish from the release build that ships — but only **after** whatever lock protected the call has been released. Give the reason inline, since it is the whole point: this target aborts, a panic raised inside a `critical_section::with` closure never restores `PRIMASK`, and interrupting the board permanently on top of silencing the panic text is strictly worse than the crash. Name `emit()` and `try_emit_dump()` as the enforcement points. Keep the existing "retrying is not a milder option" argument (313-316) — it still explains why we do not loop.
+
+### 2b. `crates/asperitas-logging/src/lib.rs` — one owner of the "panic outside the lock" rule
+
+Add one private helper next to `RECORD_BUFS` that owns (a) the `UnsafeCell` acquisition and its safety comment and (b) the stall panic, which by construction can only run after `lock()` has returned normally:
+
+```rust
+/// Run `commit` with the record buffers held, and fail loud if the pipe stalled mid-frame.
+///
+/// The panic lives here, outside `RECORD_BUFS.lock`, and nowhere else. `RECORD_BUFS` is a
+/// `CriticalSectionRawMutex`, so its closure runs with `PRIMASK` set, and this target aborts
+/// rather than unwinds: a panic raised inside that closure never restores `PRIMASK`, so the
+/// panic handler's serial emit (`usb::emit_blocking`) would spin with no USB interrupt and
+/// drop the very text it exists to deliver. Callers therefore report `WriteOutcome::Stalled`
+/// out of their closure and let this function crash. Returns whether the frame reached the pipe.
+#[cfg(feature = "log-usb")]
+fn commit_records(commit: impl FnOnce(&mut RecordBufs) -> frame::WriteOutcome) -> bool {
+    let outcome = RECORD_BUFS.lock(|cell| {
+        // Safety: the only route to these buffers is this mutex, the core is single-core,
+        // and the reference never escapes this closure.
+        commit(unsafe { &mut *cell.get() })
     });
-    if stalled {
-        panic!("emit: write_whole's sink stalled after the capacity pre-check passed; this violates write_whole's precondition that the caller holds the lock and already verified free_capacity");
+    if outcome == frame::WriteOutcome::Stalled {
+        panic!("record commit: the sink stalled after the capacity pre-check passed; the caller held RECORD_BUFS and verified free_capacity, so the pipe broke write_whole's contract and a record was lost");
     }
+    outcome == frame::WriteOutcome::Committed
+}
+```
 
-### 2c. crates/asperitas-logging/src/lib.rs -- try_emit_dump()
+`emit()` (321-355) then reads: keep `now_ms` read *before* the lock (existing comment at 323-327 stands), pass the rest as the closure — `take_seq`, `fill`, `encode`, `body_shortened`, then the `write_whole` call with the counter bumps keyed off its outcome — and return `true` for `Committed`, `false` otherwise. Ignore `emit()`'s own bool result (it has already counted the verdict internally).
 
-Around line 461-503. This closure already returns bool as the function's own return value, with early returns for the body-too-long and dump_fits refusals. Change it to return (bool /* committed */, bool /* stalled */) so the stall case can be distinguished after the lock releases, e.g.:
+`try_emit_dump()` (461-511) returns `commit_records(|bufs| { ... })` directly; its early refusals return `false` from the closure as `RefusedForSpace` after doing whatever side effect they do today.
 
-    let (committed, stalled) = RECORD_BUFS.lock(|cell| {
-        // ...unchanged setup through the dump_fits check, each early return becomes (false, false)...
-        // ...unchanged seq/encode...
-        let framed = &bufs.frame[..encoded.len];
-        match frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
-            LOG_PIPE.try_write(chunk).ok()
-        }) {
-            frame::WriteOutcome::Committed => {
-                console::CONSOLE.record_committed();
-                (true, false)
-            }
-            frame::WriteOutcome::RefusedForSpace => {
-                debug_assert!(
-                    false,
-                    "pipe refused a {}-byte frame the headroom rule had already admitted",
-                    framed.len(),
-                );
-                console::CONSOLE.record_dropped_for_space(framed.len());
-                (false, false)
-            }
-            frame::WriteOutcome::Stalled => (false, true),
-        }
-    });
-    if stalled {
-        panic!("try_emit_dump: sink stalled after the capacity pre-check passed; this violates write_whole's precondition that the caller holds the lock and already verified free_capacity");
-    }
-    committed
+**Machine check for AC#2:** after this lands, no `panic!` may appear lexically inside either lock closure or inside `write_whole`. Verify with
+`awk '/RECORD_BUFS.lock|fn write_whole/,/^}/{print FILENAME":"FNR": "$0}' crates/asperitas-logging/src/{lib,frame}.rs | grep -n 'panic!'` → expect zero hits (`commit_records`'s panic sits after the `lock(...)` call, so it is not caught).
 
-Keep the existing body.len() > MAX_BODY debug_assert! and its early return exactly as today (unrelated to this fix; do not touch it beyond adjusting its return arity to (false, false)).
+**Fallback, if the generic closure fights a borrow:** keep `RECORD_BUFS.lock(|cell| …)` open-coded at both call sites exactly as the draft proposed, returning `frame::WriteOutcome` (not a tuple) from each closure, and put the identical post-lock panic behind one `#[cold] #[inline(never)] fn stall_panic() -> !` so the message and its rationale still have one owner. Choose this only on technical necessity, and say which you took in the Final Summary.
 
-## 3. Doc corrections
+### 2c. `try_emit_dump()` — hoist the oversized-body check out of the critical section
 
-- lib.rs's try_emit_dump doc block (~409-444): replace 'While the lock is held the consumer still runs -- it runs with interrupts enabled, so free capacity can only *grow* here' with an accurate statement: RECORD_BUFS.lock() is a CriticalSectionRawMutex, so it masks interrupts globally for its duration; the consumer (usb::run()'s drain task) cannot run at all while the lock is held; free capacity is therefore frozen, not merely non-decreasing, for the duration of the call, which is what makes the capacity check below sound. Also correct the trailing clause '...and it is why write_whole's stall panic cannot fire on this path' -- it is no longer true that the panic cannot fire; write_whole no longer panics at all, and the caller (try_emit_dump, per 2c) panics after the lock releases. State that plainly instead.
-- usb.rs's emit_panic_record doc comment ('the one theoretical overlap ... cannot happen in release, where nothing in that region panics') and emit_blocking's 'USB interrupt handler is still installed and still firing' line: after 2a-2c land, verify these are true again (no panic fires inside RECORD_BUFS.lock() anymore) and leave them as-is if so; reword only the specific clause that needs it if not.
-- frame.rs's doc section title '# A stall after the pre-check panics, in every profile' (added by TASK-040): update per 2a above so it no longer claims write_whole itself panics.
+`lib.rs:470-477` validates `body.len() > frame::MAX_BODY` — pure input validation over an argument, no shared state — and then `debug_assert!(false, …)` **inside** the lock, i.e. another debug-profile panic that would leave PRIMASK stuck. Move the check and its `debug_assert!` to just after `let now_ms = …` (before the lock) and return `false` there. Behaviour in release is unchanged (the assert compiles away); behaviour in debug strictly improves, and it removes one more in-lock panic site. Leave the other two `debug_assert!`s inside (they concern values computed under the lock) and note them as residual (§7).
 
-## 4. Test update
+## 3. Call-site updates the draft missed
 
-Locate the existing test in frame.rs's `#[cfg(test)] mod tests` (added by TASK-040, currently named write_whole_panics_when_the_sink_stalls_after_the_precheck, using #[should_panic(expected = "sink stalled")]). Replace it with a plain #[test] (no should_panic) that calls write_whole with the same stalling closure and asserts:
+- `frame.rs` test module: `write_whole_refuses_a_frame_that_does_not_fit_without_writing_anything` (1233-1251) — the `assert!(!ok)` becomes `assert_eq!(…, WriteOutcome::RefusedForSpace)` and the empty-frame `assert!(write_whole(&[], 0, …))` becomes an equality against `Committed`; `write_whole_accepts_only_after_every_byte_reaches_the_sink` (1253-1264) — equality against `Committed`; the `commit()` helper (1303-1312) keeps its `-> bool` external shape by wrapping: `matches!(write_whole(…), WriteOutcome::Committed)`, so the ring-wrap test (1349-1379) and the randomized rounds test (1381-1437) need no edits at all. Import `WriteOutcome` in the test module.
+- `tests/console_dump.rs`: extend the import at 1933 to bring `WriteOutcome`, and wrap the `commit_frame` body (1956-1960) the same way. Its five uses (2072, 2209, 2222, 2284, 2300) then need no changes.
+- Grep confirms no other source references: `docs/` and `firmware/` have none. Completed tickets' text (`task-030 …:241` "two outcomes and no third") is historical record — leave it alone.
 
-    assert_eq!(outcome, frame::WriteOutcome::Stalled);
+## 4. Doc corrections (exact locations)
 
-Rename it to something like write_whole_reports_stalled_when_the_sink_stalls_after_the_precheck, and add a one-line comment noting that the actual panic now happens in the caller (emit()/try_emit_dump() in lib.rs), which only links under the log-usb firmware target and is not host-testable at this layer -- this test's job is to prove the outcome value the caller depends on, not the panic itself.
+1. `frame.rs:283-293` and `306-319` — per §2a.
+2. `lib.rs:342-345` (inline comment in `emit`) — *"inside, the consumer can only ever increase free capacity"* is wrong for the same reason as item 3: the consumer is a thread-mode task and cannot run at all behind PRIMASK. Say capacity is **frozen**, which is the stronger invariant and is what actually makes the pre-check sound.
+3. `lib.rs:422-428` (`try_emit_dump` doc) — replace *"While the lock is held the consumer still runs — it runs with interrupts enabled, so free capacity can only grow here"* with: `RECORD_BUFS.lock` masks interrupts globally, the consumer (`usb::run()`'s drain task) cannot run at all while it is held, so free capacity is frozen for the duration — which is what makes the capacity check sound rather than optimistic. Replace the trailing *"and it is why `write_whole`'s stall panic cannot fire on this path"* with the truth after this fix: `write_whole` no longer panics at all; a stall surfaces as an outcome and `commit_records` crashes on it once the critical section has released.
+4. `usb.rs:337-339` (`emit_panic_record`) — *"the one theoretical overlap (a panic raised inside the commit critical section) cannot happen in release, where nothing in that region panics"*: re-verify true after §2b/§2c and tighten the wording to name the mechanism ("callers crash only outside the record lock"), since "nothing in that region panics" is a claim about absence that the next debug_assert would silently break.
+5. `usb.rs:364-367` (`emit_blocking`) — narrow the claim to what it actually relies on: it *assumes interrupts are still live when it runs; it does not make them live*. One sentence of contrast is worth adding while here: the `log-defmt` sibling is immune for a different reason (RTT is polled by the probe, `docs/reference/daisy-seed3.md:422` records the opposite failure mode for a stalled RTT host), which is why the USB path is the fragile twin. Do not promise a mask-proof CDC emitter — §7 tickets it.
+6. `panic_handler.rs:61-64` repeats the "USB interrupt is still firing" phrasing outside `usb.rs`; keep it consistent with item 5 in the same pass.
+7. `lib.rs:46` intra-doc link to `frame::write_whole` and any new link to `WriteOutcome` must resolve. Pre-existing broken intra-doc links in this crate are TASK-043's problem — do not fix unrelated ones, but do not add new ones.
 
-## 5. Verification (run in this order)
+## 5. Test update (AC#3)
 
-1. nix develop -c cargo fmt --all --check
-2. nix develop -c cargo clippy -p asperitas-logging --all-targets -- -D warnings
-3. nix develop -c cargo test -p asperitas-logging
-4. nix develop -c cargo test --workspace
-5. cd firmware && nix develop -c cargo build --release --features seed3
-6. git diff --stat firmware/Cargo.lock   # must be empty -- this ticket touches no dependencies
+Replace `write_whole_panics_when_the_sink_stalls_after_the_precheck` (doc 1265-1272, `#[should_panic(expected = "sink stalled")]` at 1273-1274, body 1275-1289) with a plain `#[test] fn write_whole_reports_stalled_when_the_sink_stalls_after_the_precheck` reusing the same two-round stalling closure verbatim (round 1 `Some(chunk.len() / 2)`, round 2 `Some(0)`) and asserting `assert_eq!(outcome, WriteOutcome::Stalled)` plus `assert_eq!(calls, 2)` so the test still proves the loop was genuinely mid-frame when the sink stopped.
 
-## 6. In the Final Summary
+Rewrite its doc comment: the old one argues "`should_panic` is the whole point of this test … loud in both profiles". New rationale: the assertion here is the *value* the callers branch on; the panic now lives in the caller (`commit_records`, `lib.rs`) which does not even link on host, so host cannot see the crash and must not try. Keep the sentence recording *why* the old `debug_assert!` was rejected (silent in release) — that history is load-bearing.
 
-State explicitly: (a) write_whole no longer panics -- it returns WriteOutcome::Stalled and the panic moved to its two callers, firing only after RECORD_BUFS.lock() has released the critical section; (b) why that matters -- this target's panic strategy is abort, so a panic inside a critical_section::with closure never restores PRIMASK, which would have left interrupts masked for the rest of the program's life and silently defeated usb::emit_blocking's assumption that the USB interrupt is still firing during the panic spin, exactly contradicting TASK-040's own stated goal of routing this failure through the fail-loud USB path; (c) the try_emit_dump doc block's interrupts-enabled claim was also corrected to interrupts-masked/capacity-frozen, since it was already false independent of this bug.
+With `#[must_use]` on `WriteOutcome` and AC#7's `-D warnings`, forgetting to consume the outcome at any call site becomes a build failure, which is the point.
+
+## 6. Verification, in this order
+
+1. `nix develop -c cargo fmt --all --check`
+2. `nix develop -c cargo clippy -p asperitas-logging --all-targets -- -D warnings`
+3. `nix develop -c cargo test -p asperitas-logging` (includes the renamed stall test)
+4. `nix develop -c cargo test --workspace` (catches `tests/console_dump.rs` — the suite most likely to break if §3 is skipped)
+5. `cd firmware && nix develop -c cargo build --release --features seed3`
+6. `git diff --stat firmware/Cargo.lock` → must be empty
+7. The AC#2 machine check in §2b.
+
+## 7. Residual hazards — named, ticketed elsewhere, deliberately NOT this ticket
+
+Both were found while planning and are untracked anywhere else. File references are verified.
+
+- **TASK-046** — `emit_blocking`'s `EMIT_TIMEOUT` bound depends on an interrupt it cannot restore. `embassy-stm32 0.6.0`'s GP16 time driver computes `now()` as `(period << 15) + hardware CNT` (`time_driver/gp16.rs:81-82`, `:347-353`) and increments `period` **only in the timer ISR** (`next_period`, `:193-199`). With PRIMASK set, `period` freezes while the 16-bit counter free-runs, so `Instant::now()` goes non-monotonic and the `while Instant::now() < deadline` comparison at `usb.rs:419` can stop terminating — contradicting `EMIT_TIMEOUT`'s own "rather than spinning here forever" (`usb.rs:50`). Post-fix the moved panic never reaches this, but any panic that *does* fire under a mask (including the debug-only asserts below) still can. Fix belongs in a cycle-counted bound, not here.
+- **TASK-047** — the `debug_assert!`s that stay inside the `try_emit_dump` closure even after §2c (`lib.rs:486-489`, `:499-503`), plus those inside `frame::encode`, would leave PRIMASK stuck the same way. Debug-profile only, so the shipping release image is unaffected; worth routing through the same outcome-after-lock pattern.
+- Hardware proof of the stall path is out of scope and not achievable yet: `firmware/src/bin/panictest.rs` can only raise a plain panic (`:181`) and has no fault-injection hook for a sink stall, so no person can reproduce the scenario by flashing a binary. The general "is the framed console legible on hardware" confirmation is already TASK-030.04 (`@human`); do not duplicate it, and do not mark anything in this ticket `HUMAN:`.
+
+## 8. In the Final Summary
+
+State explicitly: (a) `write_whole` no longer panics — it returns `WriteOutcome::Stalled`, and the panic now fires only after `RECORD_BUFS.lock` has returned, owned by one helper rather than duplicated per call site (say which shape you took if you used the §2b fallback); (b) why that matters — `panic="abort"` means a panic inside `critical_section::with` never runs the guard's `Drop`, so PRIMASK stays set forever and `usb::emit_blocking` spins with no USB interrupt, dropping the panic text for exactly the path TASK-040 added fail-loud handling for; (c) that two docs claiming the consumer runs with interrupts enabled *while the record lock is held* (`lib.rs:342-345`, `lib.rs:422-428`) were independently wrong and are corrected to capacity-frozen; (d) the four call sites updated, including the two test helpers; (e) that TASK-046/TASK-047 exist for the two residual hazards in §7, and that hardware confirmation of this path needs a fault-injection hook nobody has built.
 <!-- SECTION:PLAN:END -->
