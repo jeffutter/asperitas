@@ -1,10 +1,11 @@
 ---
 id: TASK-041
 title: Ignore .agents/ loop state so git status stays clean
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 19:43'
+updated_date: '2026-09-10 05:03'
 labels: []
 dependencies: []
 priority: low
