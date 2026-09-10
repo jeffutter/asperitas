@@ -1,11 +1,11 @@
 ---
 id: TASK-036.05
 title: Compile the log-defmt backend in an unattended gate
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-10 21:05'
-updated_date: '2026-09-10 21:13'
+updated_date: '2026-09-10 21:32'
 labels:
   - planned
 dependencies: []
@@ -28,11 +28,11 @@ Fix is additive and cheap: one host-side lib clippy invocation with `--features 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 #1 .github/workflows/ci.yml gains `cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings` alongside the existing log-usb variant, and it passes locally inside nix develop .#default.
-- [ ] #2 #2 .github/workflows/ci.yml gains a firmware cross-compile of the RTT-only image — `cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt"` — passing alongside the existing `--features seed3` build, so build.rs's -Tdefmt.x branch is compiled by CI.
-- [ ] #3 #3 lefthook.yml's pre-commit and pre-push gain the log-defmt lib clippy (cheap, host target). The second firmware cross-compile stays out of the hooks; hook runtime is the reason, and CI still covers it.
-- [ ] #4 #4 No existing gate command changes: fmt, the workspace clippy pair, the log-usb clippy, cargo test --workspace, dump_reassemble --selftest and the console-form firmware build all appear verbatim as before.
-- [ ] #5 #5 Every new command is run locally first and its exit code recorded in this ticket's notes — a gate that is added red is worse than no gate.
+- [x] #1 #1 .github/workflows/ci.yml gains `cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings` alongside the existing log-usb variant, and it passes locally inside nix develop .#default.
+- [x] #2 #2 .github/workflows/ci.yml gains a firmware cross-compile of the RTT-only image — `cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt"` — passing alongside the existing `--features seed3` build, so build.rs's -Tdefmt.x branch is compiled by CI.
+- [x] #3 #3 lefthook.yml's pre-commit and pre-push gain the log-defmt lib clippy (cheap, host target). The second firmware cross-compile stays out of the hooks; hook runtime is the reason, and CI still covers it.
+- [x] #4 #4 No existing gate command changes: fmt, the workspace clippy pair, the log-usb clippy, cargo test --workspace, dump_reassemble --selftest and the console-form firmware build all appear verbatim as before.
+- [x] #5 #5 Every new command is run locally first and its exit code recorded in this ticket's notes — a gate that is added red is worse than no gate.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -98,3 +98,50 @@ Wiring firmware *clippy* into CI generally (the umbrella explicitly excluded tha
 separate cost decision about CI minutes); caching the thumbv7em target dir in Actions; DEFMT_LOG
 policy; anything needing a probe (TASK-037).
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Gate commands run locally inside `nix develop .#default`, exit codes as measured:
+
+- `cargo fmt --all --check` — rc=0
+- `cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings` — rc=0
+- `cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt"` — rc=0
+- `lefthook run pre-push` (with the new line in place) — rc=0, 68.88s wall; `clippy-log-defmt` itself took 0.24s of it, so the hook budget barely notices.
+- `lefthook run pre-commit` — rc=0 (and exercised for real by this commit, which had staged files).
+
+The RTT-only build really does exercise the link branch: `rust-readobj --section-headers` on
+`firmware/target/thumbv7em-none-eabihf/release/main` shows one consolidated `.defmt`
+(SHT_PROGBITS), i.e. build.rs emitted `-Tdefmt.x` and the fragment merged the loose
+`.defmt.<level>.*` inputs. Before this gate that property was invisible to CI.
+
+Negative control, per plan step 3.4: added a temporary `#[cfg(feature = "log-defmt")]`
+`clippy::len_zero` defect to `defmt_log.rs` (`#[allow(dead_code)]`, so nothing rustc-visible) and
+ran the three clippy gates — workspace rc=0, `--features log-usb` rc=0, **`--features log-defmt`
+rc=101** naming `defmt_log.rs:149`. Only the new gate sees it, which is the whole point of the
+ticket. Reverted (`git checkout`) and re-ran: rc=0.
+
+AC #4 guard: `git diff --numstat` gives 13 added / 0 deleted for ci.yml and 9 / 0 for
+lefthook.yml — additions and comments only, every pre-existing `run:` line byte-identical. Both
+files still parse (`yq`), and the workflow's inline bash script passes `bash -n` after the edit.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Two additive gate lines make the defmt-over-RTT backend fail loudly instead of silently.
+
+`ci.yml` gains `cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings` beside
+the existing log-usb variant, plus a firmware cross-compile of the RTT-only image
+(`--no-default-features --features "seed3 log-defmt"`) after the console-form build — the only
+thing that compiles `defmt_log.rs`, the five `#[cfg(not(feature = "log-defmt"))]` logger stubs and
+build.rs's `-Tdefmt.x` link line together. `lefthook.yml` gains the lib clippy in both
+`pre-commit` and `pre-push`; the second thumbv7em build stays out of the hooks on runtime grounds
+(0.24s of a 68.88s push hook for the one that did go in).
+
+Verified by measurement, not by reading: every new command rc=0 inside `nix develop .#default`, the
+whole pre-push hook green with the new line in place, and a temporary `clippy::len_zero` defect in
+`defmt_log.rs` caught by the new gate alone (workspace and log-usb clippy both rc=0) then reverted.
+The RTT ELF carries one consolidated `.defmt` section, confirming the link fragment is really
+exercised. Diff is additions only — 13/0 and 9/0 numstat — so no pre-existing gate command moved.
+<!-- SECTION:FINAL_SUMMARY:END -->

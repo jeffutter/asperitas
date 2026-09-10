@@ -17,6 +17,11 @@ pre-commit:
       run: cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
       forward_stderr: true
 
+    # And the same for the defmt-over-RTT bridge, which no default-feature build compiles at all.
+    clippy-log-defmt:
+      run: cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
+      forward_stderr: true
+
 pre-push:
   commands:
     fmt-check:
@@ -29,6 +34,10 @@ pre-push:
 
     clippy-log-usb:
       run: cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
+      forward_stderr: true
+
+    clippy-log-defmt:
+      run: cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
       forward_stderr: true
 
     test:

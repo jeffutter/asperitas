@@ -31,6 +31,12 @@ jobs:
             echo "=== cargo clippy (asperitas-logging log-usb) ==="
             cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
 
+            # The other transport has the same blind spot: the default feature set excludes `log-defmt`,
+            # so defmt_log.rs — the bridge behind the probe's lossless log channel — is compiled by no
+            # other check here.
+            echo "=== cargo clippy (asperitas-logging log-defmt) ==="
+            cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
+
             echo "=== cargo clippy (asperitas-pod pod-hw feature) ==="
             cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings
 
@@ -47,4 +53,11 @@ jobs:
 
             echo "=== firmware cross-compile ==="
             cd firmware && cargo build --release --features seed3
+
+            # The RTT-only image is the only build that links build.rs's `-Tdefmt.x` fragment and the
+            # `#[cfg(not(feature = "log-defmt"))]` logger stubs in the same binary; the console build
+            # above leaves both uncompiled. DEFMT_LOG is deliberately unset: it selects which frames get
+            # compiled in, not whether this compiles.
+            echo "=== firmware cross-compile (RTT-only, log-defmt) ==="
+            cargo build --release --no-default-features --features "seed3 log-defmt"
           '
