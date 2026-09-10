@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-10 06:30'
-updated_date: '2026-09-10 06:35'
+updated_date: '2026-09-10 21:45'
 labels: []
 dependencies: []
 priority: medium
@@ -26,6 +26,15 @@ Discovered while executing TASK-030.05: 'cargo fmt --all --check' inside firmwar
 - [x] #1 cd firmware && cargo fmt --all makes the tree clean: cd firmware && cargo fmt --all --check exits 0 (currently fails on Ticker::every wrapping in src/bin/main.rs:148 and src/bin/podtest.rs:216).
 - [x] #2 cd firmware && cargo build --release --features seed3 still succeeds and objdump -f shows a 0x0800 start address with .vector_table at 08000000.
 <!-- AC:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-10 21:45
+---
+Fixup applied post-review (review-pi-work over TASK-041/042/043): file was filed under backlog/completed/, a non-standard folder invisible to 'backlog task list -s Done' and 'backlog task edit' - the same shadowing risk CLAUDE.md warns about for backlog/archive/. Content (ACs, Final Summary) was already correct; moved back to backlog/tasks/ so the tool can see it.
+---
+<!-- COMMENTS:END -->
 
 ## Final Summary
 
