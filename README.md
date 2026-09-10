@@ -200,7 +200,7 @@ screen /dev/cu.usbmodem<N> 115200     # attach within the 10 s countdown
 
 Expect green with `panictest: panicking in N...` counting down, then steady red plus the panic line.
 Both now travel framed, so the countdown reads `~I <seq> <t_ms> panictest: panicking in N...*<crc>` and
-the last line reads `~E <seq> <t_ms> PANIC: <msg> at src/bin/panictest.rs:L:C *<crc>`; the stage table in
+the last line reads `~E <seq> <t_ms> PANIC: <msg> at src/bin/panictest.rs:L:C*<crc>`; the stage table in
 `src/bin/panictest.rs` is the copy to read. Framing changes the bytes, not the argument below: the
 countdown and the panic line travel by *different* mechanisms — the countdown goes through the log
 pipe, while the panic line is pushed straight to the endpoint because the executor is dead by then — so

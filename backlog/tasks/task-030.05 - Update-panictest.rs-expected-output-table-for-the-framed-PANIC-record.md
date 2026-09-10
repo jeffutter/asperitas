@@ -1,11 +1,11 @@
 ---
 id: TASK-030.05
 title: Update panictest.rs expected-output table for the framed PANIC record
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 09:55'
-updated_date: '2026-09-10 06:20'
+updated_date: '2026-09-10 06:31'
 labels:
   - planned
 dependencies:
@@ -26,11 +26,11 @@ Blocked from doing this inside TASK-030.02 by that ticket's AC #8, which forbids
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The 'Reading the output' table in firmware/src/bin/panictest.rs shows the panicked stage's serial line as a console v1 frame (~E <seq> <t_ms> PANIC: <msg> at src/bin/panictest.rs:L:C*<crc> CRLF) rather than the bare PANIC: text, and names usb::emit_panic_record as what pushes it.
-- [ ] #2 cargo fmt --all --check from the root AND inside firmware/ (the root command excludes firmware/ entirely), cargo clippy --workspace --all-targets -- -D warnings, and `cd firmware && cargo build --release --features seed3` (the exact ci.yml:44 command) all pass. Do not substitute `cargo build --manifest-path firmware/Cargo.toml ...`: measured this pass, that form exits 0 while never loading firmware/.cargo/config.toml, so it links without -Tlink.x and leaves an ELF with start address 0x0 and no .vector_table - a green that proves nothing. Only doc comments in the binary change: `git diff -U0 firmware/ | grep -E '^[+-][^+-]' | sed -E 's/^.//' | grep -vE '^//'` prints nothing.
-- [ ] #3 All three rows of the table (Boot, Countdown, Panicked) show console v1 records byte-faithful to the shipped encoder apart from <...> placeholders, with the '*' flush against the body, and the framing preamble states that ~<level> <seq> <t_ms> <body>*<crc> plus CRLF is the form and points at docs/reference/daisy-seed3.md Console protocol v1.
-- [ ] #4 The bullets after the table name both halves honestly - usb::emit_panic_record frames the record without the record lock, usb::emit_blocking drives the endpoint with the ring bypassed - written as code text rather than intra-doc links (this crate's `usb` resolves to the HAL module via the use at panictest.rs:57, and `pub mod usb` sits behind feature = log-usb, so either link form would break under RUSTDOCFLAGS=-D warnings); give the seq arithmetic (BOOT 0, USB connected 1, countdown 2-11, panic normally 0000000c) without pinning a constant; explain the doubled `panictest:` prefix; and record the 128-byte PANIC_MSG_BUF headroom trap where a truncated body still carries a valid CRC and trips no counter.
-- [ ] #5 README.md's transcription of the panic line drops its stray space before *<crc> so README, docs/reference/daisy-seed3.md Console protocol v1, and this table agree; no other README wording changes. `grep -n 'L:C \*<crc>' README.md` is empty and the flush form hits once.
+- [x] #1 The 'Reading the output' table in firmware/src/bin/panictest.rs shows the panicked stage's serial line as a console v1 frame (~E <seq> <t_ms> PANIC: <msg> at src/bin/panictest.rs:L:C*<crc> CRLF) rather than the bare PANIC: text, and names usb::emit_panic_record as what pushes it.
+- [x] #2 cargo fmt --all --check from the root AND inside firmware/ (the root command excludes firmware/ entirely), cargo clippy --workspace --all-targets -- -D warnings, and `cd firmware && cargo build --release --features seed3` (the exact ci.yml:44 command) all pass. Do not substitute `cargo build --manifest-path firmware/Cargo.toml ...`: measured this pass, that form exits 0 while never loading firmware/.cargo/config.toml, so it links without -Tlink.x and leaves an ELF with start address 0x0 and no .vector_table - a green that proves nothing. Only doc comments in the binary change: `git diff -U0 firmware/ | grep -E '^[+-][^+-]' | sed -E 's/^.//' | grep -vE '^//'` prints nothing.
+- [x] #3 All three rows of the table (Boot, Countdown, Panicked) show console v1 records byte-faithful to the shipped encoder apart from <...> placeholders, with the '*' flush against the body, and the framing preamble states that ~<level> <seq> <t_ms> <body>*<crc> plus CRLF is the form and points at docs/reference/daisy-seed3.md Console protocol v1.
+- [x] #4 The bullets after the table name both halves honestly - usb::emit_panic_record frames the record without the record lock, usb::emit_blocking drives the endpoint with the ring bypassed - written as code text rather than intra-doc links (this crate's `usb` resolves to the HAL module via the use at panictest.rs:57, and `pub mod usb` sits behind feature = log-usb, so either link form would break under RUSTDOCFLAGS=-D warnings); give the seq arithmetic (BOOT 0, USB connected 1, countdown 2-11, panic normally 0000000c) without pinning a constant; explain the doubled `panictest:` prefix; and record the 128-byte PANIC_MSG_BUF headroom trap where a truncated body still carries a valid CRC and trips no counter.
+- [x] #5 README.md's transcription of the panic line drops its stray space before *<crc> so README, docs/reference/daisy-seed3.md Console protocol v1, and this table agree; no other README wording changes. `grep -n 'L:C \*<crc>' README.md` is empty and the flush form hits once.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -246,4 +246,12 @@ Two findings from planning, both measured rather than inferred:
 2. **AC #1 as first written asked for a wire-wrong string** — `…panictest.rs:L:C *<crc>`, with a space before the checksum. The shipped encoder puts `*` flush against the body (`frame.rs:887-917` golden vectors, `daisy-seed3.md:181` grammar), and `README.md:203` carries the same stray space, which is why AC #5 exists. AC #1 has been corrected to the flush form.
 
 Byte-exact facts the plan relies on: panic body 105 B -> frame 133 B (not a multiple of 64, so no ZLP today); `PANIC_MSG_BUF` 128 B, so 23 B of headroom before silent truncation that still passes CRC; seq arithmetic BOOT 0 / "USB connected" 1 / countdown 2-11 / panic normally `0000000c`; location really `src/bin/panictest.rs:161:13` at planning time, column 13 = the `panic!` token's own column, and this ticket's own edit moves the line number, which is why the table keeps `L:C`.
+
+Executed per plan §2/§3. Gates (§4 order): firmware cargo fmt --all --check FAILS on pre-existing drift in main.rs:148/podtest.rs:216 only — proven identical (same two 'Diff in' hunks) at HEAD c023286 in a clean worktree without this change; panictest.rs itself is fmt-clean (no hunk for it before or after). Cannot fix here: AC #2's comment-only guard forbids touching them. Follow-up filed as TASK-044. Root cargo fmt --all --check: pass. Root cargo clippy --workspace --all-targets -- -D warnings: exit 0. cd firmware && cargo build --release --features seed3 (ci.yml:44 form): exit 0; objdump -f start address 0x08000299, .vector_table @ 08000000 — real link, not the false-green --manifest-path form. make clippy BINARY=panictest FEATURES=seed3 (log-usb default on): exit 0. cargo doc --no-deps --bin panictest: clean, no broken intra-doc links (AC #4 names kept as backticked code text per §1). Comment-only proof git diff -U0 firmware/ | grep -E '^[+-][^+-]' | sed -E 's/^.//' | grep -vE '^//': prints nothing. Panic body re-measured after the edit: line moved 161->181 (three digits either way), col still 13, body still exactly 105 bytes, so the PANIC_MSG_BUF bullet's arithmetic holds. README: 'L:C \*<crc>' grep empty, flush 'L:C\*<crc>' hits once.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Rewrote panictest.rs's 'Reading the output' section as console v1: framing preamble (~<level> <seq> <t_ms> <body>*<crc> + CRLF, flush '*', pointing at daisy-seed3.md §Console protocol v1), all three table rows framed with placeholders instead of pinned values, both panic-path halves named (usb::emit_panic_record frames without the record lock; usb::emit_blocking drives the endpoint with the ring bypassed) as code text not links, seq arithmetic BOOT 0 / USB connected 1 / countdown 2-11 / panic normally 0000000c stated as arithmetic, doubled panictest: prefix explained, and the 128-byte PANIC_MSG_BUF silent-truncation trap recorded. README.md's stray space before *<crc> removed so README, daisy-seed3.md, and the table agree. Doc-comment-only under firmware/ (verified by the AC #2 diff guard); one character outside it. All gates green except firmware-wide cargo fmt --check, which fails only on pre-existing unrelated drift proven identical at HEAD — filed as TASK-044.
+<!-- SECTION:FINAL_SUMMARY:END -->

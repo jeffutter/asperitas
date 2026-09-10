@@ -29,24 +29,44 @@
 //!
 //! # Reading the output
 //!
-//! | Stage     | LED           | Serial                               |
-//! |-----------|---------------|--------------------------------------|
-//! | Boot      | steady red    | —                                    |
-//! | Countdown | steady green  | `panictest: panicking in N...` ×N    |
-//! | Panicked  | steady red    | `PANIC: <msg> at src/bin/panictest.rs:L:C` |
+//! Every serial line below is a console v1 record — `~<level> <seq> <t_ms> <body>*<crc>` then
+//! CRLF — as specified in `docs/reference/daisy-seed3.md` §Console protocol v1 and pinned by the
+//! `encode_golden_*` tests in `frame.rs`. The `*` sits flush against the body: there is no space
+//! before the checksum. `<seq>` and `<t_ms>` vary between runs; nothing else does. The `BOOT`
+//! line is queued before the countdown but only leaves the device once a host attaches, so
+//! attaching mid-countdown shows it late rather than not at all.
+//!
+//! | Stage     | LED          | Serial                                                              |
+//! |-----------|--------------|---------------------------------------------------------------------|
+//! | Boot      | steady red   | `~I <seq> <t_ms> BOOT proto=1 fw=<ver> pipe=<n> maxbody=<n>*<crc>`  |
+//! | Countdown | steady green | `~I <seq> <t_ms> panictest: panicking in N...*<crc>`, ×N            |
+//! | Panicked  | steady red   | `~E <seq> <t_ms> PANIC: <msg> at src/bin/panictest.rs:L:C*<crc>`    |
 //!
 //! All three stages must appear. Specifically:
 //!
-//! - The countdown lines prove the ordinary pipe → drain-loop → endpoint path
-//!   works; if the LED counts down but no text arrives, the fault is there.
-//! - The `PANIC:` line proves the *panic* path works, which is a different
-//!   mechanism: the executor is dead by then, so that line is pushed to the
-//!   endpoint synchronously by `usb::emit_blocking`. Countdown text without a
-//!   `PANIC:` line is precisely the failure this binary exists to catch.
-//! - The line must end cleanly at the source location, with no trailing NUL
-//!   garbage.
-//! - Green → red is the LED half of the same signal, and is the only half that
-//!   works with no host attached.
+//! - The countdown lines prove the ordinary pipe → drain-loop → endpoint path works; if the LED
+//!   counts down but no text arrives, the fault is there. They are framed on the normal commit
+//!   path, like every other record.
+//! - The `PANIC:` line proves the *panic* path works, which is a different mechanism: the
+//!   executor is dead by then, so `usb::emit_panic_record` frames it without taking the record
+//!   lock and hands the finished bytes to `usb::emit_blocking`, which drives the endpoint itself
+//!   and bypasses the ring entirely. Countdown text without a `PANIC:` line is precisely the
+//!   failure this binary exists to catch.
+//! - The line must end cleanly at the source location, with no trailing NUL garbage. `L:C` is the
+//!   `panic!`'s own position — the column is where the `panic!` token starts — so read it off the
+//!   wire instead of asserting a number any edit to this file moves.
+//! - Expect `panictest:` twice, as in `PANIC: panictest: deliberate panic, …`. The handler prepends
+//!   the module path whenever the message contains no `::`, so the doubling is it working, not a
+//!   defect.
+//! - `seq` counts every record since boot, including ones nobody logged: `BOOT` takes `0`, the
+//!   drain task's own `USB connected` takes `1`, the ten countdown lines take `2`–`11`, so the
+//!   `PANIC:` line normally arrives as `0000000c`. A single `STATUS` record in that window shifts
+//!   it, so treat that as arithmetic rather than an expected constant.
+//! - Green → red is the LED half of the same signal, and is the only half that works with no host
+//!   attached.
+//! - Keep the message short: `PANIC_MSG_BUF` is 128 bytes and this one renders 105, so growing it
+//!   by more than 23 bytes truncates the body silently — a truncated panic still carries a valid
+//!   CRC and trips no counter, so nothing on the wire admits the loss.
 
 #![no_std]
 #![no_main]
