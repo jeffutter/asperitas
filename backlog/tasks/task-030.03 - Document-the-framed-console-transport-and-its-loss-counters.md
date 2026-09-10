@@ -1,11 +1,11 @@
 ---
 id: TASK-030.03
 title: Document the framed console transport and its loss counters
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 03:25'
-updated_date: '2026-09-10 03:53'
+updated_date: '2026-09-10 04:28'
 labels:
   - planned
 dependencies:
@@ -27,13 +27,13 @@ Parent: TASK-030, acceptance criterion #7. Write console protocol v1 down where 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 docs/reference/daisy-seed3.md "Debugging without a probe" section states the v1 record grammar field by field with a real example line, and gives the CRC parameters (algorithm, poly, init, reflection, xorout, covered byte range, 123456789 -> 0x29b1 check vector) explicitly enough to reimplement from the document alone.
-- [ ] #2 It documents why CRLF is a trustworthy delimiter, the reader resynchronisation rule, and what guarantee that rule buys.
-- [ ] #3 It lists the reserved BOOT and STATUS body prefixes with every field, explains each loss counter, and says why sequence numbers alone cannot distinguish a reboot from a loss.
-- [ ] #4 It records that the leading byte is reserved device-to-host and a different one for host-initiated commands, pointing at TASK-032, and states the measured ~8.8% baseline this replaces along with the caveat that its raw capture no longer exists.
-- [ ] #5 README.md debugging instructions describe what a plain terminal now shows, keep the panictest countdown and PANIC procedure meaningful, and give the console_decode command for checking a saved capture plus a pointer to TASK-031.
-- [ ] #6 Every field name, width and counter in both documents was checked against the shipped frame.rs and the emission site rather than transcribed from this ticket, and cargo fmt --all --check passes.
-- [ ] #7 It records the USB short-packet rule: that the device terminates every bulk transaction with a short packet or zero-length packet, why an exactly-64-byte final packet would otherwise sit unseen in the host's driver buffer, and that a reader may legitimately observe zero-length reads.
+- [x] #1 docs/reference/daisy-seed3.md "Debugging without a probe" section states the v1 record grammar field by field with a real example line, and gives the CRC parameters (algorithm, poly, init, reflection, xorout, covered byte range, 123456789 -> 0x29b1 check vector) explicitly enough to reimplement from the document alone.
+- [x] #2 It documents why CRLF is a trustworthy delimiter, the reader resynchronisation rule, and what guarantee that rule buys.
+- [x] #3 It lists the reserved BOOT and STATUS body prefixes with every field, explains each loss counter, and says why sequence numbers alone cannot distinguish a reboot from a loss.
+- [x] #4 It records that the leading byte is reserved device-to-host and a different one for host-initiated commands, pointing at TASK-032, and states the measured ~8.8% baseline this replaces along with the caveat that its raw capture no longer exists.
+- [x] #5 README.md debugging instructions describe what a plain terminal now shows, keep the panictest countdown and PANIC procedure meaningful, and give the console_decode command for checking a saved capture plus a pointer to TASK-031.
+- [x] #6 Every field name, width and counter in both documents was checked against the shipped frame.rs and the emission site rather than transcribed from this ticket, and cargo fmt --all --check passes.
+- [x] #7 It records the USB short-packet rule: that the device terminates every bulk transaction with a short packet or zero-length packet, why an exactly-64-byte final packet would otherwise sit unseen in the host's driver buffer, and that a reader may legitimately observe zero-length reads.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -343,6 +343,16 @@ Trailer `Task-Id: TASK-030.03`, matching `git log`. In the body, separate what w
    symbol names, and expect drift if TASK-030.05 or TASK-038.x lands first.
 <!-- SECTION:PLAN:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Docs-only. Three new #### subsections appended inside '### Debugging with nothing attached' in docs/reference/daisy-seed3.md: 'Console protocol v1: every record verifies itself' (~line 171), 'BOOT and STATUS: the reserved body prefixes' (~249), 'The USB short-packet rule, for whoever writes the reader' (~316). Promoted to #### rather than bolded leads because the required content ran ~150 lines, past the ~100-line threshold the plan set; no existing heading was renamed or moved, so rust-daisy-stack.md's two anchors still resolve. The placeholder pointer in 'What each channel loses' now links to the two new headings by GitHub slug.
+
+Every fact transcribed from shipped code at HEAD 9837850, not from this ticket: grammar, PREFIX_LEN 21 / TRAILER_LEN 7 / MAX_BODY 200 / MAX_FRAME 228 / T_MS_WRAP 1e8, level_letter, sanitize_byte, crc16_ccitt's parameter table and the KERMIT/XMODEM alias trap, the backwards-'*' rule and the examine() reject list, resync's discard-front-one rule, BOOT/STATUS format strings and their pinned examples, console.rs's saturating add() vs take_seq's wrapping fetch_add, usb.rs's MAX_PACKET_SIZE 64 + last_packet_was_full ZLP + emit_blocking's len%64 ZLP, and console_decode's stdout/stderr split and exit-code rule. Verified line_coding really is only stored and getter-exposed in embassy-usb-0.6.0/cdc_acm.rs before keeping the README baud aside, and quoted its CdcAcmClass short-packet paragraph verbatim.
+
+Evidence for the three example records is cargo test -p asperitas-logging (all 103 tests pass): they are the encode_golden_* vectors, byte-for-byte asserted, so no checksum here is hand-computed and none is fabricated from a bench capture. cargo fmt --all --check passes. git diff touches only README.md, docs/reference/daisy-seed3.md and this ticket file.
+<!-- SECTION:NOTES:END -->
+
 ## Comments
 
 <!-- COMMENTS:BEGIN -->
@@ -359,3 +369,11 @@ Two additions beyond the letter of the ACs, both to stop this doc contradicting 
 Cross-ticket edit made here: TASK-038.06 now also depends on TASK-030.03 (its existing deps on .03/.04 preserved). It documents AUDIO/AUDEND 'beside what TASK-030.03 documents for BOOT and STATUS' in the same region of the same file, and had no dependency either way.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Console protocol v1 is now written down where someone hunting for a debug channel will find it. docs/reference/daisy-seed3.md's probeless-debugging section gained three subsections - the record grammar with its geometry and three encoder-pinned example lines, the full CRC-16/CCITT-FALSE parameter set including the alias trap that makes 'just use CCITT' fail every record, the sanitisation argument that makes CRLF a trustworthy delimiter, the resynchronisation rule with the MAVLink desync hazard behind it and the no-record-is-ever-invented guarantee beside its two honest limits; then BOOT and STATUS field by field with all seven counters, why they saturate while seq wraps, and why a gap cannot tell loss from reboot without the banner; then the USB short-packet rule written for whoever writes the reader, so nobody chases a zero-length read as a disconnect. README's debugging instructions now say what a plain terminal shows, keep panictest's two-mechanism argument intact while describing the framed shape in prose rather than pasting a competing table, and add a 'Reading a saved capture' section with the console_decode commands and the stdout/stderr split.
+
+Transcribed from frame.rs, console.rs, usb.rs, dump.rs, lib.rs and the shipped example at HEAD 9837850; cargo test -p asperitas-logging passes and is what proves the quoted frames are the encoder's asserted bytes. Nothing here is measured at the bench - the legibility, zero-bad-frames and audio-unharmed claims stay with TASK-030.04 (@human) and TASK-033, the 8.8% figure stays a hand tally whose raw capture no longer exists, and the AUDIO/AUDEND grammar stays with TASK-038.06.
+<!-- SECTION:FINAL_SUMMARY:END -->

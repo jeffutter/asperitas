@@ -168,6 +168,176 @@ loses* covers why you can't read one off the other. In order of usefulness:
 Neither speaks before USB enumerates, which is exactly where boot faults live. That window is
 the probe's own ground, and the reason it earns a place on the bench.
 
+#### Console protocol v1: every record verifies itself
+
+CDC-ACM delivers an undifferentiated byte stream: no boundaries, no length, no sequence. A record
+whose tail vanished at a ring wrap is therefore indistinguishable from a short log line, which is how
+truncated knob lines came to be filed as an ADC glitch (TASK-018.04). v1 puts a sequence number and a
+checksum on every line while keeping each one readable in `screen` and greppable in a raw capture.
+The normative copy is `crates/asperitas-logging/src/frame.rs`; this is a transcription, and where the
+two disagree the code is right.
+
+```text
+record := '~' level SP seq SP t_ms SP body '*' crc CRLF
+```
+
+- **`~`** — start marker, device→host only (`>` is reserved the other way).
+- **`level`** — one of `I W E D T` (`level_letter`); the decoder accepts exactly those five letters.
+- **`seq`** — exactly 8 lowercase hex digits, a `u32` incremented once per record within a boot.
+  Assigned *inside* the record lock (`take_seq` called from `emit` in `lib.rs`), which is what makes
+  numeric order equal wire order. It wraps mod 2³² on purpose; the loss counters do the opposite.
+- **`t_ms`** — exactly 8 decimal digits, milliseconds since boot, transmitted modulo 100 000 000
+  (`T_MS_WRAP`) so the field never widens and invalidates the fixed offsets behind it. It wraps after
+  ~27.8 h, and neither field reveals the wrap on its own — continuity comes from `BOOT` plus `seq`.
+- **`body`** — 0–200 bytes (`MAX_BODY`), sanitised on the way out.
+- **`crc`** — `*`, then 4 lowercase hex digits, then `CR LF` (`TRAILER_LEN` 7).
+
+The prefix is 21 bytes (`PREFIX_LEN`), so overhead is 28 bytes per record — and 28 bytes is also the
+shortest legal record, the one with an empty body. Longest is 228 (`MAX_FRAME`).
+
+Example records. These are the shipped encoder's own bytes, pinned by the `encode_golden_*` tests in
+`frame.rs`, not a bench capture:
+
+```text
+~I 00000042 00004567 ENC +1*9c17
+~D 00000000 00000000 *91d4
+~W deadbeef 76980377 knob r2=298 ✓*b321
+```
+
+34, 28 and 43 bytes counting the closing CRLF. The second is pure overhead. The third carries a
+wrapped `t_ms` (0x9999_9999 ms → `76980377`) and is the truncated knob line that nearly became an ADC
+bug report; the checkmark crosses the wire as its three UTF-8 bytes.
+
+**Checksum: CRC-16/CCITT-FALSE.** Width 16, poly `0x1021`, init `0xFFFF`, `refin=false`,
+`refout=false`, `xorout=0x0000`, check `0x29b1` for the 9-byte ASCII string `123456789`, alias
+CRC-16/IBM-3740, catalogue <https://reveng.sourceforge.io/crc-catalogue/16.htm>. Copy the parameters,
+not the name: "CRC-16/CCITT" is routinely misidentified — the reflected form is KERMIT, check `0x2189`,
+and XMODEM is the init-`0x0000` variant — so anyone who implements whichever function their library
+calls CCITT gets a capture in which every record fails. The covered range is
+`level SP seq SP t_ms SP body`: every byte after the `~` up to but excluding the `*`, the separator
+spaces included — 20, 26 and 220 bytes for the three lines above. Deliberately a table-less bit loop
+(≤ 220 × 16 iterations per record) so both ends of the link can share identical source. Integrity is
+not authenticity: the checksum is affine over GF(2), so two edits whose contributions cancel leave it
+valid while changing the payload. That sets the ceiling on what a clean CRC proves.
+
+**CRLF is a trustworthy delimiter because the producer sanitises the body.** `sanitize_byte` replaces
+every byte `< 0x20` — CR and LF among them — and DEL (`0x7F`) with `'_'`, while bytes ≥ 0x80 pass
+through untouched so UTF-8 survives. The fixed-width prefix contains no CR or LF either, so the first
+complete CRLF after a candidate start *must* be that record's terminator. Printable punctuation
+deliberately survives, `~`, `*` and `|` included: framing strength comes from the grammar plus the CRC
+and above all the no-CR/LF invariant, not from a supposedly tilde-free payload, so a stray `~` or `*`
+inside a body can only cause a CRC mismatch, never a false-valid record. SLIP (RFC 1055) and COBS buy
+delimiter uniqueness by escaping bytes; this transport buys it at the producer, which is cheaper and
+keeps every line legible. The same sanitisation is the log-injection fix (CWE-117).
+
+**Locate the `*` backwards from the CRLF, never forwards from the `~`.** Sanitisation only neutralises
+control bytes and DEL, so a body may legitimately contain `*`, and a forward search mis-decodes exactly
+those records. The `*` sits 5 bytes before CR and the CRC digits start 4 bytes before it.
+
+**Resynchronisation: advance strictly past the disqualified start byte.** On any failure — a level
+letter off `I W E D T`, a misplaced separator space, a non-hex `seq`, a non-decimal `t_ms`, a missing
+`*`, a CRC mismatch, a CRLF landing where no legal body length fits, or a window that fills to
+`MAX_FRAME` without ever finding a terminator — drop that one `~`, charge the skipped bytes once, and
+retry at the next `~`; never repair a record, never guess a shorter body. The hazard is documented
+upstream: ArduPilot's C MAVLink parser desynchronised permanently when a bad-CRC message happened to end
+in a byte equal to the STX magic, because resuming at "the next plausible-looking byte" can land *inside*
+the next real frame (<https://github.com/ArduPilot/pymavlink/issues/881>). What the rule buys is stated
+by the code: corruption costs one record, not the capture, and because records come only from fully
+validated frames, **no record is ever invented**. Two limits belong in the same breath as that promise.
+A record whose leading `~` was lost produces no integrity failure at all — the decoder never saw a
+candidate start — and only a `seq` gap or a `STATUS` counter reveals it. And a byte-level splice between
+two producers legitimately decodes as two good records plus one integrity failure, because the frames
+around the splice really are intact.
+
+#### `BOOT` and `STATUS`: the reserved body prefixes
+
+Two bodies are wire contract, rendered in `crates/asperitas-logging/src/console.rs` and riding ordinary
+records — same framing, same CRC, same chance of being dropped:
+
+```text
+BOOT proto=1 fw=0.1.0 pipe=2048 maxbody=200
+STATUS proto=1 sent=12 dropped_full=3 bytes_dropped=4096 trunc=1 ep_err=2 seq_next=18 pipe_free=2048
+```
+
+`proto` comes first so a reader can handshake before trusting anything. `fw` is the
+`asperitas-logging` crate version, which is the version that ships the console — the firmware binaries
+have no separate release process. `pipe` is the log ring in bytes (`LOG_PIPE_SIZE`) and `maxbody` the
+encoder's cap. `BOOT` consumes `seq 0` and is emitted only once the USB backend is installed (`usb::init`
+installs the logger, switches the backend, then announces), so ordering it before the switch discards it
+with no trace in any counter.
+
+`STATUS` fields and their order *are* the contract: TASK-031 parses them, and a unit test fails if either
+moves. Values are absolute since-boot counts, never deltas — the host owns the differencing.
+
+| Field | Counts |
+|---|---|
+| `sent` | Records committed to the ring whole. Cross-check against the host's decoded count. |
+| `dropped_full` | Records refused for lack of space — never partially written. |
+| `bytes_dropped` | Bytes those refused records would have occupied. |
+| `trunc` | Bodies shortened by the 200-byte cap. **Those records shipped**, which is why they are not in `dropped_full`. |
+| `ep_err` | Endpoint writes that failed: link loss or stalls. |
+| `seq_next` | The value the next record will carry. |
+| `pipe_free` | Ring free bytes at the instant of rendering — how close to full the ring was, which is what makes a drop storm diagnosable after the fact rather than merely deniable. |
+
+Pacing: at most once per second (`STATUS_MIN_INTERVAL_MS`) and only when a counter actually moved,
+emitted from the drain loop only when the ring is empty. Debouncing is not politeness — during a
+full-ring condition the `STATUS` record competes for the very space that is missing, so an undebounced
+emitter starves the logs it is reporting on.
+
+**Counters saturate at `u32::MAX`; `seq` wraps.** A wrapped byte counter becomes an enormous negative
+rate and reads as a decoder bug, and roughly 24 days of sustained dropping at ring capacity is
+reachable on a rig left running. `seq` does the opposite because a saturated sequence number would emit
+the *same* `seq` twice and invent a record, while a wrapped one is recoverable by modular subtraction —
+a jump ≥ 2³¹ means restart or corruption, not loss. A counter describes an amount, a sequence number
+describes a position.
+
+**Why `seq` alone cannot tell a reboot from a loss:** CRC and `seq` detect damage, never absence. A hole
+in the stream leaves no bytes behind, so a gap is equally consistent with "bytes lost" and "board
+rebooted and restarted numbering at 0". The second `BOOT` is what breaks the tie — or a `seq`
+regression. There is deliberately no boot-id in v1: it would need `.noinit` persistence or a peripheral
+read for no gain over the banner's presence, and reset *reason* is TASK-032's. The honest limit is that a
+lost `STATUS` record is indistinguishable from nothing having changed, except through the `seq` gap it
+leaves behind — silence means "probably nothing changed", not "nothing changed".
+
+`AUDIO` and `AUDEND` are a third reserved pair carrying base64 audio dumps over the same framing
+(`crates/asperitas-logging/src/dump.rs`); their grammar and the rig workflow around them belong to
+TASK-038.06, not here.
+
+**Direction:** `~` is device→host only. `>` (0x3E) is reserved host→device for TASK-032's commands, with
+identical field and CRC rules so one parser serves both directions. The audio dump rejected Ascii85 and
+Z85 partly because those alphabets contain `~` and `<>`, which would let a corrupted body reassemble into
+a fake record boundary — the same reason the reservation is worth honouring before the first command
+exists.
+
+**What this replaced:** roughly 8.8 % of log lines were truncated over USB CDC — 1226 of 13968, counted
+by hand across a 240 s `podtest` capture on 2026-08-08 (TASK-018.04's notes). One of them read
+`r2=298`, cut mid-number, and nearly got reported as an ADC glitch. Root cause: `Pipe::try_write`
+short-writes at every ring wrap even when the ring is empty, and the old path treated a short write as
+success. Treat 8.8 % as a baseline, not a reproducible measurement — the raw capture no longer exists,
+which is itself part of the case for TASK-031.
+
+#### The USB short-packet rule, for whoever writes the reader
+
+Bulk transfers must end with a short packet. If the final packet of a transaction is exactly
+`max_packet_size` — 64 here — the host driver holds it, and everything it carried, until something
+shorter follows. embassy-usb says so verbatim in its own `CdcAcmClass` docs: "If you write a packet that
+is exactly `max_packet_size` bytes long, it won't be processed by the host operating system until a
+subsequent shorter packet is sent. A zero-length packet (ZLP) can be sent if there is no other data to
+send." USB 2.0 §5.8.3 is the normative statement, and the ST community thread *"STM32U5 USB (CDC) not
+transmitting data if in exact multiple of 64 bytes"* is the same MCU family showing the symptom.
+
+The firmware does it in both places that can strand a tail: the drain loop tracks
+`last_packet_was_full` and emits a ZLP before parking, and only when the ring is empty, because that
+pair is what means "I am about to stop sending"; and `emit_blocking` sends one when the panic record's
+length is a multiple of 64, where the miss would be least forgiving — the withheld record would be the
+`PANIC:` line. Without it the end-of-session tail never arrives, and this project's own framing would
+report that faithfully as a `seq` gap while the cause sat in the drain loop.
+
+So for the reader: **zero-length reads are legitimate.** Do not treat a 0-byte read as a disconnect or
+an EOF; terminate on record validation and `seq` continuity instead. Note too that the endpoint rejects
+oversize writes rather than splitting them (`EndpointError::BufferOverflow`), which is why every write
+path on the device chunks to 64.
+
 ### Flashing and logging over an ST-Link probe
 
 The Seed3 exposes SWD/JTAG pads. The 10-pin connector pinout is identical to earlier
@@ -288,8 +458,10 @@ The device paths keep different books, and a loss figure from one says nothing a
 The framed USB console reports what it failed to send: a per-record sequence number the reader
 can difference for gaps, plus cumulative `dropped_full`, `bytes_dropped`, `trunc` and `ep_err`
 counters carried in band — so a capture that lost records can prove it afterwards, and a capture
-that didn't can too. (TASK-030.03 documents that record grammar and field set; this section is
-only about which ledger is which.) RTT keeps no ledger at all. Unattached it discards freely and
+that didn't can too. Those fields are specified above under
+[*Console protocol v1*](#console-protocol-v1-every-record-verifies-itself) and
+[*`BOOT` and `STATUS`*](#boot-and-status-the-reserved-body-prefixes); this section is only about which
+ledger is which. RTT keeps no ledger at all. Unattached it discards freely and
 says nothing; attached it loses nothing *while the host keeps reading*, and silently stops being
 the thing under your control the moment the host stalls. So a clean, gapless RTT stream is
 evidence that the host kept up, not evidence that the firmware's diagnostics were complete —

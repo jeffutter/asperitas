@@ -164,11 +164,18 @@ A golden diff means *listen to this before accepting it*, not *run the update co
 
 No ST-Link? You still have two channels:
 
-1. **USB CDC-ACM serial** — the firmware enumerates as a serial device after booting. Connect with `screen /dev/ttyACM0 115200` (or your terminal program of choice) to see log output.
+1. **USB CDC-ACM serial** — the firmware enumerates as a serial device after booting. Connect with `screen /dev/ttyACM0 115200` (or your terminal program of choice) to see log output. The baud rate in that command is decorative — CDC-ACM has no UART to configure, and neither this firmware nor embassy-usb applies the host's line coding to the hardware.
 2. **Pod RGB LEDs** — the firmware uses LED colour to indicate boot stage: red = pre-init, green = running, red = panicked. Check `docs/reference/daisy-pod.md` for the pin map and polarity notes.
 
 Red means both "starting up" and "panicked", which is unambiguous in context — a panic
 follows green — but see `slow-boot` below if you need to watch the boot stages closely.
+
+Every line on that serial channel carries its own framing: `~<level> <seq> <t_ms> <body>*<crc>`.
+It stays readable by eye and greppable in a raw capture — that legibility is why the protocol is
+printable ASCII rather than COBS. The first line off a fresh boot is `BOOT proto=1 …`. `STATUS …`
+appears at most once a second and only when a counter moved, so a quiet stream usually means nothing
+changed rather than nothing working. Grammar, checksum parameters and what each loss counter means:
+`docs/reference/daisy-seed3.md` → *Console protocol v1*.
 
 ### Watching the boot stages
 
@@ -191,11 +198,32 @@ make flash-all BINARY=panictest
 screen /dev/cu.usbmodem<N> 115200     # attach within the 10 s countdown
 ```
 
-Expect green with `panictest: panicking in N...` counting down, then steady red plus a
-`PANIC: <msg> at src/bin/panictest.rs:L:C` line. The countdown and the panic line travel
-by *different* mechanisms — the countdown goes through the log pipe, while the panic line
-is pushed straight to the endpoint because the executor is dead by then — so countdown
-text with no `PANIC:` line is a real failure, not a missed message.
+Expect green with `panictest: panicking in N...` counting down, then steady red plus the panic line.
+Both now travel framed, so the countdown reads `~I <seq> <t_ms> panictest: panicking in N...*<crc>` and
+the last line reads `~E <seq> <t_ms> PANIC: <msg> at src/bin/panictest.rs:L:C *<crc>`; the stage table in
+`src/bin/panictest.rs` is the copy to read. Framing changes the bytes, not the argument below: the
+countdown and the panic line travel by *different* mechanisms — the countdown goes through the log
+pipe, while the panic line is pushed straight to the endpoint because the executor is dead by then — so
+countdown text with no `PANIC:` line is a real failure, not a missed message.
+
+### Reading a saved capture
+
+Save the raw bytes, not a scrollback:
+
+```bash
+cat /dev/ttyACM0 > capture.bin
+cargo run -p asperitas-logging --example console_decode -- capture.bin > clean.txt
+cat capture.bin | cargo run -p asperitas-logging --example console_decode
+```
+
+stdout carries the validated records, byte-identical to what the device sent — greppable, and re-feedable
+into the same program. stderr carries the integrity counters
+(`records=… bad_frames=… resyncs=… discarded_bytes=…`), a byte-accounting line proving every pushed byte
+is in one category or the other, and a `seq continuity` line with `gaps=` and
+`first_gap=<from8>-><to8>`. The split is the point: the counters say what the wire did to the bytes,
+the sequence summary says whether any bytes are missing, and a CRC cannot answer the second question.
+The tool **exits 0 whatever the capture contains** — it reports, and deciding whether a capture passed is
+TASK-031's job. A gap immediately after a `BOOT` record is a restart, not loss.
 
 ### Flashing and logging over an ST-Link probe
 
