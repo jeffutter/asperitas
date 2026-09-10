@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 03:25'
-updated_date: '2026-09-09 09:17'
+updated_date: '2026-09-10 12:31'
 labels:
   - planned
 dependencies:
@@ -85,3 +85,21 @@ Why this exists next to TASK-033: TASK-033 also waits on TASK-032's control chan
 check a bad v1 decision would not be discovered until the rig runner and the command protocol were already
 built on top of it.
 <!-- SECTION:PLAN:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-10 12:31
+---
+Bench observation requested by TASK-046's plan (planning-time pass; no new rig setup needed, this rides the `panictest` capture you are already going to take).
+
+TASK-046 replaces `usb::emit_blocking`'s `EMIT_TIMEOUT`, which compared `embassy_time::Instant::now()` against a deadline and therefore depended on the TIM5 time-driver ISR being able to run, with a bound measured in DWT CYCCNT processor cycles plus an unconditional poll-count ceiling. One claim in that design cannot be checked from source and is the only thing your bench can settle: whether CYCCNT actually counts on this STM32H750 after `DEMCR.TRCENA` + the DWT `LAR` unlock under a bare panic path.
+
+What to note while flashing `firmware/src/bin/panictest` (with and without the host attached to the Pod's USB-C):
+
+1. Whether the final `PANIC:` record still arrives on the wire. It should, when interrupts are live, because the cycle bound does not change the happy path.
+2. Roughly how long the pause is before the board goes red-LED-halt if the record does NOT arrive (e.g. unplug the host first). About 3 s means the cycle bound expired as designed; effectively immediate means DWT came back unavailable or locked and the code took its fast-exit branch. Both outcomes are safe and neither fails TASK-046; the observation just tells us which branch real silicon takes, so the doc comment can stop hedging about it.
+
+Deliberately not a sub-task of TASK-046: a `@human` child would inherit onto that parent and leave it unclosable with no agent work remaining, which is the TASK-004 failure mode written up in CLAUDE.md. This ticket already rigs the console and flashes `panictest`, so the check costs nothing here.
+---
+<!-- COMMENTS:END -->
