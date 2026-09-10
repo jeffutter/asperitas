@@ -1930,7 +1930,7 @@ proptest! {
 // Pipe headroom — a dump may never take the last MAX_FRAME bytes
 // ---------------------------------------------------------------------------
 
-use asperitas_logging::frame::write_whole;
+use asperitas_logging::frame::{write_whole, WriteOutcome};
 use asperitas_logging::LOG_PIPE_SIZE;
 
 /// The device's ring, referenced rather than restated: `LOG_PIPE_SIZE` is ungated precisely so
@@ -1954,9 +1954,12 @@ fn ring() -> Ring {
 /// Deliberately *not* gated on [`dump::dump_fits`] — these tests are about whether the predicate's
 /// verdict matches what the ring does, and asking the predicate first would assume the answer.
 fn commit_frame(pipe: &Ring, frame: &[u8]) -> bool {
-    write_whole(frame, pipe.free_capacity(), |chunk| {
-        pipe.try_write(chunk).ok()
-    })
+    matches!(
+        write_whole(frame, pipe.free_capacity(), |chunk| {
+            pipe.try_write(chunk).ok()
+        }),
+        WriteOutcome::Committed
+    )
 }
 
 /// Advance both cursors `at` bytes into the backing array, leaving the ring empty by occupancy —

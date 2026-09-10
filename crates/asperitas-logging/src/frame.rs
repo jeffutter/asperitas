@@ -280,17 +280,38 @@ pub(crate) fn write_decimal(value: u32, dst: &mut [u8]) {
 // Whole-record-or-nothing commit
 // ---------------------------------------------------------------------------
 
-/// Commit `frame` to a sink, or refuse it entirely. Exactly two outcomes:
+/// What one [`write_whole`] call did to its sink. Ignoring this value is a bug: the
+/// `Stalled` variant is how a broken sink reaches the fail-loud path.
+#[must_use]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// Every byte of the frame is in the sink, contiguously and in order.
+    Committed,
+    /// The frame did not fit the capacity pre-check. `write` was called zero times.
+    RefusedForSpace,
+    /// The sink stopped accepting bytes **after** the pre-check passed — a violation of
+    /// the caller's contract. `write_whole` does not panic on it: see the doc section
+    /// below for why the panic belongs to the caller, and where it may fire.
+    Stalled,
+}
+
+/// Commit `frame` to a sink, or refuse it whole. Three outcomes, reported as a
+/// [`WriteOutcome`]:
 ///
-/// - `false` — the frame did not fit in `free_capacity`, and `write` was called
-///   **zero** times. Nothing reached the sink, so nothing needs unwinding.
-/// - `true` — every byte of `frame` is in the sink, contiguously and in order.
+/// - `RefusedForSpace` — the frame did not fit in `free_capacity`, and `write` was
+///   called **zero** times. Nothing reached the sink, so nothing needs unwinding.
+/// - `Committed` — every byte of `frame` is in the sink, contiguously and in order.
+/// - `Stalled` — the sink stopped accepting bytes mid-frame, breaking the caller's
+///   contract. Some bytes may have landed.
 ///
-/// There is no third outcome and no partial-write count on purpose: a half-written
-/// record is precisely the failure mode framing exists to expose, so the API refuses
-/// to express it. Reserve/commit-with-discard is the same vocabulary Linux's ring
-/// buffer, printk's `prb_reserve`/`prb_commit` and bitdrift's reserve/commit buffer
-/// use.
+/// Whole-record-or-nothing therefore does not promise that a failed call leaves no
+/// trace in the sink — on `Stalled`, some bytes genuinely did land. What it promises is
+/// that a truncated record is *detectable downstream*: framing and the block CRC exist
+/// to expose a half-written record to the host, not to hide it. There is deliberately
+/// no partial-write count in the API: the caller cannot act on one, and anything it
+/// would do next runs in the same broken-contract state that produced it.
+/// Reserve/commit-with-discard is the same vocabulary Linux's ring buffer, printk's
+/// `prb_reserve`/`prb_commit` and bitdrift's reserve/commit buffer use.
 ///
 /// # Why the loop is required, not defensive
 ///
@@ -303,14 +324,21 @@ pub(crate) fn write_decimal(value: u32, dst: &mut [u8]) {
 /// replaces — hence the loop. Two rounds always suffice, because after crossing the
 /// wrap the contiguous run equals total free space and a consumer can only add more.
 ///
-/// # A stall after the pre-check panics, in every profile
+/// # A stall after the pre-check is reported here, panicked by the caller
 ///
 /// Given the pre-check plus the caller holding its lock, a stall mid-loop
 /// (`None`/`Some(0)` once some bytes have landed) means the sink broke the caller's
-/// contract, so `write_whole` **panics** — `debug_assert!` would be the wrong tool here,
-/// because it vanishes from the release profile that ships to the Seed3.
+/// contract. `write_whole` reports that as `WriteOutcome::Stalled` and never panics
+/// itself. The **caller** must panic on it — loudly, in every profile, because
+/// `debug_assert!` would vanish from the release build that ships — but only *after*
+/// whatever lock protected the call has been released. This target aborts on panic: a
+/// panic raised inside a `critical_section::with` closure never restores `PRIMASK`, so
+/// interrupting the board permanently, on top of silencing the panic text (the serial
+/// emit needs the USB interrupt it just masked), is strictly worse than the crash it
+/// replaces. In this crate `commit_records` (`lib.rs`) owns that rule for both
+/// `emit()` and `try_emit_dump()`; any future caller must follow it.
 ///
-/// Retrying instead of panicking is not a milder option: nothing about the sink or the
+/// Retrying instead of failing loud is not a milder option: nothing about the sink or the
 /// remaining slice changes between one retry and the next, so a genuine stall is
 /// unbounded, not transient. The loop would hold the caller's lock forever with no
 /// diagnostic at all, which is strictly worse than the crash it avoids. Panicking hands
@@ -321,23 +349,21 @@ pub fn write_whole(
     frame: &[u8],
     free_capacity: usize,
     mut write: impl FnMut(&[u8]) -> Option<usize>,
-) -> bool {
+) -> WriteOutcome {
     if frame.len() > free_capacity {
-        return false;
+        return WriteOutcome::RefusedForSpace;
     }
 
     let mut written = 0usize;
     while written < frame.len() {
         match write(&frame[written..]) {
             Some(n) if n > 0 => written += n,
-            stalled => {
-                panic!(
-                    "write_whole: sink stalled after the capacity pre-check passed ({stalled:?})"
-                );
-            }
+            // `None` or `Some(0)` after the pre-check passed: the sink broke the
+            // caller's contract. Reported, not panicked — see the doc section above.
+            _ => return WriteOutcome::Stalled,
         }
     }
-    true
+    WriteOutcome::Committed
 }
 
 // ---------------------------------------------------------------------------
@@ -1234,19 +1260,26 @@ mod tests {
     fn write_whole_refuses_a_frame_that_does_not_fit_without_writing_anything() {
         let frame = *b"~I 00000000 00000000 no-fit*0000\r\n";
         let mut calls = 0usize;
-        let ok = write_whole(&frame, frame.len() - 1, |chunk| {
+        let outcome = write_whole(&frame, frame.len() - 1, |chunk| {
             calls += 1;
             Some(chunk.len())
         });
-        assert!(!ok, "must refuse when free capacity is one byte short");
+        assert_eq!(
+            outcome,
+            WriteOutcome::RefusedForSpace,
+            "must refuse when free capacity is one byte short"
+        );
         assert_eq!(calls, 0, "refusal must not touch the sink at all");
 
         // Zero-length frames are legal (an empty body still frames) and always fit.
         let mut called = false;
-        assert!(write_whole(&[], 0, |_| {
-            called = true;
-            Some(0)
-        }));
+        assert_eq!(
+            write_whole(&[], 0, |_| {
+                called = true;
+                Some(0)
+            }),
+            WriteOutcome::Committed
+        );
         assert!(!called, "an empty frame commits without calling the sink");
     }
 
@@ -1254,29 +1287,32 @@ mod tests {
     fn write_whole_accepts_only_after_every_byte_reaches_the_sink() {
         let frame = *b"~I 00000000 00000000 whole*abcd\r\n";
         let mut got = Vec::new();
-        let ok = write_whole(&frame, frame.len(), |chunk| {
+        let outcome = write_whole(&frame, frame.len(), |chunk| {
             // One byte at a time: the worst-case sink the loop can face.
             got.extend_from_slice(&chunk[..1]);
             Some(1)
         });
-        assert!(ok);
+        assert_eq!(outcome, WriteOutcome::Committed);
         assert_eq!(got, frame.to_vec());
     }
 
     /// A sink that accepts some bytes and then stops accepting them has broken
     /// `write_whole`'s precondition (the caller holds the lock and already confirmed the
-    /// frame fits), so the call must panic rather than retry the identical write forever.
+    /// frame fits), so the call must report rather than retry the identical write forever.
     ///
-    /// `should_panic` is the whole point of this test: the old `debug_assert!` passed it in
-    /// debug and *failed to* in release, where the loop spun silently inside the caller's
-    /// lock. The assertion being made here is that the failure is loud in both profiles.
+    /// What is asserted here is the *value* the callers branch on. The panic itself now
+    /// lives in the caller — `commit_records` in `lib.rs` — which does not even link on
+    /// host, so this test must not try to observe the crash. The history is load-bearing:
+    /// the earlier `debug_assert!` was rejected because it passed in debug and *failed to*
+    /// fire in release, where the loop spun silently inside the caller's lock; the failure
+    /// must stay loud in both profiles, which is why the caller panics outright rather
+    /// than asserting.
     #[test]
-    #[should_panic(expected = "sink stalled")]
-    fn write_whole_panics_when_the_sink_stalls_after_the_precheck() {
+    fn write_whole_reports_stalled_when_the_sink_stalls_after_the_precheck() {
         let frame = *b"~I 00000000 00000000 stalled*abcd\r\n";
         let mut calls = 0usize;
 
-        write_whole(&frame, frame.len(), |chunk| {
+        let outcome = write_whole(&frame, frame.len(), |chunk| {
             calls += 1;
             // Round one accepts a prefix, so the loop is genuinely mid-frame with bytes
             // already committed; round two reports success with zero progress.
@@ -1286,6 +1322,12 @@ mod tests {
                 Some(0)
             }
         });
+
+        assert_eq!(outcome, WriteOutcome::Stalled);
+        assert_eq!(
+            calls, 2,
+            "the sink must stop mid-frame, not on first contact"
+        );
     }
 
     /// A real `embassy_sync` ring buffer, driven across the wrap condition.
@@ -1306,9 +1348,12 @@ mod tests {
         pipe: &embassy_sync::pipe::Pipe<embassy_sync::blocking_mutex::raw::NoopRawMutex, 512>,
         frame: &[u8],
     ) -> bool {
-        write_whole(frame, pipe.free_capacity(), |chunk| {
-            pipe.try_write(chunk).ok()
-        })
+        matches!(
+            write_whole(frame, pipe.free_capacity(), |chunk| {
+                pipe.try_write(chunk).ok()
+            }),
+            WriteOutcome::Committed
+        )
     }
 
     /// Advance both cursors `at` bytes into the backing array, leaving the ring empty

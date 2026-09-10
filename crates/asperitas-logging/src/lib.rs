@@ -41,9 +41,10 @@
 //! ```
 //!
 //! Everything inside the brackets happens with interrupts disabled and ends with either
-//! the whole record in the ring or none of it, which is what lets a capture distinguish
-//! "this record was never generated" from "this record was lost". See [`emit`] and
-//! [`frame::write_whole`].
+//! the whole record in the ring or none of it — the one way that rule can break is a sink
+//! that stalls mid-frame, which exits through the panic handler instead of the normal
+//! return path. That is what lets a capture distinguish "this record was never generated"
+//! from "this record was lost". See [`emit`] and [`frame::write_whole`].
 
 #![no_std]
 
@@ -295,6 +296,28 @@ static RECORD_BUFS: embassy_sync::blocking_mutex::Mutex<
     frame: [0; frame::MAX_FRAME],
 }));
 
+/// Run `commit` with the record buffers held, and fail loud if the pipe stalled mid-frame.
+///
+/// The stall panic lives here, after the record lock has released, and nowhere else. That
+/// lock is a `CriticalSectionRawMutex`, so its closure runs with `PRIMASK` set, and this
+/// target aborts rather than unwinds: a panic raised inside that closure never restores
+/// `PRIMASK`, so the panic handler's serial emit (`usb::emit_blocking`) would spin with no USB
+/// interrupt and drop the very text it exists to deliver. Callers therefore report
+/// [`frame::WriteOutcome::Stalled`] out of their closure and let this function crash.
+/// Returns whether the frame reached the pipe.
+#[cfg(feature = "log-usb")]
+fn commit_records(commit: impl FnOnce(&mut RecordBufs) -> frame::WriteOutcome) -> bool {
+    let outcome = RECORD_BUFS.lock(|cell| {
+        // Safety: the only route to these buffers is this mutex, the core is single-core,
+        // and the reference never escapes this closure.
+        commit(unsafe { &mut *cell.get() })
+    });
+    if outcome == frame::WriteOutcome::Stalled {
+        panic!("record commit: the sink stalled after the capacity pre-check passed; the caller held RECORD_BUFS and verified free_capacity, so the pipe broke write_whole's contract and a record was lost");
+    }
+    outcome == frame::WriteOutcome::Committed
+}
+
 /// Format, frame, and commit one record — whole, or not at all.
 ///
 /// `fill` writes the body into the guarded window and returns its length; the level,
@@ -326,11 +349,8 @@ fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usiz
     // inside.
     let now_ms = embassy_time::Instant::now().as_millis() as u32;
 
-    RECORD_BUFS.lock(|cell| {
-        // Safety: the only route to these buffers is this mutex, the core is single-core,
-        // and the reference never escapes this closure.
-        let bufs = unsafe { &mut *cell.get() };
-
+    // Result ignored: this path counts the verdict internally, via the counters below.
+    commit_records(|bufs| {
         let seq = console::CONSOLE.take_seq();
         let body_len = fill(&mut bufs.body);
         let encoded = frame::encode(level, seq, now_ms, &bufs.body[..body_len], &mut bufs.frame);
@@ -340,17 +360,22 @@ fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usiz
 
         let framed = &bufs.frame[..encoded.len];
         // The capacity pre-check has to live inside this lock, next to the write loop.
-        // Outside it, a full ring turns `write_whole`'s stall panic into a crash instead of
-        // a clean drop; inside, the consumer can only ever *increase* free
-        // capacity, so a pre-check that passes guarantees progress on every round.
-        if !frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
+        // Outside it, a full ring turns a clean headroom refusal into a mid-frame stall.
+        // Inside, free capacity is *frozen* — `RECORD_BUFS.lock` masks interrupts globally,
+        // so the drain consumer cannot run at all while the lock is held — and a pre-check
+        // that passes therefore guarantees progress on every round.
+        let outcome = frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
             LOG_PIPE.try_write(chunk).ok()
-        }) {
-            console::CONSOLE.record_dropped_for_space(framed.len());
-            return;
+        });
+        match outcome {
+            frame::WriteOutcome::Committed => console::CONSOLE.record_committed(),
+            frame::WriteOutcome::RefusedForSpace => {
+                console::CONSOLE.record_dropped_for_space(framed.len())
+            }
+            // Counted as nothing: `commit_records` crashes on this once the lock releases.
+            frame::WriteOutcome::Stalled => {}
         }
-
-        console::CONSOLE.record_committed();
+        outcome
     });
 }
 
@@ -422,10 +447,13 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 /// - **The lock is not optional.** Log records are emitted from arbitrary context including
 ///   the audio callback, so an interrupt can preempt a producer that does not hold
 ///   [`RECORD_BUFS`], and two interleaved `write_whole` calls splice two frames into the
-///   ring. While the lock is held the consumer still runs — it runs with interrupts enabled,
-///   so free capacity can only *grow* here. That is what makes the capacity check below
-///   sound rather than optimistic, and it is why `write_whole`'s stall panic cannot fire
-///   on this path.
+///   ring. While the lock is held the consumer does *not* run: `RECORD_BUFS` is a
+///   `CriticalSectionRawMutex`, which masks interrupts globally for its duration, so
+///   `usb::run()`'s drain task cannot move a byte and free capacity is *frozen* — not merely
+///   non-decreasing — for the duration. That is what makes the capacity check below sound
+///   rather than optimistic. And `write_whole` no longer panics anywhere: a stall surfaces
+///   as a `frame::WriteOutcome::Stalled` value and `commit_records` crashes on it only once
+///   the critical section has released.
 /// - **`dump_fits` is consulted before `take_seq`.** Refusals therefore consume no sequence
 ///   number, by construction rather than by discipline: a retry loop cannot manufacture `seq`
 ///   gaps that a host would read as loss. The predicate is tested exhaustively across the
@@ -457,28 +485,27 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 /// a chunk whose tail silently vanished reassembles into audio that measures wrong, and the
 /// block CRC catching it afterwards is not the same thing as not sending it. Every builder in
 /// [`dump`] writes into a `[u8; frame::MAX_BODY]` window, so reaching this branch is a caller
-/// bug — hence the debug assertion alongside the refusal.
+/// bug — hence the debug assertion alongside the refusal. The check runs *before* the record
+/// lock is taken, so that assertion cannot fire with interrupts masked.
 #[cfg(feature = "log-usb")]
 pub fn try_emit_dump(body: &[u8]) -> bool {
     let now_ms = embassy_time::Instant::now().as_millis() as u32;
 
-    RECORD_BUFS.lock(|cell| {
-        // Safety: the only route to these buffers is this mutex, the core is single-core,
-        // and the reference never escapes this closure.
-        let bufs = unsafe { &mut *cell.get() };
+    // Pure input validation over an argument — no shared state, so it stays out of the
+    // critical section, where even a debug-profile panic would leave PRIMASK stuck.
+    if body.len() > frame::MAX_BODY {
+        debug_assert!(
+            false,
+            "dump body of {} bytes exceeds MAX_BODY; refusing rather than shipping a shortened chunk",
+            body.len(),
+        );
+        return false;
+    }
 
-        if body.len() > frame::MAX_BODY {
-            debug_assert!(
-                false,
-                "dump body of {} bytes exceeds MAX_BODY; refusing rather than shipping a shortened chunk",
-                body.len(),
-            );
-            return false;
-        }
-
+    commit_records(|bufs| {
         // The headroom rule, asked before anything is spent: no `seq`, no counter, no byte.
         if !dump::dump_fits(body.len(), LOG_PIPE.free_capacity()) {
-            return false;
+            return frame::WriteOutcome::RefusedForSpace;
         }
 
         let seq = console::CONSOLE.take_seq();
@@ -489,24 +516,27 @@ pub fn try_emit_dump(body: &[u8]) -> bool {
         );
 
         let framed = &bufs.frame[..encoded.len];
-        if !frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
+        let outcome = frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
             LOG_PIPE.try_write(chunk).ok()
-        }) {
-            // Unreachable while the lock holds the producer contract: free capacity cannot
-            // shrink here, and the pre-check above already paid the reserve. Reaching it means
-            // the sink broke that contract, and then a record genuinely was lost — so this one
-            // path does count, unlike a headroom refusal.
-            debug_assert!(
-                false,
-                "pipe refused a {}-byte frame the headroom rule had already admitted",
-                framed.len(),
-            );
-            console::CONSOLE.record_dropped_for_space(framed.len());
-            return false;
+        });
+        match outcome {
+            frame::WriteOutcome::Committed => console::CONSOLE.record_committed(),
+            frame::WriteOutcome::RefusedForSpace => {
+                // Unreachable while the lock holds the producer contract: free capacity is
+                // frozen here, and the pre-check above already paid the reserve. Reaching it
+                // means the sink broke that contract, and then a record genuinely was lost —
+                // so this one path does count, unlike a headroom refusal.
+                debug_assert!(
+                    false,
+                    "pipe refused a {}-byte frame the headroom rule had already admitted",
+                    framed.len(),
+                );
+                console::CONSOLE.record_dropped_for_space(framed.len());
+            }
+            // Counted as nothing: `commit_records` crashes on this once the lock releases.
+            frame::WriteOutcome::Stalled => {}
         }
-
-        console::CONSOLE.record_committed();
-        true
+        outcome
     })
 }
 

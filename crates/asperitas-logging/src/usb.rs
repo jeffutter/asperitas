@@ -335,8 +335,10 @@ pub async fn run() {
 /// executor may have died part-way through holding it, and the panic handler runs on a
 /// stack that may be nearly exhausted. Sharing the buffer is acceptable for the same reason
 /// — with the executor halted nothing else is formatting, and the one theoretical overlap
-/// (a panic raised inside the commit critical section) cannot happen in release, where
-/// nothing in that region panics. Its worst case is a garbled final line, not memory
+/// (a panic raised inside the commit critical section) is designed out: record-path callers
+/// crash only *outside* the record lock, where `commit_records` defers its stall panic until
+/// `RECORD_BUFS.lock` has returned. Debug-profile-only assertions still living inside that
+/// lock are TASK-047's to move; their worst case is this same garbled final line, not memory
 /// unsafety.
 pub fn emit_panic_record(body: &[u8]) {
     // Safety: see [`PANIC_FRAME`]. Takes no lock by design; `frame!` writes are pure byte
@@ -361,10 +363,14 @@ pub fn emit_panic_record(body: &[u8]) {
 /// the board is reset. This function bypasses the pipe and drives the device and
 /// the endpoint write itself.
 ///
-/// It can do that because the USB interrupt handler is still installed and still
-/// firing during the panic spin, so the driver's hardware state keeps advancing.
-/// Only the *future* is missing someone to poll it, which is what the loop below
-/// provides.
+/// It can do that only because the USB interrupt handler is still installed and still
+/// firing when it runs — the assumption is that interrupts are live; this function does not
+/// make them live, and cannot recover a core whose `PRIMASK` a masked-context panic left
+/// set. Only the *future* is missing someone to poll it, which is what the loop below
+/// provides. The `log-defmt` sibling is immune to this failure mode for a different reason:
+/// RTT is polled by the probe rather than by any interrupt of ours (and `docs/reference/
+/// daisy-seed3.md` records its own opposite hazard, a stalled RTT host), which is why the
+/// USB path is the fragile twin.
 ///
 /// Returns once the bytes are sent, or after [`EMIT_TIMEOUT`] if the host is not
 /// listening. Silently does nothing if [`init`] never ran.

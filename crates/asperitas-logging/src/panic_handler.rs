@@ -59,9 +59,11 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
     // inside `usb::run()`, and by the time we get here the async executor is
     // halted for good — so a pipe write is not "best effort", it is guaranteed
     // to be discarded. `usb::emit_panic_record` frames the text as a console v1
-    // record and then drives the CDC endpoint itself, which works because the USB
-    // interrupt is still firing during the spin below. It is time-bounded, takes
-    // no lock, allocates nothing, and never panics.
+    // record and then drives the CDC endpoint itself. That route assumes interrupts are
+    // still live when it runs — the USB interrupt must still be firing for the driver to
+    // advance — and it does not make them live; keeping every record-path panic outside the
+    // record lock is what keeps the assumption true. The emit is time-bounded, takes no
+    // lock, allocates nothing, and never panics.
     #[cfg(feature = "log-usb")]
     {
         let (msg, len) = format_panic_message(info);

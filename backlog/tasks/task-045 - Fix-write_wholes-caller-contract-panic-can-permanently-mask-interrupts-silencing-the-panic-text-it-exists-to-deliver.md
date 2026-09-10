@@ -3,11 +3,11 @@ id: TASK-045
 title: >-
   Fix: write_whole's caller-contract panic can permanently mask interrupts,
   silencing the panic text it exists to deliver
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-10 07:02'
-updated_date: '2026-09-10 08:11'
+updated_date: '2026-09-10 08:34'
 labels:
   - planned
   - review-followup
@@ -26,15 +26,15 @@ Found while reviewing TASK-040 (crates/asperitas-logging/src/frame.rs write_whol
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 write_whole (frame.rs) no longer panics itself; it returns a result distinguishing the three outcomes (committed, refused up front for lack of space, sink stalled after partial progress) instead of bool. Its doc comment states plainly that the caller, not write_whole, is responsible for panicking on the stalled outcome, and must do so only after any lock/critical section held during the call has been released.
-- [ ] #2 Both call sites in crates/asperitas-logging/src/lib.rs (emit() and try_emit_dump()) propagate the stalled outcome out of their RECORD_BUFS.lock(|cell| {...}) closure and panic (message equivalent to today's write_whole stall message) only after that closure has returned -- i.e. outside the critical section. Neither closure panics internally on this path anymore.
-- [ ] #3 The frame.rs unit test exercising the stall path is updated to assert write_whole's returned Stalled outcome directly (no #[should_panic] on write_whole itself), with a short comment explaining that the panic itself now happens in the caller and is therefore only reachable under the log-usb firmware target, not on host.
-- [ ] #4 lib.rs's try_emit_dump doc block is corrected: RECORD_BUFS.lock() masks interrupts globally for its duration (CriticalSectionRawMutex), so the consumer cannot run at all while the lock is held and free capacity is frozen (not merely non-decreasing) during the call; the now-false 'write_whole's stall panic cannot fire on this path' claim is replaced with an accurate statement of where that panic fires after this fix.
-- [ ] #5 usb.rs's emit_panic_record doc comment ('cannot happen in release, where nothing in that region panics') and emit_blocking's 'USB interrupt handler is still installed and still firing' assumption are re-verified true given this fix (panic no longer fires inside RECORD_BUFS.lock()), and reworded only if the fix's exact mechanics require it to stay accurate.
-- [ ] #6 nix develop -c cargo fmt --all --check passes
-- [ ] #7 nix develop -c cargo clippy -p asperitas-logging --all-targets -- -D warnings passes
-- [ ] #8 nix develop -c cargo test -p asperitas-logging passes, including the updated stall-path test
-- [ ] #9 nix develop -c cargo test --workspace passes and cd firmware && nix develop -c cargo build --release --features seed3 succeeds, with firmware/Cargo.lock showing no diff
+- [x] #1 write_whole (frame.rs) no longer panics itself; it returns a result distinguishing the three outcomes (committed, refused up front for lack of space, sink stalled after partial progress) instead of bool. Its doc comment states plainly that the caller, not write_whole, is responsible for panicking on the stalled outcome, and must do so only after any lock/critical section held during the call has been released.
+- [x] #2 Both call sites in crates/asperitas-logging/src/lib.rs (emit() and try_emit_dump()) propagate the stalled outcome out of their RECORD_BUFS.lock(|cell| {...}) closure and panic (message equivalent to today's write_whole stall message) only after that closure has returned -- i.e. outside the critical section. Neither closure panics internally on this path anymore.
+- [x] #3 The frame.rs unit test exercising the stall path is updated to assert write_whole's returned Stalled outcome directly (no #[should_panic] on write_whole itself), with a short comment explaining that the panic itself now happens in the caller and is therefore only reachable under the log-usb firmware target, not on host.
+- [x] #4 lib.rs's try_emit_dump doc block is corrected: RECORD_BUFS.lock() masks interrupts globally for its duration (CriticalSectionRawMutex), so the consumer cannot run at all while the lock is held and free capacity is frozen (not merely non-decreasing) during the call; the now-false 'write_whole's stall panic cannot fire on this path' claim is replaced with an accurate statement of where that panic fires after this fix.
+- [x] #5 usb.rs's emit_panic_record doc comment ('cannot happen in release, where nothing in that region panics') and emit_blocking's 'USB interrupt handler is still installed and still firing' assumption are re-verified true given this fix (panic no longer fires inside RECORD_BUFS.lock()), and reworded only if the fix's exact mechanics require it to stay accurate.
+- [x] #6 nix develop -c cargo fmt --all --check passes
+- [x] #7 nix develop -c cargo clippy -p asperitas-logging --all-targets -- -D warnings passes
+- [x] #8 nix develop -c cargo test -p asperitas-logging passes, including the updated stall-path test
+- [x] #9 nix develop -c cargo test --workspace passes and cd firmware && nix develop -c cargo build --release --features seed3 succeeds, with firmware/Cargo.lock showing no diff
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -182,3 +182,15 @@ Both were found while planning and are untracked anywhere else. File references 
 
 State explicitly: (a) `write_whole` no longer panics — it returns `WriteOutcome::Stalled`, and the panic now fires only after `RECORD_BUFS.lock` has returned, owned by one helper rather than duplicated per call site (say which shape you took if you used the §2b fallback); (b) why that matters — `panic="abort"` means a panic inside `critical_section::with` never runs the guard's `Drop`, so PRIMASK stays set forever and `usb::emit_blocking` spins with no USB interrupt, dropping the panic text for exactly the path TASK-040 added fail-loud handling for; (c) that two docs claiming the consumer runs with interrupts enabled *while the record lock is held* (`lib.rs:342-345`, `lib.rs:422-428`) were independently wrong and are corrected to capacity-frozen; (d) the four call sites updated, including the two test helpers; (e) that TASK-046/TASK-047 exist for the two residual hazards in §7, and that hardware confirmation of this path needs a fault-injection hook nobody has built.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented per plan $2a/$2b/$2c/$3/$4/$5 (primary shape, not the fallback): frame::write_whole now returns #[must_use] WriteOutcome {Committed, RefusedForSpace, Stalled} and never panics; lib.rs gained one private commit_records() that owns the UnsafeCell acquisition and the sole stall panic, which by construction fires only after RECORD_BUFS.lock() has returned. emit() and try_emit_dump() both route through it and report Stalled out of their closures; neither closure panics on that path. Oversized-body check + its debug_assert hoisted out of the critical section (plan 2c); the two remaining in-lock debug_asserts in try_emit_dump stay and belong to TASK-047. Call sites updated: frame.rs tests (3 renamed/rewritten + commit() helper wrapped in matches!), tests/console_dump.rs commit_frame wrapped, import extended with WriteOutcome. Docs corrected: frame.rs write_whole opening + stall section (three outcomes; Stalled may leave bytes in the sink, detectable via CRC/framing; caller must panic only post-lock, abort/PRIMASK rationale inline); lib.rs module record-path blurb, emit()'s inline capacity comment and try_emit_dump's 'consumer still runs' bullet both corrected to capacity-FROZEN (CriticalSectionRawMutex masks interrupts globally); usb.rs emit_panic_record wording names the mechanism (record-path callers crash only outside the record lock; debug-only asserts inside are TASK-047); usb.rs emit_blocking narrowed to 'assumes interrupts are live, does not make them live' + log-defmt contrast; panic_handler.rs aligned. Machine check note: the plan's awk heuristic reports one false positive (its range starts at commit_records' RECORD_BUFS.lock(|cell| line and only ends at a column-0 }, so it swallows the intended post-lock panic). Stronger exact check instead: grep shows exactly ONE RECORD_BUFS.lock call site in code (lib.rs:310, inside commit_records) whose 3-line closure contains no panic!, and lib.rs contains exactly one panic! total, positioned after the lock's closing }); . No panic! remains lexically inside any lock closure or write_whole.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+write_whole no longer panics: it returns WriteOutcome::Stalled, and the panic now fires only after RECORD_BUFS.lock has returned, owned by a single helper (commit_records) rather than duplicated per call site - the plan's primary shape, not the fallback. Why it matters: this target is panic=abort, so a panic inside critical_section::with never runs the guard's Drop, PRIMASK stays set for the life of the program, and usb::emit_blocking spins its full EMIT_TIMEOUT with no USB interrupt - dropping the panic text for exactly the path TASK-040 added fail-loud handling for, leaving only the LED. Two docs claiming the drain consumer runs with interrupts enabled while the record lock is held (emit()'s inline comment, try_emit_dump()'s doc bullet) were independently wrong and are corrected to free-capacity-frozen, the stronger invariant that actually makes the pre-check sound. Four write_whole call sites updated: emit(), try_emit_dump(), frame.rs's commit() test helper, and tests/console_dump.rs's commit_frame (the two the review draft missed); the oversized-body check was hoisted out of the critical section, removing one more in-lock panic site. Verified: fmt/clippy(-D warnings)/crate tests/workspace tests green incl. the renamed host test asserting the Stalled outcome directly; firmware release build with seed3 succeeds and firmware/Cargo.lock shows no diff. Residual hazards stay ticketed: TASK-046 (EMIT_TIMEOUT clock can go non-monotonic under a mask) and TASK-047 (remaining debug_asserts inside the lock, debug-profile only). Hardware confirmation of the stall path still needs a fault-injection hook nobody has built; nothing here is markable HUMAN:.
+<!-- SECTION:FINAL_SUMMARY:END -->
