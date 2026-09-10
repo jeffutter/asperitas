@@ -16,6 +16,12 @@
 //! `n_of_n` sequence plus a block checksum. The format only earns the words “self-verifying” because
 //! something acts on that proof — see *Host-side block assembly* near the end of this module.
 //!
+//! # Why this module is not behind `log-usb`
+//!
+//! Ungated for the same reason as [`crate::frame`]: it is pure byte arithmetic whose
+//! equivalence with a reference implementation is proven on the host, where the oracle can
+//! be a dev-dependency.
+//!
 //! # Why base64 and not something denser
 //!
 //! Every candidate has to survive `sanitize_byte` unchanged, and the transport reserves bytes for

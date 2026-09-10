@@ -197,24 +197,10 @@ pub(crate) fn install_logger() {
 // Ungated modules — pure logic, no hardware types, host-testable by default
 // ---------------------------------------------------------------------------
 
-/// Console protocol v1: self-verifying framed log records.
-///
-/// Deliberately **not** behind `log-usb`: the codec is pure byte arithmetic that
-/// CI must exercise on the host (`cargo test --workspace` builds this crate with
-/// default features, i.e. without any backend).
 pub mod frame;
 
-/// Sequence numbers, loss counters, and the `BOOT`/`STATUS` wire text.
-///
-/// Ungated for the same reason as [`frame`]: the field set is a contract the host parses,
-/// so its tests must run without hardware features enabled.
 pub mod console;
 
-/// Base64 payload codec for shipping captured audio over the framed console.
-///
-/// Ungated for the same reason as [`frame`]: it is pure byte arithmetic whose equivalence
-/// with a reference implementation is proven on the host, where the oracle can be a
-/// dev-dependency.
 pub mod dump;
 
 // ---------------------------------------------------------------------------
@@ -230,15 +216,12 @@ mod spin_budget;
 #[cfg(feature = "log-usb")]
 pub mod usb;
 
-/// defmt transport: one `log::Record` in, one defmt frame out. See the module docs.
 #[cfg(feature = "log-defmt")]
 mod defmt_log;
 
-/// Boot-stage LED indicator and its blink task. See the module docs.
 #[cfg(feature = "boot-led")]
 pub mod led;
 
-/// Shared `#[panic_handler]` body. See the module docs.
 #[cfg(feature = "boot-led")]
 pub mod panic_handler;
 

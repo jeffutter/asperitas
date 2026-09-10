@@ -5,7 +5,8 @@
 //!
 //! Everything here is plain arithmetic on `AtomicU32` and `core::fmt` — no critical
 //! section, no clock, no pipe — so `cargo test --workspace` compiles and tests it on the
-//! host even though the root workspace never enables `log-usb`. That matters because
+//! host even though the root workspace never enables `log-usb`, for the same reason
+//! [`crate::frame`] is ungated. That matters because
 //! [`status_body`] and [`StatusGate::due`] *are* the protocol: TASK-030.03 documents the
 //! field set and TASK-031 parses it. A change to either should fail a host test in CI,
 //! not first show up on a board three time zones away.

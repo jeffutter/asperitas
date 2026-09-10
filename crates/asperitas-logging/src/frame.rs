@@ -1,5 +1,11 @@
 //! Console protocol v1 — every log record carries its own framing and checksum.
 //!
+//! # Why this module is not behind `log-usb`
+//!
+//! The codec is pure byte arithmetic, so CI must be able to exercise it on the host:
+//! `cargo test --workspace` builds this crate with default features, i.e. without any
+//! backend at all.
+//!
 //! # Why framing exists
 //!
 //! CDC-ACM hands the host an undifferentiated byte stream: no message boundaries,
