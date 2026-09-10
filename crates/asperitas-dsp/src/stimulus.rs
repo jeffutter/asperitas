@@ -408,8 +408,9 @@ impl Default for ExponentialSweepParams {
 /// and a per-order distortion picture. That is Farina's AES 108th-Convention technique (paper
 /// 134); the amplitude pre-equalisation some later treatments discuss is deliberately absent,
 /// because pre-emphasis time-smears the recovered response. His AES 122 note also warns against
-/// dropping the fade-out, which is what [`FADE_SAMPLES`] provides here: without it the default
-/// sweep ends at −0.963, effectively a step that smears energy across the spectrum.
+/// dropping the fade-out, which the end fades provide here; the private `FADE_SAMPLES`
+/// constant in this module caps each at 10 ms. Without that fade the default sweep ends at
+/// −0.963, effectively a step that smears energy across the spectrum.
 ///
 /// ### Phase comes from the closed-form integral
 ///

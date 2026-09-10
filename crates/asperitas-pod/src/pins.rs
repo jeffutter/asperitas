@@ -46,8 +46,9 @@ pub type PodKnob2<'a> = Peri<'a, PC0>;
 
 /// All Pod control pins collected into one struct.
 ///
-/// Like daisy-embassy's [`DaisyPins`](hal::pins::seed::DaisyPins), each field
-/// owns a `Peri` handle that must be consumed by exactly one driver.
+/// Like daisy-embassy's `DaisyPins` (upstream `src/pins/pins_seed.rs` — a type this crate
+/// mirrors rather than depends on), each field owns a `Peri` handle that must be consumed by
+/// exactly one driver.
 #[allow(non_snake_case)]
 pub struct PodPins<'a> {
     /// Button 1 (`SW_1`) — D27 = PG9

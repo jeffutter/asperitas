@@ -196,7 +196,8 @@ impl EncoderDecoder {
     ///   remainder keeps the sign of the rotation.
     ///
     /// The clamp is unreachable while every poll drains (as
-    /// [`ControlSurface::poll`] does); it exists so the `as i8` narrowing is a
+    /// `ControlSurface::poll` does — that driver is behind the `pod-hw`
+    /// feature); it exists so the `as i8` narrowing is a
     /// decision rather than luck should a caller stop draining. See
     /// `drain_clamps_rather_than_wrapping_when_undrained`.
     pub fn drain_detents(&mut self) -> i8 {

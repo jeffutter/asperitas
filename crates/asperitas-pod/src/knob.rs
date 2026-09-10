@@ -21,8 +21,9 @@
 //! The raw reading is divided by [`POT_FULL_SCALE_COUNTS`], which must equal
 //! the full-scale count of the ADC resolution actually programmed into the
 //! hardware. **These two are easy to let drift apart, and the failure is
-//! silent** — see the resolution note on [`Knobs::new`]. A compile-time
-//! assertion in this module now ties them together.
+//! silent**. The resolution note lives with the driver that programs it —
+//! `Knobs::new` in the `pod-hw` hardware module below — where a compile-time
+//! assertion ties this divisor to the resolution actually programmed.
 //!
 //! ## Curve shaping
 //!
@@ -37,8 +38,9 @@
 
 /// Full-scale ADC count that raw knob readings are normalised against.
 ///
-/// The STM32H7 ADC1 runs at **16-bit** resolution (see [`Knobs::new`]), so a
-/// pot at its electrical end stop reads 65535, not 4095.
+/// The STM32H7 ADC1 runs at **16-bit** resolution — `Knobs::new` programs
+/// `Resolution::BITS16` when the `pod-hw` feature is on — so a pot at its
+/// electrical end stop reads 65535, not 4095.
 pub const POT_FULL_SCALE_COUNTS: u32 = 65_535;
 
 /// Normalise a raw ADC reading to [0.0, 1.0].
@@ -102,8 +104,9 @@ mod hw {
     impl Knobs {
         /// Create a new knobs driver from the ADC1 peripheral and both knob pins.
         ///
-        /// Programs the ADC for 16-bit resolution ([`POT_RESOLUTION`]) and
-        /// hardware averaging (`Samples16`) for jitter suppression.
+        /// Programs the ADC for 16-bit resolution (`Resolution::BITS16`, held
+        /// in the private `POT_RESOLUTION` above) and hardware averaging
+        /// (`Samples16`) for jitter suppression.
         pub fn new(
             adc: impl Into<hal::Peri<'static, hal::peripherals::ADC1>>,
             knob1_pin: impl Into<hal::Peri<'static, hal::peripherals::PC4>>,

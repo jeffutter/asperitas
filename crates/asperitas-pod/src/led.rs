@@ -4,7 +4,7 @@
 //! simple GPIO on/off per channel. The Pod's LEDs are active-low: driving a
 //! pin `Low` lights its channel, `High` turns it off.
 //!
-//! Unlike [`asperitas-logging::led::BootLed`] which owns LED 1 as a singleton
+//! Unlike `asperitas-logging`'s `led::BootLed`, which owns LED 1 as a singleton
 //! for boot-stage indication, this is a regular component — the consumer decides
 //! storage strategy and lifecycle. No static cell, no global state.
 //!
