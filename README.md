@@ -160,7 +160,7 @@ UPDATE_GOLDENS=1 cargo test -p asperitas-cli    # regenerate, deliberately opt-i
 
 A golden diff means *listen to this before accepting it*, not *run the update command*.
 
-## Debugging Without a Probe
+## Debugging
 
 No ST-Link? You still have two channels:
 
@@ -197,7 +197,39 @@ by *different* mechanisms — the countdown goes through the log pipe, while the
 is pushed straight to the endpoint because the executor is dead by then — so countdown
 text with no `PANIC:` line is a real failure, not a missed message.
 
-When a probe arrives, `probe-rs` restores `cargo run`-style flashing and RTT logging.
+### Flashing and logging over an ST-Link probe
+
+The software side is in place: `make probe-*` targets, `probe-rs` 0.32.0 from the flake, release
+line tables for symbolication. What has *not* happened is a probe talking to this board —
+TASK-037 makes the first attachment and records timings. Treat these commands as ready, not
+proven.
+
+```bash
+cd firmware
+DEFMT_LOG=info make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1  # build, program, verify read-back, reset, exit
+make probe-log   # attach and stream RTT; no reflash, no reset
+```
+
+Both drive the release **ELF**, never `firmware.bin`: `probe-rs` decodes `defmt` frames from the
+ELF's `.defmt` section and unwinds with its DWARF, so the host's copy has to be the one that
+built what's running. The chip string (`--chip STM32H750IBKx`) is in the Makefile.
+`DEFMT_LOG=info` is load-bearing rather than decorative: unset, defmt compiles every non-ERROR
+call to nothing and a silent channel looks exactly like a dead probe.
+
+`docs/reference/daisy-seed3.md` has the rest — why the probe path takes the ELF, what RTT does
+when no host is attached versus when the host stalls, and the rule that follows from that:
+**nothing logs from the audio callback.**
+
+**Permissions are Linux-only here.** `probe-rs` talks to the ST-Link over `/dev/bus/usb/*`, not
+`/dev/ttyACM*`, so being able to reach a serial or DFU device doesn't imply this works. On Linux
+the bench needs the udev rules — they ship inside `probe-rs-tools` as
+`etc/udev/rules.d/69-probe-rs.rules`, and a NixOS host installs them with
+
+```nix
+services.udev.packages = [ pkgs.probe-rs-tools ];
+```
+
+Any other Linux, install that file the way your distro does. macOS needs nothing.
 
 ## Important Hardware Gotchas
 

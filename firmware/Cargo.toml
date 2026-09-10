@@ -26,7 +26,8 @@ slow-boot = []
 # `Backend` points at whenever it is on — even with `log-defmt` also on.
 log-usb = ["asperitas-logging/log-usb"]
 # defmt frames over RTT, streamed by probe-rs. Shares no code with the USB stack: no endpoint,
-# no pipe, no drain task. See docs/reference/diagnostics.md (TASK-036.04).
+# no pipe, no drain task. See "Flashing and logging over an ST-Link probe" in
+# docs/reference/daisy-seed3.md (TASK-036.04).
 log-defmt = ["asperitas-logging/log-defmt", "dep:defmt-rtt"]
 
 [profile.release]

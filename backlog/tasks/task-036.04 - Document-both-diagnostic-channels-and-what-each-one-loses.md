@@ -1,11 +1,11 @@
 ---
 id: TASK-036.04
 title: Document both diagnostic channels and what each one loses
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 21:42'
-updated_date: '2026-09-10 02:29'
+updated_date: '2026-09-10 03:16'
 labels:
   - planned
 dependencies:
@@ -36,13 +36,13 @@ Boundary with TASK-030.03, which is still To Do and edits the same region (daisy
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 docs/reference/daisy-seed3.md replaces "Debug probe, when one is available" with a section that states the actual workflow — make probe-flash, make probe-log, the --chip STM32H750IBKx string, why the probe path takes the ELF and DFU takes firmware.bin — and every command it prints appears verbatim in `make -n` output.
-- [ ] #2 The same file names the three RTT regimes explicitly: unattached (NON_BLOCKING_TRIM, records dropped or truncated), attached-and-keeping-up, and attached-but-stalled (block-if-full spinning inside a critical section, i.e. the application freezes), together with probe-rs --rtt-channel-mode no-block-skip and no-block-trim as the host-side escape hatch and the rule that nothing may log from the audio callback.
-- [ ] #3 The corrected sentence at daisy-seed3.md:148 no longer frames probe-rs as lost, and the RAM-length hard-fault note (:137-144) now points at the probe as the way to see a fault that fires before main instead of at reasoning about the first four bytes of firmware.bin.
-- [ ] #4 Any heading rename keeps cross-document anchors resolving: rust-daisy-stack.md:103 links to #flashing-without-a-debug-probe, and if that heading changes, the link changes in the same commit. Checked by grepping every relative link and anchor in docs/ and README.md.
-- [ ] #5 README.md replaces the future-tense promise at :200 with the real commands and adds the Linux-only permission caveat: probe-rs talks to the ST-Link over /dev/bus/usb/*, not /dev/ttyACM*, so a Linux bench needs services.udev.packages = [ pkgs.probe-rs-tools ]; macOS needs nothing.
-- [ ] #6 rust-daisy-stack.md:101 reflects the pinned reality — probe-rs/cargo-flash 0.32.0 supplied by the flake, chip string, ELF-not-.bin — and stops reading as aspirational.
-- [ ] #7 One paragraph states that the two channels count different things and that a loss figure from one does not describe the other, and every hardware claim in the new text is attributed to TASK-037 as still-unverified rather than stated as measured.
+- [x] #1 docs/reference/daisy-seed3.md replaces "Debug probe, when one is available" with a section that states the actual workflow — make probe-flash, make probe-log, the --chip STM32H750IBKx string, why the probe path takes the ELF and DFU takes firmware.bin — and every command it prints appears verbatim in `make -n` output.
+- [x] #2 The same file names the three RTT regimes explicitly: unattached (NON_BLOCKING_TRIM, records dropped or truncated), attached-and-keeping-up, and attached-but-stalled (block-if-full spinning inside a critical section, i.e. the application freezes), together with probe-rs --rtt-channel-mode no-block-skip and no-block-trim as the host-side escape hatch and the rule that nothing may log from the audio callback.
+- [x] #3 The corrected sentence at daisy-seed3.md:148 no longer frames probe-rs as lost, and the RAM-length hard-fault note (:137-144) now points at the probe as the way to see a fault that fires before main instead of at reasoning about the first four bytes of firmware.bin.
+- [x] #4 Any heading rename keeps cross-document anchors resolving: rust-daisy-stack.md:103 links to #flashing-without-a-debug-probe, and if that heading changes, the link changes in the same commit. Checked by grepping every relative link and anchor in docs/ and README.md.
+- [x] #5 README.md replaces the future-tense promise at :200 with the real commands and adds the Linux-only permission caveat: probe-rs talks to the ST-Link over /dev/bus/usb/*, not /dev/ttyACM*, so a Linux bench needs services.udev.packages = [ pkgs.probe-rs-tools ]; macOS needs nothing.
+- [x] #6 rust-daisy-stack.md:101 reflects the pinned reality — probe-rs/cargo-flash 0.32.0 supplied by the flake, chip string, ELF-not-.bin — and stops reading as aspirational.
+- [x] #7 One paragraph states that the two channels count different things and that a loss figure from one does not describe the other, and every hardware claim in the new text is attributed to TASK-037 as still-unverified rather than stated as measured.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -154,4 +154,20 @@ a screwdriver.
 
 <!-- SECTION:NOTES:BEGIN -->
 From TASK-036.03: when documenting the RTT channel, lead with the filter default. `DEFMT_LOG` unset makes defmt-macros compile every non-ERROR call to nothing (defmt-macros-1.1.1 src/function_like/log/env_filter.rs:34), so a plain `make build FEATURES="seed3 log-defmt" NO_DEFAULT=1` image has no INFO frames and an attach looks like a dead channel. The facade's runtime set_max_level cannot compensate. Working form: `DEFMT_LOG=info make probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1`. Also: only a log-defmt ELF loads under probe-rs at all (build.rs adds -Tdefmt.x; console-only ELFs are rejected before probe discovery). Both facts are already in crates/asperitas-logging/src/defmt_log.rs and the firmware/Makefile preamble.
+
+TASK-030.03 had NOT landed at pickup (status To Do), so its subject matter is untouched: no record grammar, no CRC parameters, no short-packet rule. 'What each channel loses' names the console counters (seq gaps, dropped_full, bytes_dropped, trunc, ep_err) only as far as AC#7 requires and says explicitly that TASK-030.03 owns the field set.
+
+Heading renames: '## Flashing without a debug probe' -> '## Flashing the Seed3' (rust-daisy-stack.md link updated to #flashing-the-seed3 in the same edit) and '### Debugging without a probe' -> '### Debugging with nothing attached'. README '## Debugging Without a Probe' -> '## Debugging', since it now contains a probe subsection. Anchor check is mechanical, not eyeballed: a python pass extracts every ](...) target in README.md, CLAUDE.md, docs/**/*.md and audio/README.md, resolves relative paths and GitHub-slugged anchors -> all resolve. Only one inbound anchor existed repo-wide, which is what made the rename cheap.
+
+Verbatim-command check: extracted every cargo/probe-rs line from the code blocks in the new probe section and matched against 'make -n probe-flash probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1' output normalised for whitespace -> 3 of 3 match exactly. The printed make invocations themselves dry-run rc=0, including PROBE_EXTRA="--speed 1000".
+
+Host-side facts re-measured here rather than inherited from .01/.03 notes: probe-rs 0.32.0 'chip info STM32H750IBKx' -> NVM 0x08000000..0x08020000 128 KiB, AXI SRAM 0x24000000..0x24080000 512 KiB (bare STM32H750IB resolves too); 'attach --help' -> rtt-channel-mode values no-block-skip / no-block-trim / block-if-full with block-if-full default, and row three of the RTT table quotes its own warning about freezing inside a critical section; defmt-rtt 1.3.0 src/lib.rs:113 NON_BLOCKING_TRIM init and :168 critical_section::acquire(); probe-rs-tools-0.32.0 store path really does carry etc/udev/rules.d/69-probe-rs.rules, which is what makes the services.udev.packages claim safe to print. Nothing about this board is asserted anywhere in the new text: attach/flash/throughput numbers stay absent and every such claim points at TASK-037.
+
+Also fixed a dangling reference found while grepping: firmware/Cargo.toml:29 pointed at docs/reference/diagnostics.md, a file TASK-036.03 anticipated but never created. Now names the real section. Follow-up filed as TASK-042 for CLAUDE.md's now-incomplete one-line index entry, per this ticket's instruction not to edit CLAUDE.md in passing.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Three reference documents stopped describing a probe that has since been wired up. daisy-seed3.md: heading '## Flashing without a debug probe' -> '## Flashing the Seed3' with an intro naming both routes; '### Debug probe, when one is available' replaced by '### Flashing and logging over an ST-Link probe' carrying the real workflow (make probe-flash / make probe-log, expanded commands copied verbatim out of make -n, --chip STM32H750IBKx with its chip-info numbers, ELF-not-firmware.bin and why, --verify as probe-rs read-back rather than dfu-util's grep idiom, PROBE_EXTRA and probe-rs #3516); the DEFMT_LOG-unset default and the log-defmt-only-ELF gate lead the section so a silent channel isn't misread as a dead probe; the three RTT regimes as a table with --rtt-channel-mode no-block-skip / no-block-trim as the host-side escape hatch and 'nothing logs from the audio callback' as the rule row three implies; single-128 KB-sector erase and DBGMCU_CR/sleep-vs-RTT-discovery (#350) one line each; new '### What each channel loses' stating that the console keeps a ledger and RTT keeps none. 'Losing probe-rs also loses defmt/RTT logging' became '### Debugging with nothing attached', and the memory.x RAM note now sends a pre-main fault to the probe instead of to firmware.bin's first four bytes. README.md gained '### Flashing and logging over an ST-Link probe' with the working commands and the Linux-only /dev/bus/usb udev caveat (services.udev.packages = [ pkgs.probe-rs-tools ]; macOS needs nothing), replacing the future-tense promise. rust-daisy-stack.md:101 states the pinned reality (probe-rs/cargo-flash 0.32.0 from the flake, chip string, ELF not .bin, dated 2026-09-10 per that file's snapshot warning) and its link follows the rename. Every hardware claim is attributed to TASK-037 as unmeasured; no timing or throughput number appears anywhere. Also repaired firmware/Cargo.toml's pointer at a docs/reference/diagnostics.md that was never written, and filed TASK-042 for CLAUDE.md's now-incomplete index line.
+<!-- SECTION:FINAL_SUMMARY:END -->

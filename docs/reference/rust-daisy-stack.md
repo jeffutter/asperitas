@@ -98,7 +98,15 @@ the same configuration as this project — confirmed:
 ## Toolchain
 
 - Target: `thumbv7em-none-eabihf` (Cortex-M7F, hard float)
-- `probe-rs` — flash + `defmt`/RTT logging; **requires an ST-Link probe**
+- `probe-rs` / `cargo-flash` — **0.32.0**, pinned by the flake (`pkgs.probe-rs-tools`), checked
+  against that version on 2026-09-10. Flashes over an ST-Link and streams `defmt`/RTT; drives the
+  `probe-*` targets in `firmware/Makefile`. Takes the release **ELF** plus `--chip STM32H750IBKx`,
+  not the `.bin` that `dfu-util` uses, because frames and backtraces decode from the ELF's
+  `.defmt` section and DWARF. Verified host-side only: command expansion, the chip entry via
+  `probe-rs chip info`, and flag values via `--help`. No probe has touched this board yet —
+  TASK-037 measures attach, flash, throughput, and whether `--connect-under-reset` holds up with
+  an ST-Link V3 MINIE (probe-rs #3516). Commands and caveats:
+  [daisy-seed3.md](./daisy-seed3.md#flashing-and-logging-over-an-st-link-probe)
 - `dfu-util` — probe-free flashing over the Seed3's USB-C; see
-  [daisy-seed3.md](./daisy-seed3.md#flashing-without-a-debug-probe)
+  [daisy-seed3.md](./daisy-seed3.md#flashing-the-seed3)
 - `cargo-binutils` / `llvm-tools` — `objcopy` to produce the raw `.bin` DFU needs
