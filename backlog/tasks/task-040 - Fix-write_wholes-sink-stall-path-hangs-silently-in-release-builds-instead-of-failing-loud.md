@@ -3,9 +3,11 @@ id: TASK-040
 title: >-
   Fix: write_whole's sink-stall path hangs silently in release builds instead of
   failing loud
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@ralph'
 created_date: '2026-09-09 16:46'
+updated_date: '2026-09-10 04:58'
 labels:
   - review-followup
 dependencies:
@@ -22,13 +24,13 @@ Found while reviewing TASK-030.01.01 (crates/asperitas-logging/src/frame.rs:306-
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 write_whole's stall branch (frame.rs, the match arm currently reading debug_assert!(false, ...)) panics unconditionally in both debug and release profiles when write() returns None or Some(0) after the length pre-check already passed — replace the debug_assert! with a real panic! (or equivalent unconditional assert), so the project's panic handler (LED strobe + USB serial message) fires instead of an infinite retry.
-- [ ] #2 A new #[cfg(test)] unit test in frame.rs constructs a write closure that accepts some bytes on its first call and then returns Some(0) on a later call (simulating the sink stalling after the capacity pre-check passed), and asserts write_whole panics for it (#[should_panic] or equivalent), proving the precondition-violation path is now reachable and tested rather than merely assumed unreachable.
-- [ ] #3 write_whole's doc comment states plainly that a stall after the capacity pre-check is treated as a caller-contract violation and panics immediately (via the project's normal panic handler) rather than retrying, replacing the current comment's silence on release-build behavior.
-- [ ] #4 nix develop -c cargo fmt --all --check passes
-- [ ] #5 nix develop -c cargo clippy -p asperitas-logging --all-targets -- -D warnings passes
-- [ ] #6 nix develop -c cargo test -p asperitas-logging passes, including the new should-panic test
-- [ ] #7 nix develop -c cargo test --workspace passes and cd firmware && nix develop -c cargo build --release --features seed3 succeeds, with firmware/Cargo.lock showing no diff
+- [x] #1 write_whole's stall branch (frame.rs, the match arm currently reading debug_assert!(false, ...)) panics unconditionally in both debug and release profiles when write() returns None or Some(0) after the length pre-check already passed — replace the debug_assert! with a real panic! (or equivalent unconditional assert), so the project's panic handler (LED strobe + USB serial message) fires instead of an infinite retry.
+- [x] #2 A new #[cfg(test)] unit test in frame.rs constructs a write closure that accepts some bytes on its first call and then returns Some(0) on a later call (simulating the sink stalling after the capacity pre-check passed), and asserts write_whole panics for it (#[should_panic] or equivalent), proving the precondition-violation path is now reachable and tested rather than merely assumed unreachable.
+- [x] #3 write_whole's doc comment states plainly that a stall after the capacity pre-check is treated as a caller-contract violation and panics immediately (via the project's normal panic handler) rather than retrying, replacing the current comment's silence on release-build behavior.
+- [x] #4 nix develop -c cargo fmt --all --check passes
+- [x] #5 nix develop -c cargo clippy -p asperitas-logging --all-targets -- -D warnings passes
+- [x] #6 nix develop -c cargo test -p asperitas-logging passes, including the new should-panic test
+- [x] #7 nix develop -c cargo test --workspace passes and cd firmware && nix develop -c cargo build --release --features seed3 succeeds, with firmware/Cargo.lock showing no diff
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -68,3 +70,23 @@ SETUP (read first): This is a Rust embedded-audio project (crates/*, firmware/) 
 
 6. In the Final Summary, state explicitly that this changes write_whole's behavior on an already-documented-as-unreachable precondition violation from 'silent infinite retry in release' to 'unconditional panic in every profile', and why that is the correct fail-loud choice given the project's existing panic-handler diagnostics.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+write_whole's stall arm now panics unconditionally (frame.rs:333-337); doc comment gained a '# A stall after the pre-check panics, in both profiles' section replacing the old 'release builds keep trying' claim. Two stale comments in lib.rs (emit's capacity-pre-check note, run_dump_task's docs) said 'stall assertion'/'debug-build panic' and are corrected to 'stall panic'.
+
+Evidence the release profile is what changed: with the debug_assert! restored, `cargo test --release -p asperitas-logging write_whole_panics` hangs past 60s (timeout killed it); with the panic! it passes. Debug-profile tests pass either way, which is exactly why the old assertion proved nothing about shipping builds.
+
+Also dropped a planned intra-doc link to crate::panic_handler: that module is behind the boot-led feature, so the link added an 'unresolved link' rustdoc warning under default features. Kept it as prose.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+write_whole's sink-stall arm is now an unconditional panic! instead of debug_assert!, so a caller-contract violation (the sink returning None or Some(0) after the capacity pre-check passed) fails loud in every build profile rather than spinning forever inside the caller's lock with no diagnostic. This deliberately changes behavior on a path already documented as unreachable: release builds previously kept retrying the identical write, which cannot make progress because nothing about the sink or the remaining slice changes between rounds, so 'keep trying' was an unbounded hang, not a delay. Panicking routes the failure through the project's existing fail-loud infrastructure - TASK-006's shared panic_handler turns the LED red and emits the panic text over USB serial or RTT - which a busy-loop bypassed entirely.
+
+Doc comment states the contract violation and its consequence plainly, replacing the paragraph that implied release builds would still finish the loop. New should_panic test drives a sink that accepts half the frame then returns Some(0); it passes under both `cargo test` and `cargo test --release`, and the same test hangs indefinitely when the debug_assert! is restored, which is the evidence that the fix lands where it matters. Two comments elsewhere in the crate that described the old assertion semantics were corrected.
+
+Gates: fmt --check, clippy -D warnings --all-targets, cargo test -p asperitas-logging (32+38+33+1 passed), cargo test --workspace (0 failures across 15 result blocks), and firmware release build with --features seed3 all clean, with no firmware/Cargo.lock diff.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -303,12 +303,20 @@ pub(crate) fn write_decimal(value: u32, dst: &mut [u8]) {
 /// replaces — hence the loop. Two rounds always suffice, because after crossing the
 /// wrap the contiguous run equals total free space and a consumer can only add more.
 ///
+/// # A stall after the pre-check panics, in every profile
+///
 /// Given the pre-check plus the caller holding its lock, a stall mid-loop
-/// (`None`/`Some(0)` after progress) means the sink broke its contract. Debug builds
-/// assert loudly; release builds keep trying rather than reporting success early. If
-/// an embassy change ever made it genuinely possible, the leftover fragment is caught
-/// by the reader's CRC and counted as an integrity failure — degraded, but it cannot
-/// masquerade as data, which is what v1 buys.
+/// (`None`/`Some(0)` once some bytes have landed) means the sink broke the caller's
+/// contract, so `write_whole` **panics** — `debug_assert!` would be the wrong tool here,
+/// because it vanishes from the release profile that ships to the Seed3.
+///
+/// Retrying instead of panicking is not a milder option: nothing about the sink or the
+/// remaining slice changes between one retry and the next, so a genuine stall is
+/// unbounded, not transient. The loop would hold the caller's lock forever with no
+/// diagnostic at all, which is strictly worse than the crash it avoids. Panicking hands
+/// the failure to the project's fail-loud path: the shared `panic_handler` module (`boot-led`
+/// feature) turns the LED red and emits the panic text — this message included — over
+/// whatever transport is compiled in.
 pub fn write_whole(
     frame: &[u8],
     free_capacity: usize,
@@ -323,9 +331,8 @@ pub fn write_whole(
         match write(&frame[written..]) {
             Some(n) if n > 0 => written += n,
             stalled => {
-                debug_assert!(
-                    false,
-                    "sink stalled after the capacity pre-check passed: {stalled:?}"
+                panic!(
+                    "write_whole: sink stalled after the capacity pre-check passed ({stalled:?})"
                 );
             }
         }
@@ -1254,6 +1261,31 @@ mod tests {
         });
         assert!(ok);
         assert_eq!(got, frame.to_vec());
+    }
+
+    /// A sink that accepts some bytes and then stops accepting them has broken
+    /// `write_whole`'s precondition (the caller holds the lock and already confirmed the
+    /// frame fits), so the call must panic rather than retry the identical write forever.
+    ///
+    /// `should_panic` is the whole point of this test: the old `debug_assert!` passed it in
+    /// debug and *failed to* in release, where the loop spun silently inside the caller's
+    /// lock. The assertion being made here is that the failure is loud in both profiles.
+    #[test]
+    #[should_panic(expected = "sink stalled")]
+    fn write_whole_panics_when_the_sink_stalls_after_the_precheck() {
+        let frame = *b"~I 00000000 00000000 stalled*abcd\r\n";
+        let mut calls = 0usize;
+
+        write_whole(&frame, frame.len(), |chunk| {
+            calls += 1;
+            // Round one accepts a prefix, so the loop is genuinely mid-frame with bytes
+            // already committed; round two reports success with zero progress.
+            if calls == 1 {
+                Some(chunk.len() / 2)
+            } else {
+                Some(0)
+            }
+        });
     }
 
     /// A real `embassy_sync` ring buffer, driven across the wrap condition.

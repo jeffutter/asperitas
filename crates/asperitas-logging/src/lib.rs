@@ -340,8 +340,8 @@ fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usiz
 
         let framed = &bufs.frame[..encoded.len];
         // The capacity pre-check has to live inside this lock, next to the write loop.
-        // Outside it, a full ring turns `write_whole`'s stall assertion into a debug-build
-        // panic instead of a clean drop; inside, the consumer can only ever *increase* free
+        // Outside it, a full ring turns `write_whole`'s stall panic into a crash instead of
+        // a clean drop; inside, the consumer can only ever *increase* free
         // capacity, so a pre-check that passes guarantees progress on every round.
         if !frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
             LOG_PIPE.try_write(chunk).ok()
@@ -424,7 +424,7 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 ///   [`RECORD_BUFS`], and two interleaved `write_whole` calls splice two frames into the
 ///   ring. While the lock is held the consumer still runs — it runs with interrupts enabled,
 ///   so free capacity can only *grow* here. That is what makes the capacity check below
-///   sound rather than optimistic, and it is why `write_whole`'s stall assertion cannot fire
+///   sound rather than optimistic, and it is why `write_whole`'s stall panic cannot fire
 ///   on this path.
 /// - **`dump_fits` is consulted before `take_seq`.** Refusals therefore consume no sequence
 ///   number, by construction rather than by discipline: a retry loop cannot manufacture `seq`
