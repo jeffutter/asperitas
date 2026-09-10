@@ -216,9 +216,8 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Main polling loop — ~1 kHz (ControlSurface contract).
     // Uses Ticker for fixed-period scheduling so work duration does not
     // accumulate drift into the poll interval (see TASK-025).
-    let mut ticker = embassy_time::Ticker::every(
-        embassy_time::Duration::from_millis(POLL_INTERVAL_MS)
-    );
+    let mut ticker =
+        embassy_time::Ticker::every(embassy_time::Duration::from_millis(POLL_INTERVAL_MS));
     let mut tick: u32 = 0;
     let mut knob_log_tick: u32 = 0;
     let mut color_idx: usize = 0;

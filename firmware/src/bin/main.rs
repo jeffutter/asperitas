@@ -148,7 +148,8 @@ async fn knob_poll_task(knob_state: &'static KnobState) {
     let knob2 = unsafe { hal::peripherals::PC0::steal() };
     let mut knobs = Knobs::new(adc1, knob1, knob2);
 
-    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_millis(POLL_INTERVAL_MS));
+    let mut ticker =
+        embassy_time::Ticker::every(embassy_time::Duration::from_millis(POLL_INTERVAL_MS));
     let mut last_tick = embassy_time::Instant::now();
 
     loop {
