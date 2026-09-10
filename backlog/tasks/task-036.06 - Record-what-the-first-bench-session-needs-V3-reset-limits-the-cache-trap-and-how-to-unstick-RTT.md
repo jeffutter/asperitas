@@ -3,11 +3,11 @@ id: TASK-036.06
 title: >-
   Record what the first bench session needs: V3 reset limits, the cache trap,
   and how to unstick RTT
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-10 21:08'
-updated_date: '2026-09-10 21:13'
+updated_date: '2026-09-10 22:23'
 labels:
   - planned
 dependencies: []
@@ -44,12 +44,12 @@ Docs prose plus ~8 lines in the Makefile. No board, no ears: every claim here is
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 docs/reference/daisy-seed3.md's probe section states that V3-class probes skip probe-rs's custom reset sequences — quoting the fallback message verbatim — so "attaches without --connect-under-reset but fails with it" is written down as an expected outcome of the probe class, with issue #3516 and the FAQ's try-both advice; the current framing of #3516 as one reporter's reset circuit is corrected, not merely appended to.
-- [ ] #2 firmware/Makefile gains a variable in the existing NO_DEFAULT style that removes --connect-under-reset from probe-flash and probe-run when set, documented in one comment line with the exact invocation. Prove the default is untouched: 'make -n probe-flash probe-run' output is byte-identical to before the change, and with the variable set the flag is gone from both expansions.
-- [ ] #3 The same file records the D-cache trap in at least one sentence that names the mechanism (control block in AXI SRAM at 0x24000000, debug-port reads bypass the cache), the symptom (RTT discovery or delivery silently fails), the fix (move the block to DTCM or non-cached RAM), and the fact that caching is off today so this is latent rather than present.
-- [ ] #4 defmt-rtt's disable-blocking-mode cargo feature appears next to the existing host-side --rtt-channel-mode escape hatches with its tradeoff stated, and the three-regime table still reads as one coherent story.
-- [ ] #5 defmt_log.rs's module docs cite log-to-defmt's fixed-buffer/unstable behaviour and defmt2log's opposite direction alongside the level-flattening reason already there; cargo fmt --all --check and cargo test --workspace stay green afterwards.
-- [ ] #6 Every command the ticket adds to a document appears verbatim in 'make -n' output or in probe-rs --help on the pinned 0.32 build, and no anchor introduced by a heading change is left dangling — re-check inbound links from rust-daisy-stack.md and README.md.
+- [x] #1 docs/reference/daisy-seed3.md's probe section states that V3-class probes skip probe-rs's custom reset sequences — quoting the fallback message verbatim — so "attaches without --connect-under-reset but fails with it" is written down as an expected outcome of the probe class, with issue #3516 and the FAQ's try-both advice; the current framing of #3516 as one reporter's reset circuit is corrected, not merely appended to.
+- [x] #2 firmware/Makefile gains a variable in the existing NO_DEFAULT style that removes --connect-under-reset from probe-flash and probe-run when set, documented in one comment line with the exact invocation. Prove the default is untouched: 'make -n probe-flash probe-run' output is byte-identical to before the change, and with the variable set the flag is gone from both expansions.
+- [x] #3 The same file records the D-cache trap in at least one sentence that names the mechanism (control block in AXI SRAM at 0x24000000, debug-port reads bypass the cache), the symptom (RTT discovery or delivery silently fails), the fix (move the block to DTCM or non-cached RAM), and the fact that caching is off today so this is latent rather than present.
+- [x] #4 defmt-rtt's disable-blocking-mode cargo feature appears next to the existing host-side --rtt-channel-mode escape hatches with its tradeoff stated, and the three-regime table still reads as one coherent story.
+- [x] #5 defmt_log.rs's module docs cite log-to-defmt's fixed-buffer/unstable behaviour and defmt2log's opposite direction alongside the level-flattening reason already there; cargo fmt --all --check and cargo test --workspace stay green afterwards.
+- [x] #6 Every command the ticket adds to a document appears verbatim in 'make -n' output or in probe-rs --help on the pinned 0.32 build, and no anchor introduced by a heading change is left dangling — re-check inbound links from rust-daisy-stack.md and README.md.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -175,3 +175,106 @@ to DTCM, or flipping `disable-blocking-mode` — this ticket records the trap an
 not pull either. Bench-convenience flags that change nothing diagnostically (`--list-rtt`,
 `--always-print-stacktrace`, format presets) go in TASK-037's notes, not the reference doc.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Four claims in the plan were wrong; all corrected against sources on this machine
+
+1. **`probe-rs/src/vendor/st/sequences/stm32cm7.rs` does not exist** — not in the 0.32.0 crate, not on
+   master. The H7 sequence is `src/vendor/st/sequences/stm32h7.rs`. Verified by unpacking
+   `probe-rs-0.32.0.crate` from static.crates.io (the pinned nix build ships no source) and by listing
+   the GitHub tree.
+2. **The skipped custom reset is not V3-class-specific — it is every ST-Link.** `session.rs:242-254`
+   plays the target's sequence only when `probe.try_as_dap_probe()` returns Some; the native ST-Link
+   driver never qualifies (`DebugProbeImpl::try_as_dap_probe` keeps the default `None`, and
+   `stlink/mod.rs:1404-1410` return `None` explicitly). The log line interpolates the probe's *name*,
+   which is why #3516's paste reads "ST-Link V3." An ST-Link V2 takes the same fallback. Doc says so.
+3. **"Reduces to asserting nRESET" is right for the wrong reason.** `Stm32h7` does not override
+   `reset_hardware_assert` at all — the call that gets skipped was already the generic pin-drive
+   default (`architecture/arm/sequences.rs:450`). The fallback substitutes the probe's own
+   `target_reset_assert`, i.e. a `JTAG_DRIVE_NRST_LOW` command (`stlink/mod.rs:246`). And H7's DBGMCU
+   debug-component enable survives, because `debug_device_unlock` runs off the memory interface
+   (`session.rs:284`), not the DAP path. So the fallback loses chip knowledge from the reset itself,
+   not the family support around it.
+4. **SEGGER thread 5360 never mentions the D-cache.** Fetched it: the OP reports auto-search missing
+   the block at `0x24000000`, a manual address finding it but delivering no data, and DTCM at
+   `0x20000000` working. SEGGER's reply blames AHB reachability and then edits that claim; the thread
+   closes on setting `monitor exec SetRTTSearchRanges`. The cache mechanism is ARM architecture, so
+   the doc attributes the symptom to the thread and the mechanism to the architecture rather than
+   quoting a cause the thread never gave.
+
+## Measurements added
+
+- `_SEGGER_RTT` is in `.data`, not `.bss`: `nm` of a `DEFMT_LOG=info` release `log-defmt` image gives
+  `0x24000008`, size `0x30`. Quoted as the measured address.
+- Caches really are off: no cache/MPU call in embassy-stm32 0.6.0 `src/`, none in daisy-embassy
+  `ca9bcc9`'s boot path, none in cortex-m-rt startup, and no cache-related symbol in the linked ELF.
+  **But the plan's "no MPU anywhere in src/" is false**: daisy-embassy has `SdRamBuilder::build`
+  (`src/sdram.rs:16`) enabling an MPU region marked cacheable over the SDRAM window at `0xD000_0000`.
+  Nothing here calls it and an MPU region is not the D-cache, so caches-off still holds — the doc now
+  names that near miss instead of claiming no such code exists.
+- #3516 checked at the source: still open, last activity 2026-04-18 (STLINK-V3MINIE against several
+  STM32U5 parts, cubeprogrammer-cli fine). The original reporter's root cause really was their board
+  (MIC6315 supervisor + 74 buffer, scope traces in-thread), so the doc frames the probe class as a live
+  suspect rather than a proven culprit — the plan overstated this as "travels with the probe class".
+- FAQ quote taken verbatim from probe.rs/docs/faq/faq/.
+- `disable-blocking-mode` confirmed in defmt-rtt 1.3.0 (`Cargo.toml:38`, `src/channel.rs:33`).
+- Prior art: log-to-defmt 0.1.0's Maturity section quoted verbatim from docs.rs ("uses a fixed size
+  buffer", "will likely introduce such features (altering its behavior) without declaring breaking
+  changes"); defmt2log 0.2.1 confirmed as a `defmt::Logger` that decodes frames into `log` records via
+  `defmt-decoder` — host side, opposite direction.
+
+## Verification
+
+- `make -n probe-flash probe-run` byte-identical before/after (diff empty);
+  `make -n ... UNDER_RESET=0 | grep -c connect-under-reset` prints 0;
+  `make -n probe-log build check clippy` still parse.
+- AC#6 caveat: quoted expansions match `make -n` output except for the trailing space make leaves when
+  `PROBE_EXTRA` is empty. Stripping it matches the pre-existing expansion block in the same document;
+  the double space where the flag used to sit is reproduced faithfully.
+- `cargo fmt --all --check` clean, `cargo test --workspace` green (16 result lines, 0 failures),
+  `cargo doc -p asperitas-logging --no-deps` emits no warnings. No heading changed, so the inbound
+  anchors at rust-daisy-stack.md:109,111 are untouched; README references the file without anchors.
+
+## Follow-up
+
+TASK-050 (@agent): trace the Seed3 nRESET net on the schematic — supervisor, buffer, or RC + button.
+It is the one fact that decides whether the #3516 failure mode applies here, it is not bench work, and
+the doc now points at it by name.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Five bench facts recorded where someone will hit them, plus the Makefile knob to act on the first one.
+
+**`firmware/Makefile`** — `UNDER_RESET = 1` with a parse-time `ifeq`, same shape as `NO_DEFAULT`;
+`UNDER_RESET=0` empties `$(UNDER_RESET_FLAG)` in `probe-flash` and `probe-run`. Proven: default
+`make -n probe-flash probe-run` is byte-identical to before (`diff` empty), and with the override
+`grep -c connect-under-reset` prints 0. Comment above `probe-flash` now states what the flag actually
+does instead of claiming it drives nTRST.
+
+**`docs/reference/daisy-seed3.md`** — the #3516 paragraph rewritten rather than appended to: on any
+native ST-Link probe-rs 0.32 skips its custom reset sequence and falls back to driving the pin, so
+"flashes fine without `--connect-under-reset`, fails with it" is an expected bad day, not a broken
+bench; FAQ's try-both advice quoted; `UNDER_RESET=0` given as the way to run that test at the bench.
+New D-cache paragraph: `_SEGGER_RTT` measured at `0x24000008` in `.data`, why debug-port reads going
+around the core's write-back cache make discovery or delivery fail silently, that DTCM/non-cached RAM
+is the fix and it is linker work, and that caches are off today — with daisy-embassy's SDRAM MPU
+builder named as the near miss. `disable-blocking-mode` documented beside the host-side
+`--rtt-channel-mode` options as the target-side lever, as insurance under consideration only.
+
+**`crates/asperitas-logging/src/defmt_log.rs`** — prior-art record finished: log-to-defmt's fixed
+buffer plus its own "will likely introduce such features (altering its behavior) without declaring
+breaking changes", and defmt2log identified as running the other way (host-side defmt → log).
+
+Four of the plan's claims did not survive checking and the doc carries the corrected versions: there
+is no `stm32cm7.rs` (it is `stm32h7.rs`); the skipped sequence is every ST-Link, not V3-class only;
+`Stm32h7` never overrode `reset_hardware_assert` anyway, and H7's DBGMCU enable survives the fallback;
+SEGGER thread 5360 describes the symptom but never mentions caching, so the mechanism is attributed to
+the architecture. Also corrected: daisy-embassy does contain MPU-enabling code (`sdram.rs:16`), just
+nothing that runs. Side effect requested by the ticket: TASK-046's claim that this doc records
+`disable-blocking-mode` is now true. Follow-up created: TASK-050 (@agent) reads the schematic for the
+nRESET path, the one unknown that decides whether the #3516 failure mode applies here.
+<!-- SECTION:FINAL_SUMMARY:END -->

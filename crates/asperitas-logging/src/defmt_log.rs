@@ -15,7 +15,17 @@
 //! Two alternatives were considered and rejected:
 //!
 //! - `log-to-defmt` 0.1.0 — unpublished since 2023, and its own docs admit it maps every level
-//!   to the most verbose defmt level, discarding the information this crate exists to carry.
+//!   to the most verbose defmt level, discarding the information this crate exists to carry. Its
+//!   Maturity section names a second problem in the same breath: it "uses a fixed size buffer",
+//!   and "will likely introduce such features (altering its behavior) without declaring breaking
+//!   changes". The buffer is not the objection on its own — [`emit_frame`] bounds its body to
+//!   `console::BODY_WINDOW` too, deliberately, so that the worst-case frame provably fits the ring.
+//!   The objection is that this one's bound is an undocumented shortcut its maintainers reserve the
+//!   right to change without calling it a breaking change.
+//! - `defmt2log` 0.2.1 — not a candidate at all, because it runs the other way: a `defmt::Logger`
+//!   that decodes defmt frames into `log` records on the host (`defmt-decoder`, reading the ELF's
+//!   `.defmt` section). Right for keeping defmt call-sites in code that also builds for the host;
+//!   no use reaching from `log` to a probe.
 //! - Converting the firmware call-sites to `defmt::info!` — abandons the facade whose whole
 //!   purpose was to make "the probe arrived" a feature flag rather than a refactor.
 //!

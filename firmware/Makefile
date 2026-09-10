@@ -61,6 +61,17 @@ endif
 # See the note above `probe-flash` for why that may be needed.
 PROBE_EXTRA =
 
+# `PROBE_EXTRA` can only add flags, so dropping `--connect-under-reset` — the first thing to try
+# when an attach under reset misbehaves, and probe-rs's own FAQ advice — needs a switch of its own:
+#   make probe-flash UNDER_RESET=0 FEATURES="seed3 log-defmt" NO_DEFAULT=1
+# Same plain-`=` plus parse-time `ifeq` shape as NO_DEFAULT above, which is what lets `make VAR=0`
+# win. Default leaves every expansion byte-identical to before the variable existed.
+UNDER_RESET = 1
+UNDER_RESET_FLAG = --connect-under-reset
+ifeq ($(UNDER_RESET),0)
+UNDER_RESET_FLAG =
+endif
+
 .PHONY: all build flash flash-all clean check build-elf probe-flash probe-run probe-log clippy
 
 all: build
@@ -141,21 +152,22 @@ build-elf:
 
 ## Program the ELF over the probe, verify read-back, reset, exit.
 ##
-## No BOOT/RESET handshake: --connect-under-reset asserts nRESET and nTRST while
-## attaching, which is the mechanism that takes the hand out of the loop. It has
-## open reliability reports against the ST-Link V3 MINIE specifically (probe-rs
-## #3516, where STM32CubeProgrammer succeeds and probe-rs does not; an ST community
-## thread concludes the ST-Link almost never drives nRESET low). The flag stays the
-## default until measured otherwise, and PROBE_EXTRA is the documented fallback:
-## try `PROBE_EXTRA="--speed 1000"`, or drop the flag — `make probe-log` attaches to
-## an already-flashed board and needs no reset at all. TASK-037 records which worked.
+## No BOOT/RESET handshake: --connect-under-reset drives nRESET low while attaching,
+## which is the mechanism that takes the hand out of the loop. Reliability reports
+## against the ST-Link V3 MINIE are open (probe-rs #3516), and on any native ST-Link
+## probe-rs skips its custom reset sequence there rather than playing one — see
+## "Flashing and logging over an ST-Link probe" in docs/reference/daisy-seed3.md.
+## The flag stays the default until measured otherwise. The two knobs are `PROBE_EXTRA="--speed 1000"` and
+## `UNDER_RESET=0`, which drops the flag from this recipe and from `probe-run`; `make probe-log`
+## sidesteps the question by attaching to an already-flashed board with no reset at all.
+## TASK-037 records which worked.
 probe-flash: build-elf
-	probe-rs download $(ELF) --chip $(CHIP) --connect-under-reset --verify --reset $(PROBE_EXTRA)
+	probe-rs download $(ELF) --chip $(CHIP) $(UNDER_RESET_FLAG) --verify --reset $(PROBE_EXTRA)
 
 ## Flash, then stay attached and stream RTT/defmt. Interactive use — the loop wants
 ## probe-flash, which exits.
 probe-run: build-elf
-	probe-rs run $(ELF) --chip $(CHIP) --connect-under-reset $(PROBE_EXTRA)
+	probe-rs run $(ELF) --chip $(CHIP) $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
 
 ## Attach to an already-flashed board and stream RTT/defmt without reflashing or
 ## resetting. Needs the ELF from a prior build to locate the RTT control block and

@@ -433,6 +433,14 @@ draining), say so from the host side instead of hoping: `--rtt-channel-mode no-b
 drops a whole frame when it doesn't fit, `no-block-trim` writes what fits and ignores the rest.
 Both are values probe-rs 0.32.0 accepts; `block-if-full` is its default.
 
+The target holds the matching lever, and it has a name: defmt-rtt 1.3.0's **`disable-blocking-mode`**
+cargo feature forces the non-blocking write path *even after* probe-rs has set the channel to
+BlockIfFull (`src/channel.rs:33` picks `nonblocking_write` ahead of the connection test;
+`src/lib.rs:23-24` documents it). It moves row three out of the audio deadline's way and pays for it
+exactly where this channel earns its keep: attached no longer means lossless, so frames vanish while
+you are watching them. Treat it as insurance under consideration, not a default — the standing rule,
+nothing logs from the audio callback, is the primary defence, and it costs nothing.
+
 Two erase-and-debug details that are cheap to state and expensive to rediscover:
 
 - **STM32H750xB internal flash is a single 128 KB sector**, so any probe-initiated erase wipes
@@ -443,14 +451,90 @@ Two erase-and-debug details that are cheap to state and expensive to rediscover:
   the core has slept (probe-rs #350). Nothing here sleeps — the embassy executor busy-loops —
   so the busy loop is the safe state and is not to be "optimised" without reading that issue.
 
-`probe-flash` passes `--connect-under-reset`, which asserts nRESET while attaching and is what
-takes the BOOT/RESET handshake out of the loop. It has open reliability reports against the
-ST-Link V3 MINIE specifically — probe-rs #3516, where STM32CubeProgrammer succeeds on the same
-probe and probe-rs does not, and an ST community thread concludes the V3 MINIE almost never
-drives nRESET low. The flag stays the default until measured otherwise. `PROBE_EXTRA` is the
-bench escape hatch without editing the Makefile: `make probe-flash PROBE_EXTRA="--speed 1000"`,
-or skip the reset entirely by attaching to an already-flashed board with `make probe-log`, which
-never needs one. TASK-037 records which of those worked.
+**The D-cache is the other way to lose the control block, and it is armed by a future change, not
+by anything today.** `_SEGGER_RTT` lands wherever the linker puts `.data`: measured at
+`0x24000008` (48 bytes) in a `log-defmt` release image, the first words of AXI SRAM — the same
+`0x24000000..0x24080000` region probe-rs's own `STM32H750IBKx` entry reports and `memory.x`
+describes. Enable the Cortex-M7 D-cache over that region and the host stops seeing what the core
+wrote: the core's writes live in the cache until they're evicted, while the debug port reads go to
+the memory system and never consult the cache. Either the `SEGGER RTT` magic string isn't there yet,
+so discovery fails, or the block looks present but its write index and ring contents are stale, so
+the host attaches to a stream that says nothing. SEGGER's thread 5360 is the symptom record — a block
+at `0x24000000` that auto-search missed, that a manually-set address found but got no data from, and
+that worked once moved to DTCM at `0x20000000`. Read it for the symptom, not the explanation: that
+thread never mentions caching (SEGGER's answer blames AHB reachability and then edits itself), and the
+mechanism above is the architecture's, not theirs. The fix is the same one either way — put the block
+where no cache can hold a write, DTCM or a region explicitly marked non-cacheable — and it is linker
+work, not a config bit, because defmt-rtt emits the block as an ordinary static.
+
+Latent, not present: nothing enables I- or D-cache anywhere in this stack. Verified locally — no
+cache or MPU call in embassy-stm32 0.6.0's `src/`, none in daisy-embassy `ca9bcc9`'s boot path, none
+in cortex-m-rt's startup, and no cache-related symbol in the linked image. The near miss worth
+naming is daisy-embassy's SDRAM builder (`sdram.rs:16`), which switches on the MPU with a cacheable
+region over the SDRAM window; nothing here calls it, and an MPU region is not the D-cache, so even
+that leaves RTT alone. Whoever enables caching for DSP headroom is the one who breaks RTT silently,
+and will not suspect the cache. TASK-038.03 reached the same caches-off finding independently, from
+the SDRAM-coherence side.
+
+**Under reset, an ST-Link gets a plain reset, not a chip-specific one.** `probe-flash` passes
+`--connect-under-reset`, which holds nRESET low across attach and is what takes the BOOT/RESET
+handshake out of the loop. On any ST-Link it does *not* play the target's custom reset sequence:
+probe-rs 0.32 runs that sequence only when the probe exposes a DAP interface (`session.rs:242-254`)
+and the native ST-Link driver doesn't (`stlink/mod.rs:1404-1410` return `None`), so the attach falls
+back and logs two `INFO` lines from `probe_rs::session` — quoted from #3516's own debug log, where
+the interpolated name is the probe's:
+
+```
+Custom reset sequences are not supported on ST-Link V3.
+Falling back to standard probe reset.
+```
+
+What replaces the sequence is the probe's generic reset-pin drive — for ST-Link, a
+`JTAG_DRIVE_NRST_LOW` command (`stlink/mod.rs:246`) — so the flag still means "hold the chip in reset
+while I attach", just with less chip knowledge behind it. Two things follow. First, this is not a
+V3-only quirk: it is the ST-Link driver, so an ST-Link V2 on the same pads takes the same fallback,
+and the sentence above should be read as "any ST-Link behind probe-rs's native driver". Second, the
+family-specific work is *not* all lost — H7's DBGMCU debug-component enable goes through the memory
+interface (`vendor/st/sequences/stm32h7.rs:63`, called from `session.rs:284`), which the fallback
+leaves alone. (That file is `stm32h7.rs`; there is no `stm32cm7.rs` in 0.32.)
+
+So what remains is electrical: whether the probe actually pulls this board's nRESET net down far
+enough, long enough. That is the shape of probe-rs #3516, and reading it as "one reporter's bad reset
+circuit" oversells it and undersells it at once. Oversells it because their board really was the
+problem — an oscilloscope trace showed the ST-Link's nRESET output partly fighting a MIC6315 reset
+supervisor and a 74-series buffer, and revising that circuit is what finally made
+`--connect-under-reset` work; CubeProgrammer had managed all along. Undersells it because the thread
+is still open and gained a second report in 2026-04 on different hardware — STLINK-V3MINIE against
+several STM32U5 parts, `cubeprogrammer-cli` working flawlessly on the same bench, failures
+intermittent — so the probe class is a live suspect even on a board nobody has modified.
+
+Practically: **"flashes fine without the flag, fails with it" is an expected outcome of this probe
+class, not evidence that the bench is broken.** probe-rs's FAQ puts the remedy in one line — "Make
+sure you try with and without the connect-under-reset argument. Some chips need it and others don't
+support it at all." Run both ways without editing anything, since `PROBE_EXTRA` can only add flags:
+
+```bash
+cd firmware
+make probe-flash UNDER_RESET=0 FEATURES="seed3 log-defmt" NO_DEFAULT=1
+```
+
+Expanded (`make -n probe-flash UNDER_RESET=0 FEATURES="seed3 log-defmt" NO_DEFAULT=1`):
+
+```
+cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
+probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx  --verify --reset
+```
+
+`UNDER_RESET=0` drops the flag from `probe-flash` and `probe-run` only; the default expansion is
+unchanged. Other options stay open: `PROBE_EXTRA="--speed 1000"` slows the SWD clock, and
+`make probe-log` sidesteps the question entirely by attaching to an already-flashed board with no
+reset at all. TASK-037 records which of those worked here.
+
+One question decides how much any of this matters to this board, and nobody has answered it yet:
+**does the Seed drive nRESET through a reset supervisor or a buffer, or just RC plus the button?** In
+#3516 the root cause was precisely a supervisor loading the probe's output. That is a look at the
+schematic, not a bench session, so it is TASK-050. Until that lands, treat the whole failure mode as
+possible rather than likely.
 
 ### What each channel loses
 
