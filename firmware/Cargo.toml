@@ -8,13 +8,26 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = []
-seed3 = []
+# The framed USB console is the capture transport and the default: CI's
+# `cargo build --release --features seed3` adds to these rather than replacing them, so the
+# console build stays exactly what it was. Only `--no-default-features` drops it.
+default = ["log-usb"]
+# Seed3 hardware always carries the boot-stage LED and the shared panic handler. They are not a
+# transport — they are how a board with no host attached reports how far boot got (TASK-036.02),
+# and every binary here exists partly to exercise them. Gating them on a transport instead left
+# `--no-default-features` with no diagnostics at all and five binaries that could not link.
+seed3 = ["asperitas-logging/boot-led"]
 # Hold the pre-init LED stage on screen for a few seconds before switching to
 # Running. Boot is otherwise fast enough that red → green is a single flicker,
 # which makes the two stages impossible to tell apart by eye. Bring-up only —
 # never enable for normal use.
 slow-boot = []
+# Framed console over USB CDC-ACM. The capture tooling parses this stream, so it is what
+# `Backend` points at whenever it is on — even with `log-defmt` also on.
+log-usb = ["asperitas-logging/log-usb"]
+# defmt frames over RTT, streamed by probe-rs. Shares no code with the USB stack: no endpoint,
+# no pipe, no drain task. See docs/reference/diagnostics.md (TASK-036.04).
+log-defmt = ["asperitas-logging/log-defmt", "dep:defmt-rtt"]
 
 [profile.release]
 # probe-rs decodes symbols, backtraces and defmt locations from DWARF; without it a
@@ -36,8 +49,15 @@ cortex-m-rt = "0.7"
 daisy-embassy = { git = "https://github.com/daisy-embassy/daisy-embassy", branch = "master", features = ["seed3"] }
 embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread"] }
 embassy-stm32 = { version = "0.6.0", features = ["stm32h750ib", "memory-x", "exti"] }
-asperitas-logging = { path = "../crates/asperitas-logging", features = ["log-usb"] }
-defmt = "0.3"
+asperitas-logging = { path = "../crates/asperitas-logging", default-features = false }
+# Major 1, matching daisy-embassy / embassy-stm32. Was "0.3", which resolved to 0.3.100 — a
+# shim whose only content is a dependency on defmt 1.1.1 — and left two majors in the graph.
+# The wire format is versioned per major and probe-rs decodes the ELF against it, so one major
+# is a correctness requirement here, not tidiness.
+defmt = "1"
+# The RTT logger: supplies `_defmt_write` / `_defmt_acquire` / `_defmt_release` / `_defmt_flush`.
+# Linked by the binaries under `log-defmt` (see the note in src/bin/main.rs), not by the facade.
+defmt-rtt = { version = "1", optional = true }
 embassy-time = "0.5"
 embassy-futures = "0.1"
 static_cell = "2"

@@ -53,6 +53,9 @@ fn panic_handler(_info: &core::panic::PanicInfo) -> ! {
 // usage. Not the Rust panic handler. No `bkpt()` here: with no debug probe
 // attached, BKPT escalates to a HardFault rather than halting, which would
 // turn a diagnostic into a silent lockup.
+// Stays compiled in under `log-defmt` too: `_defmt_panic` is its own symbol (defmt
+// src/export/mod.rs) that defmt-rtt does *not* provide, so dropping this would break linking of
+// every `defmt::assert!` in embassy-stm32. It is unrelated to the `#[panic_handler]` above.
 #[defmt::panic_handler]
 fn defmt_panic_handler() -> ! {
     loop {
@@ -60,12 +63,28 @@ fn defmt_panic_handler() -> ! {
     }
 }
 
-// No-op defmt logger. Must live in the binary crate — see the note in
-// `blinky.rs`; the proc-macro only emits its linker symbols when expanded in
-// the final binary.
+// The defmt logger. Exactly one of these two is compiled in, and both are load-bearing: they
+// supply `_defmt_write`, `_defmt_acquire`, `_defmt_release` and `_defmt_flush`, the symbols every
+// defmt frame inside embassy-stm32 and daisy-embassy resolves against. Drop either half and the
+// link fails on binaries that contain no defmt call of their own.
+//
+// With a probe wired, `defmt-rtt` fills its RTT ring and probe-rs reads it. Without one there is
+// nobody to scan RAM, so the stub discards every byte — silent, but still required.
+#[cfg(feature = "log-defmt")]
+use defmt_rtt as _;
+
+// No-op defmt logger.
+//
+// NOTE: This block must live in each binary crate, not in a shared lib.
+// `#[defmt::global_logger]` is a proc-macro that emits linker symbols only
+// when expanded inside the final binary crate; placing it in a lib crate
+// causes dead-code elimination to drop the struct (and its generated
+// symbols) because nothing references `Logger` by name.
+#[cfg(not(feature = "log-defmt"))]
 #[defmt::global_logger]
 struct Logger;
 
+#[cfg(not(feature = "log-defmt"))]
 unsafe impl defmt::Logger for Logger {
     fn acquire() {}
     unsafe fn release() {}

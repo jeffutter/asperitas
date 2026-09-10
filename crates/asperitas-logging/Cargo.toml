@@ -12,10 +12,20 @@ boot-led = ["dep:embassy-stm32", "dep:embassy-time", "dep:static_cell"]
 # repeated deliberately: this feature stays honest about what it needs even if
 # `boot-led` changes later.
 log-usb = ["boot-led", "dep:embassy-usb", "dep:embassy-stm32", "dep:embassy-futures", "dep:embassy-time", "dep:static_cell", "dep:embassy-sync"]
+# defmt-over-RTT transport. Only `dep:defmt` is the transport itself — the encoder emits
+# frames into whatever global logger the *binary* links, which is `defmt-rtt`, and that has
+# to sit in the binary crate (see the note in `firmware/src/bin/main.rs`). The rest repeats
+# what `boot-led` needs, for the same reason `log-usb` spells them out.
+log-defmt = ["boot-led", "dep:defmt", "dep:embassy-stm32", "dep:embassy-time", "dep:static_cell"]
 
 [dependencies]
 log = { version = "0.4", default-features = false }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+
+# log-defmt dependency. Major must stay 1.x to match daisy-embassy / embassy-stm32: the defmt
+# wire format is versioned per major, so two majors in one link means the host decoder cannot
+# read what the firmware wrote.
+defmt = { version = "1", optional = true }
 
 # log-usb dependencies — versions must match daisy-embassy
 embassy-usb = { version = "0.6.0", optional = true }

@@ -24,11 +24,14 @@
 //! shared BootLed instance. The panic handler drives it through
 //! [`crate::led::set_global_state`], which needs no initialized singleton to be safe.
 
-#[cfg(feature = "log-usb")]
-use core::fmt::Write;
 use core::panic::PanicInfo;
 
-#[cfg(feature = "log-usb")]
+// Both feed [`format_panic_message`], which exists only when some transport can carry its output.
+// Ungated, a build with no transport at all warns about them.
+#[cfg(any(feature = "log-usb", feature = "log-defmt"))]
+use core::fmt::Write;
+
+#[cfg(any(feature = "log-usb", feature = "log-defmt"))]
 use crate::TruncWriter;
 
 /// Size of the panic message buffer, in bytes.
@@ -36,7 +39,7 @@ use crate::TruncWriter;
 /// A local on the panic stack, so it stays small on purpose: the alternative is a
 /// 228-byte `MAX_FRAME` array, and this handler runs on a stack that may already be
 /// nearly exhausted.
-#[cfg(feature = "log-usb")]
+#[cfg(any(feature = "log-usb", feature = "log-defmt"))]
 const PANIC_MSG_BUF: usize = 128;
 
 /// Handle a panic — called by the binary crate's `#[panic_handler]`.
@@ -65,9 +68,18 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
         crate::usb::emit_panic_record(msg.get(..len).unwrap_or(&[][..]));
     }
 
+    // Same text, second transport. Deliberately not through `log::`: the executor is halted, so a
+    // record committed to any queue would be queued forever. `emit_panic` calls the defmt macro
+    // directly, which writes the RTT ring synchronously — no task has to be alive for it to land.
+    #[cfg(feature = "log-defmt")]
+    {
+        let (msg, len) = format_panic_message(info);
+        crate::defmt_log::emit_panic(msg.get(..len).unwrap_or(&[][..]));
+    }
+
     // Without a transport there is nothing left to deliver with the panic text: the colour
     // the LED was just driven to is the whole diagnostic, so `info` goes unread.
-    #[cfg(not(feature = "log-usb"))]
+    #[cfg(not(any(feature = "log-usb", feature = "log-defmt")))]
     let _ = info;
 
     // 3. Halt.
@@ -88,7 +100,7 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
 /// Returns the buffer and the number of bytes actually written. The length
 /// matters: the buffer is zero-filled, so writing all of it emits the message
 /// followed by NUL padding, which shows up as garbage on a serial terminal.
-#[cfg(feature = "log-usb")]
+#[cfg(any(feature = "log-usb", feature = "log-defmt"))]
 fn format_panic_message(info: &PanicInfo) -> ([u8; PANIC_MSG_BUF], usize) {
     let mut buf = [0u8; PANIC_MSG_BUF];
 

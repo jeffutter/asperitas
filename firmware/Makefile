@@ -18,14 +18,43 @@ TARGET   = thumbv7em-none-eabihf
 # --- Probe flashing (ST-Link) -------------------------------------------------
 #
 # The probe path drives the ELF, never firmware.bin: defmt frames are decoded from
-# the ELF's `.defmt_*` sections and its symbol table, so flashing a stripped .bin
+# the ELF's `.defmt` section and its symbol table, so flashing a stripped .bin
 # while holding some other ELF on the host guarantees the host's metadata does not
 # match what is running. firmware.bin stays a DFU-only artifact.
+#
+# probe-rs needs that single `.defmt` section to exist at all, and only a `log-defmt` build has
+# one: build.rs passes `-Tdefmt.x`, which consolidates the per-call-site `.defmt_*` sections into
+# it. Measured on this workspace, a console-only ELF is rejected during image load — "Failed to
+# parse defmt data: no `.defmt` section" — before probe-rs so much as looks for a probe, while a
+# `log-defmt` ELF parses cleanly and stops at "No connected probes were found". So the three
+# `probe-*` targets below are only usable with `log-defmt` in FEATURES:
+#
+# And they need a level asked for at build time. `DEFMT_LOG` unset makes defmt-macros compile
+# every non-ERROR call to nothing (see `crates/asperitas-logging/src/defmt_log.rs`), so an
+# attach against a plain `make build FEATURES="seed3 log-defmt" NO_DEFAULT=1` image reads as a
+# silent RTT channel when what is missing is the frame. Use:
+#
+#   DEFMT_LOG=info make probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1
 #
 # Plain `=` throughout, like the vars above, so `make VAR=x` still overrides from
 # the command line.
 CHIP        = STM32H750IBKx
 ELF         = target/$(TARGET)/release/$(BINARY)
+
+# `FEATURES` adds to the crate's default features; it can never take one away. Dropping the
+# framed console — for an RTT-only image, where the diagnostics channel shares nothing with USB —
+# therefore needs `--no-default-features` as well:
+#
+#   make build FEATURES="seed3 log-defmt" NO_DEFAULT=1
+#
+# Empty by default, so every existing invocation (and CI's `--features seed3`) expands exactly as
+# before. An RTT-only image wants it on the probe targets too:
+#
+#   make probe-run FEATURES="seed3 log-defmt" NO_DEFAULT=1
+CARGO_DEFAULTS =
+ifeq ($(NO_DEFAULT),1)
+CARGO_DEFAULTS = --no-default-features
+endif
 
 # Escape hatch for bench experimentation without editing this file, e.g.
 #   make probe-flash PROBE_EXTRA="--speed 1000"
@@ -43,7 +72,7 @@ all: build
 ## producing a ~469 MB file. --only-section extracts only FLASH-loadable
 ## sections, giving a correct ~32 KB binary for DFU flashing.
 build:
-	cargo objcopy --release --features "$(FEATURES)" --bin $(BINARY) -- \
+	cargo objcopy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
 		-O binary firmware.bin \
 		--only-section=.vector_table \
 		--only-section=.text \
@@ -108,7 +137,7 @@ flash-all: build flash
 
 ## Build the release ELF the probe targets aim at (`build` without the objcopy step)
 build-elf:
-	cargo build --release --features "$(FEATURES)" --bin $(BINARY)
+	cargo build --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
 
 ## Program the ELF over the probe, verify read-back, reset, exit.
 ##
@@ -141,14 +170,14 @@ probe-log:
 
 ## Check compilation without producing artifacts
 check:
-	cargo check --release --features "$(FEATURES)" --bin $(BINARY)
+	cargo check --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
 
 ## Lint the firmware for the embedded target, warnings fatal.
 ##
 ## Neither CI (.github/workflows/ci.yml) nor lefthook invokes make inside firmware/,
 ## so this target is the only place firmware clippy runs.
 clippy:
-	cargo clippy --release --features "$(FEATURES)" --bin $(BINARY) -- -D warnings
+	cargo clippy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- -D warnings
 
 clean:
 	cargo clean

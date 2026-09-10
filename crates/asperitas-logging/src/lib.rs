@@ -7,9 +7,19 @@
 //! # Features
 //!
 //! - `log-usb` — USB CDC-ACM serial logging over the Seed3's onboard USB-C
-//! - (future) `log-defmt` — defmt-based logging for probe-based debugging
+//! - `log-defmt` — defmt frames over RTT, read through a debug probe
 //!
 //! When no backend feature is enabled, logging falls back to a no-op logger.
+//!
+//! # Both transports at once
+//!
+//! `log-usb` and `log-defmt` may be on together, and then the facade keeps pointing at the
+//! framed console: the capture tooling parses that stream's sequence numbers and loss counters,
+//! which defmt cannot carry. RTT is not idle in that configuration — daisy-embassy and
+//! embassy-stm32 call `defmt::info!` directly, so driver chatter reaches the probe as soon as
+//! `defmt-rtt` is linked in the binary, whatever [`Backend`] says. Records from `log::info!`
+//! therefore land on USB while `defmt::info!` from a driver lands on RTT. That split is the
+//! design, not a misconfiguration.
 //!
 //! # Diagnostics features
 //!
@@ -53,6 +63,8 @@ pub(crate) enum Backend {
     NoOp,
     #[cfg(feature = "log-usb")]
     Usb,
+    #[cfg(feature = "log-defmt")]
+    Defmt,
 }
 
 impl Backend {
@@ -69,6 +81,8 @@ impl Backend {
             Backend::NoOp => {}
             #[cfg(feature = "log-usb")]
             Backend::Usb => emit_log_record(record),
+            #[cfg(feature = "log-defmt")]
+            Backend::Defmt => defmt_log::emit(record),
         }
     }
 }
@@ -98,6 +112,20 @@ pub(crate) fn set_backend_usb() {
     // Safety: see [`backend`] — single-threaded boot, one-way transition.
     unsafe {
         core::ptr::write(core::ptr::addr_of_mut!(GLOBAL_BACKEND), Backend::Usb);
+    }
+}
+
+/// Switch logging to the defmt backend.
+///
+/// Unlike [`set_backend_usb`] there is no device to wait for: RTT is a couple of statics in
+/// RAM that exist from the first instruction, which is why this is the only channel that can
+/// speak during the pre-USB window. Callers reach it through [`init`]; it stays public because
+/// a binary that wants RTT before anything else can call it directly.
+#[cfg(feature = "log-defmt")]
+pub fn set_backend_defmt() {
+    // Safety: see [`backend`] — single-threaded boot, one-way transition.
+    unsafe {
+        core::ptr::write(core::ptr::addr_of_mut!(GLOBAL_BACKEND), Backend::Defmt);
     }
 }
 
@@ -194,6 +222,10 @@ pub mod dump;
 
 #[cfg(feature = "log-usb")]
 pub mod usb;
+
+/// defmt transport: one `log::Record` in, one defmt frame out. See the module docs.
+#[cfg(feature = "log-defmt")]
+mod defmt_log;
 
 /// Boot-stage LED indicator and its blink task. See the module docs.
 #[cfg(feature = "boot-led")]
@@ -333,7 +365,11 @@ fn emit_log_record(record: &log::Record) {
 /// No `[LEVEL]` prefix and no trailing CRLF, unlike the old line-oriented formatter: the
 /// level travels in the frame header and CRLF is the frame's delimiter, so repeating
 /// either inside the body would double-book information the decoder already trusts.
-#[cfg(feature = "log-usb")]
+///
+/// Shared by both transports on purpose — one rendering rule, two ways to ship it. A record
+/// that reads differently over a probe than it does over the console would make the two
+/// channels impossible to compare during a bench session.
+#[cfg(any(feature = "log-usb", feature = "log-defmt"))]
 fn format_body(record: &log::Record, out: &mut [u8; console::BODY_WINDOW]) -> usize {
     use core::fmt::Write;
 
@@ -479,9 +515,14 @@ pub fn try_emit_dump(body: &[u8]) -> bool {
 // ---------------------------------------------------------------------------
 
 #[cfg(not(feature = "log-usb"))]
-/// Initialize the logging facade with a no-op backend.
+/// Initialize the logging facade with whichever backend this build has.
 ///
-/// When no backend feature is enabled, all log messages are silently dropped.
+/// The entry point for every configuration except the USB console, which initializes itself
+/// ([`usb::init`] installs the logger as part of bringing up the device). Picks defmt when
+/// `log-defmt` is on — RTT needs no device, so there is nothing to wait for — and a no-op
+/// otherwise, in which case every message is silently dropped.
 pub fn init() {
+    #[cfg(feature = "log-defmt")]
+    set_backend_defmt();
     install_logger();
 }

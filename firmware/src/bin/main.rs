@@ -22,10 +22,13 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
 }
 
 // Provide _defmt_panic symbol required by embassy-stm32 / embassy-usb's
-// internal defmt usage (defmt 0.3.x). This is NOT the Rust panic handler;
+// internal defmt usage (defmt 1.x). This is NOT the Rust panic handler;
 // it fires only when a defmt formatter encounters an unrecoverable error.
 // No `bkpt()`: with no debug probe attached it escalates to a HardFault
 // instead of halting, turning a diagnostic into a silent lockup.
+// Stays compiled in under `log-defmt` too: `_defmt_panic` is its own symbol (defmt
+// src/export/mod.rs) that defmt-rtt does *not* provide, so dropping this would break linking of
+// every `defmt::assert!` in embassy-stm32. It is unrelated to the `#[panic_handler]` above.
 #[defmt::panic_handler]
 fn defmt_panic_handler() -> ! {
     loop {
@@ -33,17 +36,28 @@ fn defmt_panic_handler() -> ! {
     }
 }
 
-// No-op defmt logger — satisfies linker symbols required by embassy-stm32's
-// internal defmt usage. Remove when adding real logging (e.g. defmt-rtt).
+// The defmt logger. Exactly one of these two is compiled in, and both are load-bearing: they
+// supply `_defmt_write`, `_defmt_acquire`, `_defmt_release` and `_defmt_flush`, the symbols every
+// defmt frame inside embassy-stm32 and daisy-embassy resolves against. Drop either half and the
+// link fails on binaries that contain no defmt call of their own.
+//
+// With a probe wired, `defmt-rtt` fills its RTT ring and probe-rs reads it. Without one there is
+// nobody to scan RAM, so the stub discards every byte — silent, but still required.
+#[cfg(feature = "log-defmt")]
+use defmt_rtt as _;
+
+// No-op defmt logger.
 //
 // NOTE: This block must live in each binary crate, not in a shared lib.
 // `#[defmt::global_logger]` is a proc-macro that emits linker symbols only
 // when expanded inside the final binary crate; placing it in a lib crate
 // causes dead-code elimination to drop the struct (and its generated
 // symbols) because nothing references `Logger` by name.
+#[cfg(not(feature = "log-defmt"))]
 #[defmt::global_logger]
 struct Logger;
 
+#[cfg(not(feature = "log-defmt"))]
 unsafe impl defmt::Logger for Logger {
     fn acquire() {}
     unsafe fn release() {}
@@ -161,6 +175,14 @@ async fn knob_poll_task(knob_state: &'static KnobState) {
 
 #[embassy_executor::main]
 async fn main(spawner: embassy_executor::Spawner) {
+    // Install the backend before the first record exists. Under `log-usb` this would be wrong —
+    // the logger cannot be installed until the device is live, and [`usb::init`] below does it —
+    // so it is only this configuration's entry point. Everything logged before the console comes
+    // up is invisible on USB; over RTT it is not, which is why boot records are worth checking
+    // here rather than at "USB logging initialized".
+    #[cfg(not(feature = "log-usb"))]
+    asperitas_logging::init();
+
     info!("Booting...");
 
     let config = daisy_embassy::default_rcc();
@@ -185,7 +207,9 @@ async fn main(spawner: embassy_executor::Spawner) {
     asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
 
     // Init USB CDC serial logging.
+    #[cfg(feature = "log-usb")]
     let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
+    #[cfg(feature = "log-usb")]
     info!("USB logging initialized");
 
     // Initialize shared knob state.
@@ -231,8 +255,14 @@ async fn main(spawner: embassy_executor::Spawner) {
 
     // Enter the audio callback loop. Returns Result<Infallible, sai::Error>;
     // Infallible can never be constructed, so this only exits on SAI hardware error.
-    // Run USB and LED blink alongside audio using nested selects.
-    let usb_fut = asperitas_logging::usb::run();
+    // Run the console and LED blink alongside audio using nested selects.
+    #[cfg(feature = "log-usb")]
+    let console_fut = asperitas_logging::usb::run();
+    // No drain task exists without the console, and RTT needs no task to exist at all — the
+    // probe reads RAM behind our back. `pending()` stands in so the select tree below is written
+    // once instead of twice: it never wakes, exactly like the drain task it replaces.
+    #[cfg(not(feature = "log-usb"))]
+    let console_fut = core::future::pending::<()>();
     let audio_fut = interface.start_callback(|input, output| {
         // Read latest knob positions under critical section.
         let knobs = cortex_m::interrupt::free(|_| knob_state.read());
@@ -257,11 +287,11 @@ async fn main(spawner: embassy_executor::Spawner) {
     });
     let led_fut = asperitas_logging::led::blink_task();
 
-    // Run LED blink alongside the audio+USB pair. The blink_task never returns,
+    // Run LED blink alongside the audio+console pair. The blink_task never returns,
     // so the outer select always yields the inner result (audio or USB ending).
     match embassy_futures::select::select(
         async {
-            match embassy_futures::select::select(audio_fut, usb_fut).await {
+            match embassy_futures::select::select(audio_fut, console_fut).await {
                 embassy_futures::select::Either::First(Ok(_)) => unreachable!(),
                 embassy_futures::select::Either::First(Err(e)) => {
                     let _ = e;
