@@ -11,4 +11,8 @@
 # The rest of .pi/ (agents, prompts, skills, the extension) IS project config and
 # is tracked.
 .pi/ralph/
+
+# Autonomous pi/ralph loop state (role.json etc.): per-run and machine-local,
+# same reasoning as .pi/ralph/ above.
+.agents/
 firmware.bin
