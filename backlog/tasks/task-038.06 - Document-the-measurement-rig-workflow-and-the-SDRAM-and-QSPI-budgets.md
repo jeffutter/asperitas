@@ -5,11 +5,12 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:44'
-updated_date: '2026-09-09 11:49'
+updated_date: '2026-09-10 03:52'
 labels: []
 dependencies:
   - TASK-038.03
   - TASK-038.04
+  - TASK-030.03
 modified_files:
   - README.md
   - docs/reference/daisy-seed3.md
