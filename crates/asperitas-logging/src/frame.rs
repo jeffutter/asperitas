@@ -114,11 +114,65 @@ pub const MIN_CR_OFFSET: usize = PREFIX_LEN + TRAILER_LEN - 2;
 const _: () = assert!(MAX_FRAME == 228);
 const _: () = assert!(MIN_CR_OFFSET + MAX_BODY + 2 == MAX_FRAME);
 
+// Prefix geometry, named rather than repeated as slices.
+//
+// These are the offsets [`encode`] writes through. Spelling them `out[3..11]` worked, but it left
+// the field widths known only to whoever typed the literals, which meant the one thing that could
+// silently corrupt a frame — a field whose declared width no longer matched its digits — had no
+// place to be checked. With the widths named, they get checked at compile time by
+// [`check_hex_width`] and [`check_decimal_fits`] below.
+/// Offset of `seq`, past `~` + level + space.
+const SEQ_AT: usize = 3;
+/// Digits in `seq`.
+const SEQ_DIGITS: usize = 8;
+/// Offset of `t_ms`, past `seq` and its separating space.
+const T_MS_AT: usize = SEQ_AT + SEQ_DIGITS + 1;
+/// Digits in `t_ms`.
+const T_MS_DIGITS: usize = 8;
+/// Hex digits in the trailer's CRC — and, because the trailer is sized from it, the width every
+/// record's checksum arrives at.
+const CRC_DIGITS: usize = 4;
+
+// The fields must tile the prefix exactly, and the trailer must be what its parts add to. If a
+// width above drifts without `PREFIX_LEN` / `TRAILER_LEN` moving with it, the build stops here
+// instead of emitting frames whose delimiter sits where a digit used to be.
+const _: () = assert!(T_MS_AT + T_MS_DIGITS + 1 == PREFIX_LEN);
+const _: () = assert!(TRAILER_LEN == 1 + CRC_DIGITS + 2);
+
 /// `t_ms` is transmitted modulo this so the prefix stays 8 digits wide forever.
 /// Raw milliseconds exceed 8 digits after ~100 000 s (~27.8 h); without the modulo
 /// the prefix would silently widen and invalidate every offset above. Neither field
 /// reveals a wrap on its own — continuity comes from `BOOT` plus `seq`.
 const T_MS_WRAP: u32 = 100_000_000;
+
+// ── Field-width rules, enforced by the compiler ───────────────────────────
+
+/// Refuse to compile if a hex field is wider than a `u32` can fill.
+///
+/// Call this from a `const` context beside the width it checks, never at runtime on the record
+/// path: [`write_hex`] runs inside `RECORD_BUFS`'s IRQ-off critical section, where a panic would
+/// leave `PRIMASK` set for the rest of the program's life (see `commit_records` in `lib.rs`). A
+/// rejected width is therefore a **compile error** — strictly better than the debug-only panic it
+/// replaces, because release builds get the same guarantee and nobody discovers the mismatch on a
+/// bench. Const evaluation refuses an oversized shift just as hard, so a bad width cannot smuggle
+/// itself past either.
+pub(crate) const fn check_hex_width(digits: usize) {
+    assert!(digits <= 8, "hex field wider than a u32");
+}
+
+/// Refuse to compile if `max_value` — the largest number a field can ever carry — needs more than
+/// `digits` decimal digits.
+///
+/// Same reasoning as [`check_hex_width`], and it retires a hazard beyond the assert it replaces:
+/// the runtime form computed `10u32.pow(dst.len() as u32)` *before* checking, which overflows and
+/// panics in **every** profile once `dst.len()` reaches 10. Here the overflow happens during
+/// const evaluation, where it is a compile error rather than a boot-loop.
+pub(crate) const fn check_decimal_fits(max_value: u32, digits: usize) {
+    assert!(
+        max_value < 10u32.pow(digits as u32),
+        "value cannot fit the decimal field"
+    );
+}
 
 // ---------------------------------------------------------------------------
 // CRC-16/CCITT-FALSE
@@ -202,20 +256,25 @@ pub fn encode(
         *slot = sanitize_byte(byte);
     }
 
+    // Widths are compile-time facts — see the `check_*` pins beside the constants — so these
+    // renderers carry no runtime check of their own.
     out[0] = b'~';
     out[1] = level_letter(level);
     out[2] = b' ';
-    write_hex(seq, &mut out[3..11]);
-    out[11] = b' ';
-    write_decimal(now_ms % T_MS_WRAP, &mut out[12..20]);
-    out[20] = b' ';
+    write_hex(seq, &mut out[SEQ_AT..SEQ_AT + SEQ_DIGITS]);
+    out[SEQ_AT + SEQ_DIGITS] = b' ';
+    write_decimal(now_ms % T_MS_WRAP, &mut out[T_MS_AT..T_MS_AT + T_MS_DIGITS]);
+    out[T_MS_AT + T_MS_DIGITS] = b' ';
 
     let crc = crc16_ccitt(&out[1..PREFIX_LEN + body_len]);
     let trailer = PREFIX_LEN + body_len;
     out[trailer] = b'*';
-    write_hex(u32::from(crc), &mut out[trailer + 1..trailer + 5]);
-    out[trailer + 5] = b'\r';
-    out[trailer + 6] = b'\n';
+    write_hex(
+        u32::from(crc),
+        &mut out[trailer + 1..trailer + 1 + CRC_DIGITS],
+    );
+    out[trailer + 1 + CRC_DIGITS] = b'\r';
+    out[trailer + 2 + CRC_DIGITS] = b'\n';
 
     Encoded {
         len: trailer + TRAILER_LEN,
@@ -253,6 +312,14 @@ pub const fn sanitize_byte(byte: u8) -> u8 {
 
 const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 
+// Every width this module renders, checked against what it has to hold. These run once, at compile
+// time; nothing on the record path pays for them or can panic because of them.
+const _: () = {
+    check_hex_width(SEQ_DIGITS);
+    check_hex_width(CRC_DIGITS);
+    check_decimal_fits(T_MS_WRAP - 1, T_MS_DIGITS);
+};
+
 /// Render `value` as exactly `dst.len()` lowercase hex digits, zero-padded, MS digit
 /// first. Width comes from the slice so the call site shows the field it fills.
 ///
@@ -260,8 +327,19 @@ const HEX_DIGITS: &[u8; 16] = b"0123456789abcdef";
 /// digit formatting means the record bodies' fixed widths cannot drift apart. Digits
 /// past `dst.len()` are dropped, which is why callers mask to their field's modulus
 /// rather than relying on truncation (`dump`'s `blk` wrap is explicit about it).
+///
+/// **No runtime width check, deliberately.** It used to assert `dst.len() <= 8`; every caller now
+/// proves that with [`check_hex_width`] where it declares its width, because this function runs
+/// inside `RECORD_BUFS`'s IRQ-off critical section, where any panic — even a debug-only one —
+/// masks interrupts for the remaining life of the board. Were the rule ever broken, `4 * (n - 1 - i)`
+/// would shift past the width of `u32`: a debug-build panic and a release-build wrong answer. The
+/// compile-time pin is what makes that unreachable instead of merely unlikely.
+///
+/// The obvious alternative — take `&mut [u8; N]` and let the array length be the proof — was
+/// rejected because getting an array reference out of `out[SEQ_AT..SEQ_AT + SEQ_DIGITS]` needs
+/// `try_into().unwrap()`, which reintroduces an in-lock panic at the very boundary it was meant to
+/// remove.
 pub(crate) fn write_hex(value: u32, dst: &mut [u8]) {
-    debug_assert!(dst.len() <= 8, "hex field wider than a u32");
     let n = dst.len();
     for (i, slot) in dst.iter_mut().enumerate() {
         let shift = 4 * (n - 1 - i);
@@ -269,12 +347,16 @@ pub(crate) fn write_hex(value: u32, dst: &mut [u8]) {
     }
 }
 
-/// Render `value` as exactly `dst.len()` decimal digits, zero-padded. The caller is
-/// responsible for fitting (see [`T_MS_WRAP`]; `dump` derives its own field width from
-/// the largest value the grammar can produce).
+/// Render `value` as exactly `dst.len()` decimal digits, zero-padded.
+///
+/// **No runtime fit check, deliberately.** The caller used to assert that `value` fitted its field;
+/// [`check_decimal_fits`] now proves it where each width is declared, from the largest value the
+/// grammar can produce ([`T_MS_WRAP`] here, `dump`'s own maximum there), for the same in-lock-panic
+/// reason laid out on [`write_hex`]. Deleting the guard also deleted a latent bug: the guard *itself*
+/// computed `10u32.pow(dst.len())` before asserting, so a field of ten or more digits panicked in
+/// every profile, not just debug. Dropping leading digits is still what an oversized value does,
+/// which is why the pin is on the maximum value rather than the rendered one.
 pub(crate) fn write_decimal(value: u32, dst: &mut [u8]) {
-    let fits = value < 10u32.pow(dst.len() as u32);
-    debug_assert!(fits, "value {value} does not fit in {} digits", dst.len());
     let mut v = value;
     for slot in dst.iter_mut().rev() {
         *slot = b'0' + (v % 10) as u8;
@@ -1056,6 +1138,53 @@ mod tests {
             "MAX_BODY exactly must not report truncation"
         );
         assert_eq!(exact.len, MAX_FRAME);
+    }
+
+    /// Pin the equivalence that let TASK-047 delete `try_emit_dump`'s `debug_assert!(!encoded
+    /// .truncated)` instead of converting it to a reported value.
+    ///
+    /// The deleted assert was a tautology on that path: `Encoded::truncated` *is* the predicate
+    /// `body.len() > MAX_BODY`, and `try_emit_dump` refuses exactly that case before taking
+    /// `RECORD_BUFS`. Plumbing an unreachable bit out of the closure would have bought a code path
+    /// nobody can execute, so what remains is this pin — the two sides of the boundary, measured
+    /// rather than assumed. If `encode` ever computes `truncated` from something other than the body
+    /// length, or `try_emit_dump`'s guard moves inside the lock, this fails here instead of leaving
+    /// a deleted assert as the only witness.
+    #[test]
+    fn truncated_is_exactly_the_predicate_the_pre_lock_guard_refuses() {
+        let mut out = [0u8; MAX_FRAME];
+
+        let at = encode(Level::Info, 1, 1, &[b'x'; MAX_BODY], &mut out);
+        assert!(
+            !at.truncated,
+            "MAX_BODY bytes is not truncation, so the guard's boundary and this field's must agree"
+        );
+
+        let over = encode(Level::Info, 1, 1, &[b'x'; MAX_BODY + 1], &mut out);
+        assert!(
+            over.truncated,
+            "one byte past MAX_BODY must report truncation, which is the whole reason the guard \
+             outside the lock can stand in for the deleted assert"
+        );
+    }
+
+    /// What replaces `write_decimal`'s deleted fit assert: the renderer still emits exactly one
+    /// digit per destination byte, including for the largest value the `t_ms` field can hold.
+    ///
+    /// The compile-time pins (`check_decimal_fits`) prove no value *reaches* this with too many
+    /// digits for its field; they say nothing about the renderer itself, which is why this stays a
+    /// test rather than resting on the const check.
+    #[test]
+    fn write_decimal_emits_one_digit_per_byte_at_its_field_extremes() {
+        let mut out = [0u8; T_MS_DIGITS];
+        write_decimal(0, &mut out);
+        assert_eq!(&out, b"00000000", "zero pads, it does not shorten");
+
+        write_decimal(T_MS_WRAP - 1, &mut out);
+        assert_eq!(
+            &out, b"99999999",
+            "the largest value the field admits fills it without shifting a delimiter"
+        );
     }
 
     // ── Decoder: the invariants worth reading first ──────────────────

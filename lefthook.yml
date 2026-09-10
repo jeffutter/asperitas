@@ -11,6 +11,12 @@ pre-commit:
       run: cargo clippy --workspace --all-targets -- -D warnings
       forward_stderr: true
 
+    # Default features leave asperitas-logging's record-path code unlinted; this is the only gate
+    # that compiles it with warnings fatal. Landed with TASK-047.
+    clippy-log-usb:
+      run: cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
+      forward_stderr: true
+
 pre-push:
   commands:
     fmt-check:
@@ -19,6 +25,10 @@ pre-push:
 
     clippy:
       run: cargo clippy --workspace --all-targets -- -D warnings
+      forward_stderr: true
+
+    clippy-log-usb:
+      run: cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
       forward_stderr: true
 
     test:

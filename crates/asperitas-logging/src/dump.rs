@@ -110,8 +110,8 @@
 use log::Level;
 
 use crate::frame::{
-    self, crc16_ccitt, parse_decimal, parse_hex, write_decimal, write_hex, Encoded, MAX_BODY,
-    MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
+    self, check_decimal_fits, check_hex_width, crc16_ccitt, parse_decimal, parse_hex,
+    write_decimal, write_hex, Encoded, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
 };
 
 /// The RFC 4648 §4 standard alphabet, in order. Index with a 6-bit value.
@@ -481,6 +481,18 @@ const _: () = assert!(FULL_AUDIO_BODY_LEN == MAX_BODY - 1);
 const _: () = assert!(FULL_AUDIO_FRAME_LEN == 227);
 const _: () = assert!(MAX_AUDEND_BODY_LEN == 43);
 const _: () = assert!(MAX_AUDEND_BODY_LEN <= MAX_BODY);
+
+// Widths checked against the values they must carry, on the same compile-time footing as `frame`'s
+// own fields (see `frame::check_hex_width` for why the check cannot live in the renderers: those
+// run inside the record lock, where a panic masks interrupts permanently). Deleting the runtime
+// asserts from `write_hex` / `write_decimal` would otherwise have quietly taken `dump`'s protection
+// with them.
+const _: () = {
+    check_hex_width(BLK_HEX_DIGITS);
+    check_hex_width(COUNT_HEX_DIGITS);
+    check_hex_width(CRC_HEX_DIGITS);
+    check_decimal_fits(MAX_BLOCK_BYTES as u32, BYTES_DEC_DIGITS);
+};
 
 // ---------------------------------------------------------------------------
 // Pipe headroom policy

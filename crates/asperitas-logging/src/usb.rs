@@ -340,10 +340,10 @@ pub async fn run() {
 /// stack that may be nearly exhausted. Sharing the buffer is acceptable for the same reason
 /// — with the executor halted nothing else is formatting, and the one theoretical overlap
 /// (a panic raised inside the commit critical section) is designed out: record-path callers
-/// crash only *outside* the record lock, where `commit_records` defers its stall panic until
-/// `RECORD_BUFS.lock` has returned. Debug-profile-only assertions still living inside that
-/// lock are TASK-047's to move; their worst case is this same garbled final line, not memory
-/// unsafety.
+/// crash only *outside* the record lock, where `commit_records` defers every panic — its
+/// unconditional stall `panic!` and the debug-only contract-break check alike — until
+/// `RECORD_BUFS.lock` has returned. Nothing on the record path can raise while `PRIMASK` is set;
+/// `tests/commit_path_no_panic.rs` fails the build if anything starts to.
 pub fn emit_panic_record(body: &[u8]) {
     // Safety: see [`PANIC_FRAME`]. Takes no lock by design; `frame!` writes are pure byte
     // arithmetic into the buffer we were given.
@@ -418,7 +418,7 @@ pub fn emit_blocking(msg: &[u8]) {
         // missed: a framed message is 28–228 bytes, and whenever it lands on an exact
         // multiple of 64 the host keeps the whole final record in its driver buffer. The
         // most important line in the capture would be the one that never arrives.
-        if !msg.is_empty() && msg.len() % MAX_PACKET_SIZE as usize == 0 {
+        if !msg.is_empty() && msg.len().is_multiple_of(MAX_PACKET_SIZE as usize) {
             let _ = cdc.write_packet(&[]).await;
         }
     };
