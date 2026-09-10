@@ -3,11 +3,11 @@ id: TASK-047
 title: >-
   Fix: the debug_assert!s left inside RECORD_BUFS's critical section mask
   interrupts permanently in debug builds
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-10 08:09'
-updated_date: '2026-09-10 16:25'
+updated_date: '2026-09-10 18:10'
 labels:
   - planned
 dependencies:
@@ -33,17 +33,17 @@ Acceptance criteria are deliberately device-free: fmt, `clippy -p asperitas-logg
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both `commit_records(|bufs| ...)` closures (`emit()` and `try_emit_dump()`) contain no panic-forming macro; the "pipe refused a frame the headroom rule already admitted" case is reported out of the closure as a value returned beside `frame::WriteOutcome` -- deliberately NOT a fourth `WriteOutcome` variant and NOT a parallel outcome type -- and crashed on inside `commit_records` only after `RECORD_BUFS.lock` has returned, with today's message text preserved.
-- [ ] #2 The tautological `debug_assert!(!encoded.truncated, ...)` is deleted (the pre-lock `body.len() > MAX_BODY` guard makes it unreachable), replaced by a comment naming that guard and a host test pinning `Encoded::truncated == (body.len() > MAX_BODY)` on both sides of the boundary.
-- [ ] #3 Release behaviour is unchanged on both paths -- same counters bumped under the lock, same return values, same wire bytes -- and the post-lock check deliberately stays debug-profile-only, with the reason it diverges from TASK-045's unconditional stall panic written into `commit_records`' doc comment.
-- [ ] #4 `write_hex` and `write_decimal` carry no runtime assert; every hex/decimal field width in frame.rs and dump.rs is pinned at compile time through one shared const helper owned by frame.rs; `T_MS_WRAP`'s fit is const-checked; prefix/trailer offsets derive from named constants asserted to tile `PREFIX_LEN`/`TRAILER_LEN`; emitted bytes are unchanged.
-- [ ] #5 A durable machine check exists at `crates/asperitas-logging/tests/commit_path_no_panic.rs` (no such artifact exists at HEAD today), run by default-feature `cargo test --workspace`, that scans every `commit_records(` argument closure plus the transitively reachable encoder/console/dump functions for panic-forming tokens, asserts exactly one `RECORD_BUFS.lock(` call site, requires the post-lock `panic!` and `debug_assert!` to still exist so deletion cannot satisfy it, carries positive controls so a broken scanner cannot pass vacuously, and trips when a new locally-defined callee appears inside a lock closure.
-- [ ] #6 That check was written BEFORE the conversions and observed failing on every site in the plan's inventory (four lexical sites: lib.rs:502, lib.rs:518, frame.rs:264, frame.rs:277); if the first red run reports a different set, reconcile the inventory before converting anything, and record the failure list in Implementation Notes.
-- [ ] #7 A host test per converted site asserts the reported outcome rather than the crash -- the classification function's four-row truth table under default features -- and each such test's doc comment states why the crash itself is not host-observable (undefined `__critical_section_1_0_*` / `__embassy_time_now` at link time).
-- [ ] #8 The pre-existing `manual_is_multiple_of` violation at usb.rs:421 is fixed, `nix develop -c cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings` passes, and that gate is added to both `.github/workflows/ci.yml` and `lefthook.yml`.
-- [ ] #9 All existing gates pass: `cargo fmt --all --check`; `cargo clippy -p asperitas-logging --all-targets -- -D warnings`; `cargo clippy --workspace --all-targets -- -D warnings` with and without `--features asperitas-pod/pod-hw`; `cargo test -p asperitas-logging`; `cargo test --workspace`.
-- [ ] #10 `cd firmware && nix develop -c cargo build --release --features seed3` and `nix develop -c make clippy FEATURES=seed3` succeed, and `git --no-ext-diff diff --stat` shows no change to `Cargo.lock` or `firmware/Cargo.lock`.
-- [ ] #11 Docs are corrected per the plan's doc section (commit_records, try_emit_dump, write_hex/write_decimal, usb::emit_panic_record) with no NEW rustdoc warnings from `cargo doc -p asperitas-logging --no-deps` under default features or `boot-led,log-usb,log-defmt`.
+- [x] #1 Both `commit_records(|bufs| ...)` closures (`emit()` and `try_emit_dump()`) contain no panic-forming macro; the "pipe refused a frame the headroom rule already admitted" case is reported out of the closure as a value returned beside `frame::WriteOutcome` -- deliberately NOT a fourth `WriteOutcome` variant and NOT a parallel outcome type -- and crashed on inside `commit_records` only after `RECORD_BUFS.lock` has returned, with today's message text preserved.
+- [x] #2 The tautological `debug_assert!(!encoded.truncated, ...)` is deleted (the pre-lock `body.len() > MAX_BODY` guard makes it unreachable), replaced by a comment naming that guard and a host test pinning `Encoded::truncated == (body.len() > MAX_BODY)` on both sides of the boundary.
+- [x] #3 Release behaviour is unchanged on both paths -- same counters bumped under the lock, same return values, same wire bytes -- and the post-lock check deliberately stays debug-profile-only, with the reason it diverges from TASK-045's unconditional stall panic written into `commit_records`' doc comment.
+- [x] #4 `write_hex` and `write_decimal` carry no runtime assert; every hex/decimal field width in frame.rs and dump.rs is pinned at compile time through one shared const helper owned by frame.rs; `T_MS_WRAP`'s fit is const-checked; prefix/trailer offsets derive from named constants asserted to tile `PREFIX_LEN`/`TRAILER_LEN`; emitted bytes are unchanged.
+- [x] #5 A durable machine check exists at `crates/asperitas-logging/tests/commit_path_no_panic.rs` (no such artifact exists at HEAD today), run by default-feature `cargo test --workspace`, that scans every `commit_records(` argument closure plus the transitively reachable encoder/console/dump functions for panic-forming tokens, asserts exactly one `RECORD_BUFS.lock(` call site, requires the post-lock `panic!` and `debug_assert!` to still exist so deletion cannot satisfy it, carries positive controls so a broken scanner cannot pass vacuously, and trips when a new locally-defined callee appears inside a lock closure.
+- [x] #6 That check was written BEFORE the conversions and observed failing on every site in the plan's inventory (four lexical sites: lib.rs:502, lib.rs:518, frame.rs:264, frame.rs:277); if the first red run reports a different set, reconcile the inventory before converting anything, and record the failure list in Implementation Notes.
+- [x] #7 A host test per converted site asserts the reported outcome rather than the crash -- the classification function's four-row truth table under default features -- and each such test's doc comment states why the crash itself is not host-observable (undefined `__critical_section_1_0_*` / `__embassy_time_now` at link time).
+- [x] #8 The pre-existing `manual_is_multiple_of` violation at usb.rs:421 is fixed, `nix develop -c cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings` passes, and that gate is added to both `.github/workflows/ci.yml` and `lefthook.yml`.
+- [x] #9 All existing gates pass: `cargo fmt --all --check`; `cargo clippy -p asperitas-logging --all-targets -- -D warnings`; `cargo clippy --workspace --all-targets -- -D warnings` with and without `--features asperitas-pod/pod-hw`; `cargo test -p asperitas-logging`; `cargo test --workspace`.
+- [x] #10 `cd firmware && nix develop -c cargo build --release --features seed3` and `nix develop -c make clippy FEATURES=seed3` succeed, and `git --no-ext-diff diff --stat` shows no change to `Cargo.lock` or `firmware/Cargo.lock`.
+- [x] #11 Docs are corrected per the plan's doc section (commit_records, try_emit_dump, write_hex/write_decimal, usb::emit_panic_record) with no NEW rustdoc warnings from `cargo doc -p asperitas-logging --no-deps` under default features or `boot-led,log-usb,log-defmt`.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -274,3 +274,88 @@ Pre-existing, invisible to every current gate, and the only thing standing betwe
 
 State explicitly: (a) the two remaining in-lock `debug_assert!`s in `try_emit_dump` are gone — one deleted as a provable tautology with a host test pinning the equivalence, one converted to a value reported out of the closure beside `frame::WriteOutcome` — an opaque carrier, deliberately not a fourth `WriteOutcome` variant and not a parallel outcome type — and crashed on in `commit_records` after the lock releases; (b) why the check there stays debug-profile while TASK-045's stall panic is unconditional (this one already reaches the wire as a counted drop; crashing would reset a live pedal for a refused dump chunk); (c) the encoder's two asserts became compile-time checks through one shared const helper, widths are now named constants that tile `PREFIX_LEN`/`TRAILER_LEN`, and deleting `write_decimal`'s guard also removed a latent all-profile `u32::pow` overflow; (d) the machine check is now a committed test that CI runs, that it scans `commit_records(` closures rather than `RECORD_BUFS.lock` (the funnel moved the bodies and the old grep would have passed vacuously), that it was written first and observed failing on exactly the four known sites, and that it cannot be satisfied by deleting the crashes; (e) that `clippy --features log-usb --lib -D warnings` is now green and wired into both gate files, and that it caught one pre-existing violation at usb.rs:421; (f) that release behaviour is unchanged on both paths (same counters, same return values, same bytes) and `Cargo.lock`/`firmware/Cargo.lock` are untouched; (g) that no part of this ticket was markable `HUMAN:` and why.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+**Step 1 red run (§2c), recorded before any conversion.** Command: `nix develop -c cargo test -p asperitas-logging --test commit_path_no_panic` at HEAD 8ff4318 with sources untouched.
+
+The token scan (`nothing_under_the_record_lock_can_panic`) reported **exactly** the four sites the plan's inventory predicted — no more, no fewer:
+
+- lib.rs:502 debug_assert!  (`!encoded.truncated`, tautology)
+- lib.rs:518 debug_assert!  (pipe refused an admitted frame)
+- frame.rs:264 debug_assert!  (hex field wider than a u32)
+- frame.rs:277 debug_assert!  (decimal value does not fit)
+
+Two other tests were also red, both expected and both by design:
+
+- `violations_still_crash_outside_the_lock` — the anti-deletion guard requires a `debug_assert!` after `RECORD_BUFS.lock` returns; none exists yet, so it fails until Step 2 lands. This is what stops the check being satisfied by deleting the crashes.
+- `no_unscanned_callee_reaches_the_record_lock` — reported two FALSE positives, reconciled per AC #6 before converting anything: `lib.rs:302 -> commit` and `frame.rs:365 -> write` are caller-supplied closure *parameters* (`commit_records`'s `commit`, `write_whole`'s `write` sink), invoked bare, matching unrelated `fn` definitions elsewhere (`Backend::write`, and a helper inside frame.rs's `mod tests`). Fixed by requiring a *barely callable* target — a module-scope `fn` — before a bare call counts as a callee, while `.method(` calls still resolve against every `fn` in sight. The tripwire now carries planted positive AND negative controls (a smuggled callee must trip it; a closure parameter must not), so a scanner that stopped collecting definitions cannot pass vacuously. After the fix it is green on unconverted sources, which is correct: there is no unscanned real callee under the lock today.
+
+## Implementation Notes
+
+### Deliberate deviations from the draft, all authorized by the plan
+
+- **AC #1's "with today's message text preserved"** cannot hold literally once the panic site moves.
+  `frame::write_whole` formats the size *inside* the sentence (`"pipe refused a {}-byte frame …"`); a
+  value carried out of the lock can only be `(message, amount)`, so the panic now reads `"record
+  commit invariant violated under RECORD_BUFS: pipe refused a frame the headroom rule had already
+  admitted (228 bytes)"`. Plan section 3(b) sanctions exactly this shape: sentence and byte count are
+  both intact, only their order changed.
+- **AC #5 names `--test record_lock_invariants`; the file name is what AC #5 pins**
+  (`tests/commit_path_no_panic.rs`), and cargo derives the test name from the file. Gates use
+  `--test commit_path_no_panic`.
+- **`dump_fits` is scanned, not listed.** The plan's transitive list omitted the one lock-callee that
+  calls into another module (`try_emit_dump` → `dump::dump_fits`). It is panic-free by construction
+  (saturating arithmetic), but "panic-free by inspection" is the claim being retired, so it is scanned
+  and its two width helpers are checked for real constants rather than the defaults.
+- **The tripwire fired on the way and was answered, not silenced.** The conversion added one new
+  callee reachable from a lock closure (`refusal_after_admission`, called from `try_emit_dump`'s). The
+  check failed on it as designed; it became a scanned region rather than an allowlist entry.
+
+### Reconciled inventory at red: same four sites, plus two scanner bugs found by the controls
+
+Red run reported lib.rs:502, lib.rs:518, frame.rs:264, frame.rs:277 — the predicted set, no additions.
+Two further failures were the check's own controls working: the anti-deletion guard (no post-lock
+`debug_assert!` existed yet — correct mid-conversion) and the tripwire, which flagged `commit` and
+`write`. Those are closure *parameters* invoked bare through `emit`'s signature, not locally-defined
+callees; the tripwire was conflating "every definition" with "every free function". Fixed by splitting
+`Definitions` into `free` (column-0 items, what a bare call can resolve to) and `any` (what a method
+call can), with planted positive and negative controls pinning both halves.
+
+### Verification results
+
+| Gate | Result |
+|---|---|
+| `cargo fmt --all --check` | pass |
+| `cargo clippy -p asperitas-logging --all-targets -- -D warnings` | pass |
+| `cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings` | pass (usb.rs:421 fixed; gate added to ci.yml + lefthook pre-commit/pre-push) |
+| `cargo clippy --workspace --all-targets -- -D warnings` | pass |
+| `… --features asperitas-pod/pod-hw` | pass |
+| `cargo test -p asperitas-logging` | 41 lib + 6 machine-check + 38 console_frame + 33 console_dump + 1 doctest |
+| `cargo test --workspace` | pass |
+| `cargo test --workspace --features asperitas-pod/pod-hw` | pass |
+| `cd firmware && nix develop -c cargo build --release --features seed3` | pass |
+| `nix develop -c make clippy FEATURES=seed3` | pass |
+| `cargo doc -p asperitas-logging --no-deps` | 4 warnings default / 14 with features — identical to the HEAD baseline measured in a worktree at 8ff4318 |
+| `git --no-ext-diff diff --stat Cargo.lock firmware/Cargo.lock` | empty |
+
+### What the machine check actually enforces
+
+Six tests. `nothing_under_the_record_lock_can_panic` scans two closures and ten functions against
+forbidden tokens, masking comments and strings first (a prose `{` or an apostrophe in a doc comment
+would otherwise desynchronize brace matching; masking replaces non-whitespace with spaces so line
+numbers survive). Positive controls: `masking_blanks_prose_without_moving_lines` proves the masker
+empties prose while holding every line number, and `token_finder_detects_a_planted_violation` plants an
+unmasked `debug_assert!` into a copy of the source and requires the scan to report it — without that, a
+scanner that masked everything would pass vacuously.
+
+Two things worth flagging to anyone who edits these regions later:
+
+- The check compares *counts*, not sets, between scanned and required callees, so a callee present
+  twice and allowlisted once still trips. Deliberate; loosen only with a reason.
+- `emit`'s caller-supplied `fill` closure still runs inside the lock, so a panicking `Display` impl
+  would mask PRIMASK just as this ticket defines the hazard, and no lexical scan can see it because it
+  lives in whatever the caller closes over. Recorded in `emit`'s doc comment; hoisting formatting out of
+  the lock is its own ticket, not a footnote to this one.
+<!-- SECTION:NOTES:END -->
