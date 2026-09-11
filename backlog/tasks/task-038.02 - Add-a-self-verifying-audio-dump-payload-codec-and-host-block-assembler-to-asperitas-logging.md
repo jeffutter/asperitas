@@ -3,11 +3,11 @@ id: TASK-038.02
 title: >-
   Add a self-verifying audio dump payload codec and host block assembler to
   asperitas-logging
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 11:33'
-updated_date: '2026-09-11 01:29'
+updated_date: '2026-09-11 01:49'
 labels:
   - planned
 dependencies:
@@ -48,13 +48,13 @@ Finally, a host-only reassembler example, so the format is proven by a program b
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A `dump` module in `crates/asperitas-logging` compiles for both no_std and host, defines the `AUDIO blk=<4hex> n=<2hex> c=<2hex> d=<b64>` and `AUDEND blk= n= bytes=<dec> crc16=<4hex>` bodies inside the existing v1 frame grammar, and leaves `MAX_BODY`, `MAX_FRAME`, `sanitize_byte`, and the CRC polynomial untouched.
-- [ ] #2 Base64 encode and decode are implemented without allocation and without `std`, strictly canonical (padding required, non-zero trailing bits rejected), and a host property test proves byte-equality with the `base64` crate as a dev-dependency-only oracle over random inputs plus exhaustive trailing-symbol enumeration; a full-size `AUDIO` record carries exactly 129 raw bytes in 172 base64 characters.
-- [ ] #3 A host assembler accepts a block only when all `n` chunks arrived and the CRC-16 of the reassembled raw bytes matches `AUDEND`; on failure it names the missing chunk indices rather than returning partially assembled data, and it separates a repeated identical chunk (idempotent) from a repeated chunk carrying different bytes (conflict — block refused, conflict named).
-- [ ] #4 Loss is proven by test, not asserted in prose: deleting any whole record from a synthetic stream is detected by sequence, a corrupted body fails the block CRC, chunks arriving out of order reassemble byte-identically, and a stream stripped of its leading `~` markers produces no completed block at all — consistent with the blind spot documented at the top of `frame.rs`.
-- [ ] #5 The ring-capacity policy is a pure function the firmware calls, and a host test proves the invariant that a dump commit never consumes the last `MAX_FRAME` bytes of the pipe — checked over every starting occupancy `0..=LOG_PIPE_SIZE` — so a maximum-size log or status record always has room and `dropped_full` cannot be blamed on the dump.
-- [ ] #6 A host test computes useful-bytes-per-wire-byte and wire cost per second of capture from the same constants the encoder uses, pinned at 129 raw / 227 wire bytes = 0.568 useful (745 records/s, ~169 kB/s for mono 16-bit capture at 96,000 B/s), so the arithmetic quoted in documentation cannot drift away from the code.
-- [ ] #7 `examples/dump_reassemble.rs` turns a captured console byte stream into raw PCM plus a manifest, exits non-zero on any incomplete or mismatched block, and is exercised in CI from synthetic streams containing truncation, corruption, and lost start markers with no board attached.
+- [x] #1 A `dump` module in `crates/asperitas-logging` compiles for both no_std and host, defines the `AUDIO blk=<4hex> n=<2hex> c=<2hex> d=<b64>` and `AUDEND blk= n= bytes=<dec> crc16=<4hex>` bodies inside the existing v1 frame grammar, and leaves `MAX_BODY`, `MAX_FRAME`, `sanitize_byte`, and the CRC polynomial untouched.
+- [x] #2 Base64 encode and decode are implemented without allocation and without `std`, strictly canonical (padding required, non-zero trailing bits rejected), and a host property test proves byte-equality with the `base64` crate as a dev-dependency-only oracle over random inputs plus exhaustive trailing-symbol enumeration; a full-size `AUDIO` record carries exactly 129 raw bytes in 172 base64 characters.
+- [x] #3 A host assembler accepts a block only when all `n` chunks arrived and the CRC-16 of the reassembled raw bytes matches `AUDEND`; on failure it names the missing chunk indices rather than returning partially assembled data, and it separates a repeated identical chunk (idempotent) from a repeated chunk carrying different bytes (conflict — block refused, conflict named).
+- [x] #4 Loss is proven by test, not asserted in prose: deleting any whole record from a synthetic stream is detected by sequence, a corrupted body fails the block CRC, chunks arriving out of order reassemble byte-identically, and a stream stripped of its leading `~` markers produces no completed block at all — consistent with the blind spot documented at the top of `frame.rs`.
+- [x] #5 The ring-capacity policy is a pure function the firmware calls, and a host test proves the invariant that a dump commit never consumes the last `MAX_FRAME` bytes of the pipe — checked over every starting occupancy `0..=LOG_PIPE_SIZE` — so a maximum-size log or status record always has room and `dropped_full` cannot be blamed on the dump.
+- [x] #6 A host test computes useful-bytes-per-wire-byte and wire cost per second of capture from the same constants the encoder uses, pinned at 129 raw / 227 wire bytes = 0.568 useful (745 records/s, ~169 kB/s for mono 16-bit capture at 96,000 B/s), so the arithmetic quoted in documentation cannot drift away from the code.
+- [x] #7 `examples/dump_reassemble.rs` turns a captured console byte stream into raw PCM plus a manifest, exits non-zero on any incomplete or mismatched block, and is exercised in CI from synthetic streams containing truncation, corruption, and lost start markers with no board attached.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -215,6 +215,26 @@ That leaves no margin at all. `COUNT_FIELD_MODULUS` is 256 and `MAX_CHUNKS_PER_B
 ### Commit state
 
 This run committed: the finalization notes above, the new `task-038.02.05` leaf file and its dependency edge on the parent, a comment on TASK-038.03 about the stale arithmetic, and the status flip on TASK-043 (Blocked → To Do) that an earlier run had left dirty.
+
+## Closure 2026-09-11
+
+All five leaves are Done, so all seven criteria are now checked against tests rather than prose. The mapping and citations are the ones recorded above by the finalization run; what changed since is TASK-038.02.05, which supplies the truncation half of #7 that #1–#6 never touched.
+
+| AC | Proven by | Where |
+|---|---|---|
+| #1 | `pub mod dump` ungated in `lib.rs:205`; bodies at `dump.rs:596`/`:650`; geometry pinned by `const _: () = assert!(…)` at `:474-483`; frame constants untouched by any leaf (`git log -- frame.rs` ends at .03's `pub(crate)` widening) | .01, .02 |
+| #2 | oracle-equivalence property test + exhaustive trailing-symbol enumeration against `base64 0.23.1` as a dev-dependency; 129 raw in 172 chars asserted at compile time (`FULL_B64_CHARS == 172`, `CHUNK_RAW == 129`) | .01 |
+| #3 | completion requires all `n` chunks and a matching block CRC; missing indices named; byte-identical repeat idempotent vs. differing repeat refused | .03 |
+| #4 | deletion / corruption / reordering / marker-stripping attacks in `tests/console_dump.rs` | .03 |
+| #5 | `RESERVE`/`dump_fits` swept over every occupancy `0..=LOG_PIPE_SIZE`, plus the interleave test showing log traffic survives a saturated dump | .04 |
+| #6 | efficiency arithmetic computed from the encoder's own constants and pinned at 129/227 = 0.568 | .02 |
+| #7 | `examples/dump_reassemble.rs --selftest` in CI (`.github/workflows/ci.yml:51-52`), now **11** cases: corruption, marker-stripping, and both mid-frame cuts added by .05 | .03, **.05** |
+
+Re-verified on this tree after .05 landed: `cargo fmt --all --check`; `dump_reassemble --selftest` -> 11 cases, exit 0; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test -p asperitas-logging --all-targets` -> 41 + 6 + 38 + 33 green; `cargo test --workspace` green; `cd firmware && cargo build --release --features seed3` clean.
+
+**Why the umbrella ran in the same session as its last leaf.** This ticket has no work of its own beyond its children, and AC #7 could not be checked honestly while .05 sat open — parking again would have been a no-op against dependencies already recorded. So the leaf was landed first, under its own ID and commit (`Task-Id: TASK-038.02.05`), and only then were the umbrella's boxes ticked.
+
+**Still true after closure:** every wire number here is predicted, not measured. Measured throughput belongs to TASK-038.05 (@human, needs the board); the async retry/backoff loop and the capture ring's block-size choice belong to TASK-038.03, which must derive chunks-per-block from `dump::CHUNK_RAW` rather than inherit the stale 150-byte figures flagged above.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -232,3 +252,13 @@ Downstream consequence for other tickets: the efficiency figure any document may
 Four leaf sub-tickets created (.01 codec, .02 grammar, .03 assembler + example + CI, .04 pipe reserve), all @agent, all planned and Dev Ready, chained by dependency because they share `src/dump.rs` and `tests/console_dump.rs`. They carry complete plans rather than descriptions only because research resolved every open question — the remaining work is writing code, not deciding shape.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Umbrella closed. All five leaves Done: the strict canonical base64 codec proven symbol-for-symbol against `base64 0.23.1` including exhaustive trailing-symbol enumeration (.01); the `AUDIO blk/n/c/d` and `AUDEND` grammar with chunk geometry derived at compile time from the writer's own byte templates and pinned at 129 raw bytes in 172 characters inside a 227-byte frame (.02); `BlockAssembler` plus the adversarial integrity suite and `examples/dump_reassemble.rs --selftest` wired into CI (.03); the pipe-reserve predicate and commit path swept over every occupancy `0..=LOG_PIPE_SIZE` against a real embassy-sync ring (.04); and the two mid-frame truncation cases that closed AC #7's last gap, so an interrupted capture is now tested through the shipped read loop rather than asserted in prose (.05).
+
+`MAX_BODY`, `MAX_FRAME`, `sanitize_byte` and the CRC polynomial are untouched — the format lives entirely inside v1. Useful efficiency is 0.568, computed from the encoder's constants by a test rather than quoted from a plan, and the record whose leading `~` is lost still produces no integrity failure, which the marker-stripping case proves is detected by completing nothing at all.
+
+Re-verified green on this tree: fmt, workspace clippy with `-D warnings`, the whole host test suite, the 11-case selftest, and the firmware `--features seed3` release build. What this ticket does *not* claim: any measured throughput. Every wire number here is predicted, and TASK-038.05 replaces them with numbers off a board.
+<!-- SECTION:FINAL_SUMMARY:END -->
