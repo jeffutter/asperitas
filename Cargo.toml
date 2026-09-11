@@ -2,3 +2,11 @@
 members = ["crates/*"]
 exclude = ["firmware"]
 resolver = "2"
+
+# Read by rustdoc only: `cargo build/check/clippy/test` never see this table, so a plain
+# `cargo doc` fails on a broken cross-reference without anyone setting RUSTDOCFLAGS. Members
+# opt in individually with `[lints] workspace = true`; `firmware/` is excluded above and so
+# inherits nothing.
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"

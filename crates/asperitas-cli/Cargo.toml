@@ -20,3 +20,7 @@ libm = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+
+# Inherit the workspace rustdoc denies (see root Cargo.toml).
+[lints]
+workspace = true

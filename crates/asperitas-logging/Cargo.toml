@@ -49,8 +49,5 @@ proptest = "1"
 embassy-sync = "0.6"
 base64 = "0.23"
 
-# Read by rustdoc only: `cargo build/check/clippy/test` never see this table, so a plain
-# `cargo doc` fails on a broken cross-reference without anyone setting RUSTDOCFLAGS.
-[lints.rustdoc]
-broken_intra_doc_links = "deny"
-private_intra_doc_links = "deny"
+[lints]
+workspace = true

@@ -40,16 +40,17 @@ pre-push:
       run: cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
       forward_stderr: true
 
-    # Cargo.toml's [lints.rustdoc] denies the two cross-reference lints for this crate alone,
-    # from the source tree only. These two commands are the other layer: RUSTDOCFLAGS makes
-    # *every* rustdoc warning fatal, and the second one documents the feature combination the
-    # device build actually uses, without which usb.rs and led.rs are never documented at all.
+    # Root Cargo.toml's [workspace.lints.rustdoc] denies the two cross-reference lints for every
+    # member that opts in, from the source tree only. These two commands are the other layer:
+    # RUSTDOCFLAGS makes *every* rustdoc warning fatal across the whole workspace. Neither run is
+    # a superset of the other -- default features document logging's fn.init() but not usb.rs,
+    # led.rs or panic_handler.rs; --all-features gains those and loses fn.init().
     doc-links:
-      run: RUSTDOCFLAGS="-D warnings" cargo doc -p asperitas-logging --no-deps
+      run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
       forward_stderr: true
 
-    doc-links-device:
-      run: RUSTDOCFLAGS="-D warnings" cargo doc -p asperitas-logging --no-deps --features boot-led,log-usb,log-defmt
+    doc-links-all-features:
+      run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
       forward_stderr: true
 
     test:
