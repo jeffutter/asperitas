@@ -3,11 +3,11 @@ id: TASK-038.03
 title: >-
   Build rig firmware binary: interrupt-executor audio, stimulus playback, SDRAM
   capture ring
-status: Dev Ready
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:37'
-updated_date: '2026-09-11 13:33'
+updated_date: '2026-09-11 13:39'
 labels:
   - planned
 dependencies:
@@ -168,6 +168,18 @@ When both leaves are Done, this umbrella verifies rather than builds:
 ## Corrections applied by the 2026-09-11 planning run
 
 Everything above about dump arithmetic predates TASK-038.02 landing and is wrong: CHUNK_RAW is 129, so a 32 KiB block is 255 chunks plus AUDEND = 256 records, worst case 57,788 wire bytes, ~750 records/s at 0.568 efficiency (~169 kB/s). Separately, sdram::SDRAM_SIZE is 64 MiB at the pinned commit ca9bcc9 (docs/reference/daisy-seed3.md line 17 confirms 64 MB on Seed3), so the 32 MiB ring is half the chip and CAPMAX headroom is a real 32 MiB. See the Implementation Plan for what each leaf now owns. Do not cite the 219-chunk or 146-kB/s figures anywhere.
+
+## Parked Blocked by an execution run (2026-09-11) — leaves not yet implemented
+
+This umbrella verifies, it does not build: its own plan says so, and all eleven ACs are mapped to TASK-038.03.01 or TASK-038.03.02. Both leaves are still To Do, so there is nothing here to integrate. Evidence from the tree, not from ticket statuses:
+
+- `firmware/src/bin/` contains blinky.rs, ledtest.rs, main.rs, panictest.rs, podtest.rs — **no rig.rs**, so AC #1/#2/#3/#5/#6/#8/#9/#10/#11 have no subject at all.
+- `crates/asperitas-logging/src/` contains console.rs, defmt_log.rs, dump.rs, frame.rs, led.rs, lib.rs, panic_handler.rs, spin_budget.rs, usb.rs — **no capture.rs** and no `pub mod capture`, so AC #4's geometry half and AC #7's host test do not exist.
+- Only prerequisite that *is* landed is TASK-038.02: dump.rs exports everything .01 needs as `pub` (CHUNK_RAW :435, MAX_CHUNKS_PER_BLOCK :444, MAX_BLOCK_BYTES :447, FULL_AUDIO_FRAME_LEN :460, MAX_AUDEND_BODY_LEN :463), so .01 has no hidden blocker behind this ticket.
+
+No follow-up ticket filed: the blocking work already exists as .01 and .02, both @agent and planned. Filing another would duplicate them.
+
+**Next actionable step:** execute TASK-038.03.01 (ready now, `backlog task list --ready`), then TASK-038.03.02 (blocked only by .01). When both are Done, this ticket resumes and runs the five-step integration check in its Implementation Plan — full workspace fmt/test/clippy plus the four stimulus cross-builds, `git diff --name-only` proving main.rs and podtest.rs untouched, a read of rig.rs against AC #2/#4/#5 for the three things each leaf could only see half of (no logging call in the audio callback, fence-then-store publish order, dump admission only via try_emit_dump with a Timer backoff), the CALLBACK_BYTES const-assert, and release-size/.bss deltas against the 86.13% baseline. Dependencies are recorded on this ticket so `backlog task list -s 'Blocked' --ready` will surface it the moment .02 lands.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
