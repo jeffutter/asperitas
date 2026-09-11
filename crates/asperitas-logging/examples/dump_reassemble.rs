@@ -44,10 +44,12 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::process::exit;
 
 use asperitas_logging::dump::{
-    self, Abandoned, Action, BlockAssembler, Failure, Finish, Tally, CHUNK_RAW,
+    self, Abandoned, Action, BlockAssembler, Failure, Finish, Tally, AUDIO_HEADER_LEN, CHUNK_RAW,
     FULL_AUDIO_FRAME_LEN, MAX_CHUNKS_PER_BLOCK,
 };
-use asperitas_logging::frame::{encode, Decoder, Stats, MAX_BODY, MAX_FRAME};
+use asperitas_logging::frame::{
+    encode, Decoder, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
+};
 use asperitas_logging::Level;
 
 /// Bytes requested per read. Larger than [`MAX_FRAME`] on purpose: a reader that happens to align
@@ -506,6 +508,18 @@ fn fail_with(code: i32, message: &str) -> ! {
 /// the assembler never sees the damage — right behaviour, wrong layer being tested. Corrupting before
 /// encoding reproduces what a device fault actually looks like: a frame that validates perfectly while
 /// carrying wrong samples, catchable only by the block checksum and the missing list.
+///
+/// Two cases damage the *transport* instead: they stop the stream mid-frame, once inside a block that
+/// never closes and once after every block closed. Those exercise a different handoff — the
+/// [`Decoder::finish`] / [`BlockAssembler::finish`] pair at the bottom of [`consume`], which runs
+/// whenever a person presses Ctrl-C during `cat /dev/cu.usbmodem… > capture.txt` or pulls the cable.
+/// The two shapes must be reported differently: the first has lost samples no checksum can prove were
+/// ever sent, the second has lost nothing but a partial line.
+///
+/// Exit codes are asserted through [`Summary::verdict_is_dirty`] rather than by piping a generated
+/// capture through this binary: the synthetic streams live here, so an external test would mean
+/// committing either a throwaway generator or a fixture blob to cover the three straight-line `if`s
+/// in [`main`], whose predicate is exactly the one these checks assert.
 mod selftest {
     use super::*;
     use asperitas_logging::frame::crc16_ccitt;
@@ -533,13 +547,25 @@ mod selftest {
     /// Block ids used only by the single-block cases, kept clear of `0..BLOCKS`.
     const AUDEND_ONLY_BLOCK: u32 = 7;
     const LATE_BLOCK: u32 = 3;
+    /// Id of the block begun but never delivered in the cut-after-close case: a half-written frame for
+    /// a block nobody else declared cannot be mistaken for a chunk an earlier block still owes.
+    const PARTIAL_NEXT_BLOCK: u32 = 4;
+
+    /// The block a mid-block cut lands in. The last one, so the blocks ahead of it are complete and a
+    /// refusal cannot be blamed on a capture that never got going.
+    const LAST_BLOCK: u32 = BLOCKS as u32 - 1;
+
+    /// Chunk of [`LAST_BLOCK`] whose frame the cut lands inside. Deliberately not the final chunk:
+    /// everything from here to the block's summary then fails to arrive, so the missing list has to
+    /// name more than the single record the host lost sight of.
+    const CUT_CHUNK: u16 = 1;
 
     /// What a case asserts: its summary, the samples that case assembled, and the samples the clean
     /// stream assembled. Cases that care about sample bytes compare the two; the rest ignore both.
     type Check = fn(summary: &Summary, produced: &[u8], expected: &[u8]) -> Result<(), String>;
 
     pub(super) fn run() -> i32 {
-        let cases: [(&str, Vec<u8>, Check); 9] = [
+        let cases: [(&str, Vec<u8>, Check); 11] = [
             ("clean", clean_stream(), expect_clean),
             (
                 "record-deleted",
@@ -572,6 +598,16 @@ mod selftest {
                 "late-chunk-after-close",
                 late_chunk_stream(),
                 expect_late_reported,
+            ),
+            (
+                "stream-cut-inside-an-open-block",
+                cut_mid_block_stream(),
+                expect_cut_mid_block,
+            ),
+            (
+                "stream-cut-after-everything-closed",
+                cut_after_close_stream(),
+                expect_cut_after_close,
             ),
         ];
         let expected = clean_pcm();
@@ -785,6 +821,62 @@ mod selftest {
         stream
     }
 
+    /// A capture that stops mid-frame inside a chunk of the block that never closes: a cable pulled,
+    /// or Ctrl-C landing between two writes.
+    ///
+    /// Every whole record before the cut is delivered, including the whole of the preceding blocks, and
+    /// then the bytes run out half-way through a base64 body with no `AUDEND` anywhere behind it.
+    fn cut_mid_block_stream() -> Vec<u8> {
+        let built = blocks(None);
+        let mut stream = Vec::new();
+        for block in &built[..LAST_BLOCK as usize] {
+            for record in &block.chunks {
+                stream.extend_from_slice(record);
+            }
+            stream.extend_from_slice(&block.summary);
+        }
+
+        let open = &built[LAST_BLOCK as usize];
+        for record in &open.chunks[..CUT_CHUNK as usize] {
+            stream.extend_from_slice(record);
+        }
+        stream.extend_from_slice(cut_inside_payload(&open.chunks[CUT_CHUNK as usize]));
+        stream
+    }
+
+    /// A capture that stops mid-frame *after* the final `AUDEND`: every block closed, and the reader
+    /// lost a partial line on the way.
+    ///
+    /// The other half of [`cut_mid_block_stream`]'s distinction. This transfer completed, so the
+    /// honest report is clean-plus-a-byte-count rather than loss; the fragment is the first chunk of a
+    /// block nobody declared, which is how an interrupted next block looks on a real port.
+    fn cut_after_close_stream() -> Vec<u8> {
+        // The sequence number the device would have used next, so the fragment reads as the start of
+        // the following block rather than a replay of one already counted.
+        let mut seq = 1 + BLOCKS as u32 * (BLOCK_CHUNKS as u32 + 1);
+        let next = build_block(&mut seq, PARTIAL_NEXT_BLOCK, None);
+        let mut stream = clean_stream();
+        stream.extend_from_slice(cut_inside_payload(&next.chunks[0]));
+        stream
+    }
+
+    /// The leading part of a chunk record's base64 payload, framing intact: what a host holds when a
+    /// writer is cut off mid-frame.
+    ///
+    /// The offset comes from the grammar rather than from a counted constant, because the claim these
+    /// cases make depends on the cut landing *inside* a frame. A literal offset that a wider
+    /// [`CHUNK_RAW`] slid past the end of the record would quietly turn both cases into the
+    /// whole-record deletion [`deleted_record_stream`] already covers.
+    fn cut_inside_payload(record: &[u8]) -> &[u8] {
+        let payload_start = PREFIX_LEN + AUDIO_HEADER_LEN;
+        let payload_end = record.len() - TRAILER_LEN;
+        debug_assert!(
+            payload_end > payload_start,
+            "generated chunk carries no payload to cut inside"
+        );
+        &record[..payload_start + (payload_end - payload_start) / 2]
+    }
+
     /// One sample byte corrupted inside the first block. Every frame still validates, so only the
     /// block checksum stands between this capture and a false "complete".
     fn corrupted_stream() -> Vec<u8> {
@@ -890,6 +982,92 @@ mod selftest {
             "one manifest row per block",
         )?;
         require(produced == expected, "assembled samples equal the source")
+    }
+
+    /// A capture cut off inside a block that never closed. The un-delivered samples are gone and
+    /// nothing can prove they were ever sent, so the block is abandoned rather than refused, every
+    /// index from the cut onwards is named, and the verdict is dirty.
+    fn expect_cut_mid_block(
+        summary: &Summary,
+        produced: &[u8],
+        _expected: &[u8],
+    ) -> Result<(), String> {
+        require(
+            summary.tally.blocks_completed == BLOCKS - 1,
+            "the blocks that closed before the cut still complete",
+        )?;
+        require(summary.refused.is_empty(), "no block is refused")?;
+        require(summary.abandoned.len() == 1, "one abandoned block")?;
+        let abandoned = summary.abandoned[0];
+        require(
+            abandoned.block == LAST_BLOCK,
+            "the abandoned block is the one the cut landed in",
+        )?;
+        require(
+            abandoned.missing.count() == (BLOCK_CHUNKS - CUT_CHUNK) as usize,
+            "every chunk from the cut onwards is named",
+        )?;
+        for index in CUT_CHUNK..BLOCK_CHUNKS {
+            require(
+                abandoned.missing.contains(index),
+                "the missing list names a chunk that never arrived",
+            )?;
+        }
+        for index in 0..CUT_CHUNK {
+            require(
+                !abandoned.missing.contains(index),
+                "a chunk that arrived whole is not named missing",
+            )?;
+        }
+        require(
+            produced == expected_without(LAST_BLOCK as usize),
+            "an abandoned block hands out none of its bytes",
+        )?;
+        require(
+            summary.stats.bad_frames == 0,
+            "a frame that never ended is not a bad frame",
+        )?;
+        require(
+            summary.stats.discarded_bytes > 0,
+            "the half frame is charged to discarded bytes",
+        )?;
+        require(
+            summary.law_holds(),
+            "the accounting law balances across the cut",
+        )?;
+        require(summary.verdict_is_dirty(), "a cut capture is not clean")
+    }
+
+    /// A capture cut off after every block closed: the transfer completed and only a partial line was
+    /// lost, so the verdict stays clean and the lost bytes get a number instead of a refusal. Without
+    /// that number a person cannot tell their own Ctrl-C from a device fault.
+    fn expect_cut_after_close(
+        summary: &Summary,
+        produced: &[u8],
+        expected: &[u8],
+    ) -> Result<(), String> {
+        require(
+            summary.tally.blocks_completed == BLOCKS,
+            "every closed block completes",
+        )?;
+        require(summary.refused.is_empty(), "nothing refused")?;
+        require(
+            summary.abandoned.is_empty(),
+            "a cut after the last summary abandons nothing",
+        )?;
+        require(produced == expected, "the cut costs no samples")?;
+        require(
+            summary.stats.discarded_bytes > 0,
+            "the cut is visible as discarded bytes",
+        )?;
+        require(
+            summary.law_holds(),
+            "the accounting law balances across the cut",
+        )?;
+        require(
+            !summary.verdict_is_dirty(),
+            "a capture that delivered everything it framed is clean",
+        )
     }
 
     /// A deleted record is named by index, and the block around the hole yields no samples at all.
