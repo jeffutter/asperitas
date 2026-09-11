@@ -3,7 +3,7 @@ id: TASK-043
 title: >-
   Chore: clear the 7 pre-existing rustdoc broken intra-doc link warnings in
   asperitas-logging
-status: In Progress
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-10 04:59'
