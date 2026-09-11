@@ -341,10 +341,10 @@ path on the device chunks to 64.
 ### Flashing and logging over an ST-Link probe
 
 The Seed3 exposes SWD/JTAG pads. The 10-pin connector pinout is identical to earlier
-Seeds; there are additional pads matching the 14-pin ST-LINK-V3MINIE, present only for
-mechanical alignment — **the extra pins are not wired up**. Whether the 10-pin footprint is
-physically reachable with the Seed seated in the Pod is unmeasured; TASK-037 records the
-attachment method actually used.
+Seeds — including **pin 10 being nRESET**, whose net is traced later in this section; there
+are additional pads matching the 14-pin ST-LINK-V3MINIE, present only for mechanical alignment — **the
+extra pins are not wired up**. Whether the 10-pin footprint is physically reachable with the Seed seated
+in the Pod is unmeasured; TASK-037 records the attachment method actually used.
 
 The probe for this bench is an ST-Link V3 MINIE. As of 2026-09-10 no probe has been attached to
 this board at all, which is what TASK-037 exists to change.
@@ -530,11 +530,57 @@ unchanged. Other options stay open: `PROBE_EXTRA="--speed 1000"` slows the SWD c
 `make probe-log` sidesteps the question entirely by attaching to an already-flashed board with no
 reset at all. TASK-037 records which of those worked here.
 
-One question decides how much any of this matters to this board, and nobody has answered it yet:
-**does the Seed drive nRESET through a reset supervisor or a buffer, or just RC plus the button?** In
-#3516 the root cause was precisely a supervisor loading the probe's output. That is a look at the
-schematic, not a bench session, so it is TASK-050. Until that lands, treat the whole failure mode as
-possible rather than likely.
+**What actually hangs off nRESET.** The question that decides how much the paragraph above matters to
+this board is whether the Seed drives nRESET through a reset supervisor or a logic buffer, or just a
+pull-up plus the front-panel button. Part of the answer is a dead end worth recording: **there is no
+Seed3 schematic to read.** Electrosmith publishes a databrief, a pinout PDF and CSV, 3D models and a
+compliance zip for the Seed3 and nothing else; every plausible schematic key against their CDN returns
+the bucket's key-absent response, and archived copies of the documentation page list the same five
+assets, so a drawing was never published and quietly withdrawn. The databrief carries no reset content
+either — extraction finds `TAC5242` once and `STM32H750`, and zero occurrences of `RESET`, `NRST` or
+`supervisor` in its 38 pages. The full search, including the leads that came up empty, is kept in
+[seed3-schematic-search-log.md](./seed3-schematic-search-log.md) so nobody re-runs it.
+
+So the net gets traced on the drawings that *are* public, each cited by the revision and date printed
+in its own title block. All four name the net `RESET`:
+
+| Drawing | Sheet date | Everything drawn on the `RESET` net |
+|---|---|---|
+| `ES_Daisy_Seed_Rev4.pdf` — full, 4 sheets | 2020-06-08 | `R19` 10 K → `+3V3_D`; `S3` PTS815 button → GND; MCU `NRST`; `P6` mini-JTAG header pin 10. No capacitor. |
+| `ES_Daisy_Seed_Rev7.pdf` — reduced | 2024-02-01 | The same three (`R19` 10 K, `S3` PTS815, `P6` pin 10) **plus `C32` 100 nF → GND**. |
+| `ES_Daisy_Seed2_DFM_Rev5-REDUCED.pdf` | 2025-02-17 | `R1` 10 K → `+3V3_D`; `S1` button → GND; `P8` `M05X2MINIJTAG` pin 10; MCU `NRST`. No capacitor. |
+| `ES_Daisy_Patch_SM_Schematic.pdf` | 2024-02-08 | `R1` 10 K → `+3V3_D`; `S1` button → GND; `P8` pin 10. |
+
+In every one of them the MCU's `NRST` pin runs straight to that net name with nothing drawn in between,
+and the debug header's pin 10 — standard Cortex Debug nRESET — is the same net as the front-panel
+button. Two traps along the way. The tokens printed on the `NRST` wire beside the BGA symbol (`J1`, with
+`C6` and `D6` on the neighbouring `PDR_ON` and `BOOT0`) are UFBGA-169 ball coordinates, not jumpers or
+components; a `J`-looking designator on a reset wire here means "ball J1", not "jumper". And the Pod
+adds nothing: the Daisy Pod schematic (2022-10-27) contains no reset net at all, so doing this bench
+work with the module seated in a Pod changes none of the analysis below.
+
+Electrically that is the benign case. #3516's MIC6315 was a second *driver* on the line, actively
+fighting the probe, with a 74-series buffer behind it that the STM32 input can't tolerate being driven
+against; revising that circuit is what made under-reset work there. Here the probe's nRESET driver has
+to sink nothing but the pull-up — 3.3 V across 10 KΩ is ≈0.33 mA — plus one RC time constant while it
+discharges the 100 nF Rev7 cap through that same 10 KΩ (τ ≈ 1 µs, and the fall is the probe's own drive,
+not a resistor divider). There is no second driver to fight and no series element keeping the probe from
+winning.
+
+**Plausible or ruled out?** On the circuit that is actually drawn, ruled out: none of these boards has a
+supervisor, buffer, gate, diode or transistor on nRESET, in any of four drawings spanning five years.
+On the Seed3 itself the finding is an inference, not a measurement, and two things limit it. The Seed3
+drawing is unpublished, and three of the four sheets above are explicitly *reduced* — Electrosmith's
+public sheets omit parts on purpose, so the absence of a supervisor there is weaker evidence than the
+presence of the 10 KΩ, the button and the capacitor. Against that, the Seed3 is documented as the same
+MCU in the same footprint with a new codec and a new USB connector, and the reset net belongs to the
+part nobody says changed. So: **treat `--connect-under-reset` as likely to work on this board, not as
+known to work.** If it fails anyway, suspect the probe side first — V3 firmware below 3.2, or a V3MINIE
+still enumerating in MassStorage mode — before suspecting a supervisor that no Seed has ever had.
+
+That does not retire the try-both-ways advice above. probe-rs's FAQ recommends it regardless of circuit,
+because some parts simply don't support being attached under reset; a clean bill of electrical health
+for the reset net removes one suspect, not the whole class.
 
 ### What each channel loses
 
