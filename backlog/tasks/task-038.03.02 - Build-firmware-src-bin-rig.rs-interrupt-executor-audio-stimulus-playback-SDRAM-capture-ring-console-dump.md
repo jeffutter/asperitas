@@ -3,11 +3,11 @@ id: TASK-038.03.02
 title: >-
   Build firmware/src/bin/rig.rs: interrupt-executor audio, stimulus playback,
   SDRAM capture ring, console dump
-status: To Do
+status: In Progress
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-11 13:28'
-updated_date: '2026-09-11 15:27'
+updated_date: '2026-09-11 16:54'
 labels:
   - task
   - planned
@@ -19,6 +19,7 @@ modified_files:
   - .github/workflows/ci.yml
   - crates/asperitas-logging/src/console.rs
   - crates/asperitas-logging/src/lib.rs
+  - crates/asperitas-logging/src/spin_budget.rs
   - docs/reference/daisy-seed3.md
 parent_task_id: TASK-038.03
 priority: high
@@ -47,18 +48,18 @@ Out of scope: host-initiated control (TASK-032), QSPI excerpt playback (TASK-038
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 firmware/src/bin/rig.rs exists and builds under CIs command cargo build --release --features seed3, and git diff --name-only shows firmware/src/bin/main.rs and podtest.rs untouched, so the human-verified podtest output contract from TASK-018.04 cannot regress.
-- [ ] #2 Audio runs on a dedicated InterruptExecutor pended on SAI1 with embassy-executors executor-interrupt feature enabled, while the USB drain, LED blink task, CAPSTAT emitter and dump writer stay on the thread executor. The priority assignment is stated in code, the comment cites upstream examples/looper.rs lines 27-32 and 129-134 at the pinned commit ca9bcc9, and records why the SAI1 vector is free (the audio driver binds DMA1_CH0/CH1, audio.rs:26-28). The numeric relationship between the DMA IRQ priority and the executor priority is checked against embassy-stm32 0.6.0 and the result recorded either way.
+- [ ] #2 Audio runs on a dedicated InterruptExecutor pended on SAI1 with embassy-executor's executor-interrupt feature enabled, while the USB drain, LED blink task, CAPSTAT emitter and dump writer stay on the thread executor. The type carries no const-generic parameter in 0.10 (InterruptExecutor<1> does not compile), start() returns a SendSpawner and unmasks the IRQ itself, so the priority is set before it. The comment cites upstream examples/looper.rs lines 27-31 and 132-134 at the pinned commit ca9bcc9, and records why the SAI1 vector is free (the audio driver binds DMA1_CH0/CH1, audio.rs:26-29, and embassy-stm32's SAI binds only DMA lines). The numeric relationship between the DMA IRQ priority and the executor priority is recorded with its source: Config::default() ships dma_interrupt_priority P0 (embassy-stm32 src/lib.rs:362), which outranks the P6 executor, and that direction is required because the DMA ISR is what pends SAI1.
 - [ ] #3 Stimulus kind is a compile-time selection via cargo features stim-sine, stim-ess and stim-pulse, with sine at -20 dBFS when nothing else is set, and mutually-exclusive selection enforced by a const assert. CI builds all four combinations so none can rot. The device emits exactly one RIGCFG record whose payload embeds the generators own describe() output plus sample rate, capture format, block geometry and cpu_hz, so no second description grammar exists.
 - [ ] #4 Input capture stores the loop channel as 16-bit mono into the ring defined by asperitas_logging::capture, publishing each block through Filling -> Full -> Dumping -> Free using that modules transition table, with samples written before the index that publishes them. The producer writes only blocks it found Free; when none are free it stops capturing and increments a visible overrun counter instead of overwriting a block being dumped. A const assert ties capture::FRAMES_PER_CALLBACK to daisy_embassy::audio::BLOCK_LENGTH, compared in samples rather than bytes: HALF_DMA_BUFFER_LENGTH counts 64 u32 words per callback (32 stereo frames) while CALLBACK_BYTES counts 64 bytes of one mono channel, so asserting those two figures equal would pass by coincidence and comparing either against HALF_DMA_BUFFER_LENGTH * 2 could never pass at all.
-- [ ] #5 Per-callback work is bounded to one contiguous copy plus lane truncation. DWT cycle-counter instrumentation reports worst-case callback duration and longest inter-callback gap, guarded for the Seed3 dual-core case and reporting zeros honestly when CYCCNT is unavailable. A periodic CAPSTAT record carries delivered blocks, expected blocks, capture overruns, max_block_us, worst_gap_us, dump progress and the transports dropped_full, giving hardware verification two independent starvation signals.
+- [ ] #5 Per-callback work is bounded to one contiguous copy plus lane truncation. DWT cycle-counter instrumentation reports worst-case callback duration and longest inter-callback gap, brought up with the sequence already proven on this part (DCB enable_trace, DWT unlock to clear the H7 software lock, has_cycle_counter probe, enable, read-back liveness check, per spin_budget.rs:80-97) and reporting zeros honestly when CYCCNT is unavailable; cycles become microseconds via a boot-time calibration against embassy-time, since embassy-stm32 0.6.0 exposes no CPU-clock accessor. A periodic CAPSTAT record carries delivered blocks, expected blocks, capture overruns, max_block_us, worst_gap_us, dump progress and the transports dropped_full, giving hardware verification two independent starvation signals.
 - [ ] #6 The device reports CAPMAX total_bytes ring_bytes seconds_max unused_headroom_bytes computed at runtime from sdram::SDRAM_SIZE and the published ring geometry, so capturable duration is measured from the driver constant rather than guessed, and the headroom statement makes clear that live audio DMA buffers remain in internal RAM.
 - [ ] #7 RIGCFG, CAPSTAT, CAPMAX and the dump-summary verb are implemented as body builders in crates/asperitas-logging/src/console.rs beside status_body, each pinned by a host unit test in that file, and committed through one public whole-record entry point modelled on the existing emit path. Nothing in the dump or status path calls usb::emit_blocking.
 - [ ] #8 The dump writer obtains permission to enqueue from dump::try_emit_dump, which consults the TASK-038.02 capacity predicate, and never bypasses it; refusals are retried on a Timer backoff rather than a busy-wait, and both the refusal count and the longest consecutive stall are counted and reported. Ordinary log and STATUS traffic stays lossless during a dump.
 - [ ] #9 Capture start and end are decided by the device: it captures for a build-time-configured window or until the ring reports full, then begins the dump on its own, because runtime control over the console link belongs to TASK-032.
 - [ ] #10 When a dump finishes the device emits one DUMPEND record naming blocks, chunks, bytes, elapsed milliseconds and the transport loss counters at that moment, so a caller times and validates a transfer from the captured stream alone.
-- [ ] #11 The SDRAM memory model is recorded where a future reader will hit it: init() returns 0xC000_0000 while the driver programs its cacheable MPU region at 0xD000_0000, caches are enabled nowhere in the stack so accesses are uncached and coherent today, nothing here enables caches or changes the MPU base, and the open question is handed to TASK-038.05 with a short factual note added to docs/reference/daisy-seed3.md section 4.
+- [ ] #11 The SDRAM memory model is recorded where a future reader will hit it: init() returns 0xC000_0000 while the driver programs its cacheable MPU region at 0xD000_0000, caches are enabled nowhere in the stack so accesses are uncached and coherent today, nothing here enables caches or changes the MPU base, the device reports the I-cache and D-cache enable bits it actually observes at boot so the claim is measured rather than asserted, and TASK-038.05 receives a rule rather than an open question: caches stay off until someone owns the coherence argument for the FMC window and revisits the capture hand-off ordering in the same change. A short factual note is added to docs/reference/daisy-seed3.md section 4.
 - [ ] #12 Rate arithmetic is gated by const asserts in rig.rs, not prose: the capture window provably fits the ring, and CAPSTAT traffic is provably below one percent of the dumps own record traffic.
-- [ ] #13 cargo fmt --all --check, cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings and every stimulus feature cross-build pass, and the finalization notes record the release size plus the .bss delta against the current 86.13 percent baseline.
+- [ ] #13 cargo fmt --all --check, cargo test --workspace, cargo clippy --workspace --all-targets -- -D warnings, the defmt-only whole-package build and each non-default stimulus variant build all pass, and CI gains a firmware clippy step (cargo clippy --release --features seed3 -- -D warnings inside firmware/, which passes as of planning; --all-targets cannot work there because a no_std target has no test crate) since firmware is excluded from the root workspace and nothing else lints rig.rs. The finalization notes record rig's measured text and .bss from size -B against main's measured baseline (text 88181, data 1428, bss 8224, i.e. 1.57 percent of the 512 KiB AXI SRAM), and state that this ticket's original 86.13 percent .bss premise had no recorded provenance and contradicts measurement.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -66,189 +67,464 @@ Out of scope: host-initiated control (TASK-032), QSPI excerpt playback (TASK-038
 <!-- SECTION:PLAN:BEGIN -->
 ## Read before writing anything
 
-Authoritative sources, in this order:
+Authoritative sources, on this machine, in this order:
 
-- Upstream example at **the commit this build actually pins** — `~/.cargo/git/checkouts/daisy-embassy-4e2531dd3689e74c/ca9bcc9/examples/looper.rs`. Lines 27-32 are the executor declaration, 38-51 the SDRAM carve, 63-92 the callback registration, 129-134 the start sequence. There is **no crates.io `daisy-embassy-0.0.2` tree present on this machine**; anything quoting `init_interrupts()` or `Priority::P1` is describing a different version and is wrong. `firmware/Cargo.lock:228-230` resolves `0.2.3` at `ca9bcc9`, and `sdram.rs:9` there reads `SDRAM_SIZE = 64 MiB`.
-- `docs/reference/daisy-seed3.md` §4 (FMC/MPU/sync-DMA) and §5 (pin banks). Its hardware table line 17 confirms Seed3 carries 64 MB SDRAM, so `SDRAM_SIZE` is right and the ring below deliberately uses half the chip.
-- `firmware/src/bin/main.rs` for the boilerplate each binary duplicates (tracked by TASK-010 — copy the shape, do not refactor five binaries as a side quest).
-- `crates/asperitas-logging/src/{dump.rs,console.rs}` for the commit path and the verb convention.
+- **Upstream example at the commit this build pins** — `~/.cargo/git/checkouts/daisy-embassy-4e2531dd3689e74c/ca9bcc9/examples/looper.rs`:
+  lines **27-31** are the executor declaration plus its `SAI1` handler, **44-51** the SDRAM carve, **63-92** the callback
+  registration, **132-134** the priority/start/spawn sequence. There is **no crates.io `daisy-embassy-0.0.2` tree here**;
+  anything quoting `init_interrupts()` or `Priority::P1` describes a different version and is wrong.
+  `firmware/Cargo.lock:228-230` resolves `0.2.3` at `ca9bcc9`, and `sdram.rs:9` there reads `SDRAM_SIZE = 64 MiB`.
+- **`~/.cargo/registry/src/*/embassy-executor-0.10.0/`** — `src/platform/cortex_m.rs` (the `InterruptExecutor` this build
+  actually links, including the `start()` doc-comment contract at 176-198) and `src/spawner.rs` (spawn tokens, `SpawnError`).
+- **`~/.cargo/registry/src/*/embassy-stm32-0.6.0/`** — `src/lib.rs:360-366` (`Config::default()` DMA IRQ priorities),
+  `src/dma/dma_bdma.rs:436-455` (where those priorities are applied), `src/sai/mod.rs:560,579,609` (what SAI binds: DMA lines only).
+- **`crates/asperitas-logging/src/spin_budget.rs:70-104`** — the DWT bring-up that has already been proven on this exact part.
+- `docs/reference/daisy-seed3.md` line 16 (**STM32H750IB, Cortex-M7F @ 480 MHz — single core**), §4 FMC/MPU, §5 pin banks.
+- `firmware/src/bin/main.rs` for the boilerplate every binary duplicates (tracked by TASK-010 — copy the shape, do not
+  refactor five binaries as a side quest); `podtest.rs:126-131` for the const rate-gate idiom.
+- `crates/asperitas-logging/src/{capture.rs,console.rs,dump.rs,frame.rs,lib.rs}` for ring geometry, verb convention and commit path.
+
+### Five claims from the earlier draft of this plan that were wrong, corrected here
+
+Do not re-import them from older ticket prose or from any C++/libDaisy memory:
+
+1. **`InterruptExecutor` is not generic.** `embassy-executor` 0.10 declares `pub struct InterruptExecutor` with **no
+   const-generic parameter**: `InterruptExecutor<1>` does not compile. Upstream's own line 27 is the bare form.
+2. **There are no `max-tasks-*` features.** They were removed in 0.8. Pool sizing in 0.10 is
+   `#[task(pool_size = N)]`, and exhaustion surfaces where the token is made, not at `spawn`: a task fn returns
+   `Result<SpawnToken<S>, SpawnError>` (`spawner.rs:60-66`), which is why upstream writes
+   `spawner.spawn(defmt::unwrap!(run_audio(...)))`.
+3. **AC #2's open question resolves by default.** `Config::default()` sets `dma_interrupt_priority: Priority::P0`
+   (`embassy-stm32 src/lib.rs:362`) and `hal::init` applies it to `DMA1_CH0`/`CH1` (`dma_bdma.rs:443`), so the audio DMA
+   completion ISR outranks the P6 executor. That is the direction we want — see §4.
+4. **Seed3 is not dual-core.** STM32H750IB is a single-core M7. There is no "second core fused off" case, and no CPACR
+   trick to write. The correct bring-up is the four-step sequence in `spin_budget.rs:80-97`; the correct capability probe
+   is `DWT::has_cycle_counter()`, and the counter is read with `cycle_count()` — `get_cycle_count` has been deprecated
+   since cortex-m 0.7.4, so using it would fail AC #13's `-D warnings`.
+5. **The "86.13 % `.bss` / ≈69 KB free" baseline does not exist.** Measured on the checked-in release ELFs with
+   `size -B firmware/target/thumbv7em-none-eabihf/release/<bin>`: `main` = text 88181 / data 1428 / **bss 8224**, i.e.
+   1.57 % of the 512 KiB AXI SRAM in `firmware/memory.x`, with ~503 KB free. The figure appears nowhere except planning
+   prose (introduced by commit `9ba7f1b`) with no command or size output behind it. Budget against the measured numbers in §11.
+
+Two smaller ones: `new_daisy_board!` has exactly one form, `new_daisy_board!(p)` (`ca9bcc9/src/lib.rs:292-389`) — there
+is **no `Type::Pod` variant** in this crate, so Pod identity comes from which pins you use afterwards, exactly as
+`main.rs:191` and `podtest.rs:153` do it. And `embassy-stm32` 0.6.0's `rcc` exposes only `frequency::<T: RccPeripheral>()`
+(`src/rcc/mod.rs:589`): **there is no public CPU-clock accessor**, so §3 derives cycles-per-microsecond by calibration
+instead of reading a number that isn't there.
+
+## 0. Facts already established (do not rediscover)
+
+- **Ring geometry** — `capture.rs`: `RING_BLOCK_BYTES` 32 768 (:105), `RING_BLOCKS` 1 024 (:112), `RING_BYTES`
+  33 554 432 (:118), `CALLBACK_BYTES` 64 (:87), `FRAMES_PER_CALLBACK` 32 (:84), `BYTES_PER_SECOND` 96 000 (:121),
+  `callbacks_per_block()` 512 (:136), `full_chunks_per_block()` 254 (:148), `tail_chunk_bytes()` 2 (:155),
+  `chunks_per_block()` 255 (:161), `records_per_block()` 256 (:167), `wire_bytes_per_block()` 57 788 (:202),
+  `ring_duration_micros()` 349 525 333 (:235), `expected_blocks(seconds: usize)` rounds **up** — 879 for 300 s (:249).
+  `RING_BLOCK_BYTES ≤ dump::MAX_BLOCK_BYTES` and `chunks_per_block() ≤ MAX_CHUNKS_PER_BLOCK` are already asserted there,
+  the latter with **zero slack**.
+- **Block hand-off** — `capture::BlockState{Free,Filling,Full,Dumping}` (:330) stored as `u8`,
+  `from_u8 -> Option` (:369, deliberately never defaults to `Free`), `transition_ok(from,to)` (:390) with exactly four
+  legal edges and no self-transitions. `AtomicU8` is lock-free on ARMv7-M, so `portable-atomic` stays out.
+- **Dump path** — `dump::CHUNK_RAW` 129 (:435), `MAX_BODY` 200 and `MAX_FRAME` 228 (`frame.rs:99,108`),
+  `audio_body(block_index: u32, chunks: u16, chunk_index: u16, raw: &[u8], out: &mut [u8; MAX_BODY]) -> Result<usize, BodyError>`
+  (:596), `audend_body(block_index: u32, chunks: u16, total_bytes: u32, crc: u16, out)` (:650) where **the caller computes**
+  `crc16_ccitt` over the raw concatenated block bytes in chunk order (`dump.rs:79,646`), and
+  `try_emit_dump(body: &[u8]) -> bool` (`lib.rs:570`), the only route dump bytes take into `LOG_PIPE` and the only place
+  `dump_fits` is acted on.
+- **Console path** — `console::boot_body` (:180) / `status_body` (:206) render into a caller-owned
+  `&mut [u8; BODY_WINDOW]` through the crate-private `TruncWriter` and return `w.filled()`; the pinning test is
+  `status_body_pins_field_names_and_order` (:317). Loss counters: `console::CONSOLE.snapshot() -> ConsoleCounters` with
+  public `u32` fields `records_sent, dropped_full, bytes_dropped, truncated, endpoint_errors, seq_next` (:58-71, :146).
+- **`console`, `dump`, `capture`, `frame` are ungated modules** (`lib.rs:201-207`); only the commit path (`lib.rs:264+`)
+  and `usb` are behind `log-usb`. So new body builders and their tests compile and run under plain `cargo test --workspace`.
+- **One lock, one commit function.** `tests/commit_path_no_panic.rs` is a source-text guard requiring exactly **one**
+  `RECORD_BUFS.lock(` call site and ≥2 `commit_records(` call sites. A new emitter that takes its own lock fails that suite.
+- **CI builds the whole firmware package** (never `--bin`), in two configs: `cargo build --release --features seed3` and
+  `cargo build --release --no-default-features --features "seed3 log-defmt"`. `lefthook.yml`'s pre-push hook runs the first.
+- **`firmware/` is excluded from the root workspace** (`Cargo.toml:3`), so `cargo clippy --workspace` never sees `rig.rs`.
+  Measured today: `cd firmware && cargo clippy --release --features seed3 -- -D warnings` is clean. (`--all-targets`
+  cannot work there — it builds test targets, and a no_std target has no `test` crate: E0463.)
+- **Nothing calls `cortex_m::Peripherals::take()` anywhere in the repo.** `spin_budget.rs:87` uses `steal()` with a
+  doc-comment justifying it by that absence.
 
 ## 1. Cargo and CI
 
-`firmware/Cargo.toml`:
+`firmware/Cargo.toml` — add `executor-interrupt` to the existing dependency, keep everything else:
 
 ```toml
 embassy-executor = { version = "0.10.0",
   features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
 
 [features]
-stim-sine  = []          # default when nothing else is selected
+stim-sine  = []   # default when nothing else is selected
 stim-ess   = []
 stim-pulse = []
 ```
 
-No `[[bin]]` section is needed — `rig.rs` is auto-discovered. Guard against two stimulus features at once with a `const _: ()` assert *in the source*, since cargo cannot express mutual exclusion.
+No `[[bin]]` section: `rig.rs` is auto-discovered, and both CI steps therefore pick it up automatically. Guard against two
+`stim-*` features at once with a `const _: ()` assert **in the source** — cargo cannot express mutual exclusion.
 
-`.github/workflows/ci.yml`: every default-off feature combination must compile or the branch is red, because both CI and lefthook build with no `--bin`. Add after the existing cross-build step:
+`.github/workflows/ci.yml` — two additions to the existing single `check` step:
 
-```yaml
-- name: Build rig firmware (each stimulus selection)
-  run: |
-    cd firmware && cargo build --release --features seed3
-    cd firmware && cargo build --release --features seed3,stim-sine
-    cd firmware && cargo build --release --features seed3,stim-ess
-    cd firmware && cargo build --release --features seed3,stim-pulse
+```bash
+echo "=== rig stimulus variants ==="
+cd firmware
+cargo build --release --features seed3,stim-ess  --bin rig
+cargo build --release --features seed3,stim-pulse --bin rig
+
+echo "=== firmware clippy (rig.rs is outside the workspace) ==="
+cargo clippy --release --features seed3 -- -D warnings
 ```
+
+Use `--bin rig` for the stimulus variants: the default-config whole-package build already covers sine + every other
+binary, and three full package rebuilds would roughly triple that step's wall time for no extra coverage (see TASK-052's
+interest in CI wall time). The clippy line is the only thing that can lint `rig.rs` at all, and it passes as of this
+planning pass; do not add `--all-targets` to it.
 
 ## 2. Record verbs belong to `console.rs`, not to the binary
 
-`RIGCFG`, `CAPSTAT`, `CAPMAX` and the dump-summary verb are wire grammar. The convention recorded at `console.rs:198-201` is that a verb's field set and order are a contract *pinned by a unit test in the same file* (`status_body_pins_field_names_and_order` at `console.rs:318` is the model). Bodies written ad hoc in `rig.rs` would have no host test at all, since the firmware package has no host-test target.
+`RIGCFG`, `CAPSTAT`, `CAPMAX` and `DUMPEND` are wire grammar. The convention at `console.rs:171-178` is that a verb's
+field set and order are a contract **pinned by a unit test in the same file**; bodies written ad hoc in `rig.rs` would have
+no host test at all, because the firmware package has no host-test target.
 
-So: add `xxx_body(...)` builders to `crates/asperitas-logging/src/console.rs` next to `status_body`/`boot_body`, each with its own pinning test, and expose one public whole-record commit entry point in `lib.rs` shaped like the existing private `emit_status` — take `RECORD_BUFS`, pre-check capacity, commit via `frame::write_whole`. Call it `emit_record(level, now_ms, body) -> bool`. Do not reach for `usb::emit_blocking`: it drives the CDC endpoint directly while `usb::run()`'s drain task owns it, it exists for the case where the executor is dead, and TASK-046/TASK-047 are exactly the failure class produced by long-lived work inside masked contexts.
-
-Field sets (fixed order, space-separated, absolute since-boot counts — the host owns differencing):
+Add four builders beside `status_body`, each following its shape exactly (`TruncWriter` + `core::write!`, `proto=1` second,
+all fields in one format string, returning `w.filled()`), each with a pinning test naming every field in order, plus one
+saturated-counters test per builder asserting the worst-case render is `< frame::MAX_BODY` — model it on
+`status_body_renders_saturated_counters_as_u32_max` (:327), which exists because a 255-byte body silently truncating at
+200 is the failure nobody notices until a host parser rejects it.
 
 ```
-RIGCFG  stim=<describe()> rate=<hz> capture=mono16 block_bytes=<n> blocks=<n>
-        bytes_per_s=<n> capsec=<n> cpu_hz=<hz>
-CAPSTAT delivered=<n> expected=<n> overrun=<n> max_block_us=<n> worst_gap_us=<n>
-        dumping=<n> free=<n> sent=<n> dropped_full=<n> bytes_dropped=<n>
-CAPMAX  total_bytes=<n> ring_bytes=<n> seconds_max=<n> unused_headroom_bytes=<n>
-DUMPEND blocks=<n> chunks=<n> bytes=<n> elapsed_ms=<n> sent=<n> dropped_full=<n> bytes_dropped=<n>
+RIGCFG  proto=1 <generators describe() output verbatim> capture=mono16 lane=<L|R> blocks=<n>
+        block_bytes=<n> bytes_per_s=<n> capsec_us=<n> window_s=<n> cpu_hz=<hz> icache=<0|1> dcache=<0|1>
+CAPSTAT proto=1 delivered=<n> expected=<n> overrun=<n> max_block_us=<n> worst_gap_us=<n> audio_exit=<n>
+        dumping=<n> free=<n> refused=<n> stall_ms=<n> sent=<n> dropped_full=<n> bytes_dropped=<n>
+CAPMAX  proto=1 total_bytes=<n> ring_bytes=<n> seconds_max=<n> us_max=<n> unused_headroom_bytes=<n>
+DUMPEND proto=1 blocks=<n> chunks=<n> bytes=<n> elapsed_ms=<n> sent=<n> dropped_full=<n> bytes_dropped=<n>
 ```
 
-`RIGCFG` carries the stimulus description straight out of `Stimulus::describe(&self, out: &mut [u8]) -> usize` (`stimulus.rs:122`) plus `cpu_hz`, because DWT counts CPU cycles and the host cannot decode `max_block_us` without knowing the clock. One `describe()` call, one grammar — AC #3's reason for existing.
+Three decisions inside that grammar:
+
+- **No second sample-rate field.** `Stimulus::describe(&self, out: &mut [u8]) -> usize`
+  (`crates/asperitas-dsp/src/stimulus.rs:122`) already renders `name=… sample_rate_hz=… level_dbfs=…`; re-emitting a
+  competing `rate=` would create two sources of truth, which is what AC #3 forbids. Everything else rig knows about the
+  signal — capture format, block geometry, window, clock — rides alongside it.
+- **`cpu_hz` is measured, not declared** (§3), and `icache`/`dcache` come from `SCB::icache_enabled()` /
+  `SCB::dcache_enabled()` (`cortex-m-0.7.7 src/peripheral/scb.rs:376,446` — plain associated functions, no `&mut`).
+  That turns AC #11's "caches are enabled nowhere" from prose into a number on the wire, which is exactly the evidence
+  TASK-038.05 AC #6 asks for.
+- **`audio_exit` is its own counter.** `start_interface()` returns `Result<_, sai::Error>` and `start_callback()` returns
+  `Result<Infallible, sai::Error>`; if either ever returns, capture stops and `delivered` simply freezes, which looks
+  identical to starvation in the stream. Store 0 = running, 1 = `start_interface` failed, 2 = `start_callback` failed.
+  Starvation and death must not share a symptom.
+
+Then expose **one** public whole-record entry point in `lib.rs`, gated `#[cfg(feature = "log-usb")]` like
+`try_emit_dump`:
+
+```rust
+pub fn emit_record(level: Level, now_ms: u32, body: &[u8]) -> bool
+```
+
+It must go through the existing `commit_records` (`lib.rs:368`) — take `RECORD_BUFS` there, `CONSOLE.take_seq()`,
+`frame::encode`, `frame::write_whole(framed, LOG_PIPE.free_capacity(), …)`, count the outcome — because
+`tests/commit_path_no_panic.rs` counts lock sites. Model it on the private `emit_status` (`lib.rs:503`) but take
+`now_ms` as an argument: `Instant::now()` must be read **outside** the lock, the way `lib.rs:421` and `lib.rs:571` do.
+Callers pass `Level::Info`, matching BOOT/STATUS: these are device facts, not diagnostics, and a Debug filter should not
+silence a measurement.
+
+**Nothing here may call `usb::emit_blocking`.** It bypasses `LOG_PIPE` and drives the endpoint directly while
+`usb::run()`'s drain task owns it; it exists for the case where the executor is dead (TASK-046/TASK-047 are the failure
+class produced by long-lived work in masked contexts).
 
 ## 3. Boot sequence and peripheral claims
 
-Under the `seed3` feature, `board.rs:221-234` calls `cortex_m::Peripherals::take()` and **panics if something else already claimed it**. Nothing in this repo calls it today, and this ticket claims it first, in `rig.rs`, before `new_daisy_board!`. Put a comment there saying so: any future binary that takes it earlier breaks `rig.rs` at boot, not at compile time.
+Order follows `main.rs:189-232`, with two things inserted ahead of it.
 
-Destructure rather than move the whole struct, because `sdram.build()` wants `&mut MPU, &mut SCB` while DWT stays useful:
-
-```rust
-let mut cp = cortex_m::Peripherals::take().unwrap();
-// ... later, in the audio task:
-let sdram = board.sdram.build(&mut cp.MPU, &mut cp.SCB);
-```
-
-DWT needs the coprocessor enabled and Seed3 is a dual-core part where CYCCNT is only available when the second core is fused off:
+**Claim the cortex-m singleton first, in `rig.rs`, before anything else:**
 
 ```rust
-if cp.DWT.cyccnt_read() != 0 || (DCB.cpacr.read() as u32 & CLUSTERLITEN) == 0 {
-    cp.DWT.enable_cycle_counter();   // cortex-m 0.7.7, dwt.rs:125
-}
+let mut cp = cortex_m::Peripherals::take().expect("cortex_m::Peripherals already claimed");
 ```
 
-Read the counter with `DWT::get_cycle_count()` (an associated function, `dwt.rs:151`). If the guard fails, report `max_block_us=0 worst_gap_us=0` and say so in `RIGCFG` rather than reporting numbers that are not measurements.
+Today nothing claims it (§0), so this is the *first* claimer, and `take()` returning `None` is the only symptom a future
+collision will produce — hence the explicit message and a comment saying that any binary claiming it earlier breaks
+`rig.rs` at boot, not at compile time. Destructure rather than move the whole struct, because `sdram.build()` wants
+`&mut cp.MPU, &mut cp.SCB` while DWT and SCB stay useful:
 
-Then, following `main.rs:178-236`: `default_rcc()` → `hal::init` → `new_daisy_board!(p, Type::Pod)` → drop `board.qspi`, discard `board.usb_peripherals` → `led::init(board.d20, board.d19, board.d18)` → `asperitas_logging::usb::init(UsbIrqs)` → spawn the drain and blink tasks → `board.audio_peripherals.prepare_interface(Default::default()).await`. Take `cpu_hz` from the clocks object `hal::init` returns; never hardcode 600 MHz.
+```rust
+let sdram = board.sdram.build(&mut cp.MPU, &mut cp.SCB);   // ca9bcc9/src/sdram.rs:16
+```
+
+While here, `spin_budget.rs:81-86` justifies its `steal()` by "no `cortex_m::Peripherals::take()` exists in this crate, in
+daisy-embassy, or in embassy-stm32". After this ticket that sentence is stale. Update it to say `rig.rs` claims the
+singleton and `steal()` remains correct because neither user resets CYCCNT — see the next paragraph for why that matters.
+
+**DWT: copy `spin_budget.rs:80-97` verbatim** rather than inventing a bring-up. It is the sequence already proven on this
+part and it handles the trap the old draft missed: H7 software-locks the DWT after power-on, so without
+`DWT::unlock()` (LAR ← `0xC5ACCE55`) every CYCCNT read is 0 and every derived microsecond is a lie.
+
+```rust
+cp.DCB.enable_trace();                        // DEMCR.TRCENA: CM7 may ignore CYCCNTENA without it
+cortex_m::peripheral::DWT::unlock();          // LAR: H7 locks the DWT after power-on
+let dwt_ok = cortex_m::peripheral::DWT::has_cycle_counter()   // CTRL.NOCYCCNT
+    && { cp.DWT.enable_cycle_counter();
+         cortex_m::peripheral::DWT::cycle_counter_enabled() }; // readback is the liveness proof
+```
+
+Read with `cortex_m::peripheral::DWT::cycle_count()` (associated fn; `get_cycle_count` is deprecated → `-D warnings`).
+**Nobody may write CYCCNT** — no `set_cycle_count(0)`, ever: `spin_budget` reads the same counter for its spin budget, and
+both users rely on unsigned wrapping deltas, which stay correct across a wrap (≈8.95 s at 480 MHz) and stop being correct
+the moment someone resets it underneath the other.
+
+If `dwt_ok` is false, report `cpu_hz=0` in `RIGCFG` and zeros in every `*_us` field, with a comment saying zero means "not
+a measurement", never "measured zero".
+
+**Deriving microseconds without a CPU-clock accessor.** `embassy-stm32` 0.6.0 exposes only
+`rcc::frequency::<T: RccPeripheral>()` — kernel clocks of peripherals, not the core (AHB is ÷2 from SYSCLK anyway, so
+substituting an `hclk` figure would be wrong by half). Calibrate instead, in thread mode at boot, before starting the
+audio executor:
+
+```rust
+let c0 = DWT::cycle_count();
+let t0 = embassy_time::Instant::now();
+Timer::after_millis(20).await;                 // << the 65 ms wrap of the 1 MHz tick counter
+let cycles = DWT::cycle_count().wrapping_sub(c0) as u64;
+let micros = t0.elapsed().as_micros() as u64;  // embassy-time tick = 1 MHz => +-1 count, ~0.005 %
+let cycles_per_us = cycles * 1_000_000 / micros;
+```
+
+Publish `cpu_hz = cycles_per_us * 1_000_000` in `RIGCFG`. Two independent references agree on the result at the bench:
+calibration says ≈480, and one filled block must then read ≈341 333 µs against `capture::ring_duration_micros()`'s
+per-block share. Say so in the comment; do not hardcode 480 MHz, and never hardcode 600 MHz.
+
+Then, following `main.rs:189-232`: `default_rcc()` → `hal::init` → `new_daisy_board!(p)` (**single-argument form**) →
+drop `board.flash` and discard `board.usb_peripherals` unread (`main.rs:196` — `usb::init` steals `USB_OTG_FS`/PA11/PA12)
+→ `asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18)` → `usb::init(UsbIrqs)` → spawn drain,
+blink, CAPSTAT and dump tasks → `board.audio_peripherals.prepare_interface(Default::default()).await`.
+
+Do **not** annotate the board as `DaisyBoard<'_>` the way `main.rs:191` does: the audio task needs
+`Interface<'static, Idle>`, and `looper.rs` proves that inference gives 'static when the peripherals come straight from
+`hal::init`. If the borrow checker disagrees, destructure `p`/`board` into separate bindings immediately rather than
+storing the board, and reach for the `StaticCell` idiom already used at `main.rs:104,217` before reaching for `Box`.
 
 ## 4. Executor topology
 
-Copy `looper.rs` verbatim in shape:
+Copy `looper.rs` in shape, with the real 0.10 API:
 
 ```rust
-static AUDIO_EXECUTOR: InterruptExecutor<1> = InterruptExecutor::new();
+// looper.rs:27-31 at ca9bcc9 — note: NOT InterruptExecutor<1>. In embassy-executor 0.10 the
+// type has no const-generic parameter; the IRQ is chosen at start(), not in the type.
+static AUDIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 
 #[interrupt]
-unsafe fn SAI1() { unsafe { AUDIO_EXECUTOR.on_interrupt() } }
+unsafe fn SAI1() {
+    // Safety: called only from this handler, and only after AUDIO_EXECUTOR.start() below
+    // (cortex_m.rs:167-173). An unexpected SAI1 event before start() would land in
+    // cortex-m-rt's DEFAULT_HANDLER infinite loop instead — which is what every SAI1 event
+    // did before this file installed a handler here.
+    unsafe { AUDIO_EXECUTOR.on_interrupt() }
+}
 ```
-
-This is safe only because the audio driver binds `DMA1_CH0`/`DMA1_CH1` and never `SAI1` (`audio.rs:26-28`), which leaves the `SAI1` vector unclaimed. State that in the comment — it is the non-obvious part of AC #2.
 
 ```rust
-interrupt::SAI1.set_priority(Priority::P6);           // looper.rs:132
-let spawner = AUDIO_EXECUTOR.start(interrupt::SAI1);
-spawner.spawn(run_audio(interface, sdram, ...));      // thread executor keeps drain + blink + dump
+// looper.rs:132-134. start() unmasks the IRQ itself (cortex_m.rs:212) and the docs are explicit:
+// set the priority BEFORE start(), never after.
+embassy_stm32::interrupt::SAI1.set_priority(Priority::P6);
+let audio_spawner = AUDIO_EXECUTOR.start(embassy_stm32::interrupt::SAI1);
+audio_spawner.spawn(run_audio(interface, sdram, ring).expect("audio task pool"));
 ```
 
-Any enabled NVIC interrupt preempts thread mode, so P6 gives structural preemption of the dump writer regardless of the exact number. Two things to verify rather than assume, and to record either way:
+Record in the comment, with numbers, why this is safe and why it is shaped this way:
 
-1. **DMA priority must stay numerically below P6**, so the DMA completion ISR can still wake the audio task promptly. Check `embassy-stm32-0.6.0/src/dma/mod.rs` for the priority assigned to `DMA1_CH0`/`CH1`. If it is not strictly higher urgency than P6, pick a priority strictly between them and update the comment.
-2. **Task-pool sizing.** `embassy-executor` 0.10 sizes pools from `max-tasks-*` features; the audio task's future is large because it owns the `Interface`, the `SdRam`, and the ring cursor. If `spawn` returns `TaskPoolOverflow`, bump the per-executor pool in `[features]` and note the RAM cost.
+- **The `SAI1` vector is genuinely ours.** `daisy-embassy` binds `DMA1_CH0`/`DMA1_CH1` only
+  (`ca9bcc9/src/audio.rs:26-29`) and `embassy-stm32`'s SAI module binds only DMA line interrupts
+  (`src/sai/mod.rs:560,579,609`), so no `SAI1` handler exists in the graph to collide with.
+- **DMA outranks the executor, and must.** `Config::default()` ships `dma_interrupt_priority: Priority::P0`
+  (`embassy-stm32 src/lib.rs:362`), applied to `DMA1_CH0`/`CH1` during `hal::init` (`dma_bdma.rs:443`), while the audio
+  executor sits at P6. That ordering is load-bearing in this direction: the DMA completion ISR is what wakes the audio
+  task, and the pender works by `NVIC.request(SAI1)` (`cortex_m.rs:29-36`) — an executor that could mask its own wake
+  source would stall the very thing it exists to service. Note the mirror image: USB OTG_FS and every other unmasked IRQ
+  keeps the NVIC reset priority 0, so they too outrank P6. The callback's latency bound is other ISRs plus PRIMASK
+  sections (§4 last bullet), not the thread-mode dump writer.
+- **`start()` hands back a `SendSpawner`** (`cortex_m.rs:199`), so `spawn` needs `SpawnToken<S>` with `S: Send`
+  (`spawner.rs:223`) — the audio future must be `Send`, which upstream's `run_audio(Interface<'static, Idle>, Sdram<..>)`
+  demonstrates. Keep the task's captured state to `'static` things: the interface, the `SdRam`, and a `'static` slice of
+  the ring.
+- **Pool sizing.** Exhaustion appears as `Err(SpawnError::Busy)` from the task *call*, not from `spawn`. If it ever
+  fires, widen with `#[embassy_executor::task(pool_size = N)]` on that task and note the RAM cost. Do not look for
+  `max-tasks-*` features; they are gone.
 
-If `Interface<'a>` will not unify with `'static` when moved into the spawned task under our manual `#[no_mangle] async fn main` (upstream uses `#[embassy_executor::main]`), leak it through the `StaticCell` already used elsewhere in this repo rather than reaching for `Box`.
+**The audio callback must never touch the console, and the reason is PRIMASK, not priority.** `RECORD_BUFS` is a
+`CriticalSectionRawMutex` (`lib.rs:283`), which on this target masks **all** interrupts regardless of NVIC priority. Two
+directions, both worth writing down:
 
-**The audio callback must never log.** `RECORD_BUFS` is a `CriticalSectionRawMutex`, i.e. PRIMASK. A producer running at P6 that takes a lock held by the thread-mode dump writer spins forever with interrupts masked. The callback's entire outward surface is SDRAM writes and atomic stores. This is also why `CAPSTAT` is emitted from the thread executor by reading atomics.
+- Thread mode holding the lock masks SAI1 *and* the DMA IRQs for the hold duration — one ≤256 B copy plus CRC plus pipe
+  write, i.e. bounded latency for audio, not starvation. Saying "P6 makes logging unable to starve audio" is false as
+  reasoning; the true invariant is that the hold time is short and constant.
+- A producer at P6 that took the lock while thread mode held it would deadlock outright: it spins at P6, thread mode
+  never resumes, the lock is never released.
+
+So the callback's entire outward surface is SDRAM writes and atomic stores, and `CAPSTAT` is emitted from the thread
+executor by reading atomics.
 
 ## 5. Stimulus selection
 
-Output is the stimulus alone; the input frame is ignored. Keep the render site narrow and shaped like `stimulus → [processor slot] → encode_block(output)`, because TASK-019.03 will insert the effect chain there and should need one line, not a restructure.
+Output is the stimulus alone; the input frame is ignored. Keep the render site shaped like
+`stimulus → [processor slot] → encode_block(output)`, because TASK-019.03 inserts the effect chain there and should need
+one line, not a restructure. All three generators implement `Processor`, whose `tick` ignores input, and
+`set_sample_rate(&mut self, hz: f32)` (`stimulus.rs:286`) — call it once with `48_000.0` before audio starts.
 
-`Sine::default()` is already `-20 dBFS at 1 kHz` — verified: the impl ends with `s.apply(&SineParams::default())` (`stimulus.rs:266-272`), and `SineParams::default()` is `{ level_dbfs: -20.0, frequency_hz: 1_000 }`. Do not "correct" the level.
-
-Call `set_sample_rate(hz)` once, before audio starts. For `ExponentialSweep`, note in a comment that `apply()` peak-normalises by scanning **every** sample of the record (`stimulus.rs:540-546`) — cheap at boot, catastrophic in a callback. Default sweep parameters give roughly a 6 s record; `PulseTrain::default()` is one band-limited pulse, so the ESS or pulse runs need a capture window that covers their record length, which `RIGCFG` makes visible to the caller.
-
-Truncate to int16 lanes with `(sample.clamp(-1.0, 1.0) * 32767.0) as i16`; document that truncation is deliberate and undithered (TASK-038.01 left dither out until the noise floor is characterised).
+- `Sine::default()` is already −20 dBFS at 1 kHz (`:261-275` ends with `apply(&SineParams::default())`, and
+  `SineParams::default()` is `{ level_dbfs: -20.0, frequency_hz: 1_000 }`). Do not "correct" the level.
+- `ExponentialSweep::default()` costs one 384 000-sample peak-normalising scan at construction (`:449-470`, and
+  `apply()` scans every sample — cheap at boot, catastrophic in a callback). Construct it in setup, never in the callback.
+- `PulseTrain::default()` is one band-limited pulse per period; the sweep's record is ≈8 s at default parameters, so the
+  window that covers a whole generator differs per build — `RIGCFG`'s `window_s` and `describe()` make that visible to the
+  caller instead of leaving them to guess.
+- Truncate to the mono lane with `(sample.clamp(-1.0, 1.0) * 32767.0) as i16`. No dither, deliberately (TASK-038.01 left
+  it out until the noise floor is characterised) — say so in the comment.
 
 ## 6. Capture producer (runs at P6)
 
-Carve the ring exactly as `looper.rs:44-51` does — `sdram.init(&mut delay)` returns `0xC000_0000`, cast to `*mut u8`, then `slice::from_raw_parts_mut` over `capture::RING_BYTES`. No linker-script change: `memory.x` keeps claiming FLASH 128 K and RAM 512 K only. **Keep the `SdRam` value alive for the program's lifetime** by owning it in the audio task; dropping it releases ~55 pins at the type level and lets someone claim them twice.
-
-State:
+Carve the ring exactly as `looper.rs:44-51` does: `sdram.init(&mut delay)` returns the bank base, cast to `*mut u8`, then
+`slice::from_raw_parts_mut` over `capture::RING_BYTES`. No linker-script change — `memory.x` keeps claiming FLASH 128 K
+and RAM 512 K only. **Keep the `SdRam` value alive for the program's lifetime** by owning it in the audio task: dropping
+it releases ~55 pins at the type level and lets someone claim them twice.
 
 ```rust
-static BLOCK_STATE: [AtomicU8; capture::RING_BLOCKS] = ...;   // 1 KiB of .bss
-static WRITE_BLOCK: AtomicUsize;                              // producer's cursor
-static PRODUCED: AtomicUsize;                                 // published high-water mark
-static OVERRUN: AtomicUsize;
+static BLOCK_STATE: [AtomicU8; capture::RING_BLOCKS] = ...;      // 1 KiB of .bss
+static WRITE_BLOCK: AtomicUsize;   // producer cursor
+static PRODUCED:    AtomicUsize;   // published high-water mark, in blocks since boot
+static OVERRUN:     AtomicUsize;
+static MAX_BLOCK_CYCLES: AtomicU32;
+static WORST_GAP_CYCLES: AtomicU32;
+static AUDIO_EXIT: AtomicU32;
 ```
 
-Per callback, bounded to exactly one contiguous copy plus lane truncation (AC #5):
+Per callback, bounded to one contiguous copy plus lane truncation (AC #5):
 
-1. Read `BLOCK_STATE[write_block]`. Anything other than `Free` ⇒ `OVERRUN += 1`, stop capturing (leave the block alone; never overwrite one being dumped), and return.
-2. Store `Filling`.
-3. Truncate the 64 `u32` lanes to 32 `i16` samples and copy them into the block's byte range at `callback_index_in_block * CALLBACK_BYTES`.
-4. On the 512th callback: `core::sync::atomic::fence(Ordering::Release)`, then store `Full`, advance `write_block`, `PRODUCED.fetch_add(1, AcqRel)`.
+1. `state = BLOCK_STATE[produced_or_write_index % RING_BLOCKS].load(Acquire)`; anything other than `Free` ⇒
+   `OVERRUN += 1`, **stop capturing** (leave the block alone; never overwrite one being dumped), return.
+2. Store `Filling` (assert the edge with `capture::transition_ok` in a debug build; the table is the authority, not a
+   remembered edge list).
+3. Truncate the 64 interleaved `u32` lanes to 32 `i16` samples of **one** channel and copy them into the block's byte
+   range at `callback_index_in_block * CALLBACK_BYTES`. Take the left lane (`input[2 * i]`, the even words, matching
+   `main.rs:110-115`'s decode) and put the choice in one `const MONO_LANE` with a comment: which physical jack the TASK-034
+   cable actually loops is TASK-038.05's observation, and flipping one constant is the fix if it is the other one.
+4. On the 512th callback: `fence(Release)`, store `Full`, advance the cursor, `PRODUCED.fetch_add(1, AcqRel)`.
 
-Ordering discipline, stated in code: samples are written before the index that publishes them (Release store / `fence`), and the consumer loads state with Acquire before reading bytes. Use `core::sync::atomic` here, not `main.rs:63-90`'s `UnsafeCell` + `interrupt::free` idiom — that shape is adequate for one slow knob writer and one fast reader, and wrong for publishing buffer ownership across executors.
+Ordering discipline, stated in code and following the classic SPSC rule (write the payload, publish it with release
+semantics, consumer acquires before reading — `rtrb`'s `RingBuffer` is the modern Rust reference if a reader wants a
+worked example): samples are written before the index that publishes them. Use `core::sync::atomic` here, **not**
+`main.rs:63-101`'s `UnsafeCell` + `interrupt::free` idiom, which is adequate for one slow knob writer and one fast reader
+and wrong for publishing buffer ownership between an interrupt-mode producer and a thread-mode consumer.
 
-Capture window: `const CAPTURE_SECONDS: u64 = 300;` (overridable at build time via `option_env!` so TASK-038.05 can shorten bench runs without editing source). Capture ends at the window deadline **or** when the ring reports full, whichever comes first, and the dump begins on the device's own decision — AC #10, because runtime control belongs to TASK-032.
-
-Close the loop on the copied driver constant. Compare **sample counts**, not bytes: `daisy_embassy::audio::InterleavedBlock` is `[u32; HALF_DMA_BUFFER_LENGTH]`, i.e. 64 words for 32 stereo frames, while `CALLBACK_BYTES` is 64 **bytes** of one mono channel — two different quantities that happen to share a number. The earlier form of this assert, `CALLBACK_BYTES == HALF_DMA_BUFFER_LENGTH * 2`, works out as 64 == 128 and cannot compile.
+Close the loop on the copied driver constants, comparing **samples**:
 
 ```rust
 const _: () = assert!(asperitas_logging::capture::FRAMES_PER_CALLBACK
-                      == daisy_embassy::audio::BLOCK_LENGTH);
+                      == daisy_embassy::audio::BLOCK_LENGTH);   // 32 == 32 frames
 ```
+
+`CALLBACK_BYTES` (64 **bytes** of one mono channel) and `HALF_DMA_BUFFER_LENGTH` (64 **`u32` words** per callback) are
+different quantities that happen to print alike: asserting them equal passes by coincidence, and comparing either against
+`HALF_DMA_BUFFER_LENGTH * 2` cannot compile at all. `capture::SAMPLE_RATE_HZ` is likewise a deliberate copy of
+`AudioConfig::default` (`ca9bcc9/src/audio.rs:220-224`), which is not a `const` and so cannot be named in an assert — say
+that in a comment and note that `RIGCFG` carries `sample_rate_hz` from `describe()`, making a mismatch visible on the wire
+rather than silent.
+
+Capture window: `const CAPTURE_SECONDS: usize = 300;`, overridable with `option_env!("ASP_RIG_CAPTURE_SECONDS")` so
+TASK-038.05 can shorten bench runs without editing source. Capture ends at the window deadline **or** when the ring
+reports full, whichever comes first, and the dump then begins on the device's own decision (AC #9 — runtime control
+belongs to TASK-032).
 
 ## 7. Dump writer (thread executor)
 
-Walk blocks in ring order from `0` to `PRODUCED`, and for each:
+Walk blocks in ring order from 0 to `PRODUCED.load()`, indexing `block % capture::RING_BLOCKS`. §8's gate proves the
+intended window never wraps; the modulo stays because "provably never happens" is not how a ring survives a future edit.
 
-1. `compare_exchange(Full, Dumping)` — if it fails the block is not ours; continue.
-2. For `c in 0..chunks_per_block()`: build the body with `dump::audio_body(block_index, chunks, c, raw, &mut body)` and retry `dump::try_emit_dump(&body[..len])` until it returns true, waiting `Timer::after_ms(1)` between refusals. Count refusals and track the longest consecutive refusal streak as `dump_stalls` / `dump_stall_ms` for `CAPSTAT`. Never bypass `dump_fits` — that predicate is what keeps ordinary log and STATUS traffic lossless during a dump (AC #8).
-3. Emit `AUDEND` via `dump::audend_body`.
+1. `compare_exchange(Full, Dumping, AcqAcq, Relaxed)` — failure means the block is not ours; continue.
+2. For `c in 0..capture::chunks_per_block()`: slice `chunk_raw = min(dump::CHUNK_RAW, remaining)`, build with
+   `dump::audio_body(block_index as u32, chunks as u16, c as u16, raw, &mut body)`, then retry
+   `asperitas_logging::try_emit_dump(&body[..len])` until true, awaiting `Timer::after_millis(1)` between refusals. Count
+   refusals (`refused`) and track the longest consecutive streak in milliseconds (`stall_ms`) for `CAPSTAT`. Never bypass
+   `dump_fits`: that predicate (`dump.rs:539`) is what keeps ordinary log and STATUS traffic lossless during a dump
+   (AC #8), and `tests/console_dump.rs`'s `log_records_survive_a_saturated_dump` is the behaviour being protected.
+3. Emit `AUDEND` with `total_bytes = capture::RING_BLOCK_BYTES` and
+   `crc = frame::crc16_ccitt(&block_bytes[..])` — over the raw concatenated bytes in chunk order, never the base64 text
+   (`dump.rs:79`).
 4. `store(Free, Release)`.
 
-Yielding at the `Timer` await is what keeps the USB drain running; a busy-wait here starves the very task that frees pipe capacity.
+Yielding at the `Timer` await is what keeps the USB drain running; a busy-wait starves the very task that frees pipe
+capacity. Packetisation is not this writer's problem: `usb.rs:290-321`'s drain loop owns the 64-byte short-packet rule and
+the ZLP, and `LOG_PIPE` is the only thing rig writes to.
 
-At the end, emit one `DUMPEND` naming blocks, chunks, bytes, elapsed milliseconds, and `CONSOLE.snapshot()`'s loss counters at that instant (AC #11), so a caller can time and validate a transfer from the captured stream alone.
+At the end emit one `DUMPEND` with blocks, chunks, bytes, elapsed ms and `CONSOLE.snapshot()`'s counters at that instant
+(AC #10), so a caller can time and validate a transfer from the captured stream alone.
 
-Dump wall-time is a prediction, not a fact: a full 349.5 s capture produces ≈59 MB of wire traffic, which needs 169 kB/s just to keep pace with real time and lands around 64 s at a best-case full-speed bulk rate. Say that in a comment and leave the measurement to TASK-038.05.
+Dump wall time is a prediction, not a fact, and the arithmetic belongs in the comment: a full ring is
+`capture::wire_bytes_per_block() × RING_BLOCKS` ≈ 59.2 MB of wire traffic; keeping pace with real-time capture needs
+96 000 B/s raw ⇒ ≈169 kB/s of wire, and a full-speed bulk class ceiling in the 0.8–1.0 MB/s range would empty the ring in
+roughly 60–75 s. Those ceilings come from USB FS bulk theory, **not** from anything measured in this repo — TASK-038.05
+AC #4 exists to replace them with the first real number, which is why `DUMPEND` carries `elapsed_ms`.
 
 ## 8. Rate gates, as arithmetic not prose
 
-`podtest.rs:117` proves its logging rate fits the link with a `const` assert. Do the equivalent here, in `rig.rs` where both the driver constants and `capture::` are visible:
+`podtest.rs:126-131` proves its logging rate fits the link with a `const` assert. Do the equivalent in `rig.rs`, where
+both the driver constants and `capture::` are visible, using `.is_multiple_of` style wherever lints apply:
 
 ```rust
-const _: () = assert!(capture::RING_BLOCK_BYTES % capture::CALLBACK_BYTES == 0);
-const _: () = assert!(capture::expected_blocks(CAPTURE_SECONDS as usize) < capture::RING_BLOCKS);
-// CAPSTAT must stay beneath one percent of the dump's own traffic:
-const _: () = assert!(MAX_CAPSTAT_BODY * 100 < capture::records_per_block() * dump::FULL_AUDIO_FRAME_LEN);
+// The window provably fits the ring (879 < 1024 for 300 s).
+const _: () = assert!(capture::expected_blocks(CAPTURE_SECONDS) < capture::RING_BLOCKS);
+
+// CAPSTAT can never approach one percent of the dump's own traffic. Over the time one block
+// takes to fill, at most this many CAPSTAT records can occur; compare their worst-case bytes
+// against the wire bytes that same block generates. Both sides come from published constants.
+const BLOCK_FILL_MS: usize =
+    capture::callbacks_per_block() * capture::FRAMES_PER_CALLBACK * 1000
+        / capture::SAMPLE_RATE_HZ as usize;                  // 341
+const CAPSTAT_MAX_PER_BLOCK: usize = BLOCK_FILL_MS / CAPSTAT_PERIOD_MS + 2;  // allow one phase slip
+const _: () = assert!(CAPSTAT_MAX_PER_BLOCK * console::CAPSTAT_MAX_BODY * 100
+                      < capture::wire_bytes_per_block());    // 2*200*100 < 57_788
 ```
 
-The last one is relative on purpose: the link ceiling is unmeasured, so the honest gate is that status traffic cannot dominate the dump, not an invented baud figure.
+Define `pub const CAPSTAT_MAX_BODY: usize = 200;` in `console.rs` next to the builder, with the saturated-render test
+asserting both `len < CAPSTAT_MAX_BODY` and `CAPSTAT_MAX_BODY <= frame::MAX_BODY`, so `rig.rs` gates on a number the crate
+owns and a host test checks. The gate is relative on purpose: the link ceiling is unmeasured, so the honest claim is that
+status traffic cannot dominate the dump, not an invented baud figure. `RING_BLOCK_BYTES % CALLBACK_BYTES == 0` is already
+asserted in `capture.rs:262-311` — do not duplicate it.
 
 ## 9. SDRAM memory model — record it, do not fix it
 
-`sdram.init()` returns `0xC000_0000` (`stm32-fmc` maps bank 1 to `FmcBank::Bank5`), while the driver programs its single cacheable MPU region at `0xD000_0000` (`sdram.rs:33`) — the other bank's window, where nothing is connected. Caches are enabled nowhere in daisy-embassy, embassy-stm32 0.6.0, or the cortex-m-rt startup, so every access is uncached and coherent today by construction, and the mis-set region is inert but misleading. **Do not quietly correct the base address**: that turns on read caching and changes the coherence argument for every DMA master.
+`sdram.init()` returns `0xC000_0000` (bank 1's default FMC mapping per RM0433; AN4891's `0xD000_0000` wording is itself
+erroneous, per ST's own forum correction), while `ca9bcc9/src/sdram.rs:33` programs the driver's single cacheable MPU
+region at `0xD000_0000` — the other bank's window, where nothing is connected. Caches are enabled nowhere in
+daisy-embassy, embassy-stm32 0.6.0, or the cortex-m-rt startup, so every access today is uncached and coherent by
+construction, and the mis-set region is inert but misleading.
 
-Write a code comment stating all of the above, hand the open question to TASK-038.05, and add a short factual note to `docs/reference/daisy-seed3.md` §4 near the existing FMC/MPU discussion. Budgets and workflow prose belong to TASK-038.06, not here.
+Do **not** quietly correct the base. Beyond scope, the constant lives in a third-party crate: changing it means either an
+upstream PR or bypassing `SdRamBuilder::build` and configuring FMC and the MPU here — and the moment caching turns on, the
+coherence argument for every master touching that window (including the capture ring's producer/consumer hand-off) becomes
+real work. `RIGCFG`'s `icache`/`dcache` bits record the actual state at boot rather than asserting it from prose.
 
-Also record in the comment: neither the driver nor `stm32-fmc` self-tests SDRAM (`sdram.rs:103` drops the handle), so the first evidence the part is alive is this ticket's first successful capture — which is why `CAPMAX` prints before any block is trusted.
+Hand TASK-038.05 a **rule**, not an open question, in the code comment: caches stay off until someone owns the coherence
+argument for the FMC window, and that person must revisit `capture`'s hand-off ordering at the same time. Then add the
+short factual note to `docs/reference/daisy-seed3.md` §4 near the existing FMC/MPU discussion. Budgets and workflow prose
+belong to TASK-038.06, not here.
 
-## 10. Verification ladder
+Also record in the comment: neither the driver nor `stm32-fmc` self-tests the SDRAM (`ca9bcc9/src/sdram.rs:103` drops the
+handle), so the first evidence the part is alive is this ticket's first successful capture — which is why `CAPMAX` prints
+before any block is trusted, and why `unused_headroom_bytes` is computed from `sdram::SDRAM_SIZE - capture::RING_BYTES`
+at runtime rather than asserted in prose (AC #6), with a note that live audio DMA buffers stay in internal RAM
+(`ca9bcc9/src/audio.rs:20-23`).
+
+## 10. The transport-less build must still compile
+
+CI's second config is `--no-default-features --features "seed3 log-defmt"`, and it builds the whole package, so `rig.rs`
+must link there. `try_emit_dump` and the future `emit_record` are `log-usb`-only. Gate the console-verb and dump paths
+with `#[cfg(feature = "log-usb")]` the way `main.rs:261-266` gates `console_fut`, and in the defmt-only build keep stimulus
+playback plus the capture ring running with `CAPSTAT`-shaped facts going through `log::info!` (the `defmt_log` bridge),
+plus one line saying plainly that this build has no dump transport. Do not fake a dump over RTT.
+
+## 11. Verification ladder and measured baselines
 
 Run in this order; paste the outputs into the finalization notes.
 
@@ -256,13 +532,32 @@ Run in this order; paste the outputs into the finalization notes.
 cargo fmt --all --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cd firmware && cargo build --release --features seed3            # and each stim-* variant
-git diff --name-only HEAD                                          # must not list main.rs or podtest.rs
+cd firmware
+cargo build --release --features seed3                    # default = stim-sine
+cargo build --release --features seed3,stim-ess   --bin rig
+cargo build --release --features seed3,stim-pulse --bin rig
+cargo build --release --no-default-features --features "seed3 log-defmt"
+cargo clippy --release --features seed3 -- -D warnings
+git diff --name-only HEAD                                 # must not list main.rs or podtest.rs
 ```
 
-Record the release size output and the `.bss` delta against the current 86.13% baseline (≈69 KB free). New internal-RAM cost is the 1 KiB state array plus two caller buffers (`MAX_BODY` + `MAX_FRAME`) and the DWT scratch — well under that, but write down the measured number rather than the estimate.
+Size, against **measured** numbers, not the phantom 86.13 %:
 
-Nothing in this ticket may be marked done on the strength of a green build. Correctness claims that need ears, a board, or a cable live in TASK-038.05 (`@human`) and are not satisfied here.
+```
+size -B target/thumbv7em-none-eabihf/release/rig
+size -B target/thumbv7em-none-eabihf/release/main     # baseline: text 88181 / data 1428 / bss 8224
+```
+
+Report `rig`'s `.text` against the 128 KiB FLASH (main sits at 67.3 %) and its `.bss` against the 512 KiB AXI SRAM
+(main sits at 1.57 %, ≈503 KB free). Expected new internal-RAM cost is the 1 KiB state array plus the dump task's
+`[u8; MAX_BODY]` scratch and a handful of atomics — write down the measured number, and note in the finalization that the
+ticket's original "86.13 % `.bss`, ≈69 KB free" premise had no recorded provenance and contradicts measurement.
+
+Nothing in this ticket may be marked done on the strength of a green build. Every claim needing ears, a board, a cable or
+a stopwatch lives in TASK-038.05 (`@human`) and is not satisfied here: audibility per stimulus build (AC #1), the
+five-minute capture with `dropped_full` unchanged and `delivered == expected` (AC #2), ring-full behaviour (AC #3), the
+first real link throughput number (AC #4), and the SDRAM/cache settlement (AC #6). `RIGCFG`, `CAPSTAT`, `CAPMAX` and
+`DUMPEND` exist so that each of those is read off the wire rather than re-instrumented.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes

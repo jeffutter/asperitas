@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-09-09 11:45'
+updated_date: '2026-09-11 16:51'
 labels:
   - planned
 dependencies:
@@ -46,6 +46,7 @@ TASK-034 must have happened first: the cable, the independent observation, and t
 - [ ] #5 HUMAN: one named excerpt from `audio/instruments/` is installed into QSPI with its erase-inclusive wall-clock time recorded, the device reports `EXCOK` with a matching readback CRC, replay drives the DAC without gaps, and a person confirms by ear that the returned audio is recognisably that clip — the digital claim being exactness of the buffer, the analog judgement staying human.
 - [ ] #6 HUMAN: the SDRAM memory model is settled with evidence: the observed value of the core cache control register, or a timed pattern write-and-readback through the 0xC000_0000 window, is recorded, and the mismatch between the address `init()` returns and the address the driver's cacheable MPU region covers is resolved in writing in `docs/reference/daisy-seed3.md` rather than left as a comment.
 - [ ] #7 HUMAN: the capture artifacts and metric summaries from this session are committed and referenced from TASK-019.03 and TASK-035, and the README measurement-rig section carries the observed numbers, since those tickets treat a recorded number as the evidence standard.
+- [ ] #8 HUMAN: the archived capture artifact is shown to contain the stimulus itself in the mono lane rig recorded — peak or RMS amplitude consistent with the loop gain TASK-034 wrote down, and the named channel (left or right) written into docs/reference/daisy-pod.md — because matching delivered and expected block counts with dropped_full at zero passes just as happily on a lane carrying silence, and only a person with the cable in hand can say which lane the loop actually drives.
 <!-- AC:END -->
 
 ## Implementation Plan
