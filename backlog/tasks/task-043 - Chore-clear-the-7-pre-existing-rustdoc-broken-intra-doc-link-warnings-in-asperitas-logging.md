@@ -3,11 +3,11 @@ id: TASK-043
 title: >-
   Chore: clear the 7 pre-existing rustdoc broken intra-doc link warnings in
   asperitas-logging
-status: To Do
+status: In Progress
 assignee:
   - '@agent'
 created_date: '2026-09-10 04:59'
-updated_date: '2026-09-10 19:40'
+updated_date: '2026-09-11 01:59'
 labels:
   - chore
   - review-followup
@@ -29,10 +29,10 @@ Corrected scope, measured during planning (rustc/cargo 1.97.1). Seven is the def
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 cargo doc -p asperitas-logging --no-deps generates zero rustdoc::broken_intra_doc_links warnings under the default features AND under --features boot-led,log-usb,log-defmt (the combination the device build uses).
-- [ ] #2 Fixes preserve intent rather than deleting links: prefer making the target public/gated consistently, or documenting the gated case, over stripping the cross-reference. Note any link genuinely meant to stay internal as plain code text instead.
-- [ ] #3 nix develop -c cargo fmt --all --check, clippy -p asperitas-logging --all-targets -- -D warnings, and cargo test --workspace still pass.
-- [ ] #4 If a doc job is cheap to add to the existing lefthook/CI setup, gate it on RUSTDOCFLAGS="-D warnings" for this crate; otherwise record in the notes why not.
+- [x] #1 cargo doc -p asperitas-logging --no-deps generates zero rustdoc::broken_intra_doc_links warnings under the default features AND under --features boot-led,log-usb,log-defmt (the combination the device build uses).
+- [x] #2 Fixes preserve intent rather than deleting links: prefer making the target public/gated consistently, or documenting the gated case, over stripping the cross-reference. Note any link genuinely meant to stay internal as plain code text instead.
+- [x] #3 nix develop -c cargo fmt --all --check, clippy -p asperitas-logging --all-targets -- -D warnings, and cargo test --workspace still pass.
+- [x] #4 If a doc job is cheap to add to the existing lefthook/CI setup, gate it on RUSTDOCFLAGS="-D warnings" for this crate; otherwise record in the notes why not.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -92,4 +92,31 @@ Evidence from the tree at 50669dd, not from ticket statuses. Measured just now w
 Both match the planning counts exactly, which means neither TASK-043.01 nor TASK-043.02 has touched crates/ yet. Dependencies were already recorded on this ticket (043.01, 043.02), so it resumes on its own once they close.
 
 Next actionable step is TASK-043.01, which is in To Do and shows under backlog task list --ready. It is mechanical (delete six outer /// comments in lib.rs, move their rationale prose onto the matching //! headers) and deliberately leaves 4 and 15 warnings behind; TASK-043.02 finishes the count to zero, then this ticket adds the lefthook/CI RUSTDOCFLAGS gate and re-runs the AC #3 gates on the merged result.
+
+Finalization (TASK-043 itself, tree at fec9b9e + these two config files). Both children had already
+merged — 14b32cd (043.01) and 75f622d (043.02) — so `crates/` needed nothing further here.
+
+AC #1/#2 measured on this tree with rustc/cargo 1.97.1 via nix develop, all three invocations clean
+of warnings of ANY kind (not just broken_intra_doc_links): default features,
+`--features boot-led,log-usb,log-defmt`, and `--all-features`. The `[lints.rustdoc]` deny stanza from
+043.02 is present in crates/asperitas-logging/Cargo.toml:54 and makes an unresolved link a hard error
+with no RUSTDOCFLAGS at all.
+
+AC #4 done as "add it". lefthook.yml pre-push gains `doc-links` and `doc-links-device`; ci.yml gains
+the same two inside the existing single `nix develop ... bash -c` step, after the clippy steps and
+before cargo test, so the nix env is still built once. Verified per-command without a full push:
+`lefthook run pre-push --command doc-links` and `... --command doc-links-device` both pass warm in
+under a second. Cold cost is the dependency compile for host target (embassy-stm32 etc.), which CI's
+firmware cross-compile does not share a target dir with — minutes at worst on ubuntu runners, against
+a pre-push that already runs a release cross-compile. `nix flake check` passes, so the ci.yml quoting
+still evaluates.
+
+Both layers kept deliberately: the Cargo.toml stanza fails a developer who just types `cargo doc`;
+RUSTDOCFLAGS fails CI on any rustdoc warning the stanza does not name. Having neither is how 24
+accumulated.
+
+AC #3 re-run on the merged result: fmt --all --check clean, `clippy -p asperitas-logging --all-targets
+-- -D warnings` clean, `cargo test --workspace` all green. No firmware rebuild — this ticket touches
+only lefthook.yml and .github/workflows/ci.yml (`git diff --no-ext-diff --stat`: 21 added lines, 2
+config files; note the ext-diff form, plain `git diff` is swallowed by difftastic).
 <!-- SECTION:NOTES:END -->

@@ -40,6 +40,15 @@ jobs:
             echo "=== cargo clippy (asperitas-pod pod-hw feature) ==="
             cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings
 
+            # Rustdoc cross-references. The crate's own [lints.rustdoc] stanza already denies the two
+            # intra-doc-link lints; RUSTDOCFLAGS raises that to every rustdoc warning, and the device
+            # feature set is a separate run because usb.rs and led.rs only exist with those features on.
+            echo "=== cargo doc (asperitas-logging) ==="
+            RUSTDOCFLAGS="-D warnings" cargo doc -p asperitas-logging --no-deps
+
+            echo "=== cargo doc (asperitas-logging device features) ==="
+            RUSTDOCFLAGS="-D warnings" cargo doc -p asperitas-logging --no-deps --features boot-led,log-usb,log-defmt
+
             echo "=== cargo test ==="
             cargo test --workspace
 
