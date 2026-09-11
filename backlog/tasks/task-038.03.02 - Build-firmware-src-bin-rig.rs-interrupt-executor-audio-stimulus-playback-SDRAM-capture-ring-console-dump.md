@@ -3,16 +3,17 @@ id: TASK-038.03.02
 title: >-
   Build firmware/src/bin/rig.rs: interrupt-executor audio, stimulus playback,
   SDRAM capture ring, console dump
-status: In Progress
+status: Blocked
 assignee:
-  - '@ralph'
+  - '@agent'
 created_date: '2026-09-11 13:28'
-updated_date: '2026-09-11 16:54'
+updated_date: '2026-09-11 15:53'
 labels:
   - task
   - planned
 dependencies:
-  - TASK-038.03.01
+  - TASK-038.03.02.01
+  - TASK-038.03.02.02
 modified_files:
   - firmware/src/bin/rig.rs
   - firmware/Cargo.toml
@@ -30,6 +31,13 @@ ordinal: 83500
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+**This ticket is an umbrella as of 2026-09-11; its plan below stays the authority for both leaves.** Two execute attempts were cut at the 40-minute deadline having produced no commit — the second one died roughly eight minutes short of the file this ticket exists to create, still repairing syntax damage the first had left uncommitted. The increment was too large for one pass: 13 criteria, five subsystems, host crate and bare-metal binary together. It is now split along the host/firmware seam:
+
+- **TASK-038.03.02.01** — the four console verbs, their host pinning tests, one whole-record emit path, and the incremental CRC. Crate-side only, testable with no board.
+- **TASK-038.03.02.02** — `rig.rs` itself, its cargo features, CI coverage, the SDRAM memory-model note.
+
+What remains on this ticket is the integration check: run §11's verification ladder once over the joined result and record the measured sizes. Nothing here is executable until both leaves are Done.
+
 The binary that closes TASK-038's measurement loop. It does four things that no existing binary does: it plays a stimulus out of the codec, records what comes back through the Pod self-loopback into external SDRAM, moves that recording out over the framed console without starving the audio callback, and reports enough numbers that "did audio starve?" is a measurement rather than an assertion.
 
 Why a new file rather than growing `podtest.rs` or `main.rs` is argued in the parent description; do not relitigate it. `main.rs` and `podtest.rs` stay byte-identical — AC #1 exists because TASK-018.04 pinned podtest's output contract with human ears.
@@ -65,6 +73,21 @@ Out of scope: host-initiated control (TASK-032), QSPI excerpt playback (TASK-038
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
+## What this ticket actually is now
+
+Two leaves carry the implementation; this umbrella carries the corrections below (which stay the authority for both), the integration check, and the mapping from its thirteen acceptance criteria onto work someone else did.
+
+| AC | Leaf |
+| --- | --- |
+| #7 — verbs as builders in `console.rs`, pinned by host tests, one whole-record emit path | `.01` |
+| everything else: `rig.rs` (#1-#6, #8-#10, #12), the §8 rate gates (#11 minus `CAPSTAT_MAX_BODY`'s definition), CI + ladder + sizes (#13) | `.02` |
+| #11's `pub const CAPSTAT_MAX_BODY` and its saturated-render bound | `.01` (the crate that renders the record owns the number `.02` divides by) |
+| `spin_budget.rs`'s stale `steal()` justification | `.02` (it becomes stale when `rig.rs` claims the singleton) |
+
+The umbrella's own work, once both leaves are Done: run §11's ladder over the joined tree — `cargo fmt --all --check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, then inside `firmware/` the default build, both stimulus variants, the defmt-only build, and firmware clippy — plus `size -B` for `rig` against `main`, and paste the outputs into Final Summary. Builds are incremental after the first; expect well under the phase budget, but ping every 10 minutes regardless.
+
+Do not re-plan either leaf from here. If one of them turns out wrong, fix its ticket, not this prose.
+
 ## Read before writing anything
 
 Authoritative sources, on this machine, in this order:
@@ -569,7 +592,13 @@ Interface facts from TASK-038.03.01, now published in asperitas_logging::capture
 - Its const assert should read capture::RING_BLOCK_BYTES.is_multiple_of(capture::CALLBACK_BYTES), not `% .. == 0`: manual_is_multiple_of is denied under -D warnings wherever root workspace lints apply. firmware/ inherits none of them today, so the % form would build — it is style debt here, not a failure.
 - The FRAMES_PER_CALLBACK vs daisy_embassy::audio::BLOCK_LENGTH assert compares samples (32 == 32). CALLBACK_BYTES (64 bytes of one mono channel) and HALF_DMA_BUFFER_LENGTH (64 u32 words per callback) coincide numerically and must not be compared.
 - Block state hand-off lives in capture::BlockState / capture::transition_ok: exactly four legal edges (Free->Filling, Filling->Full, Full->Dumping, Dumping->Free), no self-transitions, and BlockState::from_u8 returns Option — an unrecognised status byte is None, never Free. Store these in [AtomicU8; capture::RING_BLOCKS]; AtomicU8 is lock-free on ARMv7-M (LDREXB/STREXB), so portable-atomic stays out.
-- Ring geometry: RING_BLOCK_BYTES 32_768, RING_BLOCKS 1_024, RING_BYTES 33_554_432 (half the Seed3's 64 MB SDRAM, BYTES_PER_SECOND 96_000, 349 s floor / 349,525,333 us exact, 255 chunks + 1 AUDEND = 256 records per block, 57,788 wire bytes per block (exact, encoder-confirmed).
-EOF
-)
+- Ring geometry: `RING_BLOCK_BYTES` 32_768, `RING_BLOCKS` 1_024, `RING_BYTES` 33_554_432 (half the Seed3's 64 MB SDRAM), `BYTES_PER_SECOND` 96_000, 349 s floor / 349,525,333 us exact, 255 chunks + 1 AUDEND = 256 records per block, 57,788 wire bytes per block (exact, encoder-confirmed).
+
+### Why this ticket was split (2026-09-11, after two failed execute attempts)
+
+Both attempts were cut at the 40-minute execute deadline having landed **zero commits**. Neither hung: each was actively editing files when killed, exactly one budget after its last intercom ping. Attempt 1 left `frame.rs` with a syntax error uncommitted; attempt 2 spent ~25 of its 40 minutes repairing that before starting its own work, and died ~8 minutes short of ever creating `firmware/src/bin/rig.rs`. Thirteen criteria across five subsystems, spanning a host crate and a bare-metal binary, do not fit one increment.
+
+The seam is host versus firmware: `.03.02.01` takes the crate-side verbs (parent AC #7 plus `CAPSTAT_MAX_BODY` and the incremental CRC §7 step 3 needs), `.03.02.02` takes `rig.rs` and everything cross-compiled. This umbrella keeps the plan below as their shared authority and carries only §11's integration ladder.
+
+Salvage: `git stash list` holds `stash@{0}` ("wip-038.03.02-uncommitted", 687 insertions: `console.rs` +564 rig verbs, `frame.rs`, `lib.rs`, `spin_budget.rs`, `tests/commit_path_no_panic.rs`) from the aborted attempts. It was never reviewed or committed. `.03.02.01` dispositions of it first; whatever remains gets dropped, not archived.
 <!-- SECTION:NOTES:END -->

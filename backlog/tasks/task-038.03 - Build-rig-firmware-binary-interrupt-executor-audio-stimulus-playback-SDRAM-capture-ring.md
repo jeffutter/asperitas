@@ -65,16 +65,18 @@ Stimulus type and level are compile-time selections (cargo features, sine at −
 <!-- SECTION:PLAN:BEGIN -->
 ## What this ticket actually is now
 
-Two leaves carry the implementation; this umbrella carries the corrections, the integration check, and the mapping from its eleven acceptance criteria onto work that someone else did. Both leaves are planned and `@agent`.
+Two leaves carry the implementation; this umbrella carries the corrections, the integration check, and the mapping from its eleven acceptance criteria onto work that someone else did.
 
-- **TASK-038.03.01** — `asperitas_logging::capture`: the ring geometry as constants derived from the dump grammar, the block-state contract, and the host test that fails CI when the two disagree. No firmware, no hardware.
-- **TASK-038.03.02** — `firmware/src/bin/rig.rs` plus the record verbs and the Cargo/CI wiring. Everything that touches a peripheral.
+- **TASK-038.03.01** — Done (commit `dad6915`). `asperitas_logging::capture`: the ring geometry as constants derived from the dump grammar, the block-state contract, and the host test that fails CI when the two disagree. No firmware, no hardware.
+- **TASK-038.03.02** — `rig.rs` plus the record verbs and the Cargo/CI wiring. Everything that touches a peripheral. After two execute attempts died at the phase deadline with nothing committed, this leaf became an **umbrella over two sub-leaves**: `.03.02.01` (console verbs, their host tests, one whole-record emit path, incremental CRC — crate-side, board-free) then `.03.02.02` (`rig.rs`, features, CI, memory-model note). See its own plan for the AC mapping.
 
-Order is strictly `.01` then `.02`: the binary imports the geometry module and const-asserts against it, so `.02` cannot compile without `.01` landed.
+Order is strictly `.01` then `.02`: the binary imports the geometry module and const-asserts against it, so `.02` cannot compile without `.01` landed. Within `.02` the same order holds again, crate-side verbs before the binary that calls them.
 
 ### Why two leaves and not four
 
 The obvious further split — executor skeleton, capture producer, dump writer, CI matrix — was considered and rejected. Those pieces share one file and one set of atomics, and every intermediate state still has to compile under `cargo build --release --features seed3`; a "captures but never dumps" rig.rs ships nothing anyone can use. The skill's own rule applies: do not split changes that must ship together. `.01` is the only genuinely independent increment here, because it is a library module with its own test target, and it is also the one place where an error is catchable with no board attached.
+
+That rejection still governs *inside* `rig.rs`, which remains one increment in `.03.02.02`. What `.02` later split along was a different seam — host crate versus bare-metal binary, the one boundary where a change needs no cross-build to check. The reason was measured, not theoretical: 40-minute execute budget, two attempts cut with zero commits, the second dead eight minutes short of creating `rig.rs` while spending 25 of its minutes repairing syntax damage the first had left uncommitted.
 
 ## Corrections this planning run makes to the ticket text
 
@@ -98,7 +100,7 @@ When both leaves are Done, this umbrella verifies rather than builds:
 2. `git diff --name-only` proves `main.rs` and `podtest.rs` untouched — AC #1, and the reason the human-verified TASK-018.04 contract cannot regress.
 3. Read `rig.rs` end to end against AC #2/#4/#5 and confirm three specific things the leaves could each see only half of: the audio callback contains **no** logging call (it runs above the thread executor, and `RECORD_BUFS` is PRIMASK-based, so logging there deadlocks with interrupts masked); the publish ordering really is fence-then-store rather than store-then-fence; and the dump writer admits every chunk through `try_emit_dump` with a `Timer` backoff rather than a spin.
 4. Confirm the copied driver constant is checked where both sides are visible: `capture::FRAMES_PER_CALLBACK == daisy_embassy::audio::BLOCK_LENGTH`, compared in samples. Not `CALLBACK_BYTES == HALF_DMA_BUFFER_LENGTH * 2`, which was written here earlier and cannot hold — that side works out to 128 while a mono 16-bit callback contributes 64 bytes.
-5. Record the release size and `.bss` delta against the 86.13% baseline in the finalization notes.
+5. Record the release size and `.bss` delta against the **measured** baseline in the finalization notes — `main`: text 88181 / data 1428 / bss 8224, i.e. 1.57 % of the 512 KiB AXI SRAM. The "86.13 % `.bss`" figure named here earlier has no recorded provenance and contradicts `size -B` on the checked-in release ELFs; see `.03.02`'s plan §5 and §11.
 
 ## AC-to-leaf map for whoever closes this
 
@@ -115,6 +117,8 @@ When both leaves are Done, this umbrella verifies rather than builds:
 | #9 SDRAM memory model recorded, MPU base untouched | .02 |
 | #10 device decides start/end, no host channel | .02 |
 | #11 dump summary record | .02 |
+
+Since the split below, "`.02`" in this table means its sub-leaves: the `RIGCFG`/`CAPSTAT`/`CAPMAX`/`DUMPEND` builders, `CAPSTAT_MAX_BODY` and the incremental CRC live in **TASK-038.03.02.01**; `rig.rs`, its features, CI coverage and the SDRAM note live in **TASK-038.03.02.02**.
 
 ## Boundaries with siblings, so nobody duplicates work
 
