@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:37'
-updated_date: '2026-09-09 11:49'
+updated_date: '2026-09-11 01:29'
 labels: []
 dependencies:
   - TASK-038.01
@@ -90,3 +90,14 @@ Stimulus type and level are compile-time selections (cargo features, sine at −
 
 `podtest.rs:117` carries a compile-time gate (`const _: () = assert!(ENCRAW_WORST_CASE_LINES_PER_SECOND < 58)`) proving its logging rate fits the link. Put the equivalent arithmetic for `CAPSTAT` cadence and dump chunk rate somewhere the compiler or a host test can check it, not in prose.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-11 01:29
+---
+Stale dump arithmetic in your Implementation Notes — recompute before planning. They say '219 AUDIO chunks plus one AUDEND per block' and '640 records/s ... roughly 146 kB/s ... at 150-of-228 efficiency', both computed from the 150-raw-bytes-per-record figure TASK-038.02 proved impossible at MAX_BODY = 200. Actual pinned geometry: CHUNK_RAW = 129, so a 32,768-byte ring block is 254 full chunks plus a 2-byte tail = 255 chunks, 256 records counting the AUDEND, and the wire cost is 745 records/s at ~169 kB/s (pinned by published_efficiency_matches_the_encoder, tests/console_dump.rs:946).
+
+That is exactly MAX_CHUNKS_PER_BLOCK = 255 (dump.rs:444, asserted :477; MAX_BLOCK_BYTES = 32,895), so the 32 KiB block size sits on the ceiling with zero margin. Going one chunk further is a runtime refusal from the encoder (dump.rs:605, :661) during a dump, not a compile error, because nothing in asperitas-logging can see the ring's geometry. Recommend AC #7 derive chunks-per-block from dump::CHUNK_RAW and const-assert ring_block_bytes <= dump::MAX_BLOCK_BYTES instead of pinning a literal. See TASK-038.02's finalization notes for the rest.
+---
+<!-- COMMENTS:END -->

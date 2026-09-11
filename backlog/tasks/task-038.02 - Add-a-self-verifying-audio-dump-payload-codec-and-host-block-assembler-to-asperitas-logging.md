@@ -3,11 +3,11 @@ id: TASK-038.02
 title: >-
   Add a self-verifying audio dump payload codec and host block assembler to
   asperitas-logging
-status: Blocked
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:33'
-updated_date: '2026-09-09 16:10'
+updated_date: '2026-09-11 01:29'
 labels:
   - planned
 dependencies:
@@ -15,6 +15,7 @@ dependencies:
   - TASK-038.02.02
   - TASK-038.02.03
   - TASK-038.02.04
+  - TASK-038.02.05
 modified_files:
   - crates/asperitas-logging/src/dump.rs
   - crates/asperitas-logging/src/lib.rs
@@ -59,11 +60,11 @@ Finally, a host-only reassembler example, so the format is proven by a program b
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Four leaf tasks carry this ticket. Each has its own plan; read this one first because it records the two premises the ticket shipped with that turned out to be false, and the decisions every child inherits.
+Five leaf tasks carry this ticket — four that built it (.01–.04, all Done) and one that closes a gap found while finalizing (.05). Each has its own plan; read this one first because it records the two premises the ticket shipped with that turned out to be false, and the decisions every child inherits.
 
 ## Shape
 
-`dump.rs` is written top-down by four sequential leaves rather than one big session: the payload codec, then the record grammar built on it, then the consumer that proves the format self-verifying, then the pipe discipline that keeps the dump from eating the log traffic that observes it. They share files (`src/dump.rs`, `tests/console_dump.rs`), so they are chained by dependency even where their *semantics* are independent — specifically TASK-038.02.04 needs nothing from .01–.03 but must not land concurrently with them.
+`dump.rs` was written top-down by four sequential leaves rather than one big session: the payload codec, then the record grammar built on it, then the consumer that proves the format self-verifying, then the pipe discipline that keeps the dump from eating the log traffic that observes it. They share files (`src/dump.rs`, `tests/console_dump.rs`), so they are chained by dependency even where their *semantics* are independent — specifically TASK-038.02.04 needs nothing from .01–.03 but must not land concurrently with them. A fifth leaf, .05, was added at finalization; it touches only the example.
 
 | Ticket | Ships | Depends on |
 |---|---|---|
@@ -71,6 +72,7 @@ Four leaf tasks carry this ticket. Each has its own plan; read this one first be
 | .02 | `AUDIO blk/n/c/d` + `AUDEND` bodies, const-derived `CHUNK_RAW = 129`, pinned golden frames, efficiency arithmetic test | .01 |
 | .03 | `BlockAssembler`, adversarial integrity suite, `examples/dump_reassemble.rs` with `--selftest`, one CI line | .02 |
 | .04 | `RESERVE`/`dump_fits` predicate, `try_emit_dump` commit path, occupancy-sweep and interleave tests | .03 (file contention only) |
+| .05 | two mid-frame truncation cases in the example's `--selftest`, added 2026-09-11 when finalization found AC #7's "truncation" unproven through the shipped read loop | .03 (same file) |
 
 Nothing here needs the board, ears, or an instrument: AC #7's "exercised in CI ... with no board attached" is why the example carries `--selftest`. Measured throughput stays where it always was — TASK-038.05, @human. Every number in these plans is a prediction until that bench session replaces it.
 
@@ -157,11 +159,35 @@ Replacement: the writer polls `free_capacity()` and commits through `frame::writ
 - No COBS/binary framing and no Ascii85/Z85 (they contain `~`, the record start marker, and `<>`, reserved host-to-device by TASK-032).
 - No async wait loop here. The retry/backoff loop needs an executor and a timer and belongs to TASK-038.03.
 
-## Parked 2026-09-09: this is an umbrella, not a unit of work
+## Finalization run 2026-09-11: the leaves landed, one gap remains
 
-No implementation was attempted here. All seven ACs are carried by the four leaves (.01 codec, .02 grammar, .03 assembler + example + CI, .04 pipe reserve), all `@agent`, all Dev Ready, none started. Evidence from the tree rather than from statuses: `crates/asperitas-logging/src/` contains console.rs, frame.rs, led.rs, lib.rs, panic_handler.rs, usb.rs — there is no `dump.rs`, no `tests/console_dump.rs`, no `examples/dump_reassemble.rs`, and `Cargo.toml` has no base64 dev-dependency. Nothing this ticket could ship exists yet, and writing four tickets' code under one ID would leave the leaves open against a Done parent.
+All four building leaves are Done and their code is in the tree: `src/dump.rs` (1,632 lines), `tests/console_dump.rs` (2,307), `examples/dump_reassemble.rs` (1,100), `base64 = "0.23"` confined to `[dev-dependencies]`, and one CI line running `--selftest`. This run wrote no implementation; it checked each AC against the tests that claim to prove it, and found one gap, which became **TASK-038.02.05**. Until that leaf is Done this umbrella stays out of `--ready`, which is what we want.
 
-`backlog task list --ready` already excludes this ticket (it depends on .04, transitively on .01-.03) and lists **TASK-038.02.01** as the only ready Dev Ready item. That is the next actionable ticket; select it, not this one.
+Commands run against the working tree at `fe56f11`, all green:
+
+| Command | Result |
+|---|---|
+| `cargo test -p asperitas-logging --all-targets` | 38 pass in `console_dump`, 33 in `console_frame`, plus unit and example targets |
+| `cargo run -p asperitas-logging --example dump_reassemble -- --selftest` | 9 cases ok, exit 0 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | clean |
+| `cd firmware && cargo build --release --features seed3` | succeeds — the compile coverage `try_emit_dump` relied on |
+
+CI has also gained `cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings` (`.github/workflows/ci.yml:32`) since this plan was written, so the record-path functions behind `log-usb` are now *linted*, not merely cross-compiled. Better than the Verification path above assumed; no plan change needed.
+
+### What the boxes do not mean — say these out loud when checking them
+
+The proofs are strong but narrower than the AC sentences, and the difference is worth recording rather than smoothing over:
+
+- **#4 "deleting any whole record"** is swept over a fixed 3-block × 3-chunk fixture (`tests/console_dump.rs:1107-1116`) by a proptest over block × record positions (`deleting_any_record_is_detected`, :1483), and only one record is deleted per run. Multi-record loss is untested. Defensible: the missing-set arithmetic is position-independent, so two deletions differ from one by count alone.
+- **#4 "a corrupted body fails the block CRC"** rests on `block_checksum_catches_damage_inside_valid_frames` (:1586) at a single damage site (chunk 0, byte 0, XOR 0xff), plus the swept `any_single_byte_body_mutation_is_caught` (:1541), which asserts a disjunction (`bad_frames > 0 || !completed`) because most of its mutations trip the *frame* CRC first. Only the former isolates the block-CRC path, which is the one that catches damage riding inside a perfectly valid frame.
+- **#4 marker stripping** removes *every* leading `~` (`stripped_start_markers_complete_nothing`, :1656) and asserts the experiment actually bit (marker count equals record count, :1678-1683). Partial stripping is untested; the AC as written says "a stream stripped of its leading `~` markers", which is what is proven.
+- **#5's sweeps are literal**, not sampled: `for occupancy in 0..=RING` (:2059) crossed with three cursor stops and four body lengths, and `for free in 0..=RING` × `for body_len in 0..=MAX_BODY` (:2119). `RING` references `LOG_PIPE_SIZE` rather than restating it (:1934-1938).
+- **#7's manifest is stderr, not a file**; PCM goes to `--out`. That matches .03's own wording — "raw PCM plus a manifest" has always meant one file and one report, and the selftest asserts on samples captured in memory (`expect_clean`, `examples/dump_reassemble.rs:879-893`), never by reopening a file.
+- **Nothing here entitles anyone to claim the device dumps.** `try_emit_dump` (`src/lib.rs:568`, `log-usb`-gated) has no caller in `firmware/src/`; TASK-038.03 owns the caller, the retry loop, and the stall counters. Likewise every throughput figure remains a prediction until TASK-038.05 measures it.
+
+### The gap that became TASK-038.02.05
+
+AC #7 asks for CI streams containing truncation, corruption and lost start markers. Corruption is `samples-corrupted`, marker-stripping is `start-markers-stripped`, but the 9-case selftest has no truncation case. The only truncation proof in CI is `truncation_at_the_end_of_a_stream_is_refused` (`tests/console_dump.rs:1882`), which cuts at *record* boundaries and drives the assembler directly. So `consume()`'s `decoder.finish()` / `assembler.finish()` handoff (`examples/dump_reassemble.rs:307-317`) — the code that decides what an interrupted capture reports — is exercised by nothing. Real captures end mid-frame constantly (Ctrl-C on `cat /dev/cu.usbmodem… > capture.txt`, an unplugged cable), and TASK-038.05 has to distinguish that host-side cut from device-side loss. Two selftest cases close it, with both expected verdicts stated in the ticket so the executor decides nothing by accident.
 
 ### AC to leaf map, for whoever closes this umbrella
 - #1 dump module on both targets + AUDIO/AUDEND bodies, frame constants untouched -> .01 (module, ungated in `lib.rs`) plus .02 (bodies, const asserts). See .02 AC #1/#2/#3 and the firmware release build in both leaves' verification steps.
@@ -170,13 +196,25 @@ No implementation was attempted here. All seven ACs are carried by the four leav
 - #4 loss proven by test (deletion, corruption, reordering, `~` marker stripping) -> .03 AC #4.
 - #5 ring-capacity predicate plus exhaustive occupancy sweep `0..=LOG_PIPE_SIZE` -> .04 AC #1, #3, #4, #5.
 - #6 efficiency arithmetic derived from the encoder's own constants -> .02 AC #5.
-- #7 `examples/dump_reassemble.rs` gating CI via `--selftest` -> .03 AC #5, #6.
+- #7 `examples/dump_reassemble.rs` gating CI via `--selftest` -> .03 AC #5, #6 for the tool and the CI line; **.05 for the truncation half of the criterion**, which .03 did not cover.
 
-Check these boxes only after the owning leaf is Done, using that leaf's test output as the evidence. Do not check any of them from a planning or parking run.
+Evidence to cite for #1 beyond the leaf statuses: bodies at `src/dump.rs:596`/`:650` with geometry pinned by `const _: () = assert!(...)` at `:474-483`; golden frames reproduced byte-for-byte (`console_dump.rs:720`, `:749`, `:778`) and round-tripped through the real `frame::Decoder` (`:995`); `MAX_BODY`/`MAX_FRAME`/`sanitize_byte`/polynomial at `frame.rs:99`, `:108`, `:305`, `:204-215` with no diff touching them across all four leaf commits; `dump.rs:113-116` imports those constants instead of redefining them; `write_hex`/`write_decimal`/`parse_hex`/`parse_decimal` were widened to `pub(crate)` (`frame.rs:342`, `:359`, `:938`, `:952`) rather than copied.
+
+### Closing order
+
+1. Land TASK-038.02.05 (Dev Ready, planned, `@agent`) — it is the only open child and the only thing between this ticket and closure.
+2. Check #1–#7 with the citations above plus .05's 11-case selftest output for #7. Re-run the four commands in the table only if the tree has moved since `fe56f11`.
+3. `backlog task complete TASK-038.02` when all seven boxes are checked and .05 is Done.
+
+### One finding that belongs to another ticket
+
+TASK-038.03's Implementation Notes still carry pre-correction arithmetic: "219 `AUDIO` chunks plus one `AUDEND` per block" and "640 records/s … roughly 146 kB/s … at 150-of-228 efficiency". At `CHUNK_RAW = 129` a 32,768-byte ring block is 254 full chunks plus a 2-byte tail — **255 chunks, 256 records counting the `AUDEND`** — and the wire cost is the pinned 169 kB/s (`published_efficiency_matches_the_encoder`).
+
+That leaves no margin at all. `COUNT_FIELD_MODULUS` is 256 and `MAX_CHUNKS_PER_BLOCK = COUNT_FIELD_MODULUS - 1 = 255` (`dump.rs:444`, asserted at `:477`), so `MAX_BLOCK_BYTES` is 32,895 and TASK-038.03's chosen 32 KiB block lands *exactly* on the ceiling: 255 chunks, one spare chunk-width of nothing. Exceed it and the encoder refuses the block outright (`dump.rs:605`, `:661`) rather than truncating `n` — a runtime refusal during a dump, discovered at the bench, because nothing in this crate can see the ring's block size. So TASK-038.03's geometry test (its AC #7) must derive chunks-per-block from `dump::CHUNK_RAW` and assert `ring_block_bytes <= dump::MAX_BLOCK_BYTES` as a host-side const check, not carry a literal. Flagged in a comment there so its planning run recomputes from the constants instead of inheriting the stale figures as verified facts.
 
 ### Commit state
 
-The 2026-09-09 16:01 planning rewrite (both false premises corrected: 150 raw bytes per record is unreachable at `MAX_BODY = 200`; `Pipe::ready_send` is absent in embassy-sync 0.6.2) and the four new leaf files were left uncommitted by the planning run. This commit lands them.
+This run committed: the finalization notes above, the new `task-038.02.05` leaf file and its dependency edge on the parent, a comment on TASK-038.03 about the stale arithmetic, and the status flip on TASK-043 (Blocked → To Do) that an earlier run had left dirty.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
