@@ -97,7 +97,7 @@ When both leaves are Done, this umbrella verifies rather than builds:
 1. `cargo fmt --all --check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and all four stimulus cross-builds green in one tree.
 2. `git diff --name-only` proves `main.rs` and `podtest.rs` untouched — AC #1, and the reason the human-verified TASK-018.04 contract cannot regress.
 3. Read `rig.rs` end to end against AC #2/#4/#5 and confirm three specific things the leaves could each see only half of: the audio callback contains **no** logging call (it runs above the thread executor, and `RECORD_BUFS` is PRIMASK-based, so logging there deadlocks with interrupts masked); the publish ordering really is fence-then-store rather than store-then-fence; and the dump writer admits every chunk through `try_emit_dump` with a `Timer` backoff rather than a spin.
-4. Confirm the copied driver constant is checked where both sides are visible: `capture::CALLBACK_BYTES == daisy_embassy::audio::HALF_DMA_BUFFER_LENGTH * 2`.
+4. Confirm the copied driver constant is checked where both sides are visible: `capture::FRAMES_PER_CALLBACK == daisy_embassy::audio::BLOCK_LENGTH`, compared in samples. Not `CALLBACK_BYTES == HALF_DMA_BUFFER_LENGTH * 2`, which was written here earlier and cannot hold — that side works out to 128 while a mono 16-bit callback contributes 64 bytes.
 5. Record the release size and `.bss` delta against the 86.13% baseline in the finalization notes.
 
 ## AC-to-leaf map for whoever closes this
