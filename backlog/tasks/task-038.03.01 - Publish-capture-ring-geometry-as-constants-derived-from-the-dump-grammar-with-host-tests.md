@@ -3,11 +3,11 @@ id: TASK-038.03.01
 title: >-
   Publish capture-ring geometry as constants derived from the dump grammar, with
   host tests
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-11 13:24'
-updated_date: '2026-09-11 14:49'
+updated_date: '2026-09-11 15:28'
 labels:
   - task
   - planned
@@ -36,13 +36,13 @@ Scope guard: this ticket adds no firmware code, touches no hardware, and changes
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 crates/asperitas-logging/src/capture.rs exists and is exported as pub mod, ungated by log-usb, so it compiles on both the host and thumbv7em-none-eabihf. It owns every capture-ring number: sample rate, bytes per audio callback, ring block bytes, ring block count, ring bytes, bytes per second.
-- [ ] #2 No figure duplicates the wire grammar by hand. chunks-per-block, records-per-block and the per-block wire-byte budget are computed from dump::CHUNK_RAW, dump::MAX_CHUNKS_PER_BLOCK, dump::FULL_AUDIO_FRAME_LEN, dump::MAX_AUDEND_BODY_LEN and the frame prefix/trailer lengths, so widening a header moves the ring numbers instead of silently desynchronising them.
-- [ ] #3 Compile-time asserts hold: RING_BLOCK_BYTES <= dump::MAX_BLOCK_BYTES (127 B of slack today), chunks_per_block() <= dump::MAX_CHUNKS_PER_BLOCK (equal today, zero margin, which makes this the load-bearing one), RING_BLOCK_BYTES.is_multiple_of(CALLBACK_BYTES), both RING_BLOCK_BYTES and RING_BYTES are powers of two, RING_BLOCKS <= u16::MAX, and expected_blocks(CAPTURE_WINDOW_SECONDS) < RING_BLOCKS. Every duration helper carries an explicit width -- ring_duration_micros returns u64, ring_seconds_floor u32 -- with each intermediate product taken in u64, because const eval runs in the target's environment where usize is 32 bits: the usize form of RING_BYTES * 1_000_000 / BYTES_PER_SECOND builds clean on the host and fails the cross build with E0080. A change that pushes a ring block past the grammar ceiling fails cargo build, not a bench dump.
-- [ ] #4 tests/capture_geometry.rs derives and pins, from the published constants: 512 callbacks per block, 255 AUDIO chunks plus one AUDEND giving 256 records, 1,024 blocks, 96,000 bytes/s footprint, 349 s floor and 349,525,333 microseconds exact ring capacity, and an exact -- not worst-case -- 57,788-byte wire budget per block. That budget is confirmed by a second oracle which encodes a real 255-chunk block through dump::audio_record and dump::audend_record and sums the frame lengths the codec actually produced. The block-level useful fraction is pinned at 567 per 1000, named as distinct from and legitimately below the 568 per-record efficiency pinned by published_efficiency_matches_the_encoder.
-- [ ] #5 A pure BlockState contract (Free -> Filling -> Full -> Dumping -> Free) is published with a total transition_ok function plus as_u8/from_u8, where from_u8 returns Option<BlockState> rather than reading an unrecognised status byte as Free, and an exhaustive host test over all sixteen pairs asserts exactly the four legal edges, so the firmware ring and its tests share one state machine.
-- [ ] #6 The five-minute capture window TASK-019.03 asks for fits the ring: expected_blocks(300) == 878 < RING_BLOCKS, asserted in the host test, so ring-full is a backstop rather than the normal end of a run.
-- [ ] #7 Everything lefthook and CI enforce passes with these files added: cargo fmt --all --check; cargo test -p asperitas-logging --all-targets; cargo test --workspace; cargo clippy --workspace --all-targets -- -D warnings; the same with --features asperitas-pod/pod-hw; cargo clippy -p asperitas-logging --features log-usb --lib and --features log-defmt --lib, each with -D warnings; RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps in both the default and --all-features forms; and cd firmware && cargo build --release --features seed3. dump.rs and frame.rs are untouched.
+- [x] #1 crates/asperitas-logging/src/capture.rs exists and is exported as pub mod, ungated by log-usb, so it compiles on both the host and thumbv7em-none-eabihf. It owns every capture-ring number: sample rate, bytes per audio callback, ring block bytes, ring block count, ring bytes, bytes per second.
+- [x] #2 No figure duplicates the wire grammar by hand. chunks-per-block, records-per-block and the per-block wire-byte budget are computed from dump::CHUNK_RAW, dump::MAX_CHUNKS_PER_BLOCK, dump::FULL_AUDIO_FRAME_LEN, dump::MAX_AUDEND_BODY_LEN and the frame prefix/trailer lengths, so widening a header moves the ring numbers instead of silently desynchronising them.
+- [x] #3 Compile-time asserts hold: RING_BLOCK_BYTES <= dump::MAX_BLOCK_BYTES (127 B of slack today), chunks_per_block() <= dump::MAX_CHUNKS_PER_BLOCK (equal today, zero margin, which makes this the load-bearing one), RING_BLOCK_BYTES.is_multiple_of(CALLBACK_BYTES), both RING_BLOCK_BYTES and RING_BYTES are powers of two, RING_BLOCKS <= u16::MAX, and expected_blocks(CAPTURE_WINDOW_SECONDS) < RING_BLOCKS. Every duration helper carries an explicit width -- ring_duration_micros returns u64, ring_seconds_floor u32 -- with each intermediate product taken in u64, because const eval runs in the target's environment where usize is 32 bits: the usize form of RING_BYTES * 1_000_000 / BYTES_PER_SECOND builds clean on the host and fails the cross build with E0080. A change that pushes a ring block past the grammar ceiling fails cargo build, not a bench dump.
+- [x] #4 tests/capture_geometry.rs derives and pins, from the published constants: 512 callbacks per block, 255 AUDIO chunks plus one AUDEND giving 256 records, 1,024 blocks, 96,000 bytes/s footprint, 349 s floor and 349,525,333 microseconds exact ring capacity, and an exact -- not worst-case -- 57,788-byte wire budget per block. That budget is confirmed by a second oracle which encodes a real 255-chunk block through dump::audio_record and dump::audend_record and sums the frame lengths the codec actually produced. The block-level useful fraction is pinned at 567 per 1000, named as distinct from and legitimately below the 568 per-record efficiency pinned by published_efficiency_matches_the_encoder.
+- [x] #5 A pure BlockState contract (Free -> Filling -> Full -> Dumping -> Free) is published with a total transition_ok function plus as_u8/from_u8, where from_u8 returns Option<BlockState> rather than reading an unrecognised status byte as Free, and an exhaustive host test over all sixteen pairs asserts exactly the four legal edges, so the firmware ring and its tests share one state machine.
+- [x] #6 The five-minute capture window TASK-019.03 asks for fits the ring: expected_blocks(300) == 879 < RING_BLOCKS (corrected from 878 at execution: the helper rounds up, because a run that spills into a block consumes it — see Implementation Notes), asserted in the host test, so ring-full is a backstop rather than the normal end of a run.
+- [x] #7 Everything lefthook and CI enforce passes with these files added: cargo fmt --all --check; cargo test -p asperitas-logging --all-targets; cargo test --workspace; cargo clippy --workspace --all-targets -- -D warnings; the same with --features asperitas-pod/pod-hw; cargo clippy -p asperitas-logging --features log-usb --lib and --features log-defmt --lib, each with -D warnings; RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps in both the default and --all-features forms; and cd firmware && cargo build --release --features seed3. dump.rs and frame.rs are untouched.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -118,7 +118,7 @@ Derived, all pub const fn so both a const context and a test can call them:
 | useful_fraction_per_mille() -> u32 | 567 | u64 division |
 | ring_seconds_floor() -> u32 | 349 | |
 | ring_duration_micros() -> u64 | 349_525_333 | (RING_BYTES as u64 * 1_000_000) / BYTES_PER_SECOND as u64 |
-| expected_blocks(seconds: u32) -> usize | 878 at 300 | multiply in u64 |
+| expected_blocks(seconds: usize) -> usize | 879 at 300 | multiply in u64; rounds up; takes usize so TASK-038.03.02's `as usize` call site compiles |
 
 dump::encoded_len is already pub (dump.rs:190) and clamps rather than wrapping, so use it directly.
 The earlier fallback in this plan — widen it the way TASK-038.02 widened write_hex — is unnecessary
@@ -228,7 +228,7 @@ Tests, each pinning literals written once in the test file:
   independent of the module's own arithmetic; comparing the module against itself proves nothing.
 - useful_fraction_is_567_per_mille_at_block_level — pin 567, recompute it inline, then pin 568 as the
   per-record figure and assert 567 < 568.
-- a_five_minute_capture_fits_the_ring — expected_blocks(300) == 878 and < RING_BLOCKS.
+- a_five_minute_capture_fits_the_ring — expected_blocks(300) == 879 and < RING_BLOCKS.
 - only_the_four_hand_off_edges_are_legal — loop BlockState::ALL x BlockState::ALL (16 pairs), compare
   each against an explicit four-edge table, and count that exactly four came out legal.
 - the_machine_is_one_cycle_with_no_shortcut_to_full — no self-transition for any state, and the
@@ -299,3 +299,30 @@ AC #7 under-listed the enforced gates. All three are now accurate.
   time is the entire reason this module exists.
 - Do not add a tests/common module, a static_assertions dependency, or num_enum / strum.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Shipped as planned: crates/asperitas-logging/src/capture.rs (new), pub mod capture in lib.rs's ungated block, tests/capture_geometry.rs (new, 11 tests). dump.rs and frame.rs byte-identical to HEAD (git status shows only lib.rs modified among existing files).
+
+Measured results:
+- Oracle test a_real_255_chunk_block_costs_what_the_module_claims encodes 254 CHUNK_RAW chunks + the 2-byte tail + AUDEND(bytes=32768) through dump::audio_record / dump::audend_record and sums Encoded::len: 57,788 B, equal to wire_bytes_per_block(). It asserts offset == RING_BLOCK_BYTES before comparing, and asserts !Encoded::truncated on every record so a shortened body cannot fake a matching total.
+- All AC #7 gates run green: fmt --check; test -p asperitas-logging --all-targets (exit 0); cargo test --workspace (exit 0, 264 passing incl. the 11 new); clippy --workspace --all-targets -D warnings; same with --features asperitas-pod/pod-hw; clippy --features log-usb --lib and --features log-defmt --lib; RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps in default and --all-features forms; cargo build -p asperitas-logging --target thumbv7em-none-eabihf; firmware release builds seed3 and --no-default-features --features "seed3 log-defmt".
+- Firmware size delta measured, not assumed: built the tree with the change, then git stash -u and rebuilt at HEAD. main: text 88181 -> 88181, bss 8224 -> 8224. podtest: text 72133 -> 72133, bss 5556 -> 5556. Zero, as expected — nothing in firmware/ imports capture.rs yet.
+
+Two deliberate deviations from the plan, both arithmetic corrections:
+1. expected_blocks rounds UP, so expected_blocks(300) == 879, not the 878 in AC #6 and the plan's table. Floor is wrong for a capacity estimate: 300 s x 96,000 B/s = 28,800,000 B needs 879 blocks (878 hold 28,770,304 B, i.e. 29,696 B short), so a floor form understates what the ring must hold and would let gate 6 pass while a real run overruns — e.g. at RING_BLOCKS = 879, floor gives 878 < 879 (passes, insufficient) where ceil correctly refuses. AC #6's substance holds with margin: 879 < 1024. AC #6 and the plan rows corrected in place, in the style already used for this ticket's other two arithmetic fixes.
+2. expected_blocks takes usize, not u32 as the plan's table row said. TASK-038.03.02's rig.rs snippet calls capture::expected_blocks(CAPTURE_SECONDS as usize) and usize is not u32 to the type checker on either target, so a u32 parameter would fail its build. The width discipline AC #3 actually cares about is preserved: the product seconds * BYTES_PER_SECOND is taken in u64 inside the helper, which is what the 32-bit const evaluator requires.
+
+Added beyond the six named gates: two compile-time asserts that the split covers a block exactly (full_chunks*CHUNK_RAW + tail == RING_BLOCK_BYTES) and that the tail is smaller than a chunk — the assumptions wire_bytes_per_block makes about how a block divides. Noted for TASK-038.03.02 (appended there too): use is_multiple_of rather than % .. == 0 in its own const assert, and the FRAMES_PER_CALLBACK-vs-BLOCK_LENGTH comparison is in samples.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Published the capture-ring geometry as asperitas_logging::capture: one set of numbers that simultaneously sizes the SDRAM ring and the console traffic it generates, with every wire figure derived from dump's own constants and gated against them at compile time. The zero-margin fact — a 32 KiB block is exactly MAX_CHUNKS_PER_BLOCK chunks — now fails cargo build on thumbv7em and cargo test on the host instead of failing a dump at the bench.
+
+Delivered: src/capture.rs (hardware inputs, ring geometry, ten derived const fns, six AC #3 gates plus two split-coverage gates, and the BlockState hand-off contract with a sixteen-arm transition_ok); pub mod capture in lib.rs's ungated block; tests/capture_geometry.rs with 11 tests including an oracle that encodes a real 255-chunk block and confirms the 57,788-byte budget from the codec rather than from the module's own arithmetic.
+
+All AC #7 gates green and the firmware size delta measured at zero (main text 88181, bss 8224, identical before and after). Two arithmetic corrections to the plan are recorded in Implementation Notes: expected_blocks rounds up (879 blocks for the five-minute window, not 878) and takes usize so TASK-038.03.02's call site compiles; both facts were also appended to that ticket.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-11 13:28'
-updated_date: '2026-09-11 13:33'
+updated_date: '2026-09-11 15:27'
 labels:
   - task
   - planned
@@ -264,3 +264,17 @@ Record the release size output and the `.bss` delta against the current 86.13% b
 
 Nothing in this ticket may be marked done on the strength of a green build. Correctness claims that need ears, a board, or a cable live in TASK-038.05 (`@human`) and are not satisfied here.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Interface facts from TASK-038.03.01, now published in asperitas_logging::capture (measured there, so this ticket need not rediscover them):
+
+- expected_blocks takes usize and rounds UP: expected_blocks(300) == 879, not the 878 that appeared in the planning prose. This ticket's `capture::expected_blocks(CAPTURE_SECONDS as usize)` snippet compiles as written; do not "fix" the cast to u32.
+- Its const assert should read capture::RING_BLOCK_BYTES.is_multiple_of(capture::CALLBACK_BYTES), not `% .. == 0`: manual_is_multiple_of is denied under -D warnings wherever root workspace lints apply. firmware/ inherits none of them today, so the % form would build — it is style debt here, not a failure.
+- The FRAMES_PER_CALLBACK vs daisy_embassy::audio::BLOCK_LENGTH assert compares samples (32 == 32). CALLBACK_BYTES (64 bytes of one mono channel) and HALF_DMA_BUFFER_LENGTH (64 u32 words per callback) coincide numerically and must not be compared.
+- Block state hand-off lives in capture::BlockState / capture::transition_ok: exactly four legal edges (Free->Filling, Filling->Full, Full->Dumping, Dumping->Free), no self-transitions, and BlockState::from_u8 returns Option — an unrecognised status byte is None, never Free. Store these in [AtomicU8; capture::RING_BLOCKS]; AtomicU8 is lock-free on ARMv7-M (LDREXB/STREXB), so portable-atomic stays out.
+- Ring geometry: RING_BLOCK_BYTES 32_768, RING_BLOCKS 1_024, RING_BYTES 33_554_432 (half the Seed3's 64 MB SDRAM, BYTES_PER_SECOND 96_000, 349 s floor / 349,525,333 us exact, 255 chunks + 1 AUDEND = 256 records per block, 57,788 wire bytes per block (exact, encoder-confirmed).
+EOF
+)
+<!-- SECTION:NOTES:END -->
