@@ -62,6 +62,12 @@ jobs:
             echo "=== dump_reassemble --selftest ==="
             cargo run -p asperitas-logging --example dump_reassemble -- --selftest
 
+            # Docs name firmware image files. Legal names come from the build itself via `make -n`,
+            # so this is the only place in CI that invokes make -- and it stays a dry run, never a
+            # cross-compile. Landed with TASK-058.
+            echo "=== docs artifact names ==="
+            scripts/check-doc-artifact-names.sh
+
             echo "=== firmware cross-compile ==="
             cd firmware && cargo build --release --features seed3
 

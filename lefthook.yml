@@ -3,6 +3,12 @@
 
 pre-commit:
   commands:
+    # Cheapest gate here on purpose: reads firmware/Makefile's rules with make -n and greps the
+    # docs, so it costs a fifth of a second and never builds. Landed with TASK-058.
+    doc-artifact-names:
+      run: scripts/check-doc-artifact-names.sh
+      forward_stderr: true
+
     fmt-check:
       run: cargo fmt --all --check
       forward_stderr: true
@@ -24,6 +30,10 @@ pre-commit:
 
 pre-push:
   commands:
+    doc-artifact-names:
+      run: scripts/check-doc-artifact-names.sh
+      forward_stderr: true
+
     fmt-check:
       run: cargo fmt --all --check
       forward_stderr: true
