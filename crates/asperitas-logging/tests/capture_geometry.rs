@@ -188,7 +188,7 @@ fn one_block_costs_57788_wire_bytes() {
 /// 254 full chunks and the 2-byte tail a real block splits into, closes the block the way the device
 /// will, and sums the lengths the encoder actually returned.
 ///
-/// It also computes the `AUDEND` checksum twice — once over the whole block as the host will, once
+/// It also computes the `AUDEND` checksum twice - once over the whole block as the host will, once
 /// accumulated chunk by chunk as the device must, since a 32 KiB block lives in SDRAM and never
 /// reaches the writer all at once. Those two agreeing is not a detail: if they ever disagreed, every
 /// `AUDEND` from a real board would read as corrupt to a correct decoder.
@@ -246,7 +246,7 @@ fn chaining_the_crc_at_any_split_matches_one_shot() {
     }
 
     // Splitting into single bytes is the degenerate shape a byte-at-a-time producer would use, and
-    // it must survive too — 9 rounds of the same register.
+    // it must survive too - 9 rounds of the same register.
     let drip = data
         .iter()
         .fold(CRC16_INITIAL, |acc, &b| crc16_ccitt_update(acc, &[b]));

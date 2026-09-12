@@ -44,7 +44,15 @@
 //! the whole record in the ring or none of it — the one way that rule can break is a sink
 //! that stalls mid-frame, which exits through the panic handler instead of the normal
 //! return path. That is what lets a capture distinguish "this record was never generated"
-//! from "this record was lost". See the crate-private `emit()` and [`frame::write_whole`].
+//! from "this record was lost". See the crate-private `emit_at` and [`frame::write_whole`].
+//!
+//! Three producers use that one commit path, differing only in who renders the body and who
+//! chooses the timestamp: `log::Record`s go through `emit`, which reads the clock; whole
+//! wire-contract bodies the caller already rendered go through `emit_record`, which takes the
+//! timestamp as an argument; and bulk audio-dump chunks go through `try_emit_dump`, which also
+//! takes it and additionally applies [`dump::dump_fits`]'s headroom rule before spending a
+//! sequence number. The last two are named rather than linked, because both are
+//! `log-usb`-gated and neither exists to resolve in the default-feature docs.
 
 #![no_std]
 
@@ -246,7 +254,7 @@ pub mod panic_handler;
 /// silence. The static that does carry a type-level dependency, `LOG_PIPE`, stays gated.
 pub const LOG_PIPE_SIZE: usize = 2048;
 
-/// The log pipe: the crate-private `emit()` commits framed records, [`usb`]'s drain task empties it.
+/// The log pipe: `emit_at` and `try_emit_dump` commit framed records here, [`usb`]'s drain task empties it.
 ///
 /// A plain immutable `static`, because `Pipe`'s methods all take `&self` and its own
 /// `CriticalSectionRawMutex` serialises them. The previous `Option` reached through
@@ -386,10 +394,66 @@ fn commit_records(
     outcome == frame::WriteOutcome::Committed
 }
 
-/// Format, frame, and commit one record — whole, or not at all.
+/// Commit one already-rendered record body as a whole frame, returning whether it reached the pipe.
+///
+/// The non-panic way to put bytes on the console that [`log`] cannot express. A caller holding a
+/// wire-contract body (`RIGCFG`, `RIGGEN`, `CAPSTAT`, `CAPMAX`, `DUMPEND` from
+/// [`crate::console`]) needs those bytes to arrive unchanged, and `log::info!("{}", body)` would
+/// hand them to a formatting path this crate does not control.
+///
+/// Takes `now_ms` rather than reading the clock, unlike every other producer here. A rig emits its
+/// verbs around work whose duration *is* the measurement (`DUMPEND`'s `elapsed_ms`, `stall_ms`), so
+/// stamping such a record after the fact with a clock read taken wherever the caller happened to
+/// reach would put a timestamp on the wire that disagrees with the numbers beside it. Ordinary logs
+/// have no such constraint and use `emit`, which reads the clock itself.
+///
+/// # Sibling, not substitute, for [`try_emit_dump`]
+///
+/// Both go through `commit_records` and differ in one decision, which is why they are two
+/// functions rather than one with a flag. This is an ordinary record: if the pipe is full it is
+/// dropped and counted in `ConsoleStats::dropped_full`, exactly as `BOOT` and `STATUS` are, because
+/// a measurement record must never displace the traffic it describes. A dump chunk is bulk payload
+/// that must fit *around* the reserve, and its writer retries a refusal instead of accepting the
+/// loss. Same reason [`Level`] is a parameter here and fixed to `Info` there.
+///
+/// Callers pass `Level::Info`, matching `BOOT`/`STATUS`: these are device facts, not diagnostics,
+/// and a Debug filter must not silence a measurement.
+///
+/// # Failure mode
+///
+/// Never panics. A body longer than [`console::BODY_WINDOW`] is clipped to it, which the encoder
+/// counts as a truncation - the same convention [`console::status_body`] follows by truncating
+/// rather than complaining. None of the five rig builders can reach that case, since each is
+/// compile-time-bounded below [`frame::MAX_BODY`]; the clipping exists so a future caller's mistake
+/// costs a shortened field rather than a stuck interrupt mask.
+#[cfg(feature = "log-usb")]
+pub fn emit_record(level: Level, now_ms: u32, body: &[u8]) -> bool {
+    emit_at(level, now_ms, |out| {
+        let n = body.len().min(out.len());
+        out[..n].copy_from_slice(&body[..n]);
+        n
+    })
+}
+
+/// Format, frame, and commit one record at the clock's current time.
+///
+/// Thin wrapper over [`emit_at`] that owns the one thing a caller must not decide for itself: what
+/// time it is. Kept separate rather than defaulted at each call site because reading the clock
+/// inside the record lock is the bug - see [`emit_at`].
+#[cfg(feature = "log-usb")]
+fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usize) {
+    // The clock is read BEFORE the lock: it keeps the timer driver's own locking out of
+    // the IRQ-off window, and a millisecond of skew is invisible in a millisecond field.
+    // Everything that must agree with wire order — seq, frame, space check, commit — is
+    // inside.
+    let now_ms = embassy_time::Instant::now().as_millis() as u32;
+    emit_at(level, now_ms, fill);
+}
+
+/// Format, frame, and commit one record - whole, or not at all - stamped `now_ms`.
 ///
 /// `fill` writes the body into the guarded window and returns its length; the level,
-/// sequence number, timestamp, checksum, and delivery are this function's business.
+/// sequence number, checksum, and delivery are this function's business.
 ///
 /// One thing this function cannot promise: `fill` runs **inside** the record lock, so a `Display`
 /// impl that panics masks `PRIMASK` just as permanently as an assert here would. No lexical check
@@ -416,14 +480,14 @@ fn commit_records(
 /// ever shows up in the audio budget, the fix is a reserve/commit ring replacing the
 /// `Pipe`, tracked as its own ticket, not a quiet redesign of the atomicity rule.
 #[cfg(feature = "log-usb")]
-fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usize) {
-    // The clock is read BEFORE the lock: it keeps the timer driver's own locking out of
-    // the IRQ-off window, and a millisecond of skew is invisible in a millisecond field.
-    // Everything that must agree with wire order — seq, frame, space check, commit — is
-    // inside.
-    let now_ms = embassy_time::Instant::now().as_millis() as u32;
-
-    // Result ignored: this path counts the verdict internally, via the counters below.
+fn emit_at(
+    level: Level,
+    now_ms: u32,
+    fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usize,
+) -> bool {
+    // The verdict is this function's return value: `BOOT`, `STATUS` and `log` callers discard it
+    // and read loss from the console counters, while [`emit_record`] hands it back to a caller that
+    // retries or reports.
     commit_records(|bufs| {
         let seq = console::CONSOLE.take_seq();
         let body_len = fill(&mut bufs.body);
@@ -452,7 +516,7 @@ fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usiz
         // No headroom rule admitted this frame's bytes, so a refusal here is ordinary backpressure
         // rather than a broken contract: nothing to report out of the closure.
         (outcome, Violation::NONE)
-    });
+    })
 }
 
 /// Commit a `log::Record` as one framed console record.
@@ -517,7 +581,7 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 ///
 /// # Why each step sits where it does
 ///
-/// - **The clock is read before the lock**, as the crate-private `emit()` does it, keeping the timer driver's
+/// - **The clock is read before the lock**, as `emit` does before handing `now_ms` to `emit_at`, keeping the timer driver's
 ///   own locking out of the IRQ-off window. A millisecond of skew is invisible in a
 ///   millisecond field; sequence order is not, so `seq` is taken inside.
 /// - **The lock is not optional.** Log records are emitted from arbitrary context including
@@ -555,7 +619,7 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 /// `critical-section` implementation is registered, so this function does not merely fail to
 /// run there — it fails to *link*. What CI proves is the predicate ([`dump::dump_fits`],
 /// exhaustively, against a real `embassy_sync` ring: see `tests/console_dump.rs`) and the
-/// shape this function mirrors from `emit()`. What only the firmware release build
+/// shape this function mirrors from `emit_at`. What only the firmware release build
 /// (`cd firmware && cargo build --release --features seed3`) proves is that the arrangement
 /// type-checks at all. Neither reaches runtime behaviour on hardware; TASK-038.05 is the
 /// human-run check of that.

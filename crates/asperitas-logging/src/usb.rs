@@ -1,7 +1,7 @@
 //! USB CDC-ACM serial logging backend.
 //!
 //! Implements logging over the Seed3's onboard USB-C using the CDC-ACM class. Records are
-//! committed to a framed ring by the crate-private `emit()` and carried to the host by [`run`]'s drain
+//! committed to a framed ring by the crate-private `emit_at()` and carried to the host by [`run`]'s drain
 //! task, which is the only thing that touches the endpoint under normal operation.
 //!
 //! # Architecture

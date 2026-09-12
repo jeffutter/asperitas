@@ -463,7 +463,7 @@ pub enum WriteOutcome {
 /// interrupting the board permanently, on top of silencing the panic text (the serial
 /// emit needs the USB interrupt it just masked), is strictly worse than the crash it
 /// replaces. In this crate `commit_records` (`lib.rs`) owns that rule for both
-/// `emit()` and `try_emit_dump()`; any future caller must follow it.
+/// `emit_at()` and `try_emit_dump()`; any future caller must follow it.
 ///
 /// Retrying instead of failing loud is not a milder option: nothing about the sink or the
 /// remaining slice changes between one retry and the next, so a genuine stall is

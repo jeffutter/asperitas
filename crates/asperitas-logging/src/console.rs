@@ -234,7 +234,7 @@ const U32_MAX_DIGITS: usize = 10;
 
 /// Worst-case length of a body: its literal prefix, plus `1 + name + 1 + width` per field.
 ///
-/// This is the arithmetic the [`TruncWriter`]-based builders above cannot express in types — a
+/// This is the arithmetic the [`TruncWriter`]-based builders above cannot express in types - a
 /// format string says nothing about how long its result gets. Computing the sum here and
 /// asserting against [`crate::frame::MAX_BODY`] moves *"this verb fits one record"* from a
 /// nightly test run to the build itself, so a field added to a table fails compilation rather
@@ -279,11 +279,11 @@ impl MonoLane {
 ///
 /// Sent once at boot, before any stimulus plays: everything a host needs to interpret the
 /// captured bytes that follow. Numeric fields stay `u32` for uniformity with `STATUS` even
-/// where the source value is wider — [`crate::capture::total_capture_bytes`] returns `usize`
-/// and [`crate::capture::ring_duration_micros`] a `u64`. That narrowing is safe at the call
-/// site (both fit, and `rig.rs` narrows explicitly) and is *not* a claim that a ring can never
-/// be too large for the field; a future ring twice today's size would need the field widened,
-/// which is a protocol change and will read as one.
+/// where the source value is wider: `capture`'s byte totals come back as `usize` and
+/// [`crate::capture::ring_duration_micros`] as a `u64`. Narrowing is safe at the call site today
+/// (both values fit, and `rig.rs` narrows explicitly) and is *not* a claim that a ring can never
+/// grow past what these fields hold - a ring twice today's size would need them widened, which is
+/// a protocol change and will read as one.
 #[derive(Clone, Copy, Debug)]
 pub struct RigConfig {
     /// Channel captured into the mono stream.
@@ -298,7 +298,7 @@ pub struct RigConfig {
     pub capsec_us: u32,
     /// Capture window in seconds.
     pub window_s: u32,
-    /// Measured CPU clock in Hz — read from the device, never declared (§3 of the parent plan).
+    /// Measured CPU clock in Hz - read from the device, never declared (§3 of the parent plan).
     pub cpu_hz: u32,
     /// Whether the instruction cache is enabled, as reported by the hardware.
     pub icache: bool,
@@ -366,7 +366,7 @@ const RIGGEN_WORST: usize = "RIGGEN proto=1 ".len() + RIGGEN_MAX_GEN_BYTES;
 /// host parses. Clipping is silent for the same reason [`status_body`] truncates: this runs on
 /// a path that must not panic.
 ///
-/// Unlike its siblings this one does not go through [`TruncWriter`]. Its payload is `&[u8]`,
+/// Unlike its siblings this one does not go through `TruncWriter`. Its payload is `&[u8]`,
 /// and `fmt::Write` only accepts `&str`: converting would mean either panicking on invalid
 /// UTF-8 or replacing bytes the device actually measured, and `describe()`'s output is plain
 /// ASCII anyway, so neither failure mode is worth paying for. The bytes are copied, not
@@ -403,7 +403,7 @@ pub struct CaptureStatus {
     /// Its own counter because a dead engine and a starved one otherwise share a symptom:
     /// `delivered` simply stops moving either way, and the stream cannot tell them apart.
     pub audio_exit: u32,
-    /// Blocks whose `AUDEND` has been committed — dump progress as a count, not an index.
+    /// Blocks whose `AUDEND` has been committed - dump progress as a count, not an index.
     pub dumped: u32,
     /// Records the log pipe refused for lack of space.
     pub dropped_full: u32,
@@ -431,7 +431,7 @@ const CAPSTAT_WORST: usize = saturated_len("CAPSTAT proto=1", &CAPSTAT_FIELDS);
 ///
 /// An alias rather than a second `200`, so the rate gate in `rig.rs` and the encoder cannot
 /// drift apart while both claim to know the cap. It lives next to the builder that produces
-/// the record and is checked by [`capstat_body_saturated_counters_fit_one_frame`], because a
+/// the record and is checked by `capstat_body_saturated_counters_fit_one_frame`, because a
 /// gate that divided by a hand-typed number would be arithmetic nobody tested.
 pub const CAPSTAT_MAX_BODY: usize = crate::frame::MAX_BODY;
 
@@ -545,7 +545,7 @@ const DUMPEND_FIELDS: [(&str, usize); 9] = [
     ("bytes_dropped", U32_MAX_DIGITS),
 ];
 
-/// Worst-case `DUMPEND` body: 194 bytes, 6 inside the cap — the tightest verb on the wire.
+/// Worst-case `DUMPEND` body: 194 bytes, 6 inside the cap - the tightest verb on the wire.
 const DUMPEND_WORST: usize = saturated_len("DUMPEND proto=1", &DUMPEND_FIELDS);
 
 /// Render a `DUMPEND` record body into `out`, returning the bytes written.
@@ -855,7 +855,7 @@ mod tests {
     const SINE_DESCRIBE: &[u8] =
         b"name=sine sample_rate_hz=48000 level_dbfs=-20.0 frequency_hz=1000 period_samples=48";
 
-    /// Every numeric field at its ceiling — the shape a long-running device reports when a
+    /// Every numeric field at its ceiling - the shape a long-running device reports when a
     /// counter saturates, and therefore the worst case each verb must survive.
     fn saturated_rigcfg() -> RigConfig {
         RigConfig {
@@ -982,7 +982,7 @@ mod tests {
     }
 
     /// Over-budget input clips instead of panicking or overflowing, and clipping costs only the
-    /// tail of the free-text field — never a byte of the prefix a parser keys on.
+    /// tail of the free-text field - never a byte of the prefix a parser keys on.
     #[test]
     fn riggen_body_clips_an_overlong_description_without_panicking() {
         let describe = [b'y'; RIGGEN_MAX_GEN_BYTES + 4_096];
