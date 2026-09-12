@@ -78,12 +78,14 @@ const EMIT_TIMEOUT_MAX_POLLS: u32 = 20_000_000;
 /// host too and a cargo feature cannot express "not this machine".
 #[cfg(target_arch = "arm")]
 pub(crate) fn cycle_counter_running() -> bool {
-    // Safety: `DCB` and `DWT` are Cortex-M system peripherals that nothing in this stack
-    // claims — no `cortex_m::Peripherals::take()` or `steal()` exists in this crate, in
-    // daisy-embassy, or in embassy-stm32 (whose `Peripherals::take()` returns its own
-    // generated struct, not this one), so nothing can alias the two fields touched here.
-    // `steal` rather than `take` because a panic path must not depend on whether the
-    // singleton was claimed.
+    // Safety: `DCB` and `DWT` are Cortex-M system peripherals. `rig.rs` claims
+    // `cortex_m::Peripherals::take()` in the firmware package, so this cannot count on the
+    // singleton being free - which is exactly why it uses `steal()`: a panic path must not behave
+    // differently depending on whether some other binary got there first. Aliasing the singleton is
+    // harmless here because both users only *enable* tracing (idempotent) and read CYCCNT, and
+    // neither ever writes it, so the counter's meaning does not depend on who ran first. Neither
+    // this crate nor daisy-embassy claims it at all, and embassy-stm32's `Peripherals::take()`
+    // returns its own generated struct, not this one.
     let mut cp = unsafe { cortex_m::peripheral::Peripherals::steal() };
     cp.DCB.enable_trace(); // DEMCR.TRCENA: CM7 may ignore CYCCNTENA without it
     cortex_m::peripheral::DWT::unlock(); // LAR: H7 locks the DWT after power-on

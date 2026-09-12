@@ -29,6 +29,15 @@ log-usb = ["asperitas-logging/log-usb"]
 # no pipe, no drain task. See "Flashing and logging over an ST-Link probe" in
 # docs/reference/daisy-seed3.md (TASK-036.04).
 log-defmt = ["asperitas-logging/log-defmt", "dep:defmt-rtt"]
+# Stimulus generators for `rig`, mutually exclusive by a `const` assert in `src/bin/rig.rs`.
+#
+# None of them belongs in `default`: `--features seed3,stim-ess` adds to the defaults rather than
+# replacing them, so a default `stim-sine` would put two generators in the image CI builds and
+# trip rig's own exclusion guard. Selecting no stimulus is meaningful and means sine, which is why
+# `stim-sine` exists at all — as an explicit spelling, not as the default one.
+stim-sine = []
+stim-ess = []
+stim-pulse = []
 
 [profile.release]
 # probe-rs decodes symbols, backtraces and defmt log locations from DWARF - and it accepts
@@ -77,7 +86,10 @@ asperitas-pod = { path = "../crates/asperitas-pod", features = ["pod-hw"] }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
 daisy-embassy = { git = "https://github.com/daisy-embassy/daisy-embassy", branch = "master", features = ["seed3"] }
-embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread"] }
+# `executor-interrupt` is for `rig`, whose audio callback runs on an `InterruptExecutor` woken by
+# SAI1. It changes the compiled executor unit for every binary here, which is why CI's two firmware
+# builds (neither of which passes `--bin`) are what prove the other five still link.
+embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
 embassy-stm32 = { version = "0.6.0", features = ["stm32h750ib", "memory-x", "exti"] }
 asperitas-logging = { path = "../crates/asperitas-logging", default-features = false }
 # Major 1, matching daisy-embassy / embassy-stm32. Was "0.3", which resolved to 0.3.100 — a

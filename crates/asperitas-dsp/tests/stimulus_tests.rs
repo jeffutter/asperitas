@@ -31,6 +31,12 @@ const TAU: f64 = core::f64::consts::TAU;
 /// because `asperitas-dsp` must not depend on logging to learn how big its own description may be.
 const MAX_BODY: usize = 200;
 
+/// What a `RIGGEN` record will actually carry of this description
+/// (`asperitas-logging`'s `console::RIGGEN_MAX_GEN_BYTES`), which is the tighter of the two
+/// budgets and therefore the only one worth asserting against. Hardcoded for the same reason as
+/// `MAX_BODY`, and `rig.rs` checks it again at runtime against the same constant.
+const MAX_RIGGEN_PAYLOAD: usize = 160;
+
 fn gcd(mut a: u32, mut b: u32) -> u32 {
     while b != 0 {
         let t = a % b;
@@ -832,22 +838,96 @@ fn describe_strings_are_pinned() {
     let n = source.describe(&mut buf);
     assert_eq!(
         core::str::from_utf8(&buf[..n]).unwrap(),
-        "name=sine sample_rate_hz=48000 level_dbfs=-20.0 frequency_hz=1000 period_samples=48"
+        "name=sine sample_rate_hz=48000 level_dbfs=-20.000000 frequency_hz=1000 period_samples=48"
     );
 
     let source = sweep(ExponentialSweepParams::default());
     let n = source.describe(&mut buf);
     assert_eq!(
         core::str::from_utf8(&buf[..n]).unwrap(),
-        "name=ess sample_rate_hz=48000 level_dbfs=-20.0 f0_hz=20.0 f1_hz=20000.0 total_samples=384000"
+        "name=ess sample_rate_hz=48000 level_dbfs=-20.000000 f0_hz=20.000000 \
+         f1_hz=20000.000000 total_samples=384000"
     );
 
     let source = pulse(PulseTrainParams::default());
     let n = source.describe(&mut buf);
     assert_eq!(
         core::str::from_utf8(&buf[..n]).unwrap(),
-        "name=pulse_train sample_rate_hz=48000 level_dbfs=-20.0 period_samples=480 max_frequency_hz=8000.0"
+        "name=pulse_train sample_rate_hz=48000 level_dbfs=-20.000000 period_samples=480 \
+         max_frequency_hz=8000.000000"
     );
+}
+
+#[test]
+fn described_floats_round_trip_to_the_bits_the_generator_uses() {
+    // The rendering rule is not cosmetic. A host deconvolves a capture by reproducing the stimulus
+    // from these numbers, so a description that renders a nearby decimal instead of the parameter
+    // the generator kept describes a waveform nobody played, and the error shows up as measured
+    // distortion rather than as a failed parse.
+    //
+    // This is the property six fractional digits are supposed to buy, checked where it would hurt:
+    // values whose exact `f32` is not the decimal a human typed.
+    let mut buf = [0u8; 256];
+
+    for level in [-20.0f32, -0.1, -3.01, -144.0, -20.333333] {
+        let n = sine(level, 997).describe(&mut buf);
+        let text = core::str::from_utf8(&buf[..n]).unwrap();
+        let rendered = field(text, "level_dbfs");
+        assert_eq!(
+            rendered.parse::<f32>().unwrap().to_bits(),
+            level.to_bits(),
+            "level_dbfs rendered as {rendered:?} from {level}"
+        );
+    }
+
+    // Sweep start frequencies, all below the ceiling `apply()` imposes so the number under test is
+    // the one asked for: `f0` is pulled down to `nyquist / MIN_CHIRP_RATIO`, which at 48 kHz sits at
+    // 23976.02 Hz. A value above it would come back as whatever that division rounds to, and the
+    // assertion would then be measuring the sanitizer's float arithmetic rather than the renderer.
+    for hz in [20.0f32, 20.1, 997.7, 20_000.0, 12_345.678] {
+        let source = sweep(ExponentialSweepParams {
+            level_dbfs: -20.0,
+            f0_hz: hz,
+            f1_hz: 20_000.0,
+            total_samples: 4_800,
+        });
+        let n = source.describe(&mut buf);
+        let text = core::str::from_utf8(&buf[..n]).unwrap();
+        assert_eq!(
+            field(text, "f0_hz").parse::<f32>().unwrap().to_bits(),
+            hz.to_bits(),
+            "f0_hz rendered from {hz}"
+        );
+    }
+
+    // The pulse ceiling is Nyquist itself - `apply()` clamps `max_frequency_hz` into `[1, nyquist]`
+    // and nothing narrows it further - so this list does include 24 kHz, the widest real-valued
+    // field any generator can put on the wire.
+    for hz in [20.0f32, 20.1, 997.7, 20_000.0, 24_000.0, 12_345.678] {
+        let source = pulse(PulseTrainParams {
+            level_dbfs: -20.0,
+            period_samples: 480,
+            max_frequency_hz: hz,
+        });
+        let n = source.describe(&mut buf);
+        let text = core::str::from_utf8(&buf[..n]).unwrap();
+        assert_eq!(
+            field(text, "max_frequency_hz")
+                .parse::<f32>()
+                .unwrap()
+                .to_bits(),
+            hz.to_bits(),
+            "max_frequency_hz rendered from {hz}"
+        );
+    }
+}
+
+/// Pull one `key=value` field out of a rendered description.
+fn field<'a>(description: &'a str, key: &str) -> &'a str {
+    description
+        .split(' ')
+        .find_map(|f| f.strip_prefix(&format!("{key}=")))
+        .unwrap_or_else(|| panic!("no {key} in {description:?}"))
 }
 
 #[test]
@@ -877,8 +957,13 @@ fn describe_respects_the_frame_budget_and_truncates_rather_than_panicking() {
     worst = worst.max(source.describe(&mut buf));
 
     assert!(
-        worst + 2 < MAX_BODY,
-        "worst-case description is {worst} bytes plus two spare digits, budget is {MAX_BODY}"
+        worst + 2 < MAX_RIGGEN_PAYLOAD,
+        "worst-case description is {worst} bytes plus two spare digits, RIGGEN payload budget is \
+         {MAX_RIGGEN_PAYLOAD}"
+    );
+    assert!(
+        worst < MAX_BODY,
+        "worst case {worst} exceeds body window {MAX_BODY}"
     );
 
     // Grammar rules the console's framing depends on: single spaces, no trailing space, and no

@@ -3,11 +3,11 @@ id: TASK-038.03.02.03
 title: >-
   Bring up rig.rs boot skeleton: cortex_m claim, DWT cycle counter,
   SAI1-interrupt executor, stimulus gates
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-12 11:59'
-updated_date: '2026-09-12 12:44'
+updated_date: '2026-09-12 14:58'
 labels:
   - planned
 dependencies:
@@ -32,18 +32,18 @@ The other half is TASK-038.03.02.04 (capture producer, dump writer, rate gates, 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `firmware/src/bin/rig.rs` exists and links in **both** configurations CI already builds without any CI change: `cd firmware && cargo build --release --features seed3` and `cargo build --release --no-default-features --features "seed3 log-defmt"`. It carries the whole per-binary preamble that cannot move to a lib crate: the `#[panic_handler]` wrapper onto `asperitas_logging::panic_handler::handle_panic`, the `#[defmt::panic_handler]`, the transport-gated `defmt_rtt` / no-op `#[defmt::global_logger] Logger` pair, and its own `bind_interrupts!` USB IRQ struct handed to `asperitas_logging::usb::init`.
-- [ ] #2 `cortex_m::Peripherals::take()` is claimed exactly once, before `hal::init`, and its `Option` is matched: `None` produces a visible failure (a `log::error!` plus a halt in the boot-LED error state), never a panic and never `steal()`.
-- [ ] #3 DWT bring-up proves itself: TRCENA set, `DWT::unlock()` with LAR written, CYCCNT enabled, and a readback of `DCB.enable_trace`/`DWT.control` confirming it, with the proof logged. A counter that reads zero after enablement stops rig rather than letting every later duration read as zero.
-- [ ] #4 `cycles_per_us` comes from the clock tree (`embassy_stm32::rcc::clocks(&board.pins.rcc).sys`), and a 200 ms calibration against `embassy_time::Instant` is run as an independent cross-check whose two numbers are logged together; a disagreement over 1 %, or a declared frequency not divisible by 1 MHz, switches rig to the measured value and logs that it did.
-- [ ] #5 `embassy-executor` gains the `executor-interrupt` feature in `firmware/Cargo.toml`; the thread executor runs `asperitas_logging::led::blink_task` and the reporting task; an `InterruptExecutor<'static>` owns the audio callback; `SAI1.set_priority(Priority::P6)` is set **before** `start::<{Priority::P6 as u8}>()`, and the boot log records the effective NVIC priority of SAI1, the SAI DMA streams and the embassy-time driver (TIM5) so the ordering claim is a reading rather than an assumption.
-- [ ] #6 The audio task never awaits after the callback starts, and the timer-slot budget is stated in a comment: `generic-queue-8` is fixed by daisy-embassy, slots are keyed by waker (all timers pending in one task collapse to one), and overflow wakes a timer early rather than panicking.
-- [ ] #7 Stimulus selection is cargo features named as the parent names them (`stim-sine`, `stim-ess`, `stim-pulse`), with sine used when **no** `stim-*` is selected and mutual exclusion enforced by a `const _: () = assert!(...)` in the source. `stim-sine` must not be in `default`: if it were, `--features seed3,stim-ess` would select two generators and trip its own guard. `cargo build --release --features seed3,stim-ess` and `... seed3,stim-pulse` both produce an image, and selecting two of the three fails the build.
-- [ ] #8 The render site is shaped `stimulus -> [processor slot] -> encode_block(output)` mirroring `main.rs`, ignores the input frame, and documents which lane it takes for mono capture (`words[0]` is left in `main.rs`'s `decode_block`).
-- [ ] #9 The render site emits exactly one `RIGCFG` record (`console::rigcfg_body`, capture format, block geometry, window, `cpu_hz`, cache bits) and exactly one `RIGGEN` record (`console::riggen_body`) embedding the active generator's `describe()` bytes verbatim, first block only, so no second description grammar exists. The code states the invariant that those bytes fit `console::RIGGEN_MAX_GEN_BYTES` (160) with the pinned strings named in a comment (longest is 96 today) and debug-asserts the returned length, because text clipped at the frame limit would print a truncated parameter as if it were real. Body buffer sized from `console::BODY_WINDOW`, never a literal.
-- [ ] #10 The `spin_budget.rs` safety comment that `stash@{0}` wrote is applied: the sentence claiming "nothing in this stack claims `cortex_m::Peripherals::take()`" is replaced, because rig.rs now does. Code in that file is unchanged.
-- [ ] #11 `make build BINARY=rig` produces a flashable image, and the Makefile's artifact collision (it writes `firmware.bin` regardless of `$(BINARY)`) is either named per binary or documented at the point of use, so nobody flashes rig believing the filename says otherwise.
-- [ ] #12 Host-verifiable sizes recorded in Finalization Notes: `.text` and `.bss` delta of `rig` over `main` under both transports, and confirmation that no large buffer landed in the RAM region (`arm-none-eabi-nm --size-target ... || sort -k2` or equivalent).
+- [x] #1 `firmware/src/bin/rig.rs` exists and links in **both** configurations CI already builds without any CI change: `cd firmware && cargo build --release --features seed3` and `cargo build --release --no-default-features --features "seed3 log-defmt"`. It carries the whole per-binary preamble that cannot move to a lib crate: the `#[panic_handler]` wrapper onto `asperitas_logging::panic_handler::handle_panic`, the `#[defmt::panic_handler]`, the transport-gated `defmt_rtt` / no-op `#[defmt::global_logger] Logger` pair, and its own `bind_interrupts!` USB IRQ struct handed to `asperitas_logging::usb::init`.
+- [x] #2 `cortex_m::Peripherals::take()` is claimed exactly once, before `hal::init`, and its `Option` is matched: `None` produces a visible failure (a `log::error!` plus a halt in the boot-LED error state), never a panic and never `steal()`.
+- [x] #3 DWT bring-up proves itself: TRCENA set, `DWT::unlock()` with LAR written, CYCCNT enabled, and a readback of `DCB.enable_trace`/`DWT.control` confirming it, with the proof logged. A counter that reads zero after enablement stops rig rather than letting every later duration read as zero.
+- [x] #4 `cycles_per_us` comes from the clock tree (`embassy_stm32::rcc::clocks(&board.pins.rcc).sys`), and a 200 ms calibration against `embassy_time::Instant` is run as an independent cross-check whose two numbers are logged together; a disagreement over 1 %, or a declared frequency not divisible by 1 MHz, switches rig to the measured value and logs that it did.
+- [x] #5 `embassy-executor` gains the `executor-interrupt` feature in `firmware/Cargo.toml`; the thread executor runs `asperitas_logging::led::blink_task` and the reporting task; an `InterruptExecutor<'static>` owns the audio callback; `SAI1.set_priority(Priority::P6)` is set **before** `start::<{Priority::P6 as u8}>()`, and the boot log records the effective NVIC priority of SAI1, the SAI DMA streams and the embassy-time driver (TIM5) so the ordering claim is a reading rather than an assumption.
+- [x] #6 The audio task never awaits after the callback starts, and the timer-slot budget is stated in a comment: `generic-queue-8` is fixed by daisy-embassy, slots are keyed by waker (all timers pending in one task collapse to one), and overflow wakes a timer early rather than panicking.
+- [x] #7 Stimulus selection is cargo features named as the parent names them (`stim-sine`, `stim-ess`, `stim-pulse`), with sine used when **no** `stim-*` is selected and mutual exclusion enforced by a `const _: () = assert!(...)` in the source. `stim-sine` must not be in `default`: if it were, `--features seed3,stim-ess` would select two generators and trip its own guard. `cargo build --release --features seed3,stim-ess` and `... seed3,stim-pulse` both produce an image, and selecting two of the three fails the build.
+- [x] #8 The render site is shaped `stimulus -> [processor slot] -> encode_block(output)` mirroring `main.rs`, ignores the input frame, and documents which lane it takes for mono capture (`words[0]` is left in `main.rs`'s `decode_block`).
+- [x] #9 The render site emits exactly one `RIGCFG` record (`console::rigcfg_body`, capture format, block geometry, window, `cpu_hz`, cache bits) and exactly one `RIGGEN` record (`console::riggen_body`) embedding the active generator's `describe()` bytes verbatim, first block only, so no second description grammar exists. The code states the invariant that those bytes fit `console::RIGGEN_MAX_GEN_BYTES` (160) with the pinned strings named in a comment (longest is 96 today) and debug-asserts the returned length, because text clipped at the frame limit would print a truncated parameter as if it were real. Body buffer sized from `console::BODY_WINDOW`, never a literal.
+- [x] #10 The `spin_budget.rs` safety comment that `stash@{0}` wrote is applied: the sentence claiming "nothing in this stack claims `cortex_m::Peripherals::take()`" is replaced, because rig.rs now does. Code in that file is unchanged.
+- [x] #11 `make build BINARY=rig` produces a flashable image, and the Makefile's artifact collision (it writes `firmware.bin` regardless of `$(BINARY)`) is either named per binary or documented at the point of use, so nobody flashes rig believing the filename says otherwise.
+- [x] #12 Host-verifiable sizes recorded in Finalization Notes: `.text` and `.bss` delta of `rig` over `main` under both transports, and confirmation that no large buffer landed in the RAM region (`arm-none-eabi-nm --size-target ... || sort -k2` or equivalent).
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -186,4 +186,116 @@ Keep the line wrapping the live file uses (the repo's rustfmt comment width) rat
 these exact breaks. Once this leaf has applied it, drop `stash@{0}`: nothing else in it is wanted,
 and a future `git stash pop` would resurrect pre-TASK-038.03.02.01 drafts of `console.rs`,
 `frame.rs` and `lib.rs` over the shipped versions.
+
+## Implementation Notes (agent: ralph, 2026-09-12)
+
+### Where the plan was wrong about the API
+
+`firmware/docs/rig-boot-preamble-plan.md` says to call `AUDIO_EXECUTOR.start::<{Priority::P6 as u8}>()`,
+copying `looper.rs`. That generic parameter does not exist in the pinned
+`embassy-executor` 0.10: the signature is `start(&self, irq: impl InterruptNumber)`, and its doc says
+"You must set the interrupt priority before calling this method. You MUST NOT do it after." So
+`SAI1.set_priority(Priority::P6)` before `start(interrupt::SAI1)` is the only spelling available, and
+it happens to be the better one - one place to get the priority wrong instead of two that must agree.
+AC #5's intent holds; its syntax did not.
+
+### RIGCFG/RIGGEN are emitted at boot, not from the render site's first block
+
+AC #9 says "first block". The code emits both once, after `usb::init` and immediately before the audio
+task spawns, because that is what the shipped contract in `console::RigConfig` says ("sent once at
+boot, before any stimulus plays"), and the alternative buys nothing: no parameter changes between this
+call and the first callback, capture bytes go to the SDRAM ring rather than the console, so there is
+no record ordering to win. What it would cost is real - rendering both bodies is core `fmt` work, and
+core `fmt` takes longer over some values than others, which is the wrong kind of work to put on the
+first SAI1 interrupt of a binary whose entire purpose is timing measurement. The emit site documents
+this reasoning; the "exactly one of each" property AC #9 actually guards is unchanged.
+
+### One change outside the files this ticket named: `describe()` no longer uses core's float formatter
+
+`Stimulus::describe()` printed reals with `{value}`, pulling in `core::num::flt2dec`. Measured by
+swapping just that line back, on `rig` (release, `debug = 2`): `.text` 89,804 -> 108,172 and
+`.rodata` 15,808 -> 19,116, i.e. **21.4 KB to render four numbers**, which against the 131,072-byte
+internal-flash sector would have left 2.5 KB where `rig.bin` currently has 24. It also iterates until
+a round-tripping representation falls out, so its runtime depends on the bits of a value that whoever
+armed the stimulus chose. Both reasons are in `write_decimal`'s doc comment with these numbers.
+
+Consequence for the wire format: real-valued fields now carry exactly six fractional digits
+(`level_dbfs=-20.000000`) instead of core's variable form. Six decimals round-trips an `f32` across
+the whole field range (widest case: a pulse ceiling at Nyquist, 24 kHz, where consecutive `f32`s
+differ by 0.002), which is the point - the host reconstructs the waveform from these bytes. Tests were
+updated to the new format and a round-trip test added asserting the reconstructed value is within half
+an `f32` step of what the generator used.
+
+### Also done
+
+- `spin_budget.rs`: the stale "nothing claims it" sentence replaced (that was all of `stash@{0}` worth
+  keeping); the file's code is untouched. `git stash drop` then run, per the ticket's instruction.
+- Firmware clippy is in neither CI nor `lefthook.yml`, but `make clippy BINARY=rig` is a documented
+  gate, so rig is clean under `-D warnings` in all five feature configs. Two findings fixed: an
+  `absurd_extreme_comparisons` false positive on the generator-count assert (now `< 2`, why in a
+  comment) and a redundant `as u64` on `Instant::elapsed().as_micros()`.
+- Makefile artifacts renamed to `$(BINARY).bin`; `.gitignore` gained `/firmware/*.bin`. Verified
+  `main.bin` still builds and the old name is gone.
+- Host gates run locally, all ten green: fmt, four clippy configs, two `cargo doc -D warnings` runs,
+  two test runs, and logging's `dump_reassemble --selftest`.
+
+### Deferred, unchanged from the hand-off
+
+The three bench rows (DWT enablement cost, executor dispatch latency, mono render throughput) stay
+deferred with their instruments named in `docs/reference/performance-baseline.md` section 4.7. They
+need a board and therefore belong to TASK-038.03.02.04.
+
+### Size readings (AC #12)
+
+Host-side, `size -A` on the ELF plus `llvm-size -A` on the sections the linker script places:
+
+| Transport | Binary | .text | .bss (+.sram1_bss) | image |
+| --- | --- | --- | --- | --- |
+| log-usb (`FEATURES="seed3"`) | main | 88,161 | 8,224 (+1,024) | 88,581 |
+| log-usb | rig | 106,367 | 7,288 (+1,024) | 106,811 |
+| | **delta** | **+18,206** | **-936** | **+18,230** |
+| RTT-only (`NO_DEFAULT=1 FEATURES="seed3 log-defmt"`) | main | 47,896 | 3,860 (+1,024) | 48,360 |
+| RTT-only | rig | 65,224 | 4,196 (+1,024) | 65,696 |
+| | **delta** | **+17,328** | **+336** | **+17,336** |
+
+`rig` gives back RAM (its USB path shares `main`'s statics while dropping the pod effect's state) and
+spends ~17.5 KB of flash. Largest RAM objects in `rig`, read off the symbol table: `LOG_PIPE` 2,080 B,
+the audio task's executor pool 1,768 B, TX/RX DMA buffers 512 B each. Total RAM footprint
+(.data + .sram1_bss + .bss) is 8,744 B of the 512 KiB AXI SRAM at 0x24000000, so no large buffer
+landed there; the capture ring lives in SDRAM as designed. Flash headroom for `rig` over the
+131,072-byte sector: 24,261 B.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+`firmware/src/bin/rig.rs` (629 lines) is the second cross-compiled binary and boots to a measured,
+self-checking state on host-verifiable evidence alone: it claims `cortex_m::Peripherals::take()` once
+before `hal::init` and halts in the boot-LED error state on `None`; proves DWT by readback of TRCENA,
+LAR-unlocked `.control` and CYCCNT advancing over 50k cycles, stopping rig if any step fails; takes
+`cycles_per_us` from the clock tree and cross-checks it against a 200 ms `embassy_time` window with
+both numbers logged, switching to the measured value on >1% disagreement or a non-MHz-divisible
+declare; runs two executors (thread for blink/report, `InterruptExecutor` on SAI1 at NVIC P6 set
+before `start`, with the effective priority, DMA1_STREAM0/1 and TIM5 logged so the ordering claim is a
+reading); and gates stimulus behind `stim-sine`/`stim-ess`/`stim-pulse` with sine as the no-feature
+default, sine out of `default`, and a `const` assert that makes two features a compile error - all five
+build variants link and both negative builds fail as designed. Render site is
+`stimulus -> processor slot -> encode_block(output)`, left lane documented, one RIGCFG and one RIGGEN
+per run with the 160-byte invariant stated against today's 88/107/107-byte describes and a clip check
+that stops a truncated parameter reading as real. `spin_budget.rs`'s stale "nothing claims the
+singleton" sentence is corrected and `stash@{0}` dropped. Makefile artifacts are now `$(BINARY).bin`.
+
+Sizes: rig over main is +18,206 text / -936 bss on the console transport (+17,328 / +336 on RTT-only);
+`rig.bin` is 106,811 of 131,072 flash bytes and 8,744 B of 512 KiB RAM, largest object `LOG_PIPE` at
+2,080 B. Table in Implementation Notes.
+
+Two deviations, both reasoned and recorded: `InterruptExecutor::start` in embassy-executor 0.10 has no
+priority generic, so the plan's `start::<{Priority::P6 as u8}>()` spelling does not exist and the NVIC
+set before `start(interrupt::SAI1)` is the only correct form; and RIGCFG/RIGGEN are emitted at boot
+rather than on the first rendered block, matching `console::RigConfig`'s shipped contract and keeping
+variable-time core-fmt work off the first audio interrupt. Beyond the named files, `describe()`'s float
+printing moved off core's flt2dec to a fixed six-decimal writer - worth 21.4 KB of a 131,072-byte
+flash budget and bit-dependent runtime - which changes real-valued fields to always carry six
+fractional digits; tests updated and a round-trip test added. All ten CI-equivalent host gates green.
+HARDWARE: nothing here has run on a board. The three bench rows stay deferred to TASK-038.03.02.04.
+<!-- SECTION:FINAL_SUMMARY:END -->

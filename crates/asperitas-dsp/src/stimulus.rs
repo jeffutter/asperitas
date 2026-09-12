@@ -113,6 +113,10 @@ const MAX_SWEEP_SAMPLES: u32 = 48_000 * 60 * 10;
 /// console's record bodies use (`asperitas-logging`'s `boot_body`/`status_body`), because the
 /// firmware path has no allocator. Output is space-separated `key=value` fields with no trailing
 /// space and no CRLF — the frame supplies the delimiter.
+///
+/// Real-valued fields carry exactly six fractional digits (`level_dbfs=-20.000000`), always, from
+/// one writer rather than from `core`'s float formatter. Why that writer exists, and how many
+/// bytes it is worth, is spelled out on `write_decimal`. Integers stay bare.
 pub trait Stimulus {
     /// Render the effective parameter set into `out`, returning the bytes written.
     ///
@@ -122,15 +126,70 @@ pub trait Stimulus {
     fn describe(&self, out: &mut [u8]) -> usize;
 }
 
+/// Scale behind every real-valued `describe()` field: six fractional digits.
+///
+/// Six digits round-trips an `f32` anywhere these fields reach. The widest real-valued field is a
+/// pulse train's `max_frequency_hz` at Nyquist, 24 kHz, where consecutive `f32` values differ by
+/// 0.002 - so rounding to a micro-unit can err by 5e-7, some two thousand times less than half an
+/// `f32` step there, and a host that re-parses a described value recovers the bits the generator
+/// used rather than something near them. That matters here more than it usually does: the point of
+/// `describe()` is that the host can reproduce the played waveform, and a description rounded to a
+/// tenth of a hertz describes a sweep nobody played.
+const DESCRIBE_SCALE: u64 = 1_000_000;
+
+// The zero-padded width in [`write_decimal`] is written as a literal `{:06}`, because `format_args!`
+// cannot take a width from a constant. This is what stops the two from drifting apart.
+const _: () = assert!(DESCRIBE_SCALE == 1_000_000);
+
+/// Write a value as a decimal with exactly six fractional digits.
+///
+/// Deliberately not `core`'s float formatter. Printing a float with `{}` pulls in
+/// `core::num::flt2dec`, the Dragon/Grisu pair, and the bill is large enough to settle the choice:
+/// replacing this function's last line with `{value}` moved the `rig` image (release, `debug = 2`,
+/// `log-usb`, measured 2026-09-12) from `.text` 89,804 to 108,172 and `.rodata` 15,808 to 19,116 -
+/// 21.4 KB spent to render four numbers, which against the 131,072-byte internal-flash sector
+/// would have left 2.5 KB where that binary now has 24. Its cost is also the wrong shape for
+/// firmware: those algorithms iterate until a representation short enough to round-trip falls out,
+/// so how long they take depends on the bits of the value, while this renders values chosen by
+/// whoever armed the stimulus.
+///
+/// Total over its input domain rather than merely correct on the expected one: non-finite values
+/// render as `nan`/`inf`/`-inf`, and a magnitude too large for the scale saturates in the
+/// float-to-`u64` conversion instead of wrapping. Neither is reachable from a sanitized parameter;
+/// both are defined so that a description can never be the thing that stops the audio path.
+fn write_decimal(out: &mut DescWriter, value: f64) {
+    if !value.is_finite() {
+        let token = if value.is_nan() {
+            "nan"
+        } else if value > 0.0 {
+            "inf"
+        } else {
+            "-inf"
+        };
+        let _ = out.write_str(token);
+        return;
+    }
+
+    let scaled = round(value.abs() * DESCRIBE_SCALE as f64) as u64;
+    let negative = value < 0.0;
+    let whole = scaled / DESCRIBE_SCALE;
+    let frac = scaled % DESCRIBE_SCALE;
+
+    if negative {
+        let _ = out.write_str("-");
+    }
+    let _ = out.write_fmt(format_args!("{whole}.{frac:06}"));
+}
+
 /// Render the fields every source shares, owning the separator rule.
 ///
 /// This is the only place the leading grammar is written; each [`Stimulus`] implementation
 /// appends its own fields after it.
 fn describe_prefix(out: &mut DescWriter, name: &str, sample_rate_hz: u32, level_dbfs: f32) {
     let _ = out.write_fmt(format_args!(
-        "name={name} sample_rate_hz={sample_rate_hz} level_dbfs={level:.1}",
-        level = f64::from(level_dbfs)
+        "name={name} sample_rate_hz={sample_rate_hz} level_dbfs="
     ));
+    write_decimal(out, f64::from(level_dbfs));
 }
 
 /// A `fmt::Write` that stops at the end of its buffer instead of overflowing it.
@@ -607,10 +666,11 @@ impl Stimulus for ExponentialSweep {
     fn describe(&self, out: &mut [u8]) -> usize {
         let mut w = DescWriter::new(out);
         describe_prefix(&mut w, "ess", self.sample_rate_hz, self.level_dbfs);
-        let _ = w.write_fmt(format_args!(
-            " f0_hz={:.1} f1_hz={:.1} total_samples={}",
-            self.f0_hz, self.f1_hz, self.total_samples
-        ));
+        let _ = w.write_fmt(format_args!(" f0_hz="));
+        write_decimal(&mut w, self.f0_hz);
+        let _ = w.write_fmt(format_args!(" f1_hz="));
+        write_decimal(&mut w, self.f1_hz);
+        let _ = w.write_fmt(format_args!(" total_samples={}", self.total_samples));
         w.filled()
     }
 }
@@ -803,9 +863,10 @@ impl Stimulus for PulseTrain {
         let mut w = DescWriter::new(out);
         describe_prefix(&mut w, "pulse_train", self.sample_rate_hz, self.level_dbfs);
         let _ = w.write_fmt(format_args!(
-            " period_samples={} max_frequency_hz={:.1}",
-            self.period_samples, self.max_frequency_hz
+            " period_samples={} max_frequency_hz=",
+            self.period_samples
         ));
+        write_decimal(&mut w, self.max_frequency_hz);
         w.filled()
     }
 }

@@ -7,6 +7,11 @@
 # DFU flashing requires holding BOOT, tapping RESET, releasing BOOT
 # to enter the STM32 system bootloader. See docs/reference/daisy-seed3.md.
 
+# The image each target builds is named after the binary it came from: `make build BINARY=rig`
+# writes `rig.bin`, never a shared `firmware.bin`. A single name would be a trap on this project,
+# where flashing the wrong image is indistinguishable from flashing the right one by ear until you
+# hear whether stimulus is playing: `main.bin` and `rig.bin` coexist, and whichever build ran last
+# would silently own the file the next `make flash` reads.
 BINARY  = main
 # Multiple features are passed as one space-separated word, e.g.
 # `make flash-all FEATURES="seed3 slow-boot"`. Every use below must keep the
@@ -17,10 +22,10 @@ TARGET   = thumbv7em-none-eabihf
 
 # --- Probe flashing (ST-Link) -------------------------------------------------
 #
-# The probe path drives the ELF, never firmware.bin: defmt frames are decoded from
+# The probe path drives the ELF, not `$(BINARY).bin`: defmt frames are decoded from
 # the ELF's `.defmt` section and its symbol table, so flashing a stripped .bin
 # while holding some other ELF on the host guarantees the host's metadata does not
-# match what is running. firmware.bin stays a DFU-only artifact.
+# match what is running. The .bin stays a DFU-only artifact.
 #
 # probe-rs needs that single `.defmt` section to exist at all, and only a `log-defmt` build has
 # one: build.rs passes `-Tdefmt.x`, which consolidates the per-call-site `.defmt_*` sections into
@@ -81,14 +86,21 @@ all: build
 ## llvm-objcopy's -O binary output spans from lowest VMA to highest VMA,
 ## which includes the gap between FLASH (0x08000000) and RAM (0x24000000),
 ## producing a ~469 MB file. --only-section extracts only FLASH-loadable
-## sections, so the result is what flash actually holds: measured 2026-09-12
-## at `[profile.release] debug = 2`, 88,741 bytes for FEATURES="seed3" and
-## 48,320 for FEATURES="seed3 log-defmt" NO_DEFAULT=1, against the 131,072-byte
-## internal-flash budget. Treat those as measurements of this profile at this
-## commit, not constants: debug info moves .text (see firmware/Cargo.toml).
+## sections, so the result is what flash actually holds. Measured 2026-09-12 at
+## `[profile.release] debug = 2`, against the 131,072-byte internal-flash budget:
+##
+##   FEATURES="seed3"                        main.bin 88,581   rig.bin 106,811
+##   NO_DEFAULT=1 FEATURES="seed3 log-defmt" main.bin 48,360   rig.bin  65,696
+##
+## `rig` is the one to watch: at 106,811 it has 24 KB of that sector left, and it is the binary a
+## new dependency is most likely to be added for. Treat these as measurements of this profile at
+## this commit, not constants: debug info moves .text (see firmware/Cargo.toml).
+##
+## The output carries `$(BINARY)` in its name so the artifact cannot outlive the command that made
+## it. See the note beside `BINARY` above.
 build:
 	cargo objcopy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
-		-O binary firmware.bin \
+		-O binary $(BINARY).bin \
 		--only-section=.vector_table \
 		--only-section=.text \
 		--only-section=.rodata \
@@ -96,8 +108,11 @@ build:
 		--only-section='*.sgstubs' \
 		--only-section='*.defmt*'
 
-## Flash firmware.bin to the Seed3 via DFU and start it
+## Flash $(BINARY).bin to the Seed3 via DFU and start it
 ## Prerequisite: hold BOOT, tap RESET, release BOOT on the board
+##
+## `BINARY` picks the image, so `make flash-all BINARY=rig` builds and flashes rig in one step;
+## plain `make flash` re-flashes whatever `$(BINARY).bin` already holds.
 ##
 ## `:leave` makes the bootloader jump straight to the application, so no manual
 ## RESET tap is needed. Verified working on Seed3.
@@ -114,7 +129,7 @@ build:
 ## bars still render live.
 flash:
 	@log=$$(mktemp); \
-	dfu-util -a 0 -s 0x08000000:leave -D firmware.bin 2>&1 | tee "$$log"; \
+	dfu-util -a 0 -s 0x08000000:leave -D $(BINARY).bin 2>&1 | tee "$$log"; \
 	if grep -q "File downloaded successfully" "$$log"; then \
 		rm -f "$$log"; \
 		printf "\nFlashed and started (dfu-util's exit-74 on leave is expected).\n"; \
@@ -131,7 +146,7 @@ flash-all: build flash
 #
 # Why these look the way they do:
 #
-# * They take the ELF, not firmware.bin (see CHIP/ELF above). Flashing the .bin
+# * They take the ELF, not `$(BINARY).bin` (see CHIP/ELF above). Flashing the .bin
 #   would additionally need `--binary-format bin --base-address 0x08000000`, which
 #   is one more way to lose the distinction between the two artifacts.
 # * `probe-rs download --reset` rather than `cargo flash`: equivalent, but it keeps
@@ -240,4 +255,4 @@ clippy:
 
 clean:
 	cargo clean
-	rm -f firmware.bin
+	rm -f *.bin

@@ -15,4 +15,7 @@
 # Autonomous pi/ralph loop state (role.json etc.): per-run and machine-local,
 # same reasoning as .pi/ralph/ above.
 .agents/
+# DFU images from firmware/Makefile, named after the binary each came from (`main.bin`,
+# `rig.bin`). The bare `firmware.bin` is the name every image used before TASK-038.03.02.03.
+/firmware/*.bin
 firmware.bin
