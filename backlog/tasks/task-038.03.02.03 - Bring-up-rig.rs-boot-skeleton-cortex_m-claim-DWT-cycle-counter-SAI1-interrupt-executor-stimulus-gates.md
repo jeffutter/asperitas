@@ -7,7 +7,7 @@ status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-12 11:59'
-updated_date: '2026-09-12 12:33'
+updated_date: '2026-09-12 12:44'
 labels:
   - planned
 dependencies:
@@ -160,4 +160,30 @@ Available now in `crates/asperitas-logging`:
 ### Stash disposition
 
 `git stash list` still shows `stash@{0}: wip-038.03.02-uncommitted`. Its `console.rs`/`frame.rs`/`lib.rs` hunks and its `tests/commit_path_no_panic.rs` hunk are superseded by `22714b0`, `951b660` and `f0b4e18`. Only the `spin_budget.rs` hunk is still live, and it is comment-only: it rewrites the safety comment at `spin_budget.rs:81-86` because that text asserts nothing claims `Peripherals::take()`. AC #10 applies it; after that the stash may be dropped.
+
+Hand-off from TASK-038.03.02.02 (parked as an integration umbrella) on 2026-09-12: this leaf is
+the one that must discharge AC #14, and the only firmware-relevant content still sitting in
+`stash@{0}` (`wip-038.03.02-uncommitted`) is the `spin_budget.rs` safety comment. Verified against
+the live tree: the stash's `commit_path_no_panic.rs` hunk (adding `fn crc16_ccitt_update(` to
+`FRAME_FNS`) is already shipped at `crates/asperitas-logging/tests/commit_path_no_panic.rs:294,433`,
+and its `console.rs` / `frame.rs` / `lib.rs` hunks are superseded by what TASK-038.03.02.01 landed -
+the live `console.rs` carries more references to every verb than the stash did, and `RIGGEN` exists
+only in the live tree (zero occurrences in the stash).
+
+Replacement text for the stale sentence at `crates/asperitas-logging/src/spin_budget.rs:81-86`,
+verbatim out of the stash, so this leaf does not depend on the stash surviving:
+
+    // Safety: `DCB` and `DWT` are Cortex-M system peripherals. `rig.rs` claims
+    // `cortex_m::Peripherals::take()` in the firmware package, so this cannot count on the
+    // singleton being free - which is exactly why it uses `steal()`: a panic path must not behave
+    // differently depending on whether some other binary got there first. Aliasing the singleton is
+    // harmless here because both users only *enable* tracing (idempotent) and read CYCCNT, and
+    // neither ever writes it, so the counter's meaning does not depend on who ran first. Within
+    // this crate, daisy-embassy and embassy-stm32 nothing claims it at all (embassy-stm32's
+    // `Peripherals::take()` returns its own generated struct, not this one).
+
+Keep the line wrapping the live file uses (the repo's rustfmt comment width) rather than copying
+these exact breaks. Once this leaf has applied it, drop `stash@{0}`: nothing else in it is wanted,
+and a future `git stash pop` would resurrect pre-TASK-038.03.02.01 drafts of `console.rs`,
+`frame.rs` and `lib.rs` over the shipped versions.
 <!-- SECTION:NOTES:END -->

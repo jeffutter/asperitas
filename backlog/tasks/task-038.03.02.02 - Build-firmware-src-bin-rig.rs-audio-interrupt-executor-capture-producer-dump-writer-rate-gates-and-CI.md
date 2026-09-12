@@ -3,11 +3,11 @@ id: TASK-038.03.02.02
 title: >-
   Build firmware/src/bin/rig.rs: audio interrupt executor, capture producer,
   dump writer, rate gates and CI coverage
-status: Dev Ready
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-11 15:53'
-updated_date: '2026-09-12 12:30'
+updated_date: '2026-09-12 12:46'
 labels:
   - task
   - planned
@@ -112,3 +112,44 @@ The parent died twice at the 40-minute execute deadline with `rig.rs` still none
 - Ping the orchestrator over intercom **at least every 10 minutes** while running the checklist - a silent worker is killed as if hung, whatever it was actually doing.
 - A verification pass that finds a gap opens a ticket for the gap rather than fixing it inline, so the fix gets reviewed where it belongs. Small mechanical misses (a missing size reading, an unstuck comment) may be committed directly, with the commit message naming which AC it closes.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Parked 2026-09-12: both leaves are still open, so there is nothing to verify here
+
+Ran the verification ladder far enough to establish that this ticket cannot be closed, then stopped
+per the plan's own rule ("If either leaf is not Done, there is nothing to do here. Do not start
+editing firmware to help"). Evidence from the tree rather than from ticket statuses:
+
+- `firmware/src/bin/` contains `blinky.rs`, `ledtest.rs`, `main.rs`, `panictest.rs`, `podtest.rs` -
+  **no `rig.rs`**. So AC #1 fails at its first clause and every downstream AC (#2 through #14) has
+  nothing to check against.
+- Leaf status: TASK-038.03.02.03 is Dev Ready with 0/12 AC checked; TASK-038.03.02.04 is Blocked
+  behind it. Neither has been executed.
+- Working tree is clean and HEAD is `eaca742`, the planning commit that created these two leaves.
+  No partial work is at risk.
+
+No acceptance criteria checked: none is discharged by an absent file, and checking them here would
+be precisely the "marked Done with unchecked/unearned ACs" failure the workflow forbids.
+
+### Next actionable step
+
+Run **TASK-038.03.02.03** (it is the only 038-family task `backlog task list -s "Dev Ready" --ready`
+returns today), then TASK-038.03.02.04, then re-select this ticket to run the full ladder and record
+the `size -B` numbers against `main`'s baseline (text 88181 / data 1428 / bss 8224).
+
+Note for whoever selects work: this umbrella carries ordinal 83700, lower than .03's 88700, so a
+selector that orders by ordinal without filtering on dependencies picks the one thing it must not
+do. `--ready` filters it correctly now that it is Blocked.
+
+### Stash disposition (part of this ticket's remaining work, delegated)
+
+`stash@{0}` = `wip-038.03.02-uncommitted` was reviewed hunk by hunk against the live tree rather
+than applied. Its `commit_path_no_panic.rs` and `console.rs` / `frame.rs` / `lib.rs` hunks are
+superseded by what TASK-038.03.02.01 shipped; the only wanted content is the `spin_budget.rs` safety
+comment that closes AC #14, which belongs to .03. Verbatim replacement text and the drop instruction
+are recorded in TASK-038.03.02.03's notes so nothing depends on the stash surviving. Left in place
+rather than dropped here because this run made no code changes and a parked umbrella should not be
+the thing that destroys state - .03 drops it once the comment is applied.
+<!-- SECTION:NOTES:END -->
