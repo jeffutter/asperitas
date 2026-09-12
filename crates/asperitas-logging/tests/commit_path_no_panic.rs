@@ -280,14 +280,18 @@ fn commit_records_closures(lib: &Src) -> Vec<Region> {
 /// Functions reached from the record lock that this check reads in full. Adding a callee to the
 /// source without adding it here trips [`no_unscanned_callee_reaches_the_record_lock`].
 fn scanned_functions(sources: &[Src]) -> Vec<(Region, String)> {
-    const FRAME_FNS: [&str; 7] = [
+    const FRAME_FNS: [&str; 8] = [
         "fn encode(",
         "fn write_hex(",
         "fn write_decimal(",
         "fn write_whole(",
         "fn level_letter(",
         "fn sanitize_byte(",
+        // Reached from `encode`, which is reached from under the record lock. Split into two
+        // scanned functions when the incremental form arrived for the `AUDEND` CRC: `crc16_ccitt`
+        // now delegates, so both halves are on the path and neither may be assumed panic-free.
         "fn crc16_ccitt(",
+        "fn crc16_ccitt_update(",
     ];
     const DUMP_FNS: [&str; 1] = ["fn dump_fits("];
     const CONSOLE_FNS: [&str; 6] = [
@@ -423,7 +427,10 @@ fn scanner_extracts_the_regions_it_claims_to_scan() {
         ("fn write_whole(", "written += n"),
         ("fn level_letter(", "Level::Error"),
         ("fn sanitize_byte(", "0x7F"),
-        ("fn crc16_ccitt(", "0x1021"),
+        // The polynomial moved into `crc16_ccitt_update` when the whole-buffer form became a
+        // delegation. Each control now names a needle only its own body contains.
+        ("fn crc16_ccitt(", "CRC16_INITIAL"),
+        ("fn crc16_ccitt_update(", "0x1021"),
         ("fn dump_fits(", "saturating_sub"),
         ("fn take_seq(", "fetch_add"),
         ("fn record_committed(", "bump("),

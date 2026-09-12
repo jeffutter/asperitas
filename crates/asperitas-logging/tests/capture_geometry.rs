@@ -31,7 +31,9 @@ use asperitas_logging::dump::{
     self, AUDIO_HEADER_LEN, CHUNK_RAW, FULL_AUDIO_FRAME_LEN, MAX_AUDEND_BODY_LEN, MAX_BLOCK_BYTES,
     MAX_CHUNKS_PER_BLOCK,
 };
-use asperitas_logging::frame::{crc16_ccitt, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN};
+use asperitas_logging::frame::{
+    crc16_ccitt, crc16_ccitt_update, CRC16_INITIAL, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
+};
 use asperitas_logging::Level;
 
 // ---------------------------------------------------------------------------
@@ -185,21 +187,24 @@ fn one_block_costs_57788_wire_bytes() {
 /// This is the test that makes the budget independent of `capture`'s own arithmetic. It writes the
 /// 254 full chunks and the 2-byte tail a real block splits into, closes the block the way the device
 /// will, and sums the lengths the encoder actually returned.
+///
+/// It also computes the `AUDEND` checksum twice — once over the whole block as the host will, once
+/// accumulated chunk by chunk as the device must, since a 32 KiB block lives in SDRAM and never
+/// reaches the writer all at once. Those two agreeing is not a detail: if they ever disagreed, every
+/// `AUDEND` from a real board would read as corrupt to a correct decoder.
 #[test]
 fn a_real_255_chunk_block_costs_what_the_module_claims() {
     let payload = [0xA5u8; capture::RING_BLOCK_BYTES];
     let chunks = capture::chunks_per_block() as u16;
     let mut wire_bytes = 0usize;
     let mut offset = 0usize;
+    let mut chained_crc = CRC16_INITIAL;
 
     while offset < payload.len() {
         let end = (offset + CHUNK_RAW).min(payload.len());
-        wire_bytes += audio_frame_len(
-            0,
-            chunks,
-            (offset / CHUNK_RAW) as u16,
-            &payload[offset..end],
-        );
+        let chunk = &payload[offset..end];
+        wire_bytes += audio_frame_len(0, chunks, (offset / CHUNK_RAW) as u16, chunk);
+        chained_crc = crc16_ccitt_update(chained_crc, chunk);
         offset = end;
     }
 
@@ -208,6 +213,10 @@ fn a_real_255_chunk_block_costs_what_the_module_claims() {
     assert_eq!(offset, capture::RING_BLOCK_BYTES);
 
     let crc = crc16_ccitt(&payload);
+    assert_eq!(
+        chained_crc, crc,
+        "the chunk-wise CRC the device computes disagrees with the whole-block CRC the host checks"
+    );
     wire_bytes += audend_frame_len(0, chunks, offset as u32, crc);
 
     assert_eq!(
@@ -217,6 +226,35 @@ fn a_real_255_chunk_block_costs_what_the_module_claims() {
         wire_bytes,
         capture::wire_bytes_per_block()
     );
+}
+
+/// Chaining agrees with the one-shot form at every split, including the ones an implementation
+/// could plausibly get wrong: nothing, everything, and one byte either side of each boundary.
+///
+/// Run on a small buffer on purpose. The 32 KiB case above covers realistic geometry once; what
+/// needs exhaustive coverage is the *arithmetic*, which does not grow with the message.
+#[test]
+fn chaining_the_crc_at_any_split_matches_one_shot() {
+    let data = b"123456789";
+    let whole = crc16_ccitt(data);
+    assert_eq!(whole, 0x29b1, "and the check vector still holds");
+
+    for split in 0..=data.len() {
+        let (head, tail) = data.split_at(split);
+        let chained = crc16_ccitt_update(crc16_ccitt_update(CRC16_INITIAL, head), tail);
+        assert_eq!(chained, whole, "split at {split}");
+    }
+
+    // Splitting into single bytes is the degenerate shape a byte-at-a-time producer would use, and
+    // it must survive too — 9 rounds of the same register.
+    let drip = data
+        .iter()
+        .fold(CRC16_INITIAL, |acc, &b| crc16_ccitt_update(acc, &[b]));
+    assert_eq!(drip, whole);
+
+    // Zero-length pieces are no-ops, so a caller that loops over an empty chunk cannot corrupt a
+    // running checksum.
+    assert_eq!(crc16_ccitt_update(whole, b""), whole);
 }
 
 /// The useful fraction is 567 per 1000 at block level — and legitimately below the 568 per record.

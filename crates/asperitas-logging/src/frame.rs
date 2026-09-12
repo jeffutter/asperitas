@@ -201,8 +201,47 @@ pub(crate) const fn check_decimal_fits(max_value: u32, digits: usize) {
 /// source on both ends of the link, no extra data segment, and the cost is at most
 /// 220 × 16 = 3 520 iterations per record. Measuring what that costs inside the
 /// device's locked region is TASK-030.04's job, not a comment's.
+///
+/// The whole-buffer form of [`crc16_ccitt_update`]: this one delegates, so there is one
+/// implementation of the polynomial and the two agree by construction. That construction is
+/// pinned by `crc16_ccitt_update_chains_to_match_one_shot` here and by a real 32 KiB capture
+/// block split at [`crate::dump::CHUNK_RAW`] boundaries in `tests/capture_geometry.rs`.
+#[must_use]
 pub fn crc16_ccitt(data: &[u8]) -> u16 {
-    let mut crc: u16 = 0xFFFF;
+    crc16_ccitt_update(CRC16_INITIAL, data)
+}
+
+/// The value a CRC-16/CCITT chain starts from: `0xFFFF`, the `init` in the parameter table at
+/// [`crc16_ccitt`].
+///
+/// Published because a caller that checksums more than one buffer needs it to begin with, and a
+/// bare `0xFFFF` at such a call site is the same trap the table above exists to defuse: it reads
+/// like an arbitrary seed rather than the named parameter of one specific CRC variant.
+pub const CRC16_INITIAL: u16 = 0xFFFF;
+
+/// Update a running CRC-16/CCITT with `data`, returning the new running value.
+///
+/// The piecewise form of [`crc16_ccitt`], for a caller that cannot hold a whole message in one
+/// buffer. Not hypothetical on the device: a 32 KiB capture block lives in SDRAM and reaches the
+/// wire in [`crate::dump::CHUNK_RAW`]-sized pieces, so the checksum its [`crate::dump::audend_body`]
+/// carries can only be accumulated a chunk at a time.
+///
+/// # Why chaining is sound here
+///
+/// Feeding the register forward over concatenated bytes equals feeding it over each piece in turn,
+/// because the register *is* the entire state: these parameters have no input reflection (`refin`),
+/// no output reflection (`refout`), and no final xor (`xorout`), so nothing happens to the value
+/// between chunks and nothing happens to it at the end either. A reflected variant would still
+/// chain, but only if the caller passed the un-reflected register; a variant with a final xor
+/// would need the xor undone between pieces, which is why this function takes and returns the raw
+/// register rather than a finished checksum. Those three parameters are exactly what makes the
+/// split free, and they are the ones most easily misremembered - hence the pointer to the table
+/// above rather than a restatement.
+///
+/// Start from [`CRC16_INITIAL`]; pass each return value in as the next argument.
+#[must_use]
+pub fn crc16_ccitt_update(crc: u16, data: &[u8]) -> u16 {
+    let mut crc = crc;
     for &byte in data {
         crc ^= (byte as u16) << 8;
         for _ in 0..8 {
