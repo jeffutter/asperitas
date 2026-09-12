@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-11 13:28'
-updated_date: '2026-09-11 15:53'
+updated_date: '2026-09-12 03:44'
 labels:
   - task
   - planned
@@ -57,7 +57,7 @@ Out of scope: host-initiated control (TASK-032), QSPI excerpt playback (TASK-038
 <!-- AC:BEGIN -->
 - [ ] #1 firmware/src/bin/rig.rs exists and builds under CIs command cargo build --release --features seed3, and git diff --name-only shows firmware/src/bin/main.rs and podtest.rs untouched, so the human-verified podtest output contract from TASK-018.04 cannot regress.
 - [ ] #2 Audio runs on a dedicated InterruptExecutor pended on SAI1 with embassy-executor's executor-interrupt feature enabled, while the USB drain, LED blink task, CAPSTAT emitter and dump writer stay on the thread executor. The type carries no const-generic parameter in 0.10 (InterruptExecutor<1> does not compile), start() returns a SendSpawner and unmasks the IRQ itself, so the priority is set before it. The comment cites upstream examples/looper.rs lines 27-31 and 132-134 at the pinned commit ca9bcc9, and records why the SAI1 vector is free (the audio driver binds DMA1_CH0/CH1, audio.rs:26-29, and embassy-stm32's SAI binds only DMA lines). The numeric relationship between the DMA IRQ priority and the executor priority is recorded with its source: Config::default() ships dma_interrupt_priority P0 (embassy-stm32 src/lib.rs:362), which outranks the P6 executor, and that direction is required because the DMA ISR is what pends SAI1.
-- [ ] #3 Stimulus kind is a compile-time selection via cargo features stim-sine, stim-ess and stim-pulse, with sine at -20 dBFS when nothing else is set, and mutually-exclusive selection enforced by a const assert. CI builds all four combinations so none can rot. The device emits exactly one RIGCFG record whose payload embeds the generators own describe() output plus sample rate, capture format, block geometry and cpu_hz, so no second description grammar exists.
+- [ ] #3 Stimulus kind is a compile-time selection via cargo features stim-sine, stim-ess and stim-pulse, with sine at -20 dBFS when nothing else is set, and mutually-exclusive selection enforced by a const assert. CI builds all four combinations so none can rot. The device emits exactly one RIGCFG record (capture format, block geometry, window, cpu_hz, cache bits) and exactly one RIGGEN record embedding the generators own describe() output verbatim, so no second description grammar exists. See §2 for why the text travels in its own record.
 - [ ] #4 Input capture stores the loop channel as 16-bit mono into the ring defined by asperitas_logging::capture, publishing each block through Filling -> Full -> Dumping -> Free using that modules transition table, with samples written before the index that publishes them. The producer writes only blocks it found Free; when none are free it stops capturing and increments a visible overrun counter instead of overwriting a block being dumped. A const assert ties capture::FRAMES_PER_CALLBACK to daisy_embassy::audio::BLOCK_LENGTH, compared in samples rather than bytes: HALF_DMA_BUFFER_LENGTH counts 64 u32 words per callback (32 stereo frames) while CALLBACK_BYTES counts 64 bytes of one mono channel, so asserting those two figures equal would pass by coincidence and comparing either against HALF_DMA_BUFFER_LENGTH * 2 could never pass at all.
 - [ ] #5 Per-callback work is bounded to one contiguous copy plus lane truncation. DWT cycle-counter instrumentation reports worst-case callback duration and longest inter-callback gap, brought up with the sequence already proven on this part (DCB enable_trace, DWT unlock to clear the H7 software lock, has_cycle_counter probe, enable, read-back liveness check, per spin_budget.rs:80-97) and reporting zeros honestly when CYCCNT is unavailable; cycles become microseconds via a boot-time calibration against embassy-time, since embassy-stm32 0.6.0 exposes no CPU-clock accessor. A periodic CAPSTAT record carries delivered blocks, expected blocks, capture overruns, max_block_us, worst_gap_us, dump progress and the transports dropped_full, giving hardware verification two independent starvation signals.
 - [ ] #6 The device reports CAPMAX total_bytes ring_bytes seconds_max unused_headroom_bytes computed at runtime from sdram::SDRAM_SIZE and the published ring geometry, so capturable duration is measured from the driver constant rather than guessed, and the headroom statement makes clear that live audio DMA buffers remain in internal RAM.
@@ -73,16 +73,19 @@ Out of scope: host-initiated control (TASK-032), QSPI excerpt playback (TASK-038
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
+**Read "Plan corrections after TASK-038.03.02.01 landed" in Implementation Notes at the bottom of this file first.** It is dated 2026-09-12 and supersedes §0-§11 wherever they disagree; the corrections are numbered C1-C9 and each names what it replaces.
+
 ## What this ticket actually is now
 
 Two leaves carry the implementation; this umbrella carries the corrections below (which stay the authority for both), the integration check, and the mapping from its thirteen acceptance criteria onto work someone else did.
 
 | AC | Leaf |
 | --- | --- |
-| #7 — verbs as builders in `console.rs`, pinned by host tests, one whole-record emit path | `.01` |
-| everything else: `rig.rs` (#1-#6, #8-#10, #12), the §8 rate gates (#11 minus `CAPSTAT_MAX_BODY`'s definition), CI + ladder + sizes (#13) | `.02` |
+| #7 - verbs as builders in `console.rs`, pinned by host tests, one whole-record emit path | `.01` (Done) |
+| #2 interrupt executor and SAI1 priority, #5's DWT bring-up and clock question, #3's stimulus features and `RIGCFG`/`RIGGEN`, #12's transport-less shim, #14's `spin_budget.rs` sentence | `.03` |
+| #4 capture producer and ring geometry, #5's `CAPSTAT` durations, #6 `CAPMAX`, #7's dump writer and incremental CRC, #8 device-decided start and end, #9 `DUMPEND`, #10's rule-in-comment, #11 rate gates, #13 CI and sizes | `.04` |
 | #11's `pub const CAPSTAT_MAX_BODY` and its saturated-render bound | `.01` (the crate that renders the record owns the number `.02` divides by) |
-| `spin_budget.rs`'s stale `steal()` justification | `.02` (it becomes stale when `rig.rs` claims the singleton) |
+| #10's note in `docs/reference/daisy-seed3.md` | **TASK-038.06**, not `.04`; see correction C5 - that file has no FMC/MPU section to add it to |
 
 The umbrella's own work, once both leaves are Done: run §11's ladder over the joined tree — `cargo fmt --all --check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, then inside `firmware/` the default build, both stimulus variants, the defmt-only build, and firmware clippy — plus `size -B` for `rig` against `main`, and paste the outputs into Final Summary. Builds are incremental after the first; expect well under the phase budget, but ping every 10 minutes regardless.
 
@@ -209,27 +212,47 @@ planning pass; do not add `--all-targets` to it.
 field set and order are a contract **pinned by a unit test in the same file**; bodies written ad hoc in `rig.rs` would have
 no host test at all, because the firmware package has no host-test target.
 
-Add four builders beside `status_body`, each following its shape exactly (`TruncWriter` + `core::write!`, `proto=1` second,
+Add five builders beside `status_body`, each following its shape exactly (`TruncWriter` + `core::write!`, `proto=1` second,
 all fields in one format string, returning `w.filled()`), each with a pinning test naming every field in order, plus one
 saturated-counters test per builder asserting the worst-case render is `< frame::MAX_BODY` — model it on
 `status_body_renders_saturated_counters_as_u32_max` (:327), which exists because a 255-byte body silently truncating at
 200 is the failure nobody notices until a host parser rejects it.
 
+**The grammar below was corrected on 2026-09-12 while planning `.01`.** The draft carried thirteen `CAPSTAT` fields and
+put the generator's free text inside `RIGCFG`; both are arithmetically impossible against `frame::MAX_BODY` = 200, as the
+table in Implementation Notes shows (saturated `CAPSTAT` = 284 bytes, `RIGCFG` carrying `describe()` ≈ 291). Every field
+below still earns its bytes, and each verb's worst case is now provably inside one record:
+
 ```
-RIGCFG  proto=1 <generators describe() output verbatim> capture=mono16 lane=<L|R> blocks=<n>
-        block_bytes=<n> bytes_per_s=<n> capsec_us=<n> window_s=<n> cpu_hz=<hz> icache=<0|1> dcache=<0|1>
-CAPSTAT proto=1 delivered=<n> expected=<n> overrun=<n> max_block_us=<n> worst_gap_us=<n> audio_exit=<n>
-        dumping=<n> free=<n> refused=<n> stall_ms=<n> sent=<n> dropped_full=<n> bytes_dropped=<n>
-CAPMAX  proto=1 total_bytes=<n> ring_bytes=<n> seconds_max=<n> us_max=<n> unused_headroom_bytes=<n>
-DUMPEND proto=1 blocks=<n> chunks=<n> bytes=<n> elapsed_ms=<n> sent=<n> dropped_full=<n> bytes_dropped=<n>
+RIGCFG  proto=1 capture=mono16 lane=<L|R> blocks=<n> block_bytes=<n> bytes_per_s=<n> capsec_us=<n>
+        window_s=<n> cpu_hz=<hz> icache=<0|1> dcache=<0|1>                              177 B worst case
+RIGGEN  proto=1 <generators describe() output verbatim, <= console::RIGGEN_MAX_GEN_BYTES>   <= 175 B
+CAPSTAT proto=1 delivered=<n> expected=<n> overrun=<n> max_block_us=<n> worst_gap_us=<n>
+        audio_exit=<n> dumped=<n> dropped_full=<n>                                      187 B worst case
+CAPMAX  proto=1 total_bytes=<n> ring_bytes=<n> seconds_max=<n> us_max=<n> unused_headroom_bytes=<n>  133 B
+DUMPEND proto=1 blocks=<n> chunks=<n> bytes=<n> elapsed_ms=<n> refused=<n> stall_ms=<n>
+        sent=<n> dropped_full=<n> bytes_dropped=<n>                                     194 B worst case
 ```
 
-Three decisions inside that grammar:
+Four decisions inside the corrected grammar:
 
+- **The generator's text gets its own verb.** `RIGCFG` kept every numeric field the draft gave it (177 B, provable from
+  the field-name table alone) and lost only the free text, because a body mixing one unbounded string with ten numbers
+  has no checkable bound. `RIGGEN proto=1 <describe>` carries the same bytes, last in the record, so clipping shows up as
+  a missing field rather than a mangled number. `console::RIGGEN_MAX_GEN_BYTES` names the budget (160 B, so `RIGGEN` tops
+  out at 175); `asperitas-dsp`'s own `describe_respects_the_frame_budget_and_truncates_rather_than_panicking` measures
+  the real thing at 83 / 92 / 97 bytes for the three defaults and ~116 for absurd-but-representable parameters, so the
+  budget is not a guess and `rig.rs` debug-asserts the length `describe()` actually returned.
+- **One fact, one place.** `sent` and `bytes_dropped` left `CAPSTAT`: `STATUS` already carries them, with `seq_next` for
+  bracketing an interval, so repeating them in every status record duplicated a number instead of reporting it.
+  `free` left too - it is `RING_BLOCKS − (delivered − dumped)` minus the block being filled, all published constants or
+  fields already present. `refused` and `stall_ms` moved to `DUMPEND`, which is the record about one dump.
+- **`dumped` replaces `dumping`.** A count of blocks whose `AUDEND` has been committed is progress; a block index is not,
+  and it pairs with `DUMPEND`'s final `blocks`.
 - **No second sample-rate field.** `Stimulus::describe(&self, out: &mut [u8]) -> usize`
   (`crates/asperitas-dsp/src/stimulus.rs:122`) already renders `name=… sample_rate_hz=… level_dbfs=…`; re-emitting a
   competing `rate=` would create two sources of truth, which is what AC #3 forbids. Everything else rig knows about the
-  signal — capture format, block geometry, window, clock — rides alongside it.
+  signal (capture format, block geometry, window, clock) rides alongside it, in `RIGCFG`.
 - **`cpu_hz` is measured, not declared** (§3), and `icache`/`dcache` come from `SCB::icache_enabled()` /
   `SCB::dcache_enabled()` (`cortex-m-0.7.7 src/peripheral/scb.rs:376,446` — plain associated functions, no `&mut`).
   That turns AC #11's "caches are enabled nowhere" from prose into a number on the wire, which is exactly the evidence
@@ -468,7 +491,8 @@ intended window never wraps; the modulo stays because "provably never happens" i
 2. For `c in 0..capture::chunks_per_block()`: slice `chunk_raw = min(dump::CHUNK_RAW, remaining)`, build with
    `dump::audio_body(block_index as u32, chunks as u16, c as u16, raw, &mut body)`, then retry
    `asperitas_logging::try_emit_dump(&body[..len])` until true, awaiting `Timer::after_millis(1)` between refusals. Count
-   refusals (`refused`) and track the longest consecutive streak in milliseconds (`stall_ms`) for `CAPSTAT`. Never bypass
+   refusals (`refused`) and track the longest consecutive streak in milliseconds (`stall_ms`) for `DUMPEND`, which is the
+   record about one dump. Never bypass
    `dump_fits`: that predicate (`dump.rs:539`) is what keeps ordinary log and STATUS traffic lossless during a dump
    (AC #8), and `tests/console_dump.rs`'s `log_records_survive_a_saturated_dump` is the behaviour being protected.
 3. Emit `AUDEND` with `total_bytes = capture::RING_BLOCK_BYTES` and
@@ -480,8 +504,8 @@ Yielding at the `Timer` await is what keeps the USB drain running; a busy-wait s
 capacity. Packetisation is not this writer's problem: `usb.rs:290-321`'s drain loop owns the 64-byte short-packet rule and
 the ZLP, and `LOG_PIPE` is the only thing rig writes to.
 
-At the end emit one `DUMPEND` with blocks, chunks, bytes, elapsed ms and `CONSOLE.snapshot()`'s counters at that instant
-(AC #10), so a caller can time and validate a transfer from the captured stream alone.
+At the end emit one `DUMPEND` with blocks, chunks, bytes, elapsed ms, `refused`, `stall_ms` and `CONSOLE.snapshot()`'s
+ counters at that instant (AC #10), so a caller can time and validate a transfer from the captured stream alone.
 
 Dump wall time is a prediction, not a fact, and the arithmetic belongs in the comment: a full ring is
 `capture::wire_bytes_per_block() × RING_BLOCKS` ≈ 59.2 MB of wire traffic; keeping pace with real-time capture needs
@@ -601,4 +625,39 @@ Both attempts were cut at the 40-minute execute deadline having landed **zero co
 The seam is host versus firmware: `.03.02.01` takes the crate-side verbs (parent AC #7 plus `CAPSTAT_MAX_BODY` and the incremental CRC §7 step 3 needs), `.03.02.02` takes `rig.rs` and everything cross-compiled. This umbrella keeps the plan below as their shared authority and carries only §11's integration ladder.
 
 Salvage: `git stash list` holds `stash@{0}` ("wip-038.03.02-uncommitted", 687 insertions: `console.rs` +564 rig verbs, `frame.rs`, `lib.rs`, `spin_budget.rs`, `tests/commit_path_no_panic.rs`) from the aborted attempts. It was never reviewed or committed. `.03.02.01` dispositions of it first; whatever remains gets dropped, not archived.
+
+### §2's grammar could not satisfy its own byte limit (2026-09-12, while planning `.01`)
+
+`frame::MAX_BODY` is 200 and every rig verb is one record, so each verb's *worst-case* render must be under it. Rendered at `u32::MAX` (ten digits), the draft did not:
+
+| verb as drafted | worst case | verdict |
+| --- | --- | --- |
+| `CAPSTAT`, thirteen fields | **284 B** | over by 84 |
+| `RIGCFG` carrying `describe()` | **≈291 B** | over by ~91 |
+| `CAPMAX`, five fields | 133 B | fits |
+| `DUMPEND`, seven fields | 155 B | fits |
+
+AC #3 ("exactly one RIGCFG embedding `describe()`") and AC #2/#7's saturated-render test are therefore unsatisfiable *as written*: they demand both "render §2 verbatim" and "every verb < 200 B". No field-name arithmetic closes an 84-byte gap, so §2 was corrected rather than argued around. The method is worth keeping: the model reproduces the live pinned `STATUS` literal exactly (short 100 B, saturated 155 B, consistent with its `< frame::MAX_BODY` test), which is what makes the 284 trustworthy.
+
+Two further numbers make the free-text decision concrete. `Stimulus::describe()` for the three defaults measures 83 / 92 / 97 bytes (`stimulus_tests.rs:100-107` pins those strings), and the crate's own budget test accepts anything under 200, so absurd-but-representable parameters reach ≈116. `RIGCFG`'s ten numeric fields alone are 177 B, leaving 22 bytes, less than the *default* `pulse_train` string. That is why the generator text moved to `RIGGEN` behind a named 160-byte budget instead of squeezing `RIGCFG`.
+
+Consequences downstream, all reflected in §2 and in `.01`/`.02`: `refused` and `stall_ms` describe one dump and moved to `DUMPEND`; `sent`, `bytes_dropped` and `free` left `CAPSTAT` (`STATUS` carries the first two; the third is `RING_BLOCKS − (delivered − dumped)` minus the block being filled); `dumping` became `dumped`, because progress is a count of completed blocks, not an index. Parent AC #5 is unchanged: `CAPSTAT` still carries dump progress and the transport's `dropped_full`.
+
+### Plan corrections after TASK-038.03.02.01 landed (2026-09-12, while splitting `.02` again)
+
+Every item below was verified against the sources the build actually resolves (daisy-embassy checkout `ca9bcc9`, `embassy-executor-0.10.0`, `embassy-stm32-0.6.0`, `embassy-time-queue-utils-0.3.2`, this tree as of `f0b4e18`). **Where these contradict §0-§11 above, these win.**
+
+- **C1 - `embassy-stm32` does expose a clock accessor, so §3's premise is false.** `pub fn rcc::clocks(&Peri<RCC>) -> &Clocks` is public and ungated (`rcc/mod.rs:142`) and derefs to the generated `Freqs`, whose `.sys` the crate itself reads for exactly this purpose (`src/lib.rs:742`, `src/usb/usb.rs:324`). The line §3 cites (`mod.rs:589`) is `frequency::<T>()`, a *per-peripheral* kernel-clock helper; the absence of a CPU-clock accessor was inferred from it wrongly. Revised rule, implemented in `.03`: publish `cpu_hz` and derive `cycles_per_us` from the declared tree value when it divides evenly by 1 MHz, and run the embassy-time calibration as a cross-check whose two numbers are logged together, switching to measured on >1 % disagreement or a non-divisible rate. Reason: calibration is quantized by `TICK_HZ = 32_768`, one tick = 30.517 µs, so over 200 ms it carries ±0.015 %, which at 480 MHz is ±0.07 cycles/µs - enough for a truncated quotient to yield 479 where 480 is right, a 0.2 % error spent against a gap gate that sits 1 % above nominal. §3's "calibrate, then publish" survives; its precision argument does not.
+- **C2 - "≈480 MHz" is arithmetic, not a measurement.** It comes from `default_rcc()`'s PLL dividers and agrees with datasheet maximum. `rcc::clocks()` reports the same derived figure, so the two agreeing is consistency, not confirmation. Say that in the comment rather than implying a measurement.
+- **C3 - CYCCNT is 32 bits and wraps every 8.947 s at 480 MHz.** `max_block_us` (≤666 µs) is unaffected; `worst_gap_us` is not - a wider gap aliases to a small number, which is precisely the failure the field exists to reveal. Treat a raw delta at or beyond half the counter range as invalid and leave `worst_gap_us` alone.
+- **C4 - the timer budget is eight slots, set upstream, and overflow wakes a timer early instead of panicking.** `tick-hz-32_768` and `generic-queue-8` come from daisy-embassy's own `Cargo.toml:16`, not from this repo, and the manifest tracks `branch = "master"` unpinned. Slots are keyed by waker (`queue_generic.rs:55-60` coalesces every timer pending inside one task/select into one slot), and a full queue pops the furthest-out timer so it fires spuriously (`:70-75`). Rig's spend is about five: reporting ticker, LED blink, dump retry, capture deadline, boot including the codec's 2 ms startup delay; the USB drain holds none deliberately (`usb.rs:431`). Raising N from `firmware/Cargo.toml` is not available: selecting a second `generic-queue-N` duplicates `const QUEUE_SIZE` and fails to compile.
+- **C5 - there is no §4 FMC/MPU section in `docs/reference/daisy-seed3.md`, so AC #11's "note in §4" cannot be satisfied literally.** Its sections are What-is-and-isn't-different, The codec is strapped, SAI configuration, Flashing the Seed3, and the cache/MPU prose sits inside the ST-Link section around lines 485-508. `FMC` appears nowhere in `docs/`. The note therefore lands in **TASK-038.06**, which already lists that file, already carries the SDRAM/QSPI budget criteria, and already instructs itself to fix stale statements in the same change; suggested position is a new `## SDRAM memory model` sibling after "SAI configuration". Two sentences in that file also go stale the moment rig ships: the claim at `:480-483` that "the embassy executor busy-loops" (embassy-executor 0.10 runs `asm!("wfe")` whenever `poll()` finds nothing, `platform/cortex_m.rs:104-108`, with no feature to opt out), and `:504-506`'s "nothing here calls it" about `SdRamBuilder::build`, which rig will.
+- **C6 - `SdRam` has no `Drop` impl.** §6's "dropping it releases ~55 pins at the type level" is not what the code does. Keep the value alive anyway, because `init(&mut delay)` needs `&mut self` on it and it owns the FMC instance; use that reason, not the pin one.
+- **C7 - whether CYCCNT keeps counting across the core's `WFE` park is unmeasured here.** If it halts, `worst_gap_us` under-reports idle time. Until a board answers it (a TASK-038.05 row), never present `worst_gap_us` on its own: `delivered` versus `expected` is the starvation authority, and the DWT pair is corroboration.
+- **C8 - `emit_record` is `#[cfg(feature = "log-usb")]` and takes `&[u8]`** (`lib.rs:429-430`), while the `console::` builders are ungated. rig needs its own two-definition shim or the `--no-default-features --features "seed3 log-defmt"` build CI already runs will not link. `.03` builds the shim with its two records; `.04` inherits it.
+- **C9 - `stim-sine` must stay out of `[features] default`.** Putting it there looks like the tidy way to express "sine unless told otherwise" and silently breaks every variant build: `--features seed3,stim-ess` would enable two generators and trip the mutual-exclusion assert that exists to catch exactly that. Select sine in source when no `stim-*` is on.
+
+### Why `.02` split again the next day
+
+`.02` arrived as "everything cross-compiled": eleven of its fourteen criteria, one new 1 000-line binary, four novel API surfaces (`InterruptExecutor`, `Peripherals::take`, `SdRam`, DWT bring-up) and a CI edit. That is the same shape that killed the parent twice, and the umbrella had already learned that the seam which matters is *novel-API risk versus mechanical work*, not host versus firmware. So `.02.03` takes boot skeleton, DWT, executor topology and stimulus gates (the parts that can fail to compile or hang at boot), and `.02.04` takes capture producer, dump writer, rate gates and CI (mechanical, and only possible once the first exists). `.02` keeps its acceptance criteria as the definition of done and becomes the integration owner. Children numbered `.03`/`.04` rather than `.02.01`/`.02.02` because `.02.01` already exists and is Done, and a fifth level of ID depth is worse for everyone who has to type it.
 <!-- SECTION:NOTES:END -->

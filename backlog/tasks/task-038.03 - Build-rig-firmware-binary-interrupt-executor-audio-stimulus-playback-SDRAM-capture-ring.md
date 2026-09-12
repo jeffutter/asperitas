@@ -88,7 +88,7 @@ Three figures in the Implementation Notes above predate TASK-038.02 landing and 
 
 And one correction nobody had flagged:
 
-4. **`sdram::SDRAM_SIZE` is 64 MiB, not 32 MiB.** Verified at the pinned commit (`sdram.rs:9`) and corroborated by `docs/reference/daisy-seed3.md` line 17, which lists Seed3's SDRAM as 64 MB (`AS4C16M32SB-6BCN`). So AC #4's "fixed 32 MiB SDRAM ring" uses **half the chip**, and AC #6's `unused_headroom_bytes` is a real 32 MiB figure rather than zero. Growing the ring later is a one-constant change in `capture.rs` gated by that leaf's asserts. This is worth stating out loud before someone reads AC #6 as claiming the ring fills memory.
+1. **`sdram::SDRAM_SIZE` is 64 MiB, not 32 MiB.** Verified at the pinned commit (`sdram.rs:9`) and corroborated by `docs/reference/daisy-seed3.md` line 17, which lists Seed3's SDRAM as 64 MB (`AS4C16M32SB-6BCN`). So AC #4's "fixed 32 MiB SDRAM ring" uses **half the chip**, and AC #6's `unused_headroom_bytes` is a real 32 MiB figure rather than zero. Growing the ring later is a one-constant change in `capture.rs` gated by that leaf's asserts. This is worth stating out loud before someone reads AC #6 as claiming the ring fills memory.
 
 Zero margin is deliberate and stays: 32,768 B against `MAX_BLOCK_BYTES` 32,895 means exactly 255 chunks. That is safe *only* because `.01` puts the comparison in a `const` assert. Without it, exceeding the ceiling surfaces as a runtime `BlockTooLarge` refusal mid-dump at the bench.
 
@@ -105,7 +105,7 @@ When both leaves are Done, this umbrella verifies rather than builds:
 ## AC-to-leaf map for whoever closes this
 
 | AC | Proven by |
-|---|---|
+| --- | --- |
 | #1 binary exists, CI builds it, main/podtest untouched | .02 |
 | #2 InterruptExecutor on SAI1, priority stated, rationale cited | .02 |
 | #3 compile-time stimulus selection, RIGCFG from `describe()` | .02 |
@@ -191,18 +191,21 @@ No follow-up ticket filed: the blocking work already exists as .01 and .02, both
 <!-- COMMENTS:BEGIN -->
 created: 2026-09-11 01:29
 ---
+
 Stale dump arithmetic in your Implementation Notes — recompute before planning. They say '219 AUDIO chunks plus one AUDEND per block' and '640 records/s ... roughly 146 kB/s ... at 150-of-228 efficiency', both computed from the 150-raw-bytes-per-record figure TASK-038.02 proved impossible at MAX_BODY = 200. Actual pinned geometry: CHUNK_RAW = 129, so a 32,768-byte ring block is 254 full chunks plus a 2-byte tail = 255 chunks, 256 records counting the AUDEND, and the wire cost is 745 records/s at ~169 kB/s (pinned by published_efficiency_matches_the_encoder, tests/console_dump.rs:946).
 
-That is exactly MAX_CHUNKS_PER_BLOCK = 255 (dump.rs:444, asserted :477; MAX_BLOCK_BYTES = 32,895), so the 32 KiB block size sits on the ceiling with zero margin. Going one chunk further is a runtime refusal from the encoder (dump.rs:605, :661) during a dump, not a compile error, because nothing in asperitas-logging can see the ring's geometry. Recommend AC #7 derive chunks-per-block from dump::CHUNK_RAW and const-assert ring_block_bytes <= dump::MAX_BLOCK_BYTES instead of pinning a literal. See TASK-038.02's finalization notes for the rest.
+That is exactly MAX_CHUNKS_PER_BLOCK = 255 (dump.rs:444, asserted :477; MAX_BLOCK_BYTES = 32,895), so the 32 KiB block size sits on the ceiling with zero margin. Going one chunk further is a runtime refusal from the encoder (dump.rs:605, :661) during a dump, not a compile error, because nothing in asperitas-logging can see the ring's geometry. Recommend AC #7 derive chunks-per-block from dump::CHUNK_RAW and const-assert ring_block_bytes <= dump::MAX_BLOCK_BYTES instead of pinning a literal. See TASK-038.02's finalization notes for the rest
 ---
 
 created: 2026-09-11 13:32
 ---
-Planning run recomputed the flagged arithmetic (comment #1) against the code rather than the notes. Confirmed at asperitas-logging/src/dump.rs: CHUNK_RAW=129 (:435), MAX_CHUNKS_PER_BLOCK=255 (:444), MAX_BLOCK_BYTES=32,895 (:447), FULL_AUDIO_FRAME_LEN=227 (:460). A 32,768-byte ring block is therefore 254 full chunks plus a 2-byte tail = 255 chunks, 256 records counting AUDEND, worst-case 57,788 wire bytes per block, ~750 records/s, ~169 kB/s at 0.567 useful fraction. Zero margin against MAX_BLOCK_BYTES stands, and AC #7 survives as a const assert derived from CHUNK_RAW rather than a literal - implemented by new leaf TASK-038.03.01.
+
+Planning run recomputed the flagged arithmetic (comment #1) against the code rather than the notes. Confirmed at asperitas-logging/src/dump.rs: CHUNK_RAW=129 (:435), MAX_CHUNKS_PER_BLOCK=255 (:444), MAX_BLOCK_BYTES=32,895 (:447), FULL_AUDIO_FRAME_LEN=227 (:460). A 32,768-byte ring block is therefore 254 full chunks plus a 2-byte tail = 255 chunks, 256 records counting AUDEND, worst-case 57,788 wire bytes per block, ~750 records/s, ~169 kB/s at 0.567 useful fraction. Zero margin against MAX_BLOCK_BYTES stands, and AC #7 survives as a const assert derived from CHUNK_RAW rather than a literal - implemented by new leaf TASK-038.03.01
 ---
 
 created: 2026-09-11 13:32
 ---
-New fact nobody had flagged, and it changes how AC #4/#6 read: daisy_embassy::sdram::SDRAM_SIZE is 64 * 1024 * 1024 at the commit this build pins (git checkout ca9bcc9, sdram.rs:9), corroborated by docs/reference/daisy-seed3.md line 17 (Seed3 SDRAM = 64 MB, AS4C16M32SB-6BCN). So the fixed 32 MiB ring uses half the chip, unused_headroom_bytes in CAPMAX is 33,554,432, and growing the ring later is a one-constant change gated by the geometry asserts. Also recorded during planning: audio binds DMA1_CH0/CH1 (audio.rs:26-28), which is what makes the SAI1 vector free for the InterruptExecutor that upstream looper.rs pends it on at Priority::P6 (looper.rs:132).
+
+New fact nobody had flagged, and it changes how AC #4/#6 read: daisy_embassy::sdram::SDRAM_SIZE is 64 *1024* 1024 at the commit this build pins (git checkout ca9bcc9, sdram.rs:9), corroborated by docs/reference/daisy-seed3.md line 17 (Seed3 SDRAM = 64 MB, AS4C16M32SB-6BCN). So the fixed 32 MiB ring uses half the chip, unused_headroom_bytes in CAPMAX is 33,554,432, and growing the ring later is a one-constant change gated by the geometry asserts. Also recorded during planning: audio binds DMA1_CH0/CH1 (audio.rs:26-28), which is what makes the SAI1 vector free for the InterruptExecutor that upstream looper.rs pends it on at Priority::P6 (looper.rs:132)
 ---
 <!-- COMMENTS:END -->
