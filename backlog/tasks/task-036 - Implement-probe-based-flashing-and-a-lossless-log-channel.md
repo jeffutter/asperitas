@@ -1,11 +1,11 @@
 ---
 id: TASK-036
 title: Implement probe-based flashing and a lossless log channel
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-09-12 07:33'
+updated_date: '2026-09-12 08:14'
 labels:
   - planned
 dependencies:
@@ -236,6 +236,75 @@ Every number below is from this machine, not from a leaf's notes.
 * Two defmt majors remain in `firmware/Cargo.lock` (0.3.100 shim + 1.1.1). Unavoidable today: `stm32-metapac 21.0.0` and `embassy-net-driver 0.2.0` still ask for 0.3. The shim's own lock entry depends only on defmt 1.1.1, so exactly one encoder owns the wire format — which is what `.03` needed.
 * Release ELFs carry more than line tables: `.debug_info` ~997 KB, `.debug_aranges`, `.debug_pubnames`, even though `-C debuginfo=line-tables-only` is provably the flag passed and no env override exists in flake.nix or either cargo config. Harmless — all of it is non-ALLOC, and `firmware.bin` is the same size either way — so no ticket: the Cargo.toml comment's claim ("costs no flash") is true and was re-confirmed here. If someone later wants a smaller ELF, that's a new question.
 * Bare `make probe-flash` (default FEATURES) fails at *image load*, not probe discovery: a console-only ELF has no consolidated `.defmt` section, so probe-rs declines before looking for a probe. Already documented in the Makefile preamble and daisy-seed3.md; the working form is `DEFMT_LOG=info make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1`.
+
+## Integration re-run closing the umbrella - measured 2026-09-12, inside the nix dev shell
+
+Ran because the plan gates promotion on steps 2 and 3 being re-run once `.05` and `.06` landed
+(`.05` edits both gate definitions). Every number here is from this machine, not from a leaf's notes.
+
+### Step 2 - DFU path still provably unchanged
+
+`make -n build flash flash-all check` against the pre-probe Makefile (`d40d72c`) expanded in a scratch
+dir: **2 lines differ, both whitespace only** - `--release  --features` from the empty
+`$(CARGO_DEFAULTS)`. Same verdict as the 2026-09-10 pass, re-measured rather than trusted.
+
+Probe side expands fully and exits where it must with no board: `make -n probe-flash probe-log
+probe-run` rc=0 each; `make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1` builds, then stops at
+`Error: No connected probes were found.` (rc=2). `probe-rs list` prints `No debug probes were found.`
+
+### Step 3 - host gates, all rc=0
+
+fmt; clippy `--workspace --all-targets`; clippy `-p asperitas-logging --features log-usb --lib`; same
+with `log-defmt`; clippy `--features asperitas-pod/pod-hw`; both `RUSTDOCFLAGS=-D warnings cargo doc`
+runs; `cargo test --workspace`; `cargo test --workspace --features asperitas-pod/pod-hw`;
+`dump_reassemble -- --selftest`. Firmware: both ci.yml cross-compiles, plus `make clippy` under
+`FEATURES="seed3"` and `FEATURES="seed3 log-defmt" NO_DEFAULT=1`.
+
+### Four-config matrix, re-measured today (firmware.bin, `main`)
+
+| config | bytes | recorded by |
+|---|---|---|
+| `seed3` (console default) | 88677 | .03 said 88101, the 2026-09-10 pass said 88613 |
+| `--no-default-features --features "seed3 log-defmt"` | 48084 | identical to the 2026-09-10 pass (.03 said 47624) |
+| `seed3 log-usb log-defmt` | 91012 | pass said 91148, .03 said 90160 |
+| `--no-default-features --features seed3` (neither transport) | 45009 | identical to both .03 and the pass |
+
+Two of the four moved since 2026-09-10 through unrelated commits (TASK-038's logging verbs added code);
+the RTT-only and no-backend rows came out byte-identical to the 2026-09-10 pass. Nothing regressed here,
+and a frozen byte count is not the invariant - stale numbers baked into prose are TASK-055 AC #3's job,
+not this ticket's.
+
+**Config trap, recorded so nobody rediscovers it:** the fourth matrix row is *neither transport*, which
+still needs `seed3` - that feature carries `boot-led`, and every firmware binary references
+`asperitas_logging::led`. Bare `--no-default-features` with no features at all has never built and is
+not a supported configuration: there is no non-Seed3 hardware path in this workspace, since
+`daisy-embassy` and `embassy-stm32` are pulled in unconditionally. It fails with five "could not find
+`led` in `asperitas_logging`" errors. Not a defect; running it is how you waste twenty minutes.
+
+### Step 4 - claim and anchor audit
+
+Zero broken links: every relative `.md#anchor` across `docs/`, `README.md` and `CLAUDE.md` resolves
+against a real heading (checked programmatically, code fences excluded). No surviving aspirational
+probe claim in any document.
+
+### One stale claim this ticket itself created, fixed here
+
+`crates/asperitas-logging/src/panic_handler.rs` carried three sentences written before the probe
+existed, and its own `.03` work invalidated them:
+
+- the module doc claimed the panic text goes only via the `log-usb` module, and that "`boot-led` on,
+  `log-usb` off" is the LED-only degradation - false since `.03` added the RTT emit beside it;
+- the numbered behaviour list omitted the `log-defmt` step entirely;
+- the halt rationale asserted **"This project has no debug probe (see the README)"**. The README now
+  documents `make probe-*`, so the pointer had nowhere to land and the claim was no longer the reason.
+  Rewritten to the reason that does hold: both emits are synchronous and have already returned, so a
+  halted core protects nothing either way.
+
+Comment/doc only - no executable line changed. Re-greened after: fmt, both logging-feature clippy
+invocations, `cargo doc -p asperitas-logging --all-features` under `-D warnings`, `cargo test
+--workspace`, and the RTT-only cross-compile. The five `firmware/src/bin/*.rs` comments saying "with no
+debug probe attached `bkpt()` escalates to HardFault" are conditional statements about runtime and stay
+correct; left alone.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -251,3 +320,32 @@ created: 2026-09-10 21:15
 Planning round 2026-09-10: found all four leaves already Done, so this run performed the gated integration verification instead of fresh planning — results in Implementation Notes, all six ACs checked with their delivering leaf named. Two gaps surfaced and filed as TASK-036.05 (no unattended gate compiles the log-defmt cfg pairs) and TASK-036.06 (bench-facing facts unwritten + no way to drop --connect-under-reset from probe-flash). Status deliberately NOT promoted to Dev Ready: the umbrella still has two open children and sorts ahead of them by ordinal. Promote only after both land and the DFU-expansion diff plus host gates are re-run.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Umbrella closed by verification, not by new implementation: all six leaves (`.01`-`.06`) were already
+Done, so this run re-ran the integration pass the plan gates promotion on and fixed one stale claim the
+ticket itself left behind.
+
+Delivered, leaf by leaf: `#1`/`#2` `.01` (probe make targets, `--chip`/`--verify`, release line tables;
+DFU path unchanged), `#3` `.03` (`log-defmt` behind a feature, console still selectable, no-backend image
+still builds), `#4` `.03`+`.05` (thumbv7em clippy-clean *and* now compiled by CI and lefthook), `#5`
+`.02`+`.03` (panic text emitted over RTT at code level; hardware proof is TASK-037's), `#6` `.04` (both
+channels documented with what each loses, toolchain note reflects the probe as present).
+
+Evidence, measured today rather than quoted from the leaves: DFU expansion diff against the pre-probe
+Makefile is 2 whitespace-only lines; every ci.yml host gate returned 0; the four-config firmware matrix
+built at 88677 / 48084 / 91012 / 45009 bytes; `make probe-flash` with no board reaches probe discovery
+and stops there; anchor audit found zero broken links across docs/, README and CLAUDE.md.
+
+Code change made here: `crates/asperitas-logging/src/panic_handler.rs` still said "This project has no
+debug probe (see the README)" and described the panic path as USB-only in both its module doc and its
+numbered behaviour list - three statements this ticket's own work invalidated. Comment/doc only, no
+executable line touched, re-greened through fmt, both logging-feature clippy gates, rustdoc under
+`-D warnings`, the workspace tests and the RTT-only cross-compile.
+
+Nothing is left open under this umbrella. The three follow-ups raised during planning are siblings on
+purpose - TASK-053 (probe path safe to drive unattended), TASK-054 (release DWARF level), TASK-055 (six
+corrections to the RTT record) - and TASK-037 remains the only place a hardware claim gets made.
+<!-- SECTION:FINAL_SUMMARY:END -->

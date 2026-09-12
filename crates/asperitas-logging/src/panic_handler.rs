@@ -1,13 +1,16 @@
-//! Custom panic handler with a steady red LED and, when a serial transport is
-//! compiled in, a panic message on it.
+//! Custom panic handler with a steady red LED and, when a transport is compiled
+//! in, a panic message on every transport that is.
 //!
-//! Replaces `panic-halt` with visible (LED) and — under `log-usb` — serial feedback on
+//! Replaces `panic-halt` with visible (LED) and — under either transport — serial feedback on
 //! panic. The LED is set unconditionally — a synchronous GPIO write that works even with no
-//! host attached. The serial message is then pushed straight to the CDC endpoint by
-//! `usb::emit_blocking` (the `log-usb` transport module), bounded by a timeout.
+//! host attached. The same formatted text then goes out twice if both transports are on:
+//! over USB it is framed as a console v1 record and pushed straight to the CDC endpoint by
+//! `usb::emit_panic_record`, bounded by a processor-cycle budget; over RTT it is one `Error`
+//! frame from `defmt_log::emit_panic`, which writes the ring synchronously. Neither route
+//! goes through the log pipe, because the executor is halted by the time either runs.
 //!
-//! With `boot-led` on and `log-usb` off this degrades to LED-then-halt, which is what a board
-//! that dies before USB enumerates can still do: the colour is the whole diagnostic.
+//! With `boot-led` on and both transports off this degrades to LED-then-halt, which is what a
+//! board that dies before USB enumerates can still do: the colour is the whole diagnostic.
 //!
 //! # Usage
 //!
@@ -48,7 +51,8 @@ const PANIC_MSG_BUF: usize = 128;
 /// 1. Sets the LED to red (panicked state) — always works, synchronous
 /// 2. Under `log-usb`: writes the panic message over USB serial as one framed record,
 ///    driving the endpoint directly
-/// 3. Halts
+/// 3. Under `log-defmt`: writes the same text as one defmt frame into the RTT ring
+/// 4. Halts
 pub fn handle_panic(info: &PanicInfo) -> ! {
     // 1. Set LED to panicked state via the shared BootLed — synchronous, always works
     crate::led::set_global_state(crate::led::LedState::Panicked);
@@ -89,10 +93,12 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
     //
     // No `bkpt()` here. BKPT only halts when a debugger is attached; with none
     // present it escalates to a HardFault, whose default handler is its own
-    // infinite loop. That would discard the red LED and the pipe write above —
-    // the two things this handler exists to deliver — and leave a board that
-    // looks simply dead. This project has no debug probe (see the README), so
-    // a plain spin is the behaviour that actually preserves the diagnostics.
+    // infinite loop. That would discard the red LED and whatever the transports
+    // just wrote, the two things this handler exists to deliver, and leave a board
+    // that looks simply dead. A probe can now be attached (`make probe-*`), and
+    // halting the core still buys nothing: both emits above are synchronous and
+    // have already returned, so no diagnostic is in flight for a halted core to
+    // protect. The spin is what preserves them either way.
     loop {
         cortex_m::asm::nop();
     }
