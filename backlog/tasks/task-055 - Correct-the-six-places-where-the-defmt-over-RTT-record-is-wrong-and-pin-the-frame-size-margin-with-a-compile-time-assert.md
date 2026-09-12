@@ -3,11 +3,11 @@ id: TASK-055
 title: >-
   Correct the six places where the defmt-over-RTT record is wrong, and pin the
   frame-size margin with a compile-time assert
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-12 07:16'
-updated_date: '2026-09-12 18:40'
+updated_date: '2026-09-12 19:18'
 labels:
   - planned
 dependencies:
@@ -41,14 +41,14 @@ TASK-036 documented the RTT channel honestly, and most of it holds. Six things i
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 defmt_log.rs's margin argument cites the default-build write path it actually relies on, verified line by line against the vendored defmt-rtt 1.3.0, and no longer attributes the oversized-frame refusal to a cfg-gated arm our build does not compile.
-- [ ] #2 The body-window arithmetic is enforced by a compile-time assert. Prove it bites: widen console::BODY_WINDOW past the bound, show the named command fail, revert and show it pass. Name the gate that catches it.
-- [ ] #3 No stale firmware.bin byte count survives anywhere in the tree; each remaining number names the feature configuration and date it was measured, including firmware/Makefile:84.'s "~32 KB" claim.
-- [ ] #4 firmware/Cargo.toml's defmt-graph comment matches Cargo.lock (0.3.100 still resolved via embassy-net-driver and stm32-metapac, as a shim over 1.1.1), and one line beside the defmt-rtt dependency records that disable-blocking-mode, drop-on-contention and DEFMT_RTT_BUFFER_SIZE are left at their defaults on purpose, with the reason.
-- [ ] #5 docs/reference/daisy-seed3.md's loss table gains a fourth regime for the host detaching mid-run, quoting defmt-rtt's own crate documentation rather than paraphrasing, with the existing three rows and the loss-ledger section left consistent with it.
-- [ ] #6 The cache paragraph states SEGGER's alignment-and-size requirement, records both measured addresses and that neither is cache-line aligned, notes that defmt-rtt exposes only two features, names the MPU-window and upstream-patch routes, includes the NOLOAD-outside-DTCM bus-fault-before-main trap, and states that implementing either route is deliberately unscheduled pending TASK-038.'s caching decision.
-- [ ] #7 A short passage names the defmt frame sources outside asperitas-logging that are present in the linked RTT image, gives the cargo nm command that proves it, cites the sai error-conversion site, and neither claims they fire from the audio callback nor proposes a DEFMT_LOG filter.
-- [ ] #8 Host gates green in nix develop: fmt, the four clippy invocations, both RUSTDOCFLAGS=-D warnings doc runs, cargo test --workspace, and both firmware cross-compiles from ci.yml.
+- [x] #1 defmt_log.rs's margin argument cites the default-build write path it actually relies on, verified line by line against the vendored defmt-rtt 1.3.0, and no longer attributes the oversized-frame refusal to a cfg-gated arm our build does not compile.
+- [x] #2 The body-window arithmetic is enforced by a compile-time assert. Prove it bites: widen console::BODY_WINDOW past the bound, show the named command fail, revert and show it pass. Name the gate that catches it.
+- [x] #3 No stale firmware.bin byte count survives anywhere in the tree; each remaining number names the feature configuration and date it was measured, including firmware/Makefile:84.'s "~32 KB" claim.
+- [x] #4 firmware/Cargo.toml's defmt-graph comment matches Cargo.lock (0.3.100 still resolved via embassy-net-driver and stm32-metapac, as a shim over 1.1.1), and one line beside the defmt-rtt dependency records that disable-blocking-mode, drop-on-contention and DEFMT_RTT_BUFFER_SIZE are left at their defaults on purpose, with the reason.
+- [x] #5 docs/reference/daisy-seed3.md's loss table gains a fourth regime for the host detaching mid-run, quoting defmt-rtt's own crate documentation rather than paraphrasing, with the existing three rows and the loss-ledger section left consistent with it.
+- [x] #6 The cache paragraph states SEGGER's alignment-and-size requirement, records both measured addresses and that neither is cache-line aligned, notes that defmt-rtt exposes only two features, names the MPU-window and upstream-patch routes, includes the NOLOAD-outside-DTCM bus-fault-before-main trap, and states that implementing either route is deliberately unscheduled pending TASK-038.'s caching decision.
+- [x] #7 A short passage names the defmt frame sources outside asperitas-logging that are present in the linked RTT image, gives the cargo nm command that proves it, cites the sai error-conversion site, and neither claims they fire from the audio callback nor proposes a DEFMT_LOG filter.
+- [x] #8 Host gates green in nix develop: fmt, the four clippy invocations, both RUSTDOCFLAGS=-D warnings doc runs, cargo test --workspace, and both firmware cross-compiles from ci.yml.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -344,6 +344,91 @@ comment block, the same `[profile.release]` comment and the same documentation s
 *above* 48,084. Each reproduced on a second clean build into a fresh target dir. Nobody has
 explained it, and TASK-054 left it alone as out of scope. If any record in `defmt_log.rs` still
 asserts that adding levels only ever grows the image, that is the sentence to fix.
+
+### Executed 2026-09-12 (@ralph)
+
+**AC #1/#2 - the margin argument and its gate.** Rewritten against the vendored sources at
+`~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/{defmt-rtt-1.3.0,defmt-1.1.1,defmt-macros-1.1.1}`.
+The load-bearing fact the old comment missed: with the default rzcobs encoding every encoder
+callback carries **one byte** (`defmt-1.1.1/src/encoding/rzcobs.rs:57`, `let mut write_byte = move
+|b: u8| write(&[b]);`), and `defmt-rtt`'s logger forwards each callback straight to
+`Channel::write_all` (`src/lib.rs:166-186`). So no whole-frame write ever approaches `BUF_SIZE` and
+frame size cannot gate whether a write fits; occupancy versus host drain rate does, via
+`write_all`'s loop (`channel.rs:38-42`) over `blocking_write` returning 0 at `available == 0`
+(`channel.rs:57-59`), all inside `critical_section::acquire()`/`release()` (`src/lib.rs:168`, `:239`).
+The oversized-frame refusal is `channel.rs:93`, inside `#[cfg(feature = "drop-on-contention")] impl
+Channel` starting `:90`, which our build does not compile; default `write_impl` (`:71-87`) clamps at
+`bytes.len().min(available)`. Kept the conclusion (256-byte window against 1023 usable), dropped the
+guarantee. Also fixed `env_filter.rs:34` -> `:35` in both places (`defmt_log.rs`, `daisy-seed3.md`);
+`:34` is the sibling `LEVEL_WHEN_LEVEL_IS_NOT_SPECIFIED = Some(Level::Trace)`.
+
+Gate added: `RTT_BUF_SIZE` / `RTT_RING_USABLE` / `FRAME_OVERHEAD_BYTES` / `WORST_ENCODED_FRAME` plus
+`const _: () = assert!(WORST_ENCODED_FRAME < RTT_RING_USABLE, "...")`. The message is a plain literal;
+a formatted message is E0015 in const context.
+
+Proof it bites, `BODY_WINDOW` set to 2000:
+
+```text
+error[E0080]: evaluation panicked: worst-case defmt frame exceeds defmt-rtt's usable ring
+   --> crates/asperitas-logging/src/defmt_log.rs:122:15
+```
+
+from `nix develop .#default --command cargo clippy -p asperitas-logging --features log-defmt --lib --
+-D warnings`; reverted to 256 and re-run, green. Which gate catches it: only that `log-defmt`
+invocation. Measured, not assumed - with `BODY_WINDOW` still at 2000, `cargo clippy --workspace
+--all-targets -- -D warnings` finished clean, because `mod defmt_log` is
+`#[cfg(feature = "log-defmt")]`.
+
+**AC #3 - sizes.** Re-measured today with `make build` at `[profile.release] debug = 2`:
+`blinky.bin` 65,638 (`FEATURES="seed3"`), 25,176 (`NO_DEFAULT=1 FEATURES="seed3 log-defmt"`), 21,202
+(`NO_DEFAULT=1 FEATURES="seed3"`). None is "~18 KB", and the line also named a `firmware.bin` that the
+Makefile no longer produces, so `daisy-seed3.md:144` now quotes all three with their configs and the
+128 KB budget. `capture.rs:111`/`:286` lost their "~69 KB free" headroom claims rather than getting a
+new date: that figure traces to the 86.13 % `.bss` baseline TASK-038.03.02.02 records as never having
+been measured. Remaining sweep hits are dated measurements, budgets (`memory.x`, Makefile, README) or
+test fixtures.
+
+**AC #4 - manifest.** `cargo tree -e features -i defmt@0.3.100 --features seed3,log-defmt` shows two
+roots: `embassy-stm32 feature "defmt" -> stm32-metapac feature "defmt" -> defmt 0.3.100`, and
+`embassy-net-driver` (via `embassy-usb`) asking 0.3 directly. `cargo info` on 2026-09-12 reports
+embassy-net-driver 0.2.0 and stm32-metapac 21.0.0 as latest, so the shim is upstream's to drop. Added
+the deliberate-defaults line beside `defmt-rtt`.
+
+**AC #5/#6/#7 - documentation.** Fourth loss row plus `defmt-rtt/src/lib.rs:15-21` quoted verbatim,
+mechanism attributed to `host_is_connected()` reading only the mode bits (`channel.rs:151-154`), and an
+explicit refusal to claim whether probe-rs restores the flags on detach (TASK-037 measures it). Cache
+section rebuilt around SEGGER's *Cortex-M specifics* bullets fetched from kb.segger.com/RTT today.
+
+Measured on the `log-defmt` release `main` ELF today, with `cargo nm ... -- --print-size`:
+`_SEGGER_RTT` `0x24000008` size `0x30` (48 B) in `.data` (starts `0x24000000`), and
+`defmt_rtt::BUFFER` `0x240010e4` size `0x400` (1 KiB) in `.uninit`; `.bss` starts `0x240005d0`, hence
+the ~4 KB gap with unrelated data between the two objects. Precision the plan did not have: the ring's
+1 KiB *is* a multiple of a cache line, so only its start is misaligned (4 B in), whereas the control
+block fails both (48 B, straddling the line at `0x24000020`). `probe-rs chip info STM32H750IBKx` run
+today lists `RAM: 0x20000000..0x20020000 (128.0 KiB)`, so a DTCM relocation stays discoverable.
+
+One correction to the plan's AC #7 recipe: the `"package"` symbol count is NOT a console-versus-RTT
+discriminator. Measured: 82 frame symbols (75 `defmt_error`) in the RTT image, 99 (92 `defmt_error`) in
+the console image - the console build compiles driver frames too, it just lacks the consolidated
+`.defmt` section and any `SEGGER` magic. The doc now says the byte scan
+(`strings -a <ELF> | grep -c SEGGER`) is what tells them apart, and records both counts. Verified the
+named site independently: `embassy-stm32-0.6.0/src/sai/mod.rs:33` inside
+`impl From<ringbuffer::Error> for Error` (only `DmaUnsynced`, returns `Self::Overrun`), reached from
+`daisy-embassy ca9bcc9 src/audio.rs:166-178`, whose callback is `FnMut(&[u32], &mut [u32])` and so
+cannot be the audio-callback path.
+
+**AC #8 - gates.** All twelve ci.yml invocations run under `nix develop .#default`, all pass: fmt;
+clippy workspace/all-targets; clippy `log-usb`; clippy `log-defmt`; clippy with
+`asperitas-pod/pod-hw`; `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps` default and
+`--all-features`; `cargo test --workspace` (34 suites ok) and again with `pod-hw`;
+`dump_reassemble --selftest`; `cargo build --release --features seed3`; `cargo build --release
+--no-default-features --features "seed3 log-defmt"`.
+
+No follow-up tickets filed: the two open questions this ticket surfaced (does probe-rs restore the RTT
+mode flags on detach; when caching gets enabled) are already owned by TASK-037 and TASK-038, and both
+are now named in the doc where someone will hit them.
+
+Follow-up filed while sweeping: TASK-057. The build/flash quickstart at docs/reference/daisy-seed3.md:95-108 still names firmware.bin, which the Makefile stopped producing when images became $(BINARY).bin, and its manual cargo objcopy line omits the --only-section list the Makefile calls load-bearing (without it -O binary spans FLASH to RAM, ~469 MB). Outside this ticket's byte-count scope, so it got its own ticket rather than a drive-by edit here.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -354,3 +439,24 @@ created: 2026-09-12 18:40
 Planning re-verified every claim against the tree and upstream sources on 2026-09-12; the plan replaces the line references in the description, which have all drifted, and records three findings the description does not have. (1) AC #1's passage needs new reasoning, not a new citation: defmt-rtt's default-mode logger calls write_all once per encoder callback (defmt-rtt/src/lib.rs:166-186 over defmt 1.1.1's streaming Encoder), so no whole-frame write ever approaches BUF_SIZE and the body window cannot make the spin unreachable as defmt_log.rs:101-104 claims. (2) AC #3's two named targets were already fixed by TASK-054 (6fbd6bc); the live stragglers are daisy-seed3.md:144 'blinky is ~18 KB' and capture.rs:111/:286 '~69 KB free', whose .bss premise task-038.03.02.02:88 records as never having existed. (3) defmt 0.3.100 is built and linked, not merely resolved: cargo tree -e features shows daisy-embassy -> embassy-stm32 feature "defmt" -> stm32-metapac feature "defmt", which ties AC #4's manifest fix to the same mechanism that puts foreign frames in the image (AC #7). Also found a seventh wrong citation of the same class: env_filter.rs:34 should be :35, at defmt_log.rs:50 and daisy-seed3.md:416. No sub-tickets: items #3, #5, #6, #7 all edit docs/reference/daisy-seed3.md, so splitting would create conflicts for no independent increment. No acceptance criterion needs hands, so nothing was split off as @human.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Six wrong statements in the defmt-over-RTT record corrected and the frame-size margin pinned, all
+without a board. `defmt_log.rs` now argues the margin from the write path our build actually compiles
+(one byte per rzcobs callback into `Channel::write_all`, the spin caused by ring occupancy rather than
+frame size) and drops the cfg-gated `write_impl` refusal it used to cite; a new
+`assert!(WORST_ENCODED_FRAME < RTT_RING_USABLE)` pins the arithmetic, proven red at
+`BODY_WINDOW = 2000` and green at 256, and caught only by the `log-defmt` clippy gate. Stale sizes are
+gone: blinky re-measured today (65,638 / 25,176 / 21,202 bytes) with configs named, and capture.rs's
+unmeasurable "~69 KB free" headroom replaced by the u16 invariant it actually enforces.
+`firmware/Cargo.toml` now says what the lock says - defmt 0.3.100 is still resolved and built via
+embassy-stm32 -> stm32-metapac and via embassy-net-driver, as a shim over 1.1.1 that upstream has not
+dropped - and records why defmt-rtt's two features and its buffer knob stay at defaults on purpose.
+The reference doc gains a fourth loss regime for a host detaching mid-run, in defmt-rtt's own words; a
+cache section rebuilt on SEGGER's Cortex-M requirements against both measured addresses, neither of
+them cache-line aligned; and a passage naming the driver frames present in the linked image with the
+nm command that proves it, correcting the plan's claim that the frame-symbol count distinguishes the
+console build from the RTT one. All twelve ci.yml gates green.
+<!-- SECTION:FINAL_SUMMARY:END -->

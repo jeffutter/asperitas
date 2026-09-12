@@ -141,7 +141,12 @@ the core is running and the fault is downstream.
 - **DFU mode is not sticky.** Once a flashed app boots, the bootloader is gone. Repeat
   BOOT+RESET before *every* flash, or dfu-util reports `No DFU capable USB device
   available`.
-- **Binary size check:** `ls -la firmware.bin` should show < 128 KB (blinky is ~18 KB).
+- **Binary size check:** internal flash is one 128 KB sector, so anything at or over 131,072 bytes
+  cannot fit. Measured 2026-09-12 at `[profile.release] debug = 2`, from `make build`'s output named
+  for the binary: `blinky.bin` is 65,638 bytes built with defaults (`FEATURES="seed3"`), 25,176 as
+  RTT-only (`NO_DEFAULT=1 FEATURES="seed3 log-defmt"`), and 21,202 with no transport at all
+  (`NO_DEFAULT=1 FEATURES="seed3"`). `main` and `rig` are far larger; the `build` recipe in
+  `firmware/Makefile` carries those figures.
 - **Prerequisites:** `nix develop .` provides rustc, cargo-binutils, and dfu-util.
   No additional setup needed.
 - **memory.x RAM length is load-bearing.** AXI SRAM is **512 KB**, not 1 MB — the
@@ -413,7 +418,7 @@ built artifacts rather than at the bench:
   data: no `.defmt` section" — before probe discovery even starts.
 - **`DEFMT_LOG` decides what's in the stream, at build time.** With the variable unset,
   defmt-macros compiles every non-ERROR call to nothing (`defmt-macros-1.1.1`,
-  `src/function_like/log/env_filter.rs:34`), so an attach against a plain
+  `src/function_like/log/env_filter.rs:35`), so an attach against a plain
   `make build FEATURES="seed3 log-defmt" NO_DEFAULT=1` image shows a silent channel and reads
   as a broken probe. The facade's runtime `set_max_level(Info)` cannot compensate: the arm
   that would have shipped the record isn't in the binary. Ask for the level you want when you
@@ -442,15 +447,17 @@ built artifacts rather than at the bench:
   Expect only `Error: No connected probes were found.` Anything else about DWARF is a profile
   regression, not a bench problem.
 
-**Three regimes an RTT stream runs in,** predictable from the mode bit alone. `defmt-rtt`
-inits its up-channel to `NON_BLOCKING_TRIM` (`src/lib.rs:113`); probe-rs flips it to
-block-if-full when it attaches, and `defmt_rtt::in_blocking_mode()` tells firmware which it is.
+**Four regimes an RTT stream runs in.** The first three are predictable from the mode bit alone; the
+fourth is what the mode bit cannot see. `defmt-rtt` inits its up-channel to `NON_BLOCKING_TRIM`
+(`src/lib.rs:113`); probe-rs flips it to block-if-full when it attaches, and
+`defmt_rtt::in_blocking_mode()` tells firmware which it is.
 
 | Host state | Mode in effect | What happens |
 |---|---|---|
 | No host attached | `NON_BLOCKING_TRIM` | frames truncated or dropped, silently, with no counter anywhere saying so |
 | Attached, host keeping up | block-if-full (set by probe-rs on attach) | nothing lost |
 | Attached, host stalled | block-if-full | target spins in the write loop with interrupts disabled — the application freezes, and audio goes first |
+| Host detached mid-run | still block-if-full, as far as the target knows | the same freeze as row three, from a far more ordinary cause: someone closed the terminal |
 
 Row three is probe-rs's own warning, verbatim from `probe-rs attach --help`: "if the
 application writes within a critical section, using this mode can cause the application to
@@ -458,6 +465,27 @@ freeze if the buffer becomes full and is not read by the host". Every `defmt` fr
 written inside `critical_section::acquire()` (`defmt-rtt` `src/lib.rs:168`), against a ~667 µs
 audio block deadline (32 samples at 48 kHz). Hence the rule, absolute: **nothing may log from
 the audio callback.** Reentrancy is fatal too — the logger panics rather than nesting.
+
+Row four is `defmt-rtt`'s own admission, verbatim from its crate documentation
+(`defmt-rtt-1.3.0/src/lib.rs:15-21`):
+
+> `probe-rs` puts RTT into blocking-mode, to avoid losing data.
+>
+> As an effect this implementation may block forever if `probe-rs` disconnects
+> at runtime. This is because the RTT buffer will fill up and writing will
+> eventually halt the program execution.
+>
+> `defmt::flush` would also block forever in that case.
+
+The mechanism is one assumption deep. `host_is_connected()` (`channel.rs:151-154`) decides
+attachment from the mode bits alone - its own comment reads "we assume that a host is connected if we
+are in blocking-mode. this is what probe-run does." - so a host that set `BLOCK_IF_FULL` and then
+vanished leaves the target writing as though someone were still draining, and `Channel::flush`
+(`channel.rs:139-149`) returns early only when the mode says non-blocking. Whether probe-rs restores
+the flags on detach is **not verified here**, upstream or at the bench, and this section claims
+neither direction; TASK-037 is where to measure it, by attaching, streaming, killing the reader, and
+reading `_SEGGER_RTT.up_channel.flags` afterwards. Of the two levers below, only the target-side one
+reaches this regime: there is no host left to hand `--rtt-channel-mode` to.
 
 If the host is going to be slow on purpose (a laptop resuming, a pipe into `grep` that isn't
 draining), say so from the host side instead of hoping: `--rtt-channel-mode no-block-skip`
@@ -467,10 +495,40 @@ Both are values probe-rs 0.32.0 accepts; `block-if-full` is its default.
 The target holds the matching lever, and it has a name: defmt-rtt 1.3.0's **`disable-blocking-mode`**
 cargo feature forces the non-blocking write path *even after* probe-rs has set the channel to
 BlockIfFull (`src/channel.rs:33` picks `nonblocking_write` ahead of the connection test;
-`src/lib.rs:23-24` documents it). It moves row three out of the audio deadline's way and pays for it
+`src/lib.rs:23-24` documents it). It moves rows three and four out of the audio deadline's way - row
+four is otherwise unreachable, since a detached host cannot be passed a flag - and pays for it
 exactly where this channel earns its keep: attached no longer means lossless, so frames vanish while
 you are watching them. Treat it as insurance under consideration, not a default — the standing rule,
 nothing logs from the audio callback, is the primary defence, and it costs nothing.
+
+**"Nothing logs except the facade" is not true of the linked image.** Selecting `log-defmt` turns
+defmt on across `daisy-embassy`'s whole dependency stack - the `cargo tree -e features -i
+defmt@0.3.100 --features seed3,log-defmt` receipt quoted in `firmware/Cargo.toml` is the evidence -
+so driver frames are compiled in whether or not we write them. Counted 2026-09-12 on the RTT image:
+82 defmt frame symbols, 75 of them tagged `defmt_error`:
+
+```bash
+cd firmware && CARGO_TARGET_DIR=$(mktemp -d) cargo nm --release --no-default-features \
+  --features "seed3 log-defmt" --bin main -- | grep -c '"package"'
+```
+
+The flags are load-bearing, because `cargo nm` re-runs the build: omit `--no-default-features` and
+`--features` and it rebuilds and overwrites `target/.../release/main` with the console image, which
+links the `#[cfg(not(feature = "log-defmt"))]` no-op logger and contains no `SEGGER` magic at all -
+symptoms that read exactly like "RTT is missing from the firmware". Measured contrast: 99 frame
+symbols and zero `SEGGER` strings in the console image, 82 and the magic in the RTT one, so the byte
+scan (`strings -a <ELF> | grep -c SEGGER`), not the symbol count, is what tells the two images apart.
+
+One site worth knowing by name: `{"package":"embassy-stm32","tag":"defmt_error","data":"Ringbuffer
+broken invariants detected!",...}` comes from `embassy-stm32-0.6.0/src/sai/mod.rs:33`, inside
+`impl From<ringbuffer::Error> for Error`, which fires only on `ringbuffer::Error::DmaUnsynced` and
+returns `Self::Overrun`. `daisy-embassy` reaches it from `src/audio.rs:166-178`'s `start_callback`
+`codec.read(...)` / `codec.write(...)` loop, so it runs in **task context, not the audio callback** -
+that callback is `FnMut(&[u32], &mut [u32])` and cannot fail - but it is still an ERROR-level frame,
+the one level that survives an unset `DEFMT_LOG` (`env_filter.rs:35`), written inside `defmt-rtt`'s
+critical section at the moment audio is already going wrong. No filter is proposed for it:
+`DEFMT_LOG=off,crate=off` is recorded in TASK-036.03's notes as roughly 300 proc-macro errors, and
+finding a path filter that works belongs to whoever actually needs one.
 
 Two erase-and-debug details that are cheap to state and expensive to rediscover:
 
@@ -494,9 +552,66 @@ the host attaches to a stream that says nothing. SEGGER's thread 5360 is the sym
 at `0x24000000` that auto-search missed, that a manually-set address found but got no data from, and
 that worked once moved to DTCM at `0x20000000`. Read it for the symptom, not the explanation: that
 thread never mentions caching (SEGGER's answer blames AHB reachability and then edits itself), and the
-mechanism above is the architecture's, not theirs. The fix is the same one either way — put the block
-where no cache can hold a write, DTCM or a region explicitly marked non-cacheable — and it is linker
-work, not a config bit, because defmt-rtt emits the block as an ordinary static.
+mechanism above is the architecture's, not theirs.
+
+What "put the block where no cache can hold a write" actually takes is longer than a linker tweak.
+SEGGER's RTT knowledge-base page, section *Cortex-M specifics*, lists it under "If the CPU implements
+caches:" - quoted verbatim, its grammar included:
+
+> - The RTT control block as well as all RTT buffers must start cache line aligned
+> - The RTT control block as well as all RTT buffers must be the multiple of a cache line in size
+> - In case the system provides multiple cache levels, the alignment and sizes of the control block and
+>   buffers must take the cache with the largest line size as the reference point.
+> - It is **user application's responsibility** to call a cache clean + invalidate on the RTT control
+>   block + all RTT buffers after segment init is complete but before RTT is used for the first time.
+> - In the application, the RTT control block, buffers and pointers to their names must be linked with
+>   virtual address == physical address
+> - The application must provide a uncached address alias to the memory where the control block +
+>   buffers are located in.
+
+Measured against that list on the `log-defmt` release `main` image on 2026-09-12 - these two numbers
+belong to that binary at this commit, other binaries land elsewhere, and this is the command:
+
+```bash
+cd firmware && cargo nm --release --no-default-features --features "seed3 log-defmt" --bin main -- \
+  | grep -Ei "SEGGER_RTT|defmt_rtt.*BUFFER"
+```
+
+| Object | Address | Size | Output section | Bytes into its 32-byte cache line |
+|---|---|---|---|---|
+| `_SEGGER_RTT` | `0x24000008` | 48 (`0x30`) | `.data`, which starts at `0x24000000` | 8 |
+| `defmt_rtt::BUFFER` | `0x240010e4` | 1024 (`0x400`) | `.uninit`: the ring itself | 4 |
+
+Add `--print-size` to that command for the sizes. Read against SEGGER's first two bullets the layout
+fails on both counts differently: the control block is 48 bytes, not a multiple of 32, and runs
+`0x24000008..0x24000038`, so it straddles the line at `0x24000020` and shares lines with unrelated
+`.data`; the ring's 1 KiB *is* a multiple of a cache line but starts 4 bytes into its first one.
+Neither starts cache-line aligned. It gets away with that only because the cache is off.
+
+`defmt-rtt` offers no handle on any of it: 1.3.0 ships exactly two features,
+`disable-blocking-mode` and `drop-on-contention`, and neither touches alignment or placement. The
+nearest hook is that the ring is emitted into a named input section, `.uninit.defmt-rtt.BUFFER`, and
+the channel name into `.data.defmt-rtt.NAME` (`src/lib.rs:128-139`) - a linker script can select
+those, which is what makes an upstream align-and-section patch a plausible route rather than a fork.
+The wrinkle that argues against the naive version of either route: the two objects sit ~4 KB apart
+with unrelated data in between (`.data` at `0x24000000`, `.bss` at `0x240005d0`, `.uninit` at
+`0x240010e4`), so one MPU window made non-cacheable to cover both makes those neighbours uncached
+too, and partial-line sharing defeats invalidate-by-address on an M7 regardless. Two credible routes
+survive that: an MPU non-cacheable window over the start of AXI SRAM, or the upstream patch.
+
+One trap on the option people reach for first, hand-moving the block to DTCM: a `NOLOAD` section
+placed naively outside DTCM drags `__ebss` across an unmapped gap and bus-faults before `main`, which
+passes simulation and fails only on silicon - daisy-rs documents exactly this on the same H750 in
+`docs/memory-placement.md`, including that Renode backs the gap and so "passes". Discoverability is
+not the constraint on any of these routes: `probe-rs chip info STM32H750IBKx` (run 2026-09-12;
+command above) lists DTCM `0x20000000..0x20020000` among the RAM regions, so a relocated block stays
+findable without an auto-search scan.
+
+So "it is linker work, not a config bit" understates it. Against SEGGER's list, linker work is
+necessary and not sufficient - the cache clean + invalidate and the uncached alias are application
+work too. Implementing either route is **not scheduled, and deliberately not filed**: caching is off
+today, as the verification directly below records, and the day TASK-038's SDRAM/DSP work wants it on
+is the day that ticket plans this.
 
 Latent, not present: nothing enables I- or D-cache anywhere in this stack. Verified locally — no
 cache or MPU call in embassy-stm32 0.6.0's `src/`, none in daisy-embassy `ca9bcc9`'s boot path, none
@@ -752,8 +867,8 @@ that didn't can too. Those fields are specified above under
 [*Console protocol v1*](#console-protocol-v1-every-record-verifies-itself) and
 [*`BOOT` and `STATUS`*](#boot-and-status-the-reserved-body-prefixes); this section is only about which
 ledger is which. RTT keeps no ledger at all. Unattached it discards freely and
-says nothing; attached it loses nothing *while the host keeps reading*, and silently stops being
-the thing under your control the moment the host stalls. So a clean, gapless RTT stream is
+says nothing; attached it loses nothing *while the host keeps reading and stays attached*, and
+silently stops being the thing under your control the moment the host stalls or goes away. So a clean, gapless RTT stream is
 evidence that the host kept up, not evidence that the firmware's diagnostics were complete —
 and a loss count quoted from the console does not describe an RTT capture, or vice versa. When a
 number has to be trustworthy, take it from the console's counters and say which channel it came

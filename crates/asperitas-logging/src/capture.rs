@@ -107,8 +107,10 @@ pub const RING_BLOCK_BYTES: usize = 32_768;
 /// Blocks in the ring: 1 024.
 ///
 /// Sized so a five-minute capture ([`CAPTURE_WINDOW_SECONDS`]) fits with room to spare, and small
-/// enough that the per-block state array — one byte per block, held in internal RAM where roughly
-/// 69 KB is free — stays comfortably inside [`u16::MAX`].
+/// enough that the per-block state array, one byte per block held in internal RAM, stays inside
+/// [`u16::MAX`] so an index is storable atomically. Gate 5 below checks that bound; no headroom
+/// figure is quoted here, because the "roughly 69 KB free" this used to carry traced back to the
+/// 86.13 % `.bss` baseline TASK-038.03.02.02 records as never having been measured.
 pub const RING_BLOCKS: usize = 1_024;
 
 /// Total ring capacity in raw bytes: 33 554 432 (32 MiB).
@@ -283,8 +285,9 @@ const _: () = assert!(
     "ring geometry must stay powers of two for wrap arithmetic to stay a mask"
 );
 
-// 5. The per-block state array lives in internal RAM (~69 KB free), so block indices must fit a
-//    u16 the firmware can store atomically.
+// 5. The per-block state array lives in internal RAM, so block indices must fit a u16 the firmware
+//    can store atomically. Deliberately no headroom figure: the "~69 KB free" this once quoted came
+//    from the 86.13 % `.bss` baseline TASK-038.03.02.02 shows was never measured.
 const _: () = assert!(
     RING_BLOCKS <= u16::MAX as usize,
     "ring block indices no longer fit the u16 the state array stores"

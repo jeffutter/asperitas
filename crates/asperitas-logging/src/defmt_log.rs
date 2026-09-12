@@ -19,7 +19,8 @@
 //!   Maturity section names a second problem in the same breath: it "uses a fixed size buffer",
 //!   and "will likely introduce such features (altering its behavior) without declaring breaking
 //!   changes". The buffer is not the objection on its own — [`emit_frame`] bounds its body to
-//!   `console::BODY_WINDOW` too, deliberately, so that the worst-case frame provably fits the ring.
+//!   `console::BODY_WINDOW` too, deliberately, so that the worst-case frame fits the ring and a
+//!   compile-time assert below checks that it does.
 //!   The objection is that this one's bound is an undocumented shortcut its maintainers reserve the
 //!   right to change without calling it a breaking change.
 //! - `defmt2log` 0.2.1 — not a candidate at all, because it runs the other way: a `defmt::Logger`
@@ -47,9 +48,10 @@
 //!
 //! **An RTT build with `DEFMT_LOG` unset carries ERROR frames only.** When the variable is absent
 //! entirely, defmt-macros uses `LEVEL_WHEN_NOTHING_IS_SPECIFIED = Some(Level::Error)`
-//! (defmt-macros-1.1.1 src/function_like/log/env_filter.rs:34), so four of this module's five arms
-//! expand to nothing and only `log::error!` survives. Measured on `main` as `firmware.bin`, at the
-//! shipped `[profile.release] debug = 2`: an unset build and a `DEFMT_LOG=error` build are the same
+//! (defmt-macros-1.1.1 src/function_like/log/env_filter.rs:35), so four of this module's five arms
+//! expand to nothing and only `log::error!` survives. Measured 2026-09-12 on `main.bin` from
+//! `make build NO_DEFAULT=1 FEATURES="seed3 log-defmt"`, at the shipped `[profile.release]
+//! debug = 2`: an unset build and a `DEFMT_LOG=error` build are the same
 //! size exactly (48320 bytes); `warn` is 48376, `debug` 48380, `trace` 49748, `off` 44740, and
 //! `info` 47712 - below the error-only baseline, not above it.
 //!
@@ -88,21 +90,65 @@ use log::Level;
 
 use crate::console;
 
-/// Largest defmt frame this bridge can produce, in encoded bytes.
+/// defmt-rtt 1.3.0's ring size: its `build.rs` defaults `BUF_SIZE` to 1024 and honours
+/// `DEFMT_RTT_BUFFER_SIZE`, which nothing in this workspace reads.
 ///
-/// The body window is the whole budget: defmt-rtt's ring holds `BUF_SIZE - 1` usable bytes and
-/// `BUF_SIZE` defaults to **1024** (defmt-rtt 1.3.0 build.rs, overridable with
-/// `DEFMT_RTT_BUFFER_SIZE`). A frame is the body plus defmt's own overhead — a header byte
-/// carrying level and tag, a varint interned-format index, and the argument bytes the encoder
-/// inserts for `{}` — which is single-digit for a one-argument frame. So the worst case here is
-/// roughly 256 + 8 = 264 bytes against 1023 usable: the window cannot overflow the ring, and
-/// `BUF_SIZE` is deliberately left at its default.
+/// Declared locally because `asperitas-logging` depends on `defmt` but not on `defmt-rtt` - the
+/// logger sits in the binary (`firmware/Cargo.toml`), so this crate cannot name the real
+/// constant. If anyone ever sets `DEFMT_RTT_BUFFER_SIZE` smaller, this number has to move with it
+/// and the assert below is what notices.
+const RTT_BUF_SIZE: usize = 1024;
+
+/// Bytes the ring can actually hold: one less than its size, which is how defmt-rtt distinguishes
+/// full from empty (`available_buffer_size`, `channel.rs:158-164`).
+const RTT_RING_USABLE: usize = RTT_BUF_SIZE - 1;
+
+/// defmt's own framing around a body, in bytes before rzcobs: the header byte carrying level and
+/// tag, a varint interned-format index, and the length a `{}` str argument costs - a fixed 4-byte
+/// little-endian `u32`, not a varint (`defmt` 1.1.1 `export/mod.rs`'s `str()` calls `usize()`, and
+/// `integers.rs`'s `usize()` writes `(*b as u32).to_le_bytes()`).
+const FRAME_OVERHEAD_BYTES: usize = 8;
+
+/// Worst encoded size of one frame from this bridge: the window, plus defmt's overhead, expanded
+/// by rzcobs, which spends roughly one output byte per seven payload bytes and adds a frame
+/// separator (`defmt` 1.1.1 `encoding/rzcobs.rs:27-53`; the raw encoding would be smaller, but
+/// nothing here enables `encoding-raw`).
+const WORST_ENCODED_FRAME: usize = (MAX_FRAME_BODY + FRAME_OVERHEAD_BYTES) * 8 / 7 + 2;
+
+// One frame must fit the ring whole. Frame boundaries are what a reader recovers after dropping
+// bytes, so a frame that cannot fit is not merely late - non-blocking mode truncates it
+// (`channel.rs:64-69`) and blocking mode spends the whole interrupt-off window failing to deliver
+// it. Spelled into the string rather than formatted: a `format_args` message is not a const
+// expression (E0015).
+const _: () = assert!(
+    WORST_ENCODED_FRAME < RTT_RING_USABLE,
+    "worst-case defmt frame exceeds defmt-rtt's usable ring"
+);
+
+/// Largest defmt frame this bridge can produce, in bytes of rendered body.
 ///
-/// That matters more than it looks. In the default (non-`drop-on-contention`) build an
-/// over-sized frame is not dropped: `Channel::write_all` loops until every byte lands, and
-/// `write_impl` refuses to write a chunk of `BUF_SIZE` or more (channel.rs:93), so such a frame
-/// spins forever inside a critical section. The margin above is what keeps that path unreachable
-/// rather than merely unlikely.
+/// The body window is the whole budget, and the arithmetic above pins it: worst case is 264 bytes
+/// pre-expansion, 304 encoded, against 1023 usable. `BUF_SIZE` is deliberately left at its
+/// default.
+///
+/// What the margin buys is occupancy and interrupt-off time, not reachability. The ring never
+/// receives a whole frame at once: defmt-rtt's logger forwards each encoder callback straight to
+/// `Channel::write_all` (`defmt-rtt` `src/lib.rs:166-186`), and the default rzcobs encoder drives
+/// that closure one byte at a time (`defmt` 1.1.1 `encoding/rzcobs.rs:57`). So the size of a frame
+/// cannot decide whether a write fits - ring occupancy against the host's drain rate decides that,
+/// and when occupancy wins the target spins: `write_all` loops while `!bytes.is_empty()`
+/// (`channel.rs:38-42`) calling `blocking_write`, which returns 0 at `available == 0`
+/// (`channel.rs:57-59`), all of it between `critical_section::acquire()` and its `release()`
+/// (`src/lib.rs:168`, `:239`). A shorter frame bounds two of those consequences: how much of the
+/// 1023 bytes one log line can take, hence how long a stalled host takes to fill the ring, and how
+/// long interrupts stay off while it fills it.
+///
+/// It does not make the spin unreachable, which an earlier version of this comment claimed on the
+/// strength of a `write_impl` that refuses chunks of `BUF_SIZE` or more. That refusal is
+/// `channel.rs:93`, inside the `#[cfg(feature = "drop-on-contention")] impl Channel` block that
+/// begins at `channel.rs:90` and that this build does not compile. The default `write_impl`
+/// (`channel.rs:71-87`) clamps at `bytes.len().min(available)` and refuses nothing; for what the
+/// cfg'd-out mode means, see its documentation at `defmt-rtt/src/lib.rs:42-52`.
 const MAX_FRAME_BODY: usize = console::BODY_WINDOW;
 
 /// Deliver one `log::Record` as one defmt frame.

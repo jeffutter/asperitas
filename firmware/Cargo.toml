@@ -92,13 +92,27 @@ daisy-embassy = { git = "https://github.com/daisy-embassy/daisy-embassy", branch
 embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
 embassy-stm32 = { version = "0.6.0", features = ["stm32h750ib", "memory-x", "exti"] }
 asperitas-logging = { path = "../crates/asperitas-logging", default-features = false }
-# Major 1, matching daisy-embassy / embassy-stm32. Was "0.3", which resolved to 0.3.100 — a
-# shim whose only content is a dependency on defmt 1.1.1 — and left two majors in the graph.
-# The wire format is versioned per major and probe-rs decodes the ELF against it, so one major
-# is a correctness requirement here, not tidiness.
+# Major 1, matching daisy-embassy / embassy-stm32. Was "0.3", and the wire format is versioned per
+# major while probe-rs decodes the ELF against it, so 1.x is a correctness requirement here rather
+# than tidiness - but this line does NOT leave one major in the graph. Cargo.lock still resolves
+# `defmt 0.3.100` (Cargo.lock:279) beside our 1.1.1, pulled by two of our own transitive deps:
+# embassy-stm32's `defmt` feature enables stm32-metapac's, and embassy-net-driver asks for 0.3
+# directly (reproduce with `cargo tree -e features -i defmt@0.3.100 --features seed3,log-defmt`,
+# measured 2026-09-12). That 0.3 is a shim over 1.x, so the wire format is still single-major; its
+# own docs say so (`defmt-0.3.100/src/lib.rs:9-11`): "This is a defmt-0.3 compatbility [sic]
+# crate. It depends upon `defmt-1.0` and re-exports the items that were available in `defmt-0.3`.
+# This allows you to mix defmt-0.3 and defmt-1.0 within the same compilation." Its sole lock entry
+# dependency is `defmt 1.1.1` (Cargo.lock:283-285). Both parents are at their latest published
+# versions as of 2026-09-12 - embassy-net-driver 0.2.0, stm32-metapac 21.0.0 - so removing the shim
+# is waiting on upstream, not a bump we can make.
 defmt = "1"
 # The RTT logger: supplies `_defmt_write` / `_defmt_acquire` / `_defmt_release` / `_defmt_flush`.
 # Linked by the binaries under `log-defmt` (see the note in src/bin/main.rs), not by the facade.
+# All three of its knobs are at their defaults deliberately, not overlooked: `disable-blocking-mode`
+# off, because an attached host then means lossless (`docs/reference/daisy-seed3.md`'s loss table);
+# `drop-on-contention` off, because it drops frames by design and is ARM-only (`compile_error!` at
+# `defmt-rtt/src/lib.rs:56-57`); `DEFMT_RTT_BUFFER_SIZE` unset, because the 1024-byte default is the
+# ring the frame-size assert in `crates/asperitas-logging/src/defmt_log.rs` measures against.
 defmt-rtt = { version = "1", optional = true }
 embassy-time = "0.5"
 embassy-futures = "0.1"
