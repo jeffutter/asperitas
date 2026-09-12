@@ -54,19 +54,31 @@ stim-pulse = []
 # having, so `2` ships.
 #
 # Cost, measured 2026-09-12 against the RTT-only image (`--no-default-features --features
-# "seed3 log-defmt"`), one fresh target dir per row, `firmware.bin` cut with `make build`'s
+# "seed3 log-defmt"`), one fresh target dir per row, `main.bin` cut with `make build`'s
 # own --only-section list (.vector_table .text .rodata .data *.sgstubs *.defmt*):
 #
-#   debug               rustc flag                        ELF        .debug_*   .debug_info  firmware.bin
+#   debug               rustc flag                        ELF        .debug_*   .debug_info  main.bin
 #   false               (none passed)                 262,328          0            -          48,084
 #   "line-tables-only"  -C debuginfo=line-tables-only   3,007,876  2,745,028      916,073      48,084
 #   1                   -C debuginfo=1                  4,735,756  4,472,411    1,181,667      48,228
 #   2 (shipped)         -C debuginfo=2                  9,481,280  9,217,836    3,555,137      48,320
 #
+# Read the table as one snapshot of one commit, because the shipped row has already moved inside
+# the day it was cut. Re-running that row alone on 2026-09-12 at `a1376f3` gives `main.bin` 48,360
+# and `.text` 39,136 where the row says 48,320 and 39,096; the other four cells were not re-cut.
+# 48,360 is what `firmware/Makefile` reports for the same feature set, so the gap is code added
+# between the two measurements rather than a dispute about either. Setting `DEFMT_LOG=info` moves
+# it again, to 48,504 on the same day. Reproduce a row with:
+#
+#   CARGO_TARGET_DIR=$(mktemp -d) make build NO_DEFAULT=1 FEATURES="seed3 log-defmt"
+#
+# Keep the temporary target dir. Without it this relinks `target/.../release/main` and leaves the
+# RTT image where the console image was, and that ELF is the decoder every probe command reads with.
+#
 # Two prices and only one of them is flash. Host-side, the ELF goes 3.0 MB -> 9.5 MB, because
 # that is where the DWARF lives: all 9.2 MB of it sits in non-ALLOC `.debug_*` sections, which
-# `make build`'s --only-section list keeps out of `firmware.bin`. Flash-side it is 236 bytes of
-# the 131,072-byte internal-flash budget, 48,084 -> 48,320. That 236 is not an artifact of the
+# `make build`'s --only-section list keeps out of `main.bin`. Flash-side it is 236 bytes of
+# the 131,072-byte internal-flash budget, 48,084 -> 48,320, both cells read off the table above. That 236 is not an artifact of the
 # section list either - debuginfo perturbs codegen, moving .text from 38,840 at `false` and at
 # line tables, through 39,016 at `1`, to 39,096 here, while loading none of the debug bytes. So a size figure is a
 # per-level measurement rather than an invariant: quote one across levels, or across commits

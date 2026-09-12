@@ -5,7 +5,7 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-09-12 10:11'
+updated_date: '2026-09-12 21:34'
 labels: []
 dependencies:
   - TASK-053
@@ -155,5 +155,10 @@ writes inside a critical section, so a stalled host freezes the target rather th
 If the ~667 us block deadline starts missing only while `probe-log` is running, that is the mechanism
 — `--rtt-channel-mode no-block-skip` on the host, or defmt-rtt's `disable-blocking-mode` feature on
 the target (costing losslessness) is the lever.
+---
+
+created: 2026-09-12 21:34
+---
+Bench ask from TASK-057's planning pass (2026-09-12): when you have the probe on and the board in reach, also run `make flash-all BINARY=blinky` exactly as the corrected quickstart in docs/reference/daisy-seed3.md now spells it, and confirm steady green LED 1. That recipe was rewritten because the old one flashed main.bin while claiming to flash blinky; nothing in TASK-057 could verify the new wording beyond its `make -n` expansion, so this is the human half of closing it. Cheap to fold into the same session - it costs one BOOT+RESET tap.
 ---
 <!-- COMMENTS:END -->

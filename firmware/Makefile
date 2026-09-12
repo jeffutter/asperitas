@@ -29,10 +29,17 @@ TARGET   = thumbv7em-none-eabihf
 #
 # probe-rs needs that single `.defmt` section to exist at all, and only a `log-defmt` build has
 # one: build.rs passes `-Tdefmt.x`, which consolidates the per-call-site `.defmt_*` sections into
-# it. Measured on this workspace, a console-only ELF is rejected during image load — "Failed to
-# parse defmt data: no `.defmt` section" — before probe-rs so much as looks for a probe, while a
-# `log-defmt` ELF parses cleanly and stops at "No connected probes were found". So every
-# `probe-*` target below is only usable with `log-defmt` in FEATURES:
+# it. Measured on this workspace with probe-rs-tools 0.32.0 on 2026-09-12, nothing attached:
+# `probe-rs attach` and `probe-rs run` refuse a console-only ELF before they look for a probe,
+# rc=1, with exactly this chain:
+#
+#   Caused by:
+#       0: Failed to parse defmt data
+#       1: defmt version found, but no `.defmt` section - check your linker configuration
+#
+# while a `log-defmt` ELF parses cleanly and stops at "No connected probes were found".
+# `probe-rs download` exits on the missing probe whichever ELF it is handed, so an empty bench says
+# nothing about it. So every `probe-*` target below is only usable with `log-defmt` in FEATURES:
 #
 # And they need a level asked for at build time. `DEFMT_LOG` unset makes defmt-macros compile
 # every non-ERROR call to nothing (see `crates/asperitas-logging/src/defmt_log.rs`), so an
@@ -83,11 +90,19 @@ all: build
 
 ## Build $(BINARY) as a release binary and produce raw .bin for DFU
 ##
-## llvm-objcopy's -O binary output spans from lowest VMA to highest VMA,
-## which includes the gap between FLASH (0x08000000) and RAM (0x24000000),
-## producing a ~469 MB file. --only-section extracts only FLASH-loadable
-## sections, so the result is what flash actually holds. Measured 2026-09-12 at
-## `[profile.release] debug = 2`, against the 131,072-byte internal-flash budget:
+## llvm-objcopy's `-O binary` output is a memory image spanning the lowest to the highest
+## *load* address, and `.sram1_bss` is loaded where it runs: daisy-embassy places its SAI DMA
+## buffers there with `#[link_section = ".sram1_bss"]` (`src/audio.rs:20-22`), uninitialised
+## data that is nonetheless file-backed, LMA == VMA at 0x24000198 in AXI SRAM. A bare `-O binary`
+## of anything that links the audio module therefore covers 0x08000000..0x24000598 and comes out
+## at 469,763,480 bytes. Load address, not VMA, is what matters here: `.data` has a RAM VMA of
+## 0x24000000 and a flash LMA of 0x08015808, so it costs nothing. `--only-section` extracts only
+## FLASH-loadable sections, so the result is what flash actually holds. The blowup is per binary:
+## `blinky` links no audio module, and its raw image is 65,638 bytes, byte-identical to this
+## recipe's output, which is how a hand-copied command without the flags looks fine.
+##
+## Measured 2026-09-12 at `[profile.release] debug = 2`, against the 131,072-byte internal-flash
+## budget:
 ##
 ##   FEATURES="seed3"                        main.bin 88,581   rig.bin 106,811
 ##   NO_DEFAULT=1 FEATURES="seed3 log-defmt" main.bin 48,360   rig.bin  65,696

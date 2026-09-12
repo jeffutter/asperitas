@@ -81,7 +81,11 @@ the application into QSPI.
 ### Enter DFU mode
 
 Hold `BOOT`, tap `RESET`, release `BOOT` — the board enumerates as an STM32 DFU device.
-Verify with `lsusb` (should show **STMicroelectronics STM32 bootloader**).
+Check it from inside the dev shell with `dfu-util --list`, which prints one `Found DFU:` line
+per device and nothing but its banner when the board is not in DFU mode (dfu-util 0.11, run
+2026-09-12 with nothing attached). `lsusb` names the same device **STMicroelectronics STM32
+bootloader**, but the flake ships no usbutils, so that is the form for outside the shell. The
+*Prerequisites* bullet below lists what the shell does provide.
 
 ### Build and flash blinky
 
@@ -91,21 +95,37 @@ From the `firmware/` directory:
 # One-shot build + flash
 make flash-all BINARY=blinky
 
-# Or step by step
-make build BINARY=blinky   # produces firmware.bin via cargo objcopy
-make flash                 # dfu-util -a 0 -s 0x08000000:leave -D firmware.bin
+# Or step by step, with BINARY on both halves
+make build BINARY=blinky   # writes blinky.bin
+make flash BINARY=blinky   # dfu-util -a 0 -s 0x08000000:leave -D blinky.bin
 ```
 
 `BINARY` defaults to `main`, so plain `make flash-all` flashes the application, not
-blinky.
+blinky. Repeating `BINARY` on the two-line route is not ceremony. `build` writes `$(BINARY).bin`
+and `flash` reads `$(BINARY).bin`, so `make build BINARY=blinky` followed by a bare `make flash`
+programs `main.bin` while printing a completely successful DFU transcript. Verified against
+`make -n build flash BINARY=blinky` and `make -n flash` on 2026-09-12: the first expands to
+`-O binary blinky.bin` and `-D blinky.bin`, the second to `-D main.bin`. `firmware/Makefile:11-14`
+carries why each image carries its binary's name instead of sharing one file.
 
-Or manually:
-
-```bash
-cd firmware
-cargo objcopy --release --features seed3 --bin blinky -- -O binary firmware.bin
-dfu-util -a 0 -s 0x08000000:leave -D firmware.bin
-```
+No hand-typed objcopy recipe is transcribed here, deliberately. That command belongs to the
+`build` rule of `firmware/Makefile` alone, because the six `--only-section` flags it passes are
+load-bearing rather than cosmetic. `-O binary` asks llvm-objcopy for a *memory* image, which spans
+from the lowest to the highest **load** address, and `.sram1_bss` is loaded where it runs: two
+`GroundedArrayCell::uninit()` DMA buffers that daisy-embassy `ca9bcc9` places with
+`#[link_section = ".sram1_bss"]` (`src/audio.rs:20-22`), uninitialised data that is nonetheless
+file-backed, with LMA equal to VMA at `0x24000198` in AXI SRAM. Anything that links the audio
+module therefore spans `0x08000000..0x24000598` and comes out at **469,763,480 bytes** of mostly
+zeros: measured 2026-09-12 at `a1376f3` for both `main` and `rig`, against the 88,581 and 106,811
+bytes the flag list produces. `blinky` links no audio module, which is how a hand-copied command
+survives looking fine: its raw image is 65,638 bytes and byte-for-byte identical to what
+`make build BINARY=blinky` writes. Two more things worth knowing before simplifying it. `.data` is
+not the culprit, despite the RAM-shaped address: its VMA is `0x24000000` but its LMA is
+`0x08015808`, in flash, and the span follows load addresses. And a section name that no longer
+exists fails silently: `--only-section=.no_such_section` exits 0 and writes a 0-byte file (measured
+the same day), so a hand-kept copy of that list is a truncated image waiting to happen. TASK-059
+gives `.sram1_bss` a flash load address, which is the real fix; until it lands, copy the recipe from
+the Makefile rather than retyping it.
 
 The blinky binary (`firmware/src/bin/blinky.rs`) drives **Pod RGB LED 1** (D20/D19/D18
 = PC1/PA6/PA7) through the shared LED state machine — it does *not* touch the Seed's
@@ -147,8 +167,10 @@ the core is running and the fault is downstream.
   RTT-only (`NO_DEFAULT=1 FEATURES="seed3 log-defmt"`), and 21,202 with no transport at all
   (`NO_DEFAULT=1 FEATURES="seed3"`). `main` and `rig` are far larger; the `build` recipe in
   `firmware/Makefile` carries those figures.
-- **Prerequisites:** `nix develop .` provides rustc, cargo-binutils, and dfu-util.
-  No additional setup needed.
+- **Prerequisites:** `nix develop .` provides rustc, cargo-binutils, dfu-util and probe-rs-tools,
+  matching `firmware/Makefile:4`; `flake.nix:38-63` is the list. No additional setup needed. What
+  the shell leaves out is usbutils, so `lsusb` (*Enter DFU mode*) has to come from outside it, and
+  `dfu-util --list` is the equivalent that works inside.
 - **memory.x RAM length is load-bearing.** AXI SRAM is **512 KB**, not 1 MB — the
   advertised "1 MB" is the total across all domains (AXI 512K + D2 288K + D3 64K + DTCM
   128K + ITCM 64K), and only the AXI region is contiguous at `0x24000000`. `cortex-m-rt`
@@ -158,9 +180,9 @@ the core is running and the fault is downstream.
 - **A fault before `main` is invisible to both software channels.** Nothing has initialised
   USB or the LED state machine yet, so the board just sits there. The probe is the way to see
   it: attaching under reset halts the core wherever it faulted and the fault status registers
-  say why (*Flashing and logging over an ST-Link probe*). Reading the first four bytes of
-  `firmware.bin` — the little-endian initial SP — is what's left on a bench with no probe, and
-  it is a clue, not a diagnosis.
+  say why (*Flashing and logging over an ST-Link probe*). On a bench with no probe, the first four
+  bytes of the image you flashed, `main.bin` or whichever `$(BINARY).bin` it was, hold the
+  little-endian initial stack pointer. Read that, and treat it as a clue rather than a diagnosis.
 
 ### Debugging with nothing attached
 
@@ -398,24 +420,40 @@ the sources mislabels live output into something that looks like data. Don't exp
 
 `--chip STM32H750IBKx` is the exact string, verified host-side against the pinned toolchain:
 `probe-rs chip info STM32H750IBKx` reports NVM `0x08000000..0x08020000` (128 KiB) and AXI SRAM
-`0x24000000..0x24080000` (512 KiB), which matches `firmware/memory.x`. Bare `STM32H750IB`
+`0x24000000..0x24080000` (512 KiB), which matches `firmware/memory.x` (re-run 2026-09-12 against
+probe-rs-tools 0.32.0). Bare `STM32H750IB`
 resolves too; use the full string so it reads as the same part `memory.x` describes.
 
-**Why the probe path takes the ELF and DFU takes `firmware.bin`.** `probe-rs` decodes `defmt`
+**Why the probe path takes the ELF and DFU takes `$(BINARY).bin`.** `probe-rs` decodes `defmt`
 frames from the ELF's `.defmt` section and its symbol table, and unwinds with its DWARF. Flash
 a stripped `.bin` while holding some other ELF on the host and the host's metadata cannot match
 what is running — you get frames that decode wrong, or addresses that resolve to the wrong
-line, which is worse than no symbols because it looks like data. `firmware.bin` stays a
-DFU-only artifact. Flashing a raw binary over the probe would also need
+line, which is worse than no symbols because it looks like data. The `.bin` stays a DFU-only
+artifact. Flashing a raw binary over the probe would also need
 `--binary-format bin --base-address 0x08000000`, adding one more way to confuse the two.
 
 Three things gate whether a probe command gets anywhere, all three found by running them against
 built artifacts rather than at the bench:
 
-- **Only a `log-defmt` ELF loads at all.** `build.rs` passes `-Tdefmt.x` for that feature,
-  which consolidates the per-call-site `.defmt_*` sections into the single `.defmt` section
-  probe-rs reads. A console-only ELF is rejected during image load with "Failed to parse defmt
-  data: no `.defmt` section" — before probe discovery even starts.
+- **Only a `log-defmt` build gets past defmt parsing.** `build.rs` passes `-Tdefmt.x` for that
+  feature, which consolidates the per-call-site `.defmt_*` sections into the single `.defmt`
+  section probe-rs reads. Give `probe-rs attach` or `probe-rs run` a console-only ELF and it is
+  refused before the tool so much as looks for a probe, rc=1, quoted verbatim from probe-rs-tools
+  0.32.0 on 2026-09-12:
+
+  ```text
+  Error: Some uncategorized error occurred.
+
+  Caused by:
+      0: Failed to parse defmt data
+      1: defmt version found, but no `.defmt` section - check your linker configuration
+  ```
+
+  A `log-defmt` ELF parses cleanly and stops at `Error: No connected probes were found.` instead,
+  so `make probe-log`, `make probe-rtt-list` and `make probe-run` want `log-defmt` in `FEATURES`
+  without exception. `probe-rs download`, which is what `make probe-flash` runs, never reaches the
+  defmt parse on an empty bench: it exits 1 on the missing probe whichever ELF it is given, so this
+  boardless check separates the two commands rather than the two images.
 - **`DEFMT_LOG` decides what's in the stream, at build time.** With the variable unset,
   defmt-macros compiles every non-ERROR call to nothing (`defmt-macros-1.1.1`,
   `src/function_like/log/env_filter.rs:35`), so an attach against a plain
@@ -573,9 +611,14 @@ Measured against that list on the `log-defmt` release `main` image on 2026-09-12
 belong to that binary at this commit, other binaries land elsewhere, and this is the command:
 
 ```bash
-cd firmware && cargo nm --release --no-default-features --features "seed3 log-defmt" --bin main -- \
-  | grep -Ei "SEGGER_RTT|defmt_rtt.*BUFFER"
+cd firmware && CARGO_TARGET_DIR=$(mktemp -d) cargo nm --release --no-default-features \
+  --features "seed3 log-defmt" --bin main -- | grep -Ei "SEGGER_RTT|defmt_rtt.*BUFFER"
 ```
+
+The temporary target dir earns its place: `cargo nm` re-runs the build, so without it this line
+replaces the ELF sitting in `target/` with the image built by whatever flags you happened to type,
+which is the trap spelled out under *"Nothing logs except the facade" is not true of the linked
+image*. Re-running the command as written on 2026-09-12 reproduces both addresses.
 
 | Object | Address | Size | Output section | Bytes into its 32-byte cache line |
 |---|---|---|---|---|
@@ -755,12 +798,14 @@ recipes and nowhere else.
 | `probe-rs download … --non-interactive` (what `make probe-flash` runs) | 1 | 2 | `Error: No connected probes were found.` |
 | `probe-rs attach … --non-interactive --list-rtt` (`make probe-rtt-list`) | 1 | 2 | the same string alone. A ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` line one row above it means the release profile has dropped below `debug = 2`, so locations are off: see the third gate under *Flashing and logging over an ST-Link probe*. Measured both ways on 2026-09-12. |
 | `probe-rs list` | 0 | n/a | `No debug probes were found.` |
-| `make probe-log` or `make probe-rtt-list` with an ELF behind the sources | never runs | 2 | `<ELF> is older than <path>`, and no probe-rs output whatsoever |
+| `make probe-log` or `make probe-rtt-list` with an ELF behind the sources | never runs | 2 | `<ELF> is older than <path>`, then two advisory lines (flash the current build; force a relink with `rm -f $(ELF) && make build-elf` if only timestamps moved), and no probe-rs output whatsoever |
+| `make probe-log` or `make probe-rtt-list` with no ELF on disk at all | never runs | 2 | `no <ELF> - run 'make build-elf' with the FEATURES and NO_DEFAULT you mean to flash`, plus make's own `*** [Makefile:<line>: elf-check] Error 1` below it. Measured 2026-09-12 by pointing the recipe at a binary that was never built: `make probe-log BINARY=nope-not-built` |
 
 Two layers of exit code, because `make` turns any nonzero recipe status into its own 2. A driver
-that shells out to `make` therefore sees rc=2 for "no probe" *and* for "stale ELF": only the stderr
-separates them, so match on the message rather than the number. Calling `probe-rs` directly removes
-the ambiguity.
+that shells out to `make` therefore sees rc=2 for "no probe", for "stale ELF" and for "no ELF":
+only the stderr separates them, so match on the message rather than the number. Calling `probe-rs`
+directly removes the ambiguity, but not the last case: without an ELF to hand it there is nothing to
+call it on.
 
 Two different strings for two different questions, and they are not interchangeable evidence.
 `list` reports what enumeration found and exits 0 whether or not anything answered; `download` and
@@ -784,7 +829,7 @@ make probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 \
   PROBE_EXTRA="--no-timestamps --log-format oneline --target-output-file defmt=out.txt"
 ```
 
-Expanded (`make -n probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 PROBE_EXTRA="--no-timestamps --log-format oneline --target-output-file defmt=out.txt"`):
+Expanded (`make -n probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 PROBE_EXTRA="--no-timestamps --log-format oneline --target-output-file defmt=out.txt"`, again with the `elf-check` lines that guard `probe-log` left out):
 
 ```
 probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --no-timestamps --log-format oneline --target-output-file defmt=out.txt

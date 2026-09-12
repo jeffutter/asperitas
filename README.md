@@ -33,7 +33,7 @@ Start the dev shell from the project root:
 nix develop .
 ```
 
-This gives you `rustc`, `cargo`, `dfu-util`, `cargo objcopy`, `probe-rs`, and everything else. See `flake.nix` for details.
+This gives you `rustc`, `cargo`, `dfu-util`, `cargo-binutils`, `probe-rs`, and everything else. See `flake.nix` for details.
 
 ## Quick Start
 
@@ -89,9 +89,14 @@ make flash-all
 board is in DFU mode:
 
 ```bash
-make build   # produces firmware.bin
-make flash   # flashes firmware.bin via DFU
+make build   # produces main.bin
+make flash   # flashes main.bin via DFU
 ```
+
+Each target names the image after the binary it came from, so if you override `BINARY` for one
+line, override it on the other. A bare `make flash` programs whatever `$(BINARY).bin` was built
+last, which on this project means it can quietly program the application instead of the test binary
+you just compiled. `docs/reference/daisy-seed3.md` (*Build and flash blinky*) has the worked example.
 
 ### Entering DFU Mode
 
@@ -99,7 +104,9 @@ make flash   # flashes firmware.bin via DFU
 2. Tap **RESET**
 3. Release **BOOT**
 
-Verify the board enumerates: `lsusb` should show "STMicroelectronics STM32 bootloader".
+Verify the board enumerates: `dfu-util --list` inside the dev shell prints a `Found DFU:` line per
+device, and `lsusb` shows "STMicroelectronics STM32 bootloader" if you run it outside the shell
+(the flake ships no usbutils).
 
 **DFU mode is not sticky.** Once a flashed app boots, the bootloader is gone — you must
 repeat the button dance before *every* flash. Running `make flash` against a board
@@ -239,7 +246,7 @@ make probe-log        # attach and stream RTT; no reflash, no reset
 make probe-rtt-list   # attach, print the RTT channel table, exit; the cheapest bench question
 ```
 
-All three drive the release **ELF**, never `firmware.bin`: `probe-rs` decodes `defmt` frames from the
+All three drive the release **ELF**, never the DFU `.bin`: `probe-rs` decodes `defmt` frames from the
 ELF's `.defmt` section and unwinds with its DWARF, so the host's copy has to be the one that
 built what's running. Locations are the part that asks for more DWARF than symbols do - at
 `false`, `1` or `line-tables-only` it decodes the stream anyway and prints
