@@ -1,5 +1,6 @@
-//! Device-side console state: sequence numbers, cumulative loss counters, and the two
-//! record bodies whose bytes are a wire contract (`BOOT`, `STATUS`).
+//! Device-side console state: sequence numbers, cumulative loss counters, and the record
+//! bodies whose bytes are a wire contract (`BOOT`, `STATUS`, and the five measurement-rig
+//! verbs `RIGCFG`, `RIGGEN`, `CAPSTAT`, `CAPMAX`, `DUMPEND`).
 //!
 //! # Why this module is not behind `log-usb`
 //!
@@ -220,6 +221,361 @@ pub fn status_body(out: &mut [u8; BODY_WINDOW], snap: &ConsoleCounters, pipe_fre
 }
 
 // ---------------------------------------------------------------------------
+// Measurement-rig verbs (TASK-038.03.02)
+// ---------------------------------------------------------------------------
+
+/// How many decimal digits a saturated `u32` renders as: `4294967295`.
+///
+/// Every numeric field in the field tables below is a `u32` and therefore costs exactly this
+/// many bytes at its worst. Naming the number is what makes those tables auditable: a table
+/// that said `11` would pass the same asserts while quietly overstating the verb, and one that
+/// said `9` would understate it and let a real device overflow one record.
+const U32_MAX_DIGITS: usize = 10;
+
+/// Worst-case length of a body: its literal prefix, plus `1 + name + 1 + width` per field.
+///
+/// This is the arithmetic the [`TruncWriter`]-based builders above cannot express in types — a
+/// format string says nothing about how long its result gets. Computing the sum here and
+/// asserting against [`crate::frame::MAX_BODY`] moves *"this verb fits one record"* from a
+/// nightly test run to the build itself, so a field added to a table fails compilation rather
+/// than shipping a body that silently truncates at 200 bytes. The runtime saturated tests
+/// beside each builder then prove the *builder* still renders what its table claims, by
+/// asserting the two lengths are equal.
+const fn saturated_len(prefix: &str, fields: &[(&str, usize)]) -> usize {
+    let mut total = prefix.len();
+    let mut i = 0;
+    while i < fields.len() {
+        let (name, width) = fields[i];
+        total += 1 + name.len() + 1 + width;
+        i += 1;
+    }
+    total
+}
+
+/// Which channel the rig captured, as `RIGCFG`'s `lane` field.
+///
+/// A named type rather than a `bool` or a `char` because the field set is a contract: an
+/// argument of either of those shapes lets a caller put garbage on the wire, and a host parser
+/// that sees `lane=x` has no way to tell that from a real reading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MonoLane {
+    /// The left, or loop, channel.
+    Left,
+    /// The right channel.
+    Right,
+}
+
+impl MonoLane {
+    /// The one-character wire spelling of this lane.
+    const fn letter(self) -> &'static str {
+        match self {
+            MonoLane::Left => "L",
+            MonoLane::Right => "R",
+        }
+    }
+}
+
+/// What the measurement rig was configured to do, as one `RIGCFG` record.
+///
+/// Sent once at boot, before any stimulus plays: everything a host needs to interpret the
+/// captured bytes that follow. Numeric fields stay `u32` for uniformity with `STATUS` even
+/// where the source value is wider — [`crate::capture::total_capture_bytes`] returns `usize`
+/// and [`crate::capture::ring_duration_micros`] a `u64`. That narrowing is safe at the call
+/// site (both fit, and `rig.rs` narrows explicitly) and is *not* a claim that a ring can never
+/// be too large for the field; a future ring twice today's size would need the field widened,
+/// which is a protocol change and will read as one.
+#[derive(Clone, Copy, Debug)]
+pub struct RigConfig {
+    /// Channel captured into the mono stream.
+    pub lane: MonoLane,
+    /// Ring blocks the capture expects to fill.
+    pub blocks: u32,
+    /// Raw payload bytes per ring block.
+    pub block_bytes: u32,
+    /// Captured bytes per second of audio.
+    pub bytes_per_s: u32,
+    /// Exact ring capacity in microseconds.
+    pub capsec_us: u32,
+    /// Capture window in seconds.
+    pub window_s: u32,
+    /// Measured CPU clock in Hz — read from the device, never declared (§3 of the parent plan).
+    pub cpu_hz: u32,
+    /// Whether the instruction cache is enabled, as reported by the hardware.
+    pub icache: bool,
+    /// Whether the data cache is enabled, as reported by the hardware.
+    pub dcache: bool,
+}
+
+/// Field table behind [`rigcfg_body`]: `(name, worst-case width)` in wire order.
+const RIGCFG_FIELDS: [(&str, usize); 9] = [
+    ("lane", 1),
+    ("blocks", U32_MAX_DIGITS),
+    ("block_bytes", U32_MAX_DIGITS),
+    ("bytes_per_s", U32_MAX_DIGITS),
+    ("capsec_us", U32_MAX_DIGITS),
+    ("window_s", U32_MAX_DIGITS),
+    ("cpu_hz", U32_MAX_DIGITS),
+    ("icache", 1),
+    ("dcache", 1),
+];
+
+/// Worst-case `RIGCFG` body: 177 bytes, inside [`crate::frame::MAX_BODY`] with 23 to spare.
+const RIGCFG_WORST: usize = saturated_len("RIGCFG proto=1 capture=mono16", &RIGCFG_FIELDS);
+
+/// Render a `RIGCFG` record body into `out`, returning the bytes written.
+///
+/// Carries numbers only. The generator's free-text description lives in its own
+/// [`riggen_body`] record, because a body mixing one unbounded string with nine numbers has no
+/// checkable bound: `RIGCFG`'s numeric fields leave 23 bytes of slack, less than the default
+/// pulse-train description (97), so any string that could actually be sent would blow the
+/// record. Splitting them keeps both verbs provably one-record.
+pub fn rigcfg_body(cfg: &RigConfig, out: &mut [u8; BODY_WINDOW]) -> usize {
+    let mut w = TruncWriter::new(out);
+    let _ = core::write!(
+        w,
+        "RIGCFG proto=1 capture=mono16 lane={} blocks={} block_bytes={} bytes_per_s={} capsec_us={} window_s={} cpu_hz={} icache={} dcache={}",
+        cfg.lane.letter(),
+        cfg.blocks,
+        cfg.block_bytes,
+        cfg.bytes_per_s,
+        cfg.capsec_us,
+        cfg.window_s,
+        cfg.cpu_hz,
+        u8::from(cfg.icache),
+        u8::from(cfg.dcache),
+    );
+    w.filled()
+}
+
+/// Most generator-description bytes [`riggen_body`] will carry: 160.
+///
+/// Named so the caller can check its own payload against the budget instead of trusting a
+/// comment. `asperitas-dsp` guarantees only that `describe()` stays under `frame::MAX_BODY`,
+/// which is 16 bytes more than this verb can carry; `rig.rs` debug-asserts the length
+/// `describe()` actually returned against this constant.
+pub const RIGGEN_MAX_GEN_BYTES: usize = 160;
+
+/// Worst-case `RIGGEN` body: the 15-byte prefix plus [`RIGGEN_MAX_GEN_BYTES`] = 175.
+const RIGGEN_WORST: usize = "RIGGEN proto=1 ".len() + RIGGEN_MAX_GEN_BYTES;
+
+/// Render a `RIGGEN` record body into `out`: the prefix, then the generator's own
+/// description verbatim, returning the bytes written.
+///
+/// The payload goes last and is clipped to [`RIGGEN_MAX_GEN_BYTES`], so a description that
+/// overruns loses the tail of its *last* field rather than shifting or mangling a number the
+/// host parses. Clipping is silent for the same reason [`status_body`] truncates: this runs on
+/// a path that must not panic.
+///
+/// Unlike its siblings this one does not go through [`TruncWriter`]. Its payload is `&[u8]`,
+/// and `fmt::Write` only accepts `&str`: converting would mean either panicking on invalid
+/// UTF-8 or replacing bytes the device actually measured, and `describe()`'s output is plain
+/// ASCII anyway, so neither failure mode is worth paying for. The bytes are copied, not
+/// interpreted.
+pub fn riggen_body(describe: &[u8], out: &mut [u8; BODY_WINDOW]) -> usize {
+    const HEADER: &[u8] = b"RIGGEN proto=1 ";
+    let text = &describe[..describe.len().min(RIGGEN_MAX_GEN_BYTES)];
+    let take = text.len().min(out.len() - HEADER.len());
+    out[..HEADER.len()].copy_from_slice(HEADER);
+    out[HEADER.len()..HEADER.len() + take].copy_from_slice(&text[..take]);
+    HEADER.len() + take
+}
+
+/// What the capture producer has done so far, as one `CAPSTAT` record.
+///
+/// Deliberately missing three fields a first draft carried, each because the rule *a fact
+/// appears on the wire once* puts it elsewhere: `sent` and `bytes_dropped` belong to `STATUS`
+/// (which also carries `seq_next`, so an interval is still bracketable), and `free` is
+/// derivable from [`crate::capture::RING_BLOCKS`] plus two fields already here.
+#[derive(Clone, Copy, Debug)]
+pub struct CaptureStatus {
+    /// Blocks handed to the ring since boot.
+    pub delivered: u32,
+    /// Blocks the window still expects, counting down.
+    pub expected: u32,
+    /// Blocks the producer had to discard because the ring was full.
+    pub overrun: u32,
+    /// Longest single audio callback seen, in microseconds.
+    pub max_block_us: u32,
+    /// Longest gap between callbacks seen, in microseconds.
+    pub worst_gap_us: u32,
+    /// Audio engine health: 0 running, 1 `start_interface` failed, 2 `start_callback` failed.
+    ///
+    /// Its own counter because a dead engine and a starved one otherwise share a symptom:
+    /// `delivered` simply stops moving either way, and the stream cannot tell them apart.
+    pub audio_exit: u32,
+    /// Blocks whose `AUDEND` has been committed — dump progress as a count, not an index.
+    pub dumped: u32,
+    /// Records the log pipe refused for lack of space.
+    pub dropped_full: u32,
+}
+
+/// Field table behind [`capstat_body`].
+const CAPSTAT_FIELDS: [(&str, usize); 8] = [
+    ("delivered", U32_MAX_DIGITS),
+    ("expected", U32_MAX_DIGITS),
+    ("overrun", U32_MAX_DIGITS),
+    ("max_block_us", U32_MAX_DIGITS),
+    ("worst_gap_us", U32_MAX_DIGITS),
+    ("audio_exit", U32_MAX_DIGITS),
+    ("dumped", U32_MAX_DIGITS),
+    ("dropped_full", U32_MAX_DIGITS),
+];
+
+/// Worst-case `CAPSTAT` body: 187 bytes, 13 inside the cap.
+///
+/// The tightest of the four numeric verbs relative to when it repeats, which is why its rate
+/// gate exists (parent plan §8) and divides by [`CAPSTAT_MAX_BODY`].
+const CAPSTAT_WORST: usize = saturated_len("CAPSTAT proto=1", &CAPSTAT_FIELDS);
+
+/// The byte budget a `CAPSTAT` record may never exceed: [`crate::frame::MAX_BODY`].
+///
+/// An alias rather than a second `200`, so the rate gate in `rig.rs` and the encoder cannot
+/// drift apart while both claim to know the cap. It lives next to the builder that produces
+/// the record and is checked by [`capstat_body_saturated_counters_fit_one_frame`], because a
+/// gate that divided by a hand-typed number would be arithmetic nobody tested.
+pub const CAPSTAT_MAX_BODY: usize = crate::frame::MAX_BODY;
+
+// The alias must never exceed what the encoder caps at. Checked at compile time rather than
+// in the test below, because a comparison between two constants has one possible outcome and a
+// runtime assertion on it can only ever pass; `clippy::assertions_on_constants` says so too.
+const _: () = assert!(CAPSTAT_MAX_BODY <= crate::frame::MAX_BODY);
+
+/// Render a `CAPSTAT` record body into `out`, returning the bytes written.
+pub fn capstat_body(st: &CaptureStatus, out: &mut [u8; BODY_WINDOW]) -> usize {
+    let mut w = TruncWriter::new(out);
+    let _ = core::write!(
+        w,
+        "CAPSTAT proto=1 delivered={} expected={} overrun={} max_block_us={} worst_gap_us={} audio_exit={} dumped={} dropped_full={}",
+        st.delivered,
+        st.expected,
+        st.overrun,
+        st.max_block_us,
+        st.worst_gap_us,
+        st.audio_exit,
+        st.dumped,
+        st.dropped_full,
+    );
+    w.filled()
+}
+
+/// What the capture ring could hold at all, as one `CAPMAX` record.
+///
+/// Reported once at boot alongside `RIGCFG`. These are the constants the device was compiled
+/// with, not measurements, so a host can state the ceiling a `CAPSTAT` overrun must be judged
+/// against without knowing anything about this firmware's geometry.
+#[derive(Clone, Copy, Debug)]
+pub struct RingCapacity {
+    /// Bytes the requested window needs.
+    pub total_bytes: u32,
+    /// Bytes the ring can hold.
+    pub ring_bytes: u32,
+    /// Whole seconds the ring can hold, floored.
+    pub seconds_max: u32,
+    /// Exact ring capacity in microseconds.
+    pub us_max: u32,
+    /// Bytes the window leaves unused.
+    pub unused_headroom_bytes: u32,
+}
+
+/// Field table behind [`capmax_body`].
+const CAPMAX_FIELDS: [(&str, usize); 5] = [
+    ("total_bytes", U32_MAX_DIGITS),
+    ("ring_bytes", U32_MAX_DIGITS),
+    ("seconds_max", U32_MAX_DIGITS),
+    ("us_max", U32_MAX_DIGITS),
+    ("unused_headroom_bytes", U32_MAX_DIGITS),
+];
+
+/// Worst-case `CAPMAX` body: 133 bytes, 67 inside the cap.
+const CAPMAX_WORST: usize = saturated_len("CAPMAX proto=1", &CAPMAX_FIELDS);
+
+/// Render a `CAPMAX` record body into `out`, returning the bytes written.
+pub fn capmax_body(cap: &RingCapacity, out: &mut [u8; BODY_WINDOW]) -> usize {
+    let mut w = TruncWriter::new(out);
+    let _ = core::write!(
+        w,
+        "CAPMAX proto=1 total_bytes={} ring_bytes={} seconds_max={} us_max={} unused_headroom_bytes={}",
+        cap.total_bytes,
+        cap.ring_bytes,
+        cap.seconds_max,
+        cap.us_max,
+        cap.unused_headroom_bytes,
+    );
+    w.filled()
+}
+
+/// How one completed dump went, as one `DUMPEND` record.
+///
+/// The record about a single dump, which is why `refused` and `stall_ms` live here rather than
+/// in the repeating `CAPSTAT`: they describe the transfer this record closes, not the device's
+/// life so far. `sent`/`bytes_dropped` are the console's cumulative ledger, restated here for
+/// the interval the dump spans.
+#[derive(Clone, Copy, Debug)]
+pub struct DumpSummary {
+    /// Blocks transferred in this dump.
+    pub blocks: u32,
+    /// Chunk records those blocks cost.
+    pub chunks: u32,
+    /// Raw payload bytes delivered.
+    pub bytes: u32,
+    /// Wall time from first chunk to `AUDEND`, in milliseconds.
+    pub elapsed_ms: u32,
+    /// Times the headroom rule refused a chunk and the writer retried.
+    pub refused: u32,
+    /// Longest stretch with no forward progress, in milliseconds.
+    pub stall_ms: u32,
+    /// Console records sent overall.
+    pub sent: u32,
+    /// Console records refused for space overall.
+    pub dropped_full: u32,
+    /// Bytes those refusals would have occupied.
+    pub bytes_dropped: u32,
+}
+
+/// Field table behind [`dumpend_body`].
+const DUMPEND_FIELDS: [(&str, usize); 9] = [
+    ("blocks", U32_MAX_DIGITS),
+    ("chunks", U32_MAX_DIGITS),
+    ("bytes", U32_MAX_DIGITS),
+    ("elapsed_ms", U32_MAX_DIGITS),
+    ("refused", U32_MAX_DIGITS),
+    ("stall_ms", U32_MAX_DIGITS),
+    ("sent", U32_MAX_DIGITS),
+    ("dropped_full", U32_MAX_DIGITS),
+    ("bytes_dropped", U32_MAX_DIGITS),
+];
+
+/// Worst-case `DUMPEND` body: 194 bytes, 6 inside the cap — the tightest verb on the wire.
+const DUMPEND_WORST: usize = saturated_len("DUMPEND proto=1", &DUMPEND_FIELDS);
+
+/// Render a `DUMPEND` record body into `out`, returning the bytes written.
+pub fn dumpend_body(d: &DumpSummary, out: &mut [u8; BODY_WINDOW]) -> usize {
+    let mut w = TruncWriter::new(out);
+    let _ = core::write!(
+        w,
+        "DUMPEND proto=1 blocks={} chunks={} bytes={} elapsed_ms={} refused={} stall_ms={} sent={} dropped_full={} bytes_dropped={}",
+        d.blocks,
+        d.chunks,
+        d.bytes,
+        d.elapsed_ms,
+        d.refused,
+        d.stall_ms,
+        d.sent,
+        d.dropped_full,
+        d.bytes_dropped,
+    );
+    w.filled()
+}
+
+// One record each, at their own worst case. These five lines are the half a drifted format
+// string breaks and a runtime test would only catch on the night it runs.
+const _: () = assert!(RIGCFG_WORST < crate::frame::MAX_BODY);
+const _: () = assert!(RIGGEN_WORST < crate::frame::MAX_BODY);
+const _: () = assert!(CAPSTAT_WORST < crate::frame::MAX_BODY);
+const _: () = assert!(CAPMAX_WORST < crate::frame::MAX_BODY);
+const _: () = assert!(DUMPEND_WORST < crate::frame::MAX_BODY);
+
+// ---------------------------------------------------------------------------
 // STATUS pacing
 // ---------------------------------------------------------------------------
 
@@ -354,28 +710,39 @@ mod tests {
         );
     }
 
-    /// Both synthetic bodies must be legal v1 payloads, not merely plausible text: a
-    /// `STATUS` record that tripped the encoder's cap or contained something the sanitiser
-    /// mangled would report counters while failing its own checksum.
+    /// Every body this module renders must be a legal v1 payload, not merely plausible text: a
+    /// record that tripped the encoder's cap or contained something the sanitiser mangled would
+    /// report counters while failing its own checksum.
+    ///
+    /// All seven builders go through the one loop on purpose. Each verb got its own saturated
+    /// test below because a shared loop reporting "one of these was capped" hides which, but a
+    /// shared loop is the right shape for "none of them breaks the codec".
     #[test]
-    fn boot_and_status_bodies_survive_the_wire_codec() {
+    fn all_console_bodies_survive_the_wire_codec() {
         use crate::frame::{encode, Decoder, MAX_FRAME};
 
-        let mut boot_buf = [0u8; BODY_WINDOW];
-        let boot_len = boot_body(&mut boot_buf, "0.1.0", 2048, crate::frame::MAX_BODY);
-
         let maxed = counters(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX);
-        let mut status_buf = [0u8; BODY_WINDOW];
-        let status_len = status_body(&mut status_buf, &maxed, 2_048);
+        let mut bufs: [[u8; BODY_WINDOW]; 7] = [[0; BODY_WINDOW]; 7];
 
-        for (window, len) in [(&boot_buf, boot_len), (&status_buf, status_len)] {
+        let lens = [
+            boot_body(&mut bufs[0], "0.1.0", 2048, crate::frame::MAX_BODY),
+            status_body(&mut bufs[1], &maxed, 2_048),
+            rigcfg_body(&saturated_rigcfg(), &mut bufs[2]),
+            riggen_body(SINE_DESCRIBE, &mut bufs[3]),
+            capstat_body(&saturated_capture_status(), &mut bufs[4]),
+            capmax_body(&saturated_ring_capacity(), &mut bufs[5]),
+            dumpend_body(&saturated_dump_summary(), &mut bufs[6]),
+        ];
+
+        for (window, &len) in bufs.iter().zip(&lens) {
             let body = &window[..len];
             let mut frame_buf = [0u8; MAX_FRAME];
             let enc = encode(log::Level::Info, 7, 1_234, body, &mut frame_buf);
             assert!(
                 !enc.truncated,
-                "console body of {} bytes was capped",
-                body.len()
+                "console body of {} bytes was capped: {}",
+                body.len(),
+                core::str::from_utf8(body).unwrap_or("<invalid utf8>")
             );
 
             let mut decoder = Decoder::new();
@@ -478,5 +845,304 @@ mod tests {
         );
         // Past the wrap by 1000 ms of real time.
         assert!(gate.due(500, &b));
+    }
+
+    // -- measurement-rig verbs ---------------------------------------------------------
+
+    /// `asperitas-dsp`'s pinned description of a 1 kHz sine (`stimulus_tests.rs`), used here as
+    /// a realistic `describe()` payload rather than a synthetic filler. If dsp renames a field,
+    /// this literal is the one in two places that has to change together, which is the point.
+    const SINE_DESCRIBE: &[u8] =
+        b"name=sine sample_rate_hz=48000 level_dbfs=-20.0 frequency_hz=1000 period_samples=48";
+
+    /// Every numeric field at its ceiling — the shape a long-running device reports when a
+    /// counter saturates, and therefore the worst case each verb must survive.
+    fn saturated_rigcfg() -> RigConfig {
+        RigConfig {
+            lane: MonoLane::Right,
+            blocks: u32::MAX,
+            block_bytes: u32::MAX,
+            bytes_per_s: u32::MAX,
+            capsec_us: u32::MAX,
+            window_s: u32::MAX,
+            cpu_hz: u32::MAX,
+            icache: true,
+            dcache: true,
+        }
+    }
+
+    fn saturated_capture_status() -> CaptureStatus {
+        CaptureStatus {
+            delivered: u32::MAX,
+            expected: u32::MAX,
+            overrun: u32::MAX,
+            max_block_us: u32::MAX,
+            worst_gap_us: u32::MAX,
+            audio_exit: u32::MAX,
+            dumped: u32::MAX,
+            dropped_full: u32::MAX,
+        }
+    }
+
+    fn saturated_ring_capacity() -> RingCapacity {
+        RingCapacity {
+            total_bytes: u32::MAX,
+            ring_bytes: u32::MAX,
+            seconds_max: u32::MAX,
+            us_max: u32::MAX,
+            unused_headroom_bytes: u32::MAX,
+        }
+    }
+
+    fn saturated_dump_summary() -> DumpSummary {
+        DumpSummary {
+            blocks: u32::MAX,
+            chunks: u32::MAX,
+            bytes: u32::MAX,
+            elapsed_ms: u32::MAX,
+            refused: u32::MAX,
+            stall_ms: u32::MAX,
+            sent: u32::MAX,
+            dropped_full: u32::MAX,
+            bytes_dropped: u32::MAX,
+        }
+    }
+
+    #[test]
+    fn rigcfg_body_pins_field_names_and_order() {
+        let mut out = [0u8; BODY_WINDOW];
+        let cfg = RigConfig {
+            lane: MonoLane::Left,
+            blocks: 879,
+            block_bytes: crate::capture::RING_BLOCK_BYTES as u32,
+            bytes_per_s: crate::capture::BYTES_PER_SECOND as u32,
+            capsec_us: crate::capture::ring_duration_micros() as u32,
+            window_s: crate::capture::CAPTURE_WINDOW_SECONDS as u32,
+            cpu_hz: 480_000_000,
+            icache: true,
+            dcache: false,
+        };
+        let n = rigcfg_body(&cfg, &mut out);
+        assert_eq!(
+            core::str::from_utf8(&out[..n]).unwrap(),
+            "RIGCFG proto=1 capture=mono16 lane=L blocks=879 block_bytes=32768 bytes_per_s=96000 capsec_us=349525333 window_s=300 cpu_hz=480000000 icache=1 dcache=0"
+        );
+    }
+
+    #[test]
+    fn rigcfg_body_renders_saturated_fields_as_u32_max() {
+        let mut out = [0u8; BODY_WINDOW];
+        let n = rigcfg_body(&saturated_rigcfg(), &mut out);
+        let text = core::str::from_utf8(&out[..n]).unwrap();
+        assert!(
+            text.starts_with("RIGCFG proto=1 capture=mono16 lane=R blocks=4294967295 "),
+            "{text}"
+        );
+        assert!(text.ends_with("icache=1 dcache=1"), "{text}");
+        assert!(
+            n < crate::frame::MAX_BODY,
+            "worst-case RIGCFG body is {n} bytes, cap is {}",
+            crate::frame::MAX_BODY
+        );
+    }
+
+    #[test]
+    fn riggen_body_carries_the_generator_text_verbatim() {
+        let mut out = [0u8; BODY_WINDOW];
+        let n = riggen_body(SINE_DESCRIBE, &mut out);
+        assert_eq!(
+            core::str::from_utf8(&out[..n]).unwrap(),
+            "RIGGEN proto=1 name=sine sample_rate_hz=48000 level_dbfs=-20.0 frequency_hz=1000 period_samples=48"
+        );
+    }
+
+    /// A payload exactly at the budget must still frame whole. This is the case that makes
+    /// `RIGGEN_MAX_GEN_BYTES` a promise rather than a comment: 15 + 160 = 175 < 200.
+    #[test]
+    fn riggen_body_at_the_full_budget_frames_untruncated() {
+        use crate::frame::{encode, Decoder, MAX_FRAME};
+
+        let describe = [b'x'; RIGGEN_MAX_GEN_BYTES];
+        let mut out = [0u8; BODY_WINDOW];
+        let n = riggen_body(&describe, &mut out);
+        assert_eq!(n, "RIGGEN proto=1 ".len() + RIGGEN_MAX_GEN_BYTES);
+
+        let mut frame_buf = [0u8; MAX_FRAME];
+        let enc = encode(log::Level::Info, 1, 0, &out[..n], &mut frame_buf);
+        assert!(
+            !enc.truncated,
+            "a budget-sized RIGGEN was capped at {n} bytes"
+        );
+
+        let mut decoder = Decoder::new();
+        decoder.push(&frame_buf[..enc.len]);
+        let record = decoder.next_record().expect("record must decode");
+        assert_eq!(record.body, &out[..n]);
+        assert_eq!(decoder.stats().bad_frames, 0);
+    }
+
+    /// Over-budget input clips instead of panicking or overflowing, and clipping costs only the
+    /// tail of the free-text field — never a byte of the prefix a parser keys on.
+    #[test]
+    fn riggen_body_clips_an_overlong_description_without_panicking() {
+        let describe = [b'y'; RIGGEN_MAX_GEN_BYTES + 4_096];
+        let mut out = [0u8; BODY_WINDOW];
+        let n = riggen_body(&describe, &mut out);
+        assert_eq!(n, "RIGGEN proto=1 ".len() + RIGGEN_MAX_GEN_BYTES);
+        assert!(out[..n].starts_with(b"RIGGEN proto=1 "));
+        assert!(out["RIGGEN proto=1 ".len()..n].iter().all(|&b| b == b'y'));
+
+        // And the empty case: a generator that described nothing still yields a legal record.
+        let mut empty = [0u8; BODY_WINDOW];
+        assert_eq!(riggen_body(&[], &mut empty), "RIGGEN proto=1 ".len());
+    }
+
+    #[test]
+    fn capstat_body_pins_field_names_and_order() {
+        let mut out = [0u8; BODY_WINDOW];
+        let st = CaptureStatus {
+            delivered: 412,
+            expected: 467,
+            overrun: 0,
+            max_block_us: 731,
+            worst_gap_us: 1_102,
+            audio_exit: 0,
+            dumped: 100,
+            dropped_full: 3,
+        };
+        let n = capstat_body(&st, &mut out);
+        assert_eq!(
+            core::str::from_utf8(&out[..n]).unwrap(),
+            "CAPSTAT proto=1 delivered=412 expected=467 overrun=0 max_block_us=731 worst_gap_us=1102 audio_exit=0 dumped=100 dropped_full=3"
+        );
+    }
+
+    #[test]
+    fn capstat_body_saturated_counters_fit_one_frame() {
+        let mut out = [0u8; BODY_WINDOW];
+        let n = capstat_body(&saturated_capture_status(), &mut out);
+        let text = core::str::from_utf8(&out[..n]).unwrap();
+        assert!(
+            text.starts_with("CAPSTAT proto=1 delivered=4294967295 expected=4294967295 "),
+            "{text}"
+        );
+        assert!(
+            text.ends_with("dumped=4294967295 dropped_full=4294967295"),
+            "{text}"
+        );
+
+        // The bound `.02`'s rate gate divides by, checked rather than assumed: the record must
+        // fit inside it, and inside what the encoder actually caps at. Whether the published
+        // budget itself is sane is a compile-time question, answered by the const assert beside
+        // the alias.
+        assert!(
+            n < CAPSTAT_MAX_BODY,
+            "worst-case CAPSTAT body is {n} bytes, budget is {CAPSTAT_MAX_BODY}"
+        );
+        assert!(
+            n < crate::frame::MAX_BODY,
+            "worst-case CAPSTAT body is {n} bytes, cap is {}",
+            crate::frame::MAX_BODY
+        );
+    }
+
+    #[test]
+    fn capmax_body_pins_field_names_and_order() {
+        let mut out = [0u8; BODY_WINDOW];
+        let cap = RingCapacity {
+            total_bytes: 28_800_000,
+            ring_bytes: crate::capture::RING_BYTES as u32,
+            seconds_max: crate::capture::ring_seconds_floor(),
+            us_max: crate::capture::ring_duration_micros() as u32,
+            unused_headroom_bytes: 4_754_432,
+        };
+        let n = capmax_body(&cap, &mut out);
+        assert_eq!(
+            core::str::from_utf8(&out[..n]).unwrap(),
+            "CAPMAX proto=1 total_bytes=28800000 ring_bytes=33554432 seconds_max=349 us_max=349525333 unused_headroom_bytes=4754432"
+        );
+    }
+
+    #[test]
+    fn capmax_body_renders_saturated_fields_as_u32_max() {
+        let mut out = [0u8; BODY_WINDOW];
+        let n = capmax_body(&saturated_ring_capacity(), &mut out);
+        let text = core::str::from_utf8(&out[..n]).unwrap();
+        assert!(
+            text.starts_with("CAPMAX proto=1 total_bytes=4294967295 "),
+            "{text}"
+        );
+        assert!(text.ends_with("unused_headroom_bytes=4294967295"), "{text}");
+        assert!(
+            n < crate::frame::MAX_BODY,
+            "worst-case CAPMAX body is {n} bytes, cap is {}",
+            crate::frame::MAX_BODY
+        );
+    }
+
+    #[test]
+    fn dumpend_body_pins_field_names_and_order() {
+        let mut out = [0u8; BODY_WINDOW];
+        let d = DumpSummary {
+            blocks: 879,
+            chunks: 224_145,
+            bytes: 28_800_000,
+            elapsed_ms: 311_402,
+            refused: 17,
+            stall_ms: 940,
+            sent: 4_118,
+            dropped_full: 3,
+            bytes_dropped: 12_288,
+        };
+        let n = dumpend_body(&d, &mut out);
+        assert_eq!(
+            core::str::from_utf8(&out[..n]).unwrap(),
+            "DUMPEND proto=1 blocks=879 chunks=224145 bytes=28800000 elapsed_ms=311402 refused=17 stall_ms=940 sent=4118 dropped_full=3 bytes_dropped=12288"
+        );
+    }
+
+    #[test]
+    fn dumpend_body_renders_saturated_fields_as_u32_max() {
+        let mut out = [0u8; BODY_WINDOW];
+        let n = dumpend_body(&saturated_dump_summary(), &mut out);
+        let text = core::str::from_utf8(&out[..n]).unwrap();
+        assert!(
+            text.starts_with("DUMPEND proto=1 blocks=4294967295 "),
+            "{text}"
+        );
+        assert!(
+            text.ends_with("dropped_full=4294967295 bytes_dropped=4294967295"),
+            "{text}"
+        );
+        assert!(
+            n < crate::frame::MAX_BODY,
+            "worst-case DUMPEND body is {n} bytes, cap is {}",
+            crate::frame::MAX_BODY
+        );
+    }
+
+    /// Each builder's actual worst case must equal what its field table claims. The `const`
+    /// asserts above prove the *table* fits one record; these prove the format string still
+    /// renders that table, so a field added to one and not the other fails here.
+    #[test]
+    fn saturated_renders_match_their_field_tables() {
+        let mut out = [0u8; BODY_WINDOW];
+        assert_eq!(rigcfg_body(&saturated_rigcfg(), &mut out), RIGCFG_WORST);
+        assert_eq!(
+            riggen_body(&[b'z'; RIGGEN_MAX_GEN_BYTES], &mut out),
+            RIGGEN_WORST
+        );
+        assert_eq!(
+            capstat_body(&saturated_capture_status(), &mut out),
+            CAPSTAT_WORST
+        );
+        assert_eq!(
+            capmax_body(&saturated_ring_capacity(), &mut out),
+            CAPMAX_WORST
+        );
+        assert_eq!(
+            dumpend_body(&saturated_dump_summary(), &mut out),
+            DUMPEND_WORST
+        );
     }
 }
