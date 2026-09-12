@@ -1,14 +1,15 @@
 ---
 id: TASK-037
 title: Attach the ST-Link and verify the probe path on hardware
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-09-11 00:35'
+updated_date: '2026-09-12 07:39'
 labels: []
 dependencies:
-  - TASK-036
+  - TASK-053
+  - TASK-054
 documentation:
   - docs/reference/daisy-seed3.md
 priority: high
@@ -67,6 +68,51 @@ What changes at the bench, and what does not:
   with the module seated changes none of the above.
 
 Full trace with sources: docs/reference/daisy-seed3.md, "Flashing and logging over an ST-Link probe".
+
+## Pre-flight facts for the bench session (gathered while planning TASK-036, 2026-09-12)
+
+**Order of work at the bench.** First thing, before anything erases flash:
+
+    probe-rs attach firmware/target/main.elf --chip STM32H750IBKx --non-interactive --list-rtt
+
+It reads memory through the debug port, neither needs the host to drain RTT nor erases the single 128 KB
+sector, and it proves the probe, the wiring, the target description and the ELF's RTT symbols together.
+TASK-053 is expected to wrap it as `make probe-rtt-list`. Then DFU (`make flash`) for the image under
+test, then the probe only for observation.
+
+**Probe-side gotchas read out of probe-rs 0.32.0's own source or measured here:**
+
+* An ST-Link/V3 must be at least V3MIN `0x0359`, or V3SET `0x0410` if it is a V3SET; older firmware makes
+  probe-rs refuse the probe. Check with `probe-rs st-link doctor`, fix with `probe-rs st-link upgrade`.
+  probe-rs cannot detect an ST-Link/V2 at all without libusb at build time and reports that in a way that
+  reads like a permissions problem, so know which probe you are holding before chasing udev rules.
+* A machine that has had STM32CubeProgrammer installed may need its `stlink-v2.rules.py` restored, and
+  CubeProgrammer's systemd services can hold the probe.
+* `--connect-under-reset` works here because PA13/PA14 stay powered in the VBAT domain. **Do not also pass
+  `--reset`**: daisy-rs records that combination faulting SWD on the same part.
+* Consider `--disable-double-buffering` for repeated flashes: pyOCD #1700 reports silent STM32H750 flash
+  corruption roughly 1 attempt in 5 on a ~30 kB image. Whatever you conclude about it, note that `--verify`
+  is load-bearing on a chip whose internal flash is one 128 KB sector - every flash erases the whole app.
+* Exit codes as measured with nothing attached: probe path rc=1 with stderr
+  `Error: No connected probes were found.`; `probe-rs list` prints a different string
+  (`No debug probes were found.`); dfu-util `-a 0 -s 0x08000000:leave` exits 74 when DFU-mode match fails.
+* Until TASK-054 lands, expect `WARN ... Insufficient DWARF info; compile your program with debug = 2 to
+  enable location info` on every probe-rs invocation against our builds, and expect defmt log lines to
+  lack source locations. Partial backtraces are normal either way: probe-rs stops unwinding at the first PC
+  lacking debug info (#896), reports truncated frames with custom panic handlers (#2274), and has shipped
+  wrong stack traces before (#3309). Record what you actually get, not what you hoped for.
+
+**Clock chain, if USB never enumerates but the board boots:** the 48 MHz domain comes from PLLP, not
+PLLSAI, and `RCC.d2.cdcfg.d2ppre` set to the wrong value hangs the kernel outright (daisy-rs). HSE runs in
+BYPASS mode driven by the Pod jumper `OSC_BY` (PB15 high = oscillator enabled); a missing oscillator looks
+identical to a dead codec.
+
+**Reading the two channels together:** RTT keeps no ledger, so a drop count taken from the framed console
+does not describe an RTT capture, and defmt frame loss is never evidence of a SAI overrun. A `log-defmt`
+only build (`NO_DEFAULT=1 FEATURES="seed3 log-defmt"`) has no console at all, so a board that never
+enumerates USB gives you RTT and nothing else - plan the first session around that. If an RTT capture
+stops and the target appears wedged after closing probe-rs, that is the documented mid-run detach hazard
+in defmt-rtt, not a firmware bug; power-cycle before concluding anything.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

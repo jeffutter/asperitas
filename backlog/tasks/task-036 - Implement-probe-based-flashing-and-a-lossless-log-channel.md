@@ -1,11 +1,11 @@
 ---
 id: TASK-036
 title: Implement probe-based flashing and a lossless log channel
-status: Blocked
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-09-10 21:15'
+updated_date: '2026-09-12 07:33'
 labels:
   - planned
 dependencies:
@@ -159,6 +159,45 @@ the host gates, since `.05` edits both gate definitions), confirm nothing else m
 Do not promote while either leaf is open — by ordinal this parent sorts ahead of every child, and
 Execute takes the first Dev Ready ticket without re-checking dependencies, which is the TASK-004
 spin recorded in CLAUDE.md.
+
+## Integration re-run at planning time (2026-09-12), all six leaves Done
+
+Every gate in `.github/workflows/ci.yml` was run inside `nix develop .#default` against the tree as it
+stands with all six leaves complete: `cargo fmt --all --check`, the four clippy invocations (`--workspace
+--all-targets --lib --bins`, `--workspace --lib --examples --features host_target`, `-p asperitas-core
+--no-default-features --lib`, `-p asperitas-logging --features log-defmt --lib`), both
+`RUSTDOCFLAGS="-D warnings"` doc runs, `cargo test --workspace`, `cargo run --bin dump -- --selftest`,
+and both firmware cross-compiles plus their two clippy invocations. All returned 0.
+
+The DFU path is still provably unchanged by TASK-036.01's Makefile work: diffing the pre-change recipe
+expansions against the current ones for `build flash flash-all check` shows no semantic delta, only an
+empty-variable double space in the rustc line from `$(CARGO_DEFAULTS)`.
+
+## Follow-up tickets raised from this planning pass (siblings, not children)
+
+Re-reading the shipped probe surface and the loss model against upstream sources turned up work that does
+not belong under this umbrella, whose own acceptance criteria are all met. They are siblings so closing
+them cannot reopen TASK-036, and so TASK-036 can reach Dev Ready now.
+
+* **TASK-053** - make the probe path safe to drive unattended. Our three probe recipes omit
+  `--non-interactive`, which hangs forever on stdin; `probe-log` decodes a running board with whatever ELF
+  happens to be on disk; nothing records the probe path's exit-code contract or the recovery levers
+  (`--cycle-power`, `--read-flasher-rtt`, `--dry-run`, `--disable-double-buffering`); and there is no
+  non-destructive smoke target. Host-side only, no board.
+* **TASK-054** - choose the release DWARF level deliberately. Measured here: `probe-rs attach --list-rtt`
+  prints "Insufficient DWARF info; compile your program with `debug = 2` to enable location info" on every
+  build except `debug = 2`, so today's `line-tables-only` silently costs defmt log locations over the
+  channel this ticket built. Moving to `2` costs 236 bytes of flash and turns a 3 MB host ELF into 9.5 MB.
+* **TASK-055** - correct six wrong or unenforced statements in the RTT record (a mis-cited defmt-rtt code
+  path behind the frame-size margin, a manifest claim Cargo.lock contradicts, stale binary sizes, the
+  missing host-detaches-mid-run loss regime, an understated cache-alignment requirement with both block
+  addresses measured unaligned, and foreign defmt frames present in the linked image), and pin the margin
+  with a compile-time assert the CI `log-defmt` gate will actually check. Depends on 053 and 054 because
+  all three touch the same comment blocks and documentation section.
+
+TASK-037 now depends on TASK-053 and TASK-054 so its measurements describe the configuration we intend to
+keep, and its notes carry the bench-session facts gathered here (ST-Link firmware floors, the CubeProgrammer
+udev trap, the `--list-rtt` smoke test, partial-backtrace expectations, the mid-run detach hazard).
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
