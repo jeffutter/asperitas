@@ -5,7 +5,7 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-09-12 07:39'
+updated_date: '2026-09-12 10:11'
 labels: []
 dependencies:
   - TASK-053
@@ -113,6 +113,10 @@ only build (`NO_DEFAULT=1 FEATURES="seed3 log-defmt"`) has no console at all, so
 enumerates USB gives you RTT and nothing else - plan the first session around that. If an RTT capture
 stops and the target appears wedged after closing probe-rs, that is the documented mid-run detach hazard
 in defmt-rtt, not a firmware bug; power-cycle before concluding anything.
+
+**Backtrace quality is measured at `debug = 2`, and TASK-054 just changed that level.** `[profile.release] debug` was `"line-tables-only"`; it is now `2`, because probe-rs refuses to put file:line on a decoded `defmt` record at anything lower (it prints "Insufficient DWARF info; compile your program with `debug = 2` to enable location info." and decodes without locations anyway). Cost was 236 bytes of flash on the RTT image and a 3 MB host ELF becoming 9.5 MB; both measured, both in `firmware/Cargo.toml`. So AC #3's "arrives with a decoded backtrace" is now judged at full debug info, which is the best case this profile offers.
+
+**Judge a partial trace against probe-rs, not against the build.** Three upstream issues describe failure modes that survive complete DWARF: #896 - unwinding stops at the first PC that has no debug info, so a frame inside a crate built without it truncates the trace there and says nothing about why; #2274 - reported frames come back truncated when a custom panic handler is in play, which is exactly what this firmware has (`#[panic_handler]` in `asperitas-logging`); #3309 - stack traces shipped wrong outright. Expect a trace that ends early or names a frame you can't reconcile, and record what you got rather than concluding the image is misbuilt. The one thing worth checking before believing any of it: the ELF on the host is the one that produced the image on the board (`make elf-check`), since decoding with a stale ELF produces output that looks like data.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

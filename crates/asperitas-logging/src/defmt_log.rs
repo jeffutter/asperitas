@@ -48,9 +48,17 @@
 //! **An RTT build with `DEFMT_LOG` unset carries ERROR frames only.** When the variable is absent
 //! entirely, defmt-macros uses `LEVEL_WHEN_NOTHING_IS_SPECIFIED = Some(Level::Error)`
 //! (defmt-macros-1.1.1 src/function_like/log/env_filter.rs:34), so four of this module's five arms
-//! expand to nothing and only `log::error!` survives. Measured on `main`: an unset build and a
-//! `DEFMT_LOG=error` build are the same size exactly (48084 bytes), while `warn` is 48136, `info`
-//! 48304, `debug` 48984, `trace` 49712 and `off` 44592.
+//! expand to nothing and only `log::error!` survives. Measured on `main` as `firmware.bin`, at the
+//! shipped `[profile.release] debug = 2`: an unset build and a `DEFMT_LOG=error` build are the same
+//! size exactly (48320 bytes); `warn` is 48376, `debug` 48380, `trace` 49748, `off` 44740, and
+//! `info` 47712 - below the error-only baseline, not above it.
+//!
+//! Treat those as one set of numbers at one DWARF level. The same seven builds at
+//! `debug = "line-tables-only"` came out 48084 (unset and `error` alike), `warn` 48136, `info`
+//! 48304, `debug` 48984, `trace` 49712, `off` 44592, with `info` above the baseline instead of
+//! under it. Debug info perturbs codegen - TASK-054's table in `firmware/Cargo.toml` is that
+//! measurement - so a size claim here is good for the profile it was taken at, and re-measuring
+//! costs about 20 seconds.
 //!
 //! That is easy to mistake for a dead channel: `make build FEATURES="seed3 log-defmt" NO_DEFAULT=1`
 //! then attaching a probe shows a boot that says nothing, because `info!("Booting...")` was never

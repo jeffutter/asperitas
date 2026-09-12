@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-12 07:16'
-updated_date: '2026-09-12 07:33'
+updated_date: '2026-09-12 10:16'
 labels:
   - planned
 dependencies:
@@ -140,3 +140,22 @@ size sweep in step 3 is meaningless while the other two are moving numbers. Beca
 `Dev Ready` ticket without re-checking dependencies, promoting this one early would have an agent resolve
 figures that are about to change again. Flip it to `Dev Ready` when both parents close.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+**Two of your six are already closed by TASK-054 (2026-09-12), so don't redo them.**
+
+1. The `firmware/Makefile` "giving a correct ~32 KB binary for DFU flashing" claim is gone: it now
+   carries the measured 88,741 bytes (`FEATURES="seed3"`) and 48,320 bytes (`FEATURES="seed3
+   log-defmt" NO_DEFAULT=1`) against the 131,072-byte budget, with a note that the figures belong
+   to the profile they were taken at.
+2. `crates/asperitas-logging/src/defmt_log.rs`'s `DEFMT_LOG` size ladder was re-measured at the new
+   `[profile.release] debug = 2` and rewritten to stop implying monotonicity.
+
+**A finding worth your attention while you are in that module.** At `debug = 2` the `info` build is
+47,712 bytes, *below* the unset/`error` baseline of 48,320; at `line-tables-only` it was 48,304
+*above* 48,084. Each reproduced on a second clean build into a fresh target dir. Nobody has
+explained it, and TASK-054 left it alone as out of scope. If any record in `defmt_log.rs` still
+asserts that adding levels only ever grows the image, that is the sentence to fix.
+<!-- SECTION:NOTES:END -->

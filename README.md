@@ -227,10 +227,10 @@ TASK-031's job. A gap immediately after a `BOOT` record is a restart, not loss.
 
 ### Flashing and logging over an ST-Link probe
 
-The software side is in place: `make probe-*` targets, `probe-rs` 0.32.0 from the flake, release
-line tables for symbolication. What has *not* happened is a probe talking to this board —
-TASK-037 makes the first attachment and records timings. Treat these commands as ready, not
-proven.
+The software side is in place: `make probe-*` targets, `probe-rs` 0.32.0 from the flake, and a
+release profile at `debug = 2` - the only DWARF level probe-rs reads log locations out of. What
+has *not* happened is a probe talking to this board — TASK-037 makes the first attachment and
+records timings. Treat these commands as ready, not proven.
 
 ```bash
 cd firmware
@@ -241,7 +241,20 @@ make probe-rtt-list   # attach, print the RTT channel table, exit; the cheapest 
 
 All three drive the release **ELF**, never `firmware.bin`: `probe-rs` decodes `defmt` frames from the
 ELF's `.defmt` section and unwinds with its DWARF, so the host's copy has to be the one that
-built what's running. The chip string (`--chip STM32H750IBKx`) is in the Makefile.
+built what's running. Locations are the part that asks for more DWARF than symbols do - at
+`false`, `1` or `line-tables-only` it decodes the stream anyway and prints
+``Insufficient DWARF info; compile your program with `debug = 2` to enable location info.``
+without naming a file or a line. The warning lands before probe discovery, so the level is
+checkable with no board attached:
+
+```bash
+cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt" \
+  && probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --list-rtt
+```
+
+Expect `Error: No connected probes were found.` and nothing above it. Any DWARF complaint means
+`[profile.release] debug` has dropped below `2`; `firmware/Cargo.toml` carries the measured cost
+of each level. The chip string (`--chip STM32H750IBKx`) is in the Makefile.
 `DEFMT_LOG=info` is load-bearing rather than decorative: unset, defmt compiles every non-ERROR
 call to nothing and a silent channel looks exactly like a dead probe.
 

@@ -81,7 +81,11 @@ all: build
 ## llvm-objcopy's -O binary output spans from lowest VMA to highest VMA,
 ## which includes the gap between FLASH (0x08000000) and RAM (0x24000000),
 ## producing a ~469 MB file. --only-section extracts only FLASH-loadable
-## sections, giving a correct ~32 KB binary for DFU flashing.
+## sections, so the result is what flash actually holds: measured 2026-09-12
+## at `[profile.release] debug = 2`, 88,741 bytes for FEATURES="seed3" and
+## 48,320 for FEATURES="seed3 log-defmt" NO_DEFAULT=1, against the 131,072-byte
+## internal-flash budget. Treat those as measurements of this profile at this
+## commit, not constants: debug info moves .text (see firmware/Cargo.toml).
 build:
 	cargo objcopy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
 		-O binary firmware.bin \

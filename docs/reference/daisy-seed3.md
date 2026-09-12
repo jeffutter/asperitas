@@ -404,7 +404,7 @@ line, which is worse than no symbols because it looks like data. `firmware.bin` 
 DFU-only artifact. Flashing a raw binary over the probe would also need
 `--binary-format bin --base-address 0x08000000`, adding one more way to confuse the two.
 
-Two things gate whether a probe command gets anywhere, both found by running them against
+Three things gate whether a probe command gets anywhere, all three found by running them against
 built artifacts rather than at the bench:
 
 - **Only a `log-defmt` ELF loads at all.** `build.rs` passes `-Tdefmt.x` for that feature,
@@ -418,6 +418,29 @@ built artifacts rather than at the bench:
   as a broken probe. The facade's runtime `set_max_level(Info)` cannot compensate: the arm
   that would have shipped the record isn't in the binary. Ask for the level you want when you
   build — `DEFMT_LOG=info` above is load-bearing, not decoration.
+- **Locations need the release profile at `debug = 2`.** Symbols and unwinding come from any
+  DWARF, but the file:line on each decoded `defmt` record does not: at `false`, `1` or
+  `line-tables-only`, probe-rs decodes the stream anyway and announces what it left out
+  (measured 2026-09-12, probe-rs 0.32.0, against a boardless `log-defmt` ELF):
+
+  ```text
+  WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.
+  Error: No connected probes were found.
+  ```
+
+  The `WARN` comes *before* probe discovery, so that ordering is what makes the level checkable
+  with no board: the warning present means locations absent, and rc=1 afterwards is just the
+  missing probe. `firmware/Cargo.toml`'s `[profile.release]` comment carries the measured cost
+  of the four levels and why this one is chosen; if that `WARN` ever reappears, someone lowered
+  the level. Check it in one line:
+
+  ```bash
+  cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt" \
+    && probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --list-rtt
+  ```
+
+  Expect only `Error: No connected probes were found.` Anything else about DWARF is a profile
+  regression, not a bench problem.
 
 **Three regimes an RTT stream runs in,** predictable from the mode bit alone. `defmt-rtt`
 inits its up-channel to `NON_BLOCKING_TRIM` (`src/lib.rs:113`); probe-rs flips it to
@@ -615,7 +638,7 @@ recipes and nowhere else.
 | Command | probe-rs rc | `make` rc | stderr |
 |---|---|---|---|
 | `probe-rs download … --non-interactive` (what `make probe-flash` runs) | 1 | 2 | `Error: No connected probes were found.` |
-| `probe-rs attach … --non-interactive --list-rtt` (`make probe-rtt-list`) | 1 | 2 | the same string, one line after ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` |
+| `probe-rs attach … --non-interactive --list-rtt` (`make probe-rtt-list`) | 1 | 2 | the same string alone. A ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` line one row above it means the release profile has dropped below `debug = 2`, so locations are off: see the third gate under *Flashing and logging over an ST-Link probe*. Measured both ways on 2026-09-12. |
 | `probe-rs list` | 0 | n/a | `No debug probes were found.` |
 | `make probe-log` or `make probe-rtt-list` with an ELF behind the sources | never runs | 2 | `<ELF> is older than <path>`, and no probe-rs output whatsoever |
 
@@ -630,9 +653,10 @@ Two different strings for two different questions, and they are not interchangea
 `download` plus an empty `list` means the host sees no probe at all (cable, udev rules, a V3 still
 counting as MassStorage), while rc=1 with any other message means it found one and something else
 failed. And unlike dfu-util's 74 (*Notes* under *Flashing the Seed3*), rc here means what it says:
-nonzero failed, zero worked. The `WARN` line comes from `debug = "line-tables-only"` in
-`firmware/Cargo.toml` and is TASK-054's to settle; it is quoted only so that whatever matches on
-stderr knows it will be there.
+nonzero failed, zero worked. Until TASK-054 the `attach` row also carried a `WARN` line naming
+the DWARF level; `[profile.release] debug = 2` in `firmware/Cargo.toml` silenced it, so if that
+line ever reappears somebody lowered the level. It is quoted above only so that whatever matches
+on stderr knows what to match.
 
 **Capturing without a TTY.** No new target; it is `probe-log` with flags composed through
 `PROBE_EXTRA`. The ELF has to already exist and match the image on the board, because `probe-log`
