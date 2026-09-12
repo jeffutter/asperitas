@@ -133,6 +133,11 @@ the core is running and the fault is downstream.
   since 74 is also returned for genuine download I/O errors. `make flash` keys on
   dfu-util's own `File downloaded successfully` marker instead and prints `Flashed and
   started` or `FLASH FAILED`; trust that line, not the dfu-util noise above it.
+- **The probe path's exit code means what it says**, which is the one place the two flashing
+  routes agree on nothing else: with no probe attached, `probe-rs download` and `probe-rs attach`
+  both exit **1** printing `Error: No connected probes were found.` The full contract, including
+  the different string `probe-rs list` prints for the same empty bench, is in
+  [*Running the probe path unattended*](#running-the-probe-path-unattended).
 - **DFU mode is not sticky.** Once a flashed app boots, the bootloader is gone. Repeat
   BOOT+RESET before *every* flash, or dfu-util reports `No DFU capable USB device
   available`.
@@ -363,23 +368,26 @@ DEFMT_LOG=info make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1
 make probe-log
 ```
 
-Expanded (`make -n probe-flash probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1`):
+Expanded (`make -n probe-flash probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1`, with the
+`elf-check` lines that guard `probe-log` left out):
 
 ```
 cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
-probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --connect-under-reset --verify --reset
-probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx
+probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --connect-under-reset --verify --reset
+probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive
 ```
 
-There is a third target, `probe-run`: flash, then stay attached and stream. The names don't
+There are two more targets. `probe-run` flashes and then stays attached to stream; `probe-rtt-list`
+attaches, prints the RTT channel table and exits. The names don't
 show the difference that matters, so: **`probe-flash` exits when it's done**, which is what an
 unattended loop wants, while `probe-run` and `probe-log` hold the attachment and stream until
 you interrupt them. `probe-flash`'s `--verify` is genuine read-back verification by probe-rs —
 don't port the `File downloaded successfully` grep from the DFU recipe to this path; that idiom
 exists only because dfu-util reports failure on success. `probe-log` compiles nothing and resets
-nothing — it reads the ELF from the previous build to find the RTT control block, so rebuild
-first if the firmware changed, and don't expect `FEATURES` or `DEFMT_LOG` on that line to do
-anything. There is deliberately no
+nothing — it reads the ELF from the previous build to find the RTT control block — and it
+*refuses to run* rather than warning if any source is newer than that ELF, because a decoder behind
+the sources mislabels live output into something that looks like data. Don't expect `FEATURES` or
+`DEFMT_LOG` on that line to do anything either: the recipe runs no compiler. There is deliberately no
 `runner` in `.cargo/config.toml`, even though upstream daisy-embassy ships one: a runner lets
 `cargo run` in a script, or an editor action, silently reach for the probe.
 
@@ -522,7 +530,7 @@ Expanded (`make -n probe-flash UNDER_RESET=0 FEATURES="seed3 log-defmt" NO_DEFAU
 
 ```
 cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
-probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx  --verify --reset
+probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive  --verify --reset
 ```
 
 `UNDER_RESET=0` drops the flag from `probe-flash` and `probe-run` only; the default expansion is
@@ -581,6 +589,134 @@ still enumerating in MassStorage mode — before suspecting a supervisor that no
 That does not retire the try-both-ways advice above. probe-rs's FAQ recommends it regardless of circuit,
 because some parts simply don't support being attached under reset; a clean bill of electrical health
 for the reset net removes one suspect, not the whole class.
+
+#### Running the probe path unattended
+
+Everything above assumes a person types the command and watches the terminal. A driver that isn't a
+person needs more of it said out loud: what it must never block on, what success looks like in
+numbers, how to capture output with no TTY, which levers exist when programming itself goes wrong,
+how to name one probe when the bench has several, and which command is cheap enough to run first.
+All of it below was measured against the pinned `probe-rs-tools` 0.32.0 **with nothing
+attached to the bench**, so every line is reproducible here without hardware. None of it is a claim
+about this board; that stays TASK-037's.
+
+**No prompts, ever.** Every probe recipe passes `--non-interactive` ("Disable interactive probe
+selection", env `PROBE_RS_NON_INTERACTIVE`). Without it, probe-rs asks the terminal which probe to
+use the moment a second one is present, and an unattended run waits forever on a question nobody is
+there to answer. Today exactly one probe exists so nobody has seen the prompt; the flag is there for
+the day that stops being true. It is unconditional rather than a knob because prompting is never
+useful to a scripted driver, and someone who does want a particular probe names it up front
+(`--probe`, below) instead of answering a dialog. `probe-rs list` rejects the flag outright
+(`error: unexpected argument '--non-interactive' found`, rc=2), which is why the flag appears in the
+recipes and nowhere else.
+
+**Exit codes, measured with nothing attached:**
+
+| Command | probe-rs rc | `make` rc | stderr |
+|---|---|---|---|
+| `probe-rs download … --non-interactive` (what `make probe-flash` runs) | 1 | 2 | `Error: No connected probes were found.` |
+| `probe-rs attach … --non-interactive --list-rtt` (`make probe-rtt-list`) | 1 | 2 | the same string, one line after ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` |
+| `probe-rs list` | 0 | n/a | `No debug probes were found.` |
+| `make probe-log` or `make probe-rtt-list` with an ELF behind the sources | never runs | 2 | `<ELF> is older than <path>`, and no probe-rs output whatsoever |
+
+Two layers of exit code, because `make` turns any nonzero recipe status into its own 2. A driver
+that shells out to `make` therefore sees rc=2 for "no probe" *and* for "stale ELF": only the stderr
+separates them, so match on the message rather than the number. Calling `probe-rs` directly removes
+the ambiguity.
+
+Two different strings for two different questions, and they are not interchangeable evidence.
+`list` reports what enumeration found and exits 0 whether or not anything answered; `download` and
+`attach` exit 1 because they cannot do their job without a probe. Read them in that order: rc=1 from
+`download` plus an empty `list` means the host sees no probe at all (cable, udev rules, a V3 still
+counting as MassStorage), while rc=1 with any other message means it found one and something else
+failed. And unlike dfu-util's 74 (*Notes* under *Flashing the Seed3*), rc here means what it says:
+nonzero failed, zero worked. The `WARN` line comes from `debug = "line-tables-only"` in
+`firmware/Cargo.toml` and is TASK-054's to settle; it is quoted only so that whatever matches on
+stderr knows it will be there.
+
+**Capturing without a TTY.** No new target; it is `probe-log` with flags composed through
+`PROBE_EXTRA`. The ELF has to already exist and match the image on the board, because `probe-log`
+builds nothing and refuses if the ELF is behind the sources.
+
+```bash
+cd firmware
+DEFMT_LOG=info make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1  # build and program once
+make probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 \
+  PROBE_EXTRA="--no-timestamps --log-format oneline --target-output-file defmt=out.txt"
+```
+
+Expanded (`make -n probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 PROBE_EXTRA="--no-timestamps --log-format oneline --target-output-file defmt=out.txt"`):
+
+```
+probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --no-timestamps --log-format oneline --target-output-file defmt=out.txt
+```
+
+`--target-output-file <channel>=<path>` writes probe-rs's *formatted* output for one channel to a
+file; repeat it per channel, and prefix a name with `rtt:` or `semihosting:` when a channel name is
+ambiguous (`semihosting:stdout`). `--no-timestamps` suppresses the leading timestamps and
+`--log-format oneline` picks probe-rs's one-line preset rather than a custom format string. Two
+things this is not: it is not probe-rs's own debug log, which is separate (`--log-file <path>`, or
+`--log-to-folder` for the default location), and it is not a raw byte capture the way
+`cat /dev/ttyACM0 > capture.bin` is for the USB console. A rig that wants bytes off this channel
+takes the stdout stream, not that file.
+
+Which flags belong where matters, because `PROBE_EXTRA` composes into whichever recipe it is given:
+`--disable-progressbars`, `--disable-double-buffering` and `--read-flasher-rtt` exist on `download`
+and `run` only. Passing one to `attach` is a usage error (rc=2), so a `probe-log` composition that
+copies a `probe-run` flag set dies before it reaches the bench.
+
+**Levers when programming goes wrong.** All reachable today through `PROBE_EXTRA`, none needing an
+edit to the Makefile.
+
+| Flag | On | What it is for |
+|---|---|---|
+| `--cycle-power` | download, run, attach | Cycles the probe's power before attaching (help: "Whether to cycle usb power before run", env `PROBE_RS_CYCLE_POWER`). For a target left in a state a reset alone doesn't clear. Costs a power-on, so it belongs on the second attempt, not the first. |
+| `--read-flasher-rtt` | download, run | Also read the RTT output the flash algorithm emits (help: "Whether to read the RTT output from the flash loader, if available") — for when what needs seeing is the programmer's progress rather than the application's. |
+| `--dry-run` | download, run, attach | Env `PROBE_RS_DRY_RUN`; 0.32.0 gives it no help text at all. A string in the binary, `Skipping programming, dry run!`, says it stops short of programming. Whether the erase happens before that point is unmeasured, and an erase here takes the whole application: **not a safe rehearsal until someone measures it.** |
+| `--disable-double-buffering` | download, run | Help: "Use this flag to disable double-buffering when downloading flash data. If download fails during programming with timeout errors, try this option". Read with pyOCD #1700 below. Passing it makes probe-rs say so out loud (`Disabled double-buffering support for loader via passed option, though target supports it.`), so you can tell the flag took effect. |
+
+**Why `--verify` is load-bearing, not decorative.** pyOCD issue
+[#1700](https://github.com/pyocd/pyOCD/issues/1700), "STM32H750 flash corruption with double
+buffering enabled" (opened 2024-06-11, closed as completed 2025-08-13), is the closest published
+account of what a bad download looks like on this part. A 30 kB image came back corrupted on roughly
+one attempt in five "without any type of sign that something went wrong", the diff showing pages only
+partially written with the tail left `0xff`; the reporter traced it to double buffering alone, under
+either erase mode, and separately measured the same loader failing "after on average 2 programmings"
+against 100 consecutive successes with a different flash algorithm for the same chip. A second
+reporter hit the same symptoms programming an STM32H750 **on a Daisy Seed**, with a success rate of
+"about one out of three tries" across three different probes, while OpenOCD programmed and verified
+the same bench flawlessly. pyOCD's maintainer closed it by disabling double buffering for flash
+algorithms by default (v0.38.0), blaming stalls from bus-related effects on devices with strict
+timing constraints such as STM32H7xx. Keep the inference the size of the evidence: pyOCD runs its own flash
+algorithm loader, so this is about the technique and the chip, not about probe-rs's implementation.
+What it does establish is the shape of the failure, silent partial writes, and the complaint
+underneath it, that nothing in that tool chain checked the flash afterwards. That is the argument
+for `--verify` on `probe-flash`: on a part whose internal flash is one 128 KB sector, a short write
+is a board that boots wrong or not at all, and read-back is the only thing standing between that and
+a wrong conclusion about the firmware. So when a download times out, pull
+`--disable-double-buffering` before suspecting the bench, and don't add a flash recipe that drops
+`--verify`.
+
+**More than one probe on the bench.** Pin it rather than let the tool choose: `--probe VID:PID`, or
+`VID:PID:Serial` when two probes share a VID:PID; multi-channel FTDI parts (FT2232H) take
+`VID:PID-INTERFACE` for the channel, e.g. `--probe 0403:6010-1` is channel B. Environment
+equivalents cover everything used here (`PROBE_RS_PROBE`, `PROBE_RS_CHIP`, `PROBE_RS_SPEED`,
+`PROBE_RS_CONNECT_UNDER_RESET`, `PROBE_RS_CYCLE_POWER`, `PROBE_RS_NON_INTERACTIVE`). A shared rig is
+better served by a `[presets]` entry in a probe-rs config file, selected with `--preset NAME` or
+`PROBE_RS_CONFIG_PRESET`, because it names the probe-chip pair once instead of scattering IDs through
+scripts. Precedence is probe-rs's own sentence, verbatim and broken in the original: "Manually
+specified command line arguments take overwrite presets, but presets take precedence over environment
+variables." CLI beats preset beats env, so an environment variable cannot override a preset, only a
+command-line flag can.
+
+**First thing to run at a bench: `make probe-rtt-list`.** It attaches, prints the RTT channel table,
+and exits. It doesn't reflash, so it can't erase the single 128 KB sector, and it doesn't sit there
+streaming, so it is as close to a read-only look as SWD allows. When RTT shows nothing for one of the
+several reasons it goes quiet (core asleep, D-cache over the control block, wrong ELF, no `.defmt`
+section), this is the cheapest question worth asking, from a shell or from a script. With nothing
+attached it produces the exit-code contract above, which makes it the way to check that a rig's probe
+plumbing works before anything that could take the board down. Like `probe-log` it needs a current
+ELF and builds nothing.
 
 ### What each channel loses
 

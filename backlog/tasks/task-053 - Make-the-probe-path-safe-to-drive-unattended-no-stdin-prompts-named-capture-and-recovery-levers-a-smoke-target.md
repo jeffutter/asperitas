@@ -3,11 +3,11 @@ id: TASK-053
 title: >-
   Make the probe path safe to drive unattended: no stdin prompts, named capture
   and recovery levers, a smoke target
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-12 07:05'
-updated_date: '2026-09-12 07:33'
+updated_date: '2026-09-12 09:31'
 labels:
   - planned
 dependencies: []
@@ -37,13 +37,13 @@ Also worth shipping here: a `--list-rtt` smoke target. `probe-rs attach <ELF> --
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All three probe recipes pass --non-interactive and `probe-rs list` does not gain it. Prove it two ways: the `make -n probe-flash probe-run probe-log` expansions contain the flag, and `make -n build flash flash-all check` is byte-identical to the pre-change expansion apart from empty-variable spacing.
-- [ ] #2 `probe-log` can no longer silently decode a running board with a stale ELF: it either builds the ELF first or fails loudly when a source is newer than the ELF. The chosen mechanism is stated in one Makefile comment line, and the prose-only warning it replaces is gone.
-- [ ] #3 A scripted (non-TTY) capture invocation is documented and proven to expand via `make -n`, and the probe path records its exit-code contract as measured on this machine: the command, the numeric rc, and the verbatim stderr string for the no-probe case, kept distinct from `probe-rs list` wording and placed beside the existing dfu-util exit-74 note.
-- [ ] #4 docs/reference/daisy-seed3.md gains an `#### Running the probe path unattended` subsection that names --cycle-power, --read-flasher-rtt, --dry-run and --disable-double-buffering with what each is for (pyOCD #1700 cited for the last, with what it implies for --verify), plus multi-probe pinning via --probe / PROBE_RS_* / [presets] and the measured CLI > preset > env precedence. No existing heading is renamed, so the anchors from rust-daisy-stack.md:108-109 and README.md:247 still resolve.
-- [ ] #5 A make target runs `probe-rs attach ... --list-rtt` and exits, reachable with no board attached and expanding correctly under `make -n`.
-- [ ] #6 Every probe command printed in docs/ and README.md matches `make -n` output modulo whitespace, reported as a count as TASK-036.04 did.
-- [ ] #7 Host gates green in nix develop: fmt, the four clippy invocations, both RUSTDOCFLAGS=-D warnings doc runs, cargo test --workspace, and both firmware cross-compiles from ci.yml.
+- [x] #1 All three probe recipes pass --non-interactive and `probe-rs list` does not gain it. Prove it two ways: the `make -n probe-flash probe-run probe-log` expansions contain the flag, and `make -n build flash flash-all check` is byte-identical to the pre-change expansion apart from empty-variable spacing.
+- [x] #2 `probe-log` can no longer silently decode a running board with a stale ELF: it either builds the ELF first or fails loudly when a source is newer than the ELF. The chosen mechanism is stated in one Makefile comment line, and the prose-only warning it replaces is gone.
+- [x] #3 A scripted (non-TTY) capture invocation is documented and proven to expand via `make -n`, and the probe path records its exit-code contract as measured on this machine: the command, the numeric rc, and the verbatim stderr string for the no-probe case, kept distinct from `probe-rs list` wording and placed beside the existing dfu-util exit-74 note.
+- [x] #4 docs/reference/daisy-seed3.md gains an `#### Running the probe path unattended` subsection that names --cycle-power, --read-flasher-rtt, --dry-run and --disable-double-buffering with what each is for (pyOCD #1700 cited for the last, with what it implies for --verify), plus multi-probe pinning via --probe / PROBE_RS_* / [presets] and the measured CLI > preset > env precedence. No existing heading is renamed, so the anchors from rust-daisy-stack.md:108-109 and README.md:247 still resolve.
+- [x] #5 A make target runs `probe-rs attach ... --list-rtt` and exits, reachable with no board attached and expanding correctly under `make -n`.
+- [x] #6 Every probe command printed in docs/ and README.md matches `make -n` output modulo whitespace, reported as a count as TASK-036.04 did.
+- [x] #7 Host gates green in nix develop: fmt, the four clippy invocations, both RUSTDOCFLAGS=-D warnings doc runs, cargo test --workspace, and both firmware cross-compiles from ci.yml.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -154,3 +154,96 @@ under double buffering, drop the citation and keep only probe-rs's own help text
 `--disable-double-buffering`. Same rule for any issue number inherited from a ticket description - cite what
 the page actually says, not what the ticket asserts.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## What shipped
+
+firmware/Makefile: `--non-interactive` on all four probe recipes (`probe-flash`, `probe-run`,
+`probe-log`, new `probe-rtt-list`); new `elf-check` target that fails rather than warns when an input
+to the ELF is newer than it, wired as a prerequisite of `probe-log` and `probe-rtt-list`; the old
+prose-only "build first if the firmware changed" sentence deleted. docs/reference/daisy-seed3.md: new
+`#### Running the probe path unattended` under the existing `###` probe heading (no heading renamed, so
+rust-daisy-stack.md's two anchors still resolve). README.md: mirrored commands plus the stale-ELF
+refusal.
+
+## Measured, not asserted (probe-rs 0.32.0 pinned build, nothing attached)
+
+- AC1: `make -n probe-flash probe-run probe-log probe-rtt-list FEATURES="seed3 log-defmt"
+  NO_DEFAULT=1` shows the flag on all four. `probe-rs list --non-interactive` exits 2 with
+  "error: unexpected argument '--non-interactive' found". DFU guard: `make -n build flash flash-all
+  check` against the same command run on `git show HEAD:firmware/Makefile` is byte-identical, not
+  merely whitespace-normalised.
+- AC3: the capture composition expands to exactly the line printed in the doc, character for
+  character: `probe-rs attach .../main --chip STM32H750IBKx --non-interactive --no-timestamps
+  --log-format oneline --target-output-file defmt=out.txt`. Exit codes re-measured this run:
+  `probe-rs download` rc=1 with "Error: No connected probes were found."; `probe-rs attach --list-rtt`
+  rc=1, same string one line after the DWARF WARN; `probe-rs list` rc=0 with "No debug probes were
+  found."
+- AC5: `make probe-rtt-list FEATURES="seed3 log-defmt" NO_DEFAULT=1` reaches probe-rs with no board and
+  dies there (probe-rs rc=1, make reports 2). `make elf-check` was separately seen to fail closed
+  before probe-rs runs at all.
+- AC6: every `probe-rs` line inside fenced blocks in docs/ and README.md diffed against live `make -n`
+  expansions, whitespace-normalised: 4 of 4 match. The two non-matching lines in those blocks are not
+  probe-path recipes (a blinky `cargo objcopy` "or manually" example at daisy-seed3.md:106, and
+  `cargo build -p asperitas-cli -p asperitas-dsp` in README).
+- AC7: the full ci.yml gate script inside `nix develop .#default`: fmt, the four clippy invocations,
+  both RUSTDOCFLAGS=-D warnings doc runs, `cargo test --workspace`, the pod-hw test pass,
+  dump_reassemble selftest, and both firmware cross-compiles -> ALL GATES GREEN, outer rc=0. Makefile
+  edits cannot reach the compiler; said with the numbers anyway: 20 test binaries, 0 failures.
+
+## Two corrections to the plan, both from measuring
+
+1. **The exit-code table had the wrong layer.** It listed `make probe-flash` with rc 1, but make turns
+   any nonzero recipe status into its own 2: measured `make probe-flash` -> 2, `make probe-log` -> 2,
+   `make probe-rtt-list` -> 2, each with probe-rs itself exiting 1. A stale-ELF refusal is also rc=2,
+   with probe-rs never running. The table now carries separate `probe-rs rc` and `make rc` columns and
+   says plainly that rc alone cannot distinguish "no probe" from "stale ELF" when driven through make.
+2. **pyOCD #1700 was re-read**, which the plan asked for. Fetched through the GitHub API: opened
+   2024-06-11 by nattgris, closed as completed 2025-08-13 by TeoMahnic, who disabled double buffering
+   for flash algorithms by default (v0.38.0) and blamed stalls from bus-related effects on devices with
+   strict timing constraints such as STM32H7xx. Every claim in the paragraph holds, with three
+   tightenings made while citing: the second reporter (newbrain, programming an STM32H750 on a Daisy
+   Seed) reported a success rate of "about one out of three tries", not "failing twice in three";
+   probe-rs's `--disable-double-buffering` help text is now quoted in full instead of from mid-sentence;
+   and the reporter's own datapoint of 100 consecutive successes with a different flash algorithm
+   versus a loader that "failed after on average 2 programmings" is included, because it is the
+   strongest evidence that the failure lives in the flash algorithm rather than the tool.
+
+## Follow-up filed
+
+TASK-056: `elf-check` uses `find -newer`, so a bulk mtime refresh (git checkout, stash pop, worktree
+operations) makes it fail on a tree that is byte-identical to what built the ELF. Hit for real during
+this ticket: ELF mtime 1789201869892003000 versus sources at 1789201885874687000 with a clean
+`git status`. Recoverable through the printed one-liner, so it blocked nothing here; the fix is a
+content digest stamped at build time, which cannot see mtimes at all.
+
+## Working tree note
+
+Three backlog files unrelated to this ticket (task-038.03, task-038.03.02, task-038.03.02.02) carry
+uncommitted edits that predate this run by hours and were left by earlier sessions. Left untouched and
+out of this commit, matching the convention that a commit carries only its own task file.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Probe path is now safe to drive with nobody watching. All four probe recipes pass `--non-interactive`
+unconditionally (`probe-rs list` rejects that flag, so it stays out of every other recipe), `probe-log`
+and the new `probe-rtt-list` smoke target depend on a new `elf-check` that fails closed rather than
+warning when the ELF on disk is behind the sources, and docs/reference/daisy-seed3.md gained
+`#### Running the probe path unattended`: the measured exit-code contract for both flashing routes kept
+distinct from `probe-rs list`'s wording, a proven non-TTY capture invocation, the four recovery levers
+with what each is for, multi-probe pinning with probe-rs's own precedence sentence, and pyOCD #1700
+re-read at the source before quoting. README mirrors the user-visible commands.
+
+Verification was measurement, not prose: DFU expansion byte-identical to HEAD, 4 of 4 documented
+probe command lines matching live `make -n` output, the capture line matching its expansion character
+for character, and every ci.yml host gate green (outer rc=0). Measuring turned up two defects in the
+plan as written: the exit-code table conflated probe-rs's rc with make's (make reports 2 for both "no
+probe" and "stale ELF", only stderr separates them), and three of the pyOCD citations needed tightening
+against the actual issue thread. Both fixed here. One follow-up filed, TASK-056, because `elf-check`
+keys on mtimes and therefore fails on a clean tree after a bulk metadata refresh; observed while
+closing this ticket.
+<!-- SECTION:FINAL_SUMMARY:END -->

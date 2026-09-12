@@ -26,8 +26,8 @@ TARGET   = thumbv7em-none-eabihf
 # one: build.rs passes `-Tdefmt.x`, which consolidates the per-call-site `.defmt_*` sections into
 # it. Measured on this workspace, a console-only ELF is rejected during image load — "Failed to
 # parse defmt data: no `.defmt` section" — before probe-rs so much as looks for a probe, while a
-# `log-defmt` ELF parses cleanly and stops at "No connected probes were found". So the three
-# `probe-*` targets below are only usable with `log-defmt` in FEATURES:
+# `log-defmt` ELF parses cleanly and stops at "No connected probes were found". So every
+# `probe-*` target below is only usable with `log-defmt` in FEATURES:
 #
 # And they need a level asked for at build time. `DEFMT_LOG` unset makes defmt-macros compile
 # every non-ERROR call to nothing (see `crates/asperitas-logging/src/defmt_log.rs`), so an
@@ -72,7 +72,7 @@ ifeq ($(UNDER_RESET),0)
 UNDER_RESET_FLAG =
 endif
 
-.PHONY: all build flash flash-all clean check build-elf probe-flash probe-run probe-log clippy
+.PHONY: all build flash flash-all clean check build-elf elf-check probe-flash probe-run probe-log probe-rtt-list clippy
 
 all: build
 
@@ -139,6 +139,12 @@ flash-all: build flash
 # * `probe-flash` exits when it is done, which is what an unattended loop needs.
 #   `probe-run` and `probe-log` stay attached and stream RTT — they are the human
 #   commands. The target names do not make that difference visible, so say it here.
+# * `--non-interactive` goes on every probe command, unconditionally and not behind a knob:
+#   with a second probe on the bench probe-rs prompts on stdin to choose one, so an unattended
+#   invocation blocks forever on a question nobody is there to answer. Prompting is never useful
+#   here; someone who genuinely wants to pick interactively picks the probe up front with
+#   `PROBE_EXTRA="--probe VID:PID:SERIAL"`. Confirmed on `download`, `run` and `attach` in
+#   probe-rs 0.32.0; `probe-rs list` rejects the flag outright (usage error, rc=2).
 # * There is deliberately no `runner` in .cargo/config.toml, even though upstream
 #   daisy-embassy ships one: a runner lets `cargo run` in a script, or an editor
 #   action, silently reach for a probe.
@@ -162,23 +168,60 @@ build-elf:
 ## sidesteps the question by attaching to an already-flashed board with no reset at all.
 ## TASK-037 records which worked.
 probe-flash: build-elf
-	probe-rs download $(ELF) --chip $(CHIP) $(UNDER_RESET_FLAG) --verify --reset $(PROBE_EXTRA)
+	probe-rs download $(ELF) --chip $(CHIP) --non-interactive $(UNDER_RESET_FLAG) --verify --reset $(PROBE_EXTRA)
 
 ## Flash, then stay attached and stream RTT/defmt. Interactive use — the loop wants
 ## probe-flash, which exits.
 probe-run: build-elf
-	probe-rs run $(ELF) --chip $(CHIP) $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
+	probe-rs run $(ELF) --chip $(CHIP) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
+
+# Inputs whose bytes end up in $(ELF), so a newer one means the ELF on disk is not the one your
+# sources describe. Not `git status`: a dirty tree says nothing about this particular artifact.
+# Registry crates come in through Cargo.lock/Cargo.toml, both listed; `../crates` is pruned at
+# any `target` directory so build products can't trip the check.
+ELF_INPUTS = src build.rs memory.x Cargo.toml Cargo.lock ../crates
+
+## Fail if any input to $(ELF) is newer than it.
+##
+## A check and never a build: whether the ELF matches the sources is knowable here, whether it
+## matches the image on the board is not, and rebuilding would overwrite the only host copy of
+## the symbols describing whatever is running right now.
+elf-check:
+	@test -f $(ELF) || { \
+		echo "no $(ELF) - run 'make build-elf' with the FEATURES and NO_DEFAULT you mean to flash" >&2; \
+		exit 1; \
+	}
+	@stale=$$(find $(ELF_INPUTS) \( -name target -prune \) -o \
+		\( -type f \( -name '*.rs' -o -name '*.x' -o -name 'Cargo.toml' -o -name 'Cargo.lock' \) \
+		-newer $(ELF) -print -quit \) ); \
+	if [ -n "$$stale" ]; then \
+		echo "$(ELF) is older than $$stale" >&2; \
+		echo "an ELF behind your sources describes neither the board nor your edit, and decoding a live stream with it produces output that looks like data. Flash the current build instead - 'make probe-run' flashes and streams in one step." >&2; \
+		echo "If only timestamps moved, as after a git checkout, force a relink: rm -f $(ELF) && make build-elf." >&2; \
+		exit 1; \
+	fi
 
 ## Attach to an already-flashed board and stream RTT/defmt without reflashing or
 ## resetting. Needs the ELF from a prior build to locate the RTT control block and
-## decode defmt, so build first if the firmware changed.
+## decode defmt.
+##
+## `elf-check` enforces that rather than warning about it: the ELF is the decoder, so a stale one
+## silently mislabels live output. This target still builds nothing, on purpose (see `elf-check`).
 ##
 ## If anything here ever waits in WFI, STM32 parts need DBG_SLEEP/DBG_STANDBY/
 ## DBG_STOP set in DBGMCU_CR or RTT's control block is never discovered (probe-rs
 ## #350). Nothing sleeps today — the embassy executor busy-loops — so do not add an
 ## idle path without reading that.
-probe-log:
-	probe-rs attach $(ELF) --chip $(CHIP) $(PROBE_EXTRA)
+probe-log: elf-check
+	probe-rs attach $(ELF) --chip $(CHIP) --non-interactive $(PROBE_EXTRA)
+
+## Is RTT discoverable at all? Attach, print the RTT channel table, exit.
+##
+## The cheapest bench question there is: it neither erases the single 128 KB sector nor requires
+## the host to keep up with the ring, so it can fail without costing anything. Run it before
+## anything that takes the board down. Like `probe-log` it builds nothing, for the same reason.
+probe-rtt-list: elf-check
+	probe-rs attach $(ELF) --chip $(CHIP) --non-interactive --list-rtt $(PROBE_EXTRA)
 
 ## Check compilation without producing artifacts
 check:

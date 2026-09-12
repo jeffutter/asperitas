@@ -235,14 +235,19 @@ proven.
 ```bash
 cd firmware
 DEFMT_LOG=info make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1  # build, program, verify read-back, reset, exit
-make probe-log   # attach and stream RTT; no reflash, no reset
+make probe-log        # attach and stream RTT; no reflash, no reset
+make probe-rtt-list   # attach, print the RTT channel table, exit; the cheapest bench question
 ```
 
-Both drive the release **ELF**, never `firmware.bin`: `probe-rs` decodes `defmt` frames from the
+All three drive the release **ELF**, never `firmware.bin`: `probe-rs` decodes `defmt` frames from the
 ELF's `.defmt` section and unwinds with its DWARF, so the host's copy has to be the one that
 built what's running. The chip string (`--chip STM32H750IBKx`) is in the Makefile.
 `DEFMT_LOG=info` is load-bearing rather than decorative: unset, defmt compiles every non-ERROR
 call to nothing and a silent channel looks exactly like a dead probe.
+
+`probe-log` and `probe-rtt-list` compile nothing and *refuse to run* if any source is newer than
+that ELF, because a decoder behind your sources mislabels live output rather than failing. Flash
+the current build with `make probe-run` when that fires.
 
 `docs/reference/daisy-seed3.md` has the rest — why the probe path takes the ELF, what RTT does
 when no host is attached versus when the host stalls, and the rule that follows from that:
