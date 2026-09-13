@@ -30,7 +30,7 @@ relitigated.
 | Debug probe | **None for the first few weeks.** Flash by DFU over USB-C; debug over USB CDC serial with Pod LEDs as boot-stage fallback. `probe-rs` + `defmt` slots in later without rework |
 | Desktop tooling | WAV CLI first, then live `cpal` TUI, then analysis output, then a CPU-cost harness |
 | Test corpus | Real instrument recordings **committed to git**, alongside synthetic signals |
-| CI | `lefthook` locally **and** GitHub Actions |
+| CI | `lefthook` locally **and** GitHub Actions. Pre-commit is the one that runs on every commit; CI is pre-push plus one priced check deliberately kept off the hook (see §5) |
 
 ### Assumptions made without asking
 
@@ -113,8 +113,14 @@ asperitas/
 **Two workspaces, deliberately.** A single workspace cannot cleanly hold both host and
 `thumbv7em` targets — `forced-target` is unstable, and a workspace-wide
 `[build] target` breaks the host crates. `firmware/` is excluded from the root workspace
-and carries its own `.cargo/config.toml`. The cost is `cargo test` at the root not
-covering firmware; the pre-push hook and CI compensate by cross-compiling explicitly.
+and carries its own `.cargo/config.toml`. The cost is that nothing reaches `firmware/` by
+default: `cargo fmt --all`, `cargo clippy --workspace`, `cargo doc` and `cargo test` at the
+root all stop at that exclusion, so each needs a second invocation naming the firmware
+workspace, and those exist now (`fmt-check-firmware`, the `clippy-firmware` pair, CI's two
+firmware clippy steps). Tests remain the honest gap: a `no_std` target has no test harness to
+link, so over there correctness is carried by the cross-compile, the lints, and the bench.
+TASK-060 is what the ungated version looked like - `rig.rs` sat unformatted for days while
+root `cargo fmt --all --check` exited 0.
 
 ### The `Processor` boundary
 
@@ -222,16 +228,30 @@ embedded target.
 
 ### lefthook
 
-- **pre-commit** — `rustfmt --check` and `clippy` on changed crates. Fast enough not to
-  be resented.
-- **pre-push** — full `fmt` + `clippy -D warnings` across both workspaces, full test
-  suite, and a `--target thumbv7em-none-eabihf` build. The cross-compile check is the
-  important one: without it the firmware silently rots while all the work happens on
-  desktop.
+Both hooks run their whole command set rather than a changed-files subset, and no lint job
+uses lefthook's `root:` key - it filters paths, and a job whose filtered set is empty exits 0
+without running anything. Costs are local warm figures on aarch64-darwin.
+
+- **pre-commit** - about 1.5 s: `doc-artifact-names`; `fmt` and `fmt --check` on the firmware
+  workspace; `clippy -D warnings` on the host workspace plus the two feature-gated
+  `asperitas-logging` transports; and cross-target `clippy -D warnings` over all six firmware
+  bins in both cfg sets (20 s on a fresh target dir, ~2 s once dependencies exist). Fast enough
+  not to be resented, and it is the only gate the autonomous commit loop reliably executes.
+- **pre-push** - about 75 s, of which `cargo test --workspace` alone is 67 s. Everything
+  pre-commit runs, plus `cargo doc` twice under `RUSTDOCFLAGS=-D warnings`, the full test suite,
+  the `pod-hw` clippy, `dump_reassemble --selftest`, and both firmware cross-compiles (console
+  and RTT-only). The cross-compile is the important one: without it the firmware silently rots
+  while all the work happens on desktop.
 
 ### CI
 
-GitHub Actions re-runs the pre-push set. Same checks, but immune to `--no-verify`.
+GitHub Actions runs a superset of pre-push. Exactly one check lives only there:
+`cargo test --workspace --features asperitas-pod/pod-hw`, 67 s local warm - more than every
+other pre-push command combined, spent re-running the host suite under one non-default flag
+whose compile-time half is already gated here. Priced and recorded in TASK-060.04, taking the
+same split TASK-018.01's fixup made deliberately (`c44b9c1`). Reopen it if pushes become
+routine or the commit loop starts pushing. CI stays the authority either way, immune to
+`--no-verify`.
 
 ---
 
@@ -300,7 +320,7 @@ would need hardware in the loop.
 | No prior DSP experience | Medium | From-scratch on `dasp` is the *learning* choice, not the fast one. Analysis output makes behaviour visible. Resonators are the right first algorithm — a comb filter is a delay line plus feedback |
 | CPU headroom exhausted late | Medium | CPU-cost harness in M7 is arguably too late; if voice counts start feeling ambitious, pull it forward |
 | Committed audio corpus bloats the repo | Low | Short mono clips, deliberate regeneration only |
-| Two-workspace friction | Low | Pre-push and CI cross-compile explicitly, so the firmware can't rot unnoticed |
+| Two-workspace friction | Low | Every root-level cargo command stops at the exclusion, so firmware gets its own invocations: fmt, cross clippy over all six bins in both cfg sets, and two cross-compiles, in pre-commit, pre-push and CI alike (TASK-060). Residuals named rather than glossed: firmware docs are ungated - `cargo doc` covers `crates/*` only - pedantic clippy lints are unadopted, and the `pod-hw` *test* runs in CI alone |
 
 ---
 

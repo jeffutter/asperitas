@@ -7,6 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-13 00:52'
+updated_date: '2026-09-13 01:02'
 labels:
   - planned
 dependencies: []
@@ -40,4 +41,6 @@ Two facts measured 2026-09-13 while TASK-060.03 ran CI's firmware section verbat
 
 <!-- SECTION:NOTES:BEGIN -->
 Discovered by TASK-060.03's executor, which hit both facts while proving the new gates and had to restore the session-start ELF digest by hand. Related but distinct: TASK-056 makes the staleness test content-based so a bulk mtime refresh cannot fail it spuriously - that ticket covers false RED, this one covers the false GREEN from cfg ambiguity plus a broken recovery path. Coordinate so one does not rewrite what the other depends on.
+
+Second reproduction while executing TASK-060.04 minutes later, same shell: pre-push's new firmware-cross-compile-rtt job left target/thumbv7em-none-eabihf/release/main at sha256 16dc9e5cdff48c3e433171060bb04c33fa137dd1fec0effd0dac6150206ee431 (9,497,564 B, RTT-only cfg) with mtime unchanged at Sep 12 19:41; 'rm -f $ELF && make build-elf' put it back to 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b (10,941,616 B, console cfg), again WITHOUT a fresh mtime, which is why 'make elf-check' stayed red afterwards. Two things this ticket owns: the name cannot tell the two cfg sets apart, and the remedy elf-check prints does not refresh the timestamp it compares.
 <!-- SECTION:NOTES:END -->

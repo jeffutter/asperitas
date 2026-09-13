@@ -57,6 +57,14 @@ pre-commit:
       forward_stderr: true
 
 pre-push:
+  # One CI check is deliberately missing here, and it is the expensive one:
+  # `cargo test --workspace --features asperitas-pod/pod-hw`, 67 s local warm -- more than every
+  # other command in this hook combined -- to re-run the whole host suite under one non-default
+  # feature flag. Its compile-time half IS here (clippy-pod-hw), so what stays in CI is runtime
+  # coverage of pod-hw code paths. Accepted because CI is the authority for that check, TASK-018.01's
+  # fixup made the same split on purpose (CI-only, commit c44b9c1), and the commit loop that writes
+  # most commits here never pushes -- pre-commit is where its work gets gated. Reopen this if pushes
+  # become routine or the loop starts pushing, and re-measure before deciding either way.
   commands:
     doc-artifact-names:
       run: scripts/check-doc-artifact-names.sh
@@ -95,6 +103,12 @@ pre-push:
       run: cd firmware && cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings
       forward_stderr: true
 
+    # pod-hw gates the hardware-backed Pod paths no default-feature build compiles. Mirrors CI; the
+    # matching test stays CI-only per the note above.
+    clippy-pod-hw:
+      run: cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings
+      forward_stderr: true
+
     # Root Cargo.toml's [workspace.lints.rustdoc] denies the two cross-reference lints for every
     # member that opts in, from the source tree only. These two commands are the other layer:
     # RUSTDOCFLAGS makes *every* rustdoc warning fatal across the whole workspace. Neither run is
@@ -112,7 +126,21 @@ pre-push:
       run: cargo test --workspace
       forward_stderr: true
 
+    # The capture decoder's own verdict: exit 0 means every block the synthetic captures promised,
+    # they proved. Exercises the shipped read/decode/assemble path, so it needs no board. ~0 s.
+    dump-reassemble-selftest:
+      run: cargo run -p asperitas-logging --example dump_reassemble -- --selftest
+      forward_stderr: true
+
     firmware-cross-compile:
       root: "firmware/"
       run: cargo build --release --features seed3
+      forward_stderr: true
+
+    # The RTT-only image links build.rs's `-Tdefmt.x` fragment and the logger stubs the console build
+    # leaves uncompiled. `cd` rather than this job's sibling's `root: "firmware/"`: that filters
+    # paths, and lefthook skips a command whose filtered set is empty with exit 0, so a toolchain
+    # bump touching no firmware file would pass without building anything. ~1 s warm.
+    firmware-cross-compile-rtt:
+      run: cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt"
       forward_stderr: true
