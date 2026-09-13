@@ -3,11 +3,11 @@ id: TASK-061.01
 title: >-
   Write scripts/gates.sh: the gate set defined once, with cumulative
   commit/push/ci tiers
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-13 03:09'
-updated_date: '2026-09-13 03:10'
+updated_date: '2026-09-13 03:52'
 labels:
   - planned
 dependencies: []
@@ -27,13 +27,13 @@ Additive work: nothing invokes the script yet, so this commit cannot break a bui
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 scripts/gates.sh exists and is executable, anchors itself to the repo root via BASH_SOURCE rather than trusting the caller cwd, runs its tier sequentially cheapest-first, fails fast naming the gate that died, defaults to ci when no tier argument is given, and exits non-zero on an unknown tier or on a tier that matched zero gates.
-- [ ] #2 Tier membership equals the three current lists exactly - 9 pre-commit gates, 16 pre-push, 17 CI - with "cargo test --workspace --features asperitas-pod/pod-hw" the only single-tier item, carrying over the priced exception recorded at lefthook.yml:65-73 including its reopen condition (TASK-061 AC #3).
-- [ ] #3 --dry-run prints the commands a tier would run without executing anything, and --list prints the tier x gate matrix. Both are used to prove equivalence mechanically against the old lists (extracted run: lines plus ci-steps.sh blocks, normalising the cd-firmware and env-prefix spelling differences); the diffs go in the ticket notes as AC #2 evidence.
-- [ ] #4 Every gate keeps its existing banner label verbatim - including the two cargo doc banners TASK-052 greps CI output for - and gains a one-line wall-time print, so per-gate cost survives having one call site instead of sixteen.
-- [ ] #5 Firmware gates run through a scoped subshell so no leaked cd can retarget a later host gate to the wrong workspace with exit 0, and the console cross-build stays immediately before the RTT-only one with nothing building firmware after them (TASK-062: whichever build ran last is what the bench ELF names).
-- [ ] #6 A thumbv7em preflight fails with a plain instruction to enter nix develop .#default rather than an inscrutable E0463 when the embedded std is missing.
-- [ ] #7 Evidence: all three tiers green end to end inside nix develop on a clean tree; the pre-change baseline for the same tiers captured first; git status --porcelain empty afterwards; firmware/target/thumbv7em-none-eabihf/release/main restored to its starting sha256.
+- [x] #1 scripts/gates.sh exists and is executable, anchors itself to the repo root via BASH_SOURCE rather than trusting the caller cwd, runs its tier sequentially cheapest-first, fails fast naming the gate that died, defaults to ci when no tier argument is given, and exits non-zero on an unknown tier or on a tier that matched zero gates.
+- [x] #2 Tier membership equals the three current lists exactly - 9 pre-commit gates, 16 pre-push, 17 CI - with "cargo test --workspace --features asperitas-pod/pod-hw" the only single-tier item, carrying over the priced exception recorded at lefthook.yml:65-73 including its reopen condition (TASK-061 AC #3).
+- [x] #3 --dry-run prints the commands a tier would run without executing anything, and --list prints the tier x gate matrix. Both are used to prove equivalence mechanically against the old lists (extracted run: lines plus ci-steps.sh blocks, normalising the cd-firmware and env-prefix spelling differences); the diffs go in the ticket notes as AC #2 evidence.
+- [x] #4 Every gate keeps its existing banner label verbatim - including the two cargo doc banners TASK-052 greps CI output for - and gains a one-line wall-time print, so per-gate cost survives having one call site instead of sixteen.
+- [x] #5 Firmware gates run through a scoped subshell so no leaked cd can retarget a later host gate to the wrong workspace with exit 0, and the console cross-build stays immediately before the RTT-only one with nothing building firmware after them (TASK-062: whichever build ran last is what the bench ELF names).
+- [x] #6 A thumbv7em preflight fails with a plain instruction to enter nix develop .#default rather than an inscrutable E0463 when the embedded std is missing.
+- [x] #7 Evidence: all three tiers green end to end inside nix develop on a clean tree; the pre-change baseline for the same tiers captured first; git status --porcelain empty afterwards; firmware/target/thumbv7em-none-eabihf/release/main restored to its starting sha256.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -224,3 +224,107 @@ This is the acceptance evidence, not a smoke test.
   (TASK-049:130), so 17 jobs would mean 17 cold builds; that idea only becomes sane once
   `Swatinem/rust-cache` or sccache lands, and belongs in its own ticket if anyone wants it.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Evidence (all figures LOCAL warm, aarch64-darwin, inside nix develop .#default, clean tree)
+
+### Baselines taken BEFORE the script existed (old lists, forced so nothing skips)
+
+| tier | what ran | result |
+| --- | --- | --- |
+| old pre-commit | `lefthook run pre-commit -f` (9 commands, alphabetical) | rc 0, 2 s wall; per-cmd 0.01-1.42 s, docs gate eighth at 0.16 s |
+| old pre-push | `lefthook run pre-push -f` (16 commands, alphabetical) | rc 0, **74 s** wall; `test` 66.87 s of it |
+| old CI | `bash .github/ci-steps.sh` (16 blocks) | rc 0, **139 s** wall |
+
+The documented 138 s CI baseline re-measures as 139 s in this session, so every comparison below is
+against a same-session number rather than against a quote.
+
+### All three new tiers, green end to end
+
+| tier | gates | wall | old equivalent | delta |
+| --- | --- | --- | --- | --- |
+| commit | 9 | **2.0 s** | 2 s | none (same 9 checks; order now cheapest-first) |
+| push | 16 | **74.0 s** | 74 s | none |
+| ci | 17 | **139.0 s** | 139 s | none, and one gate more than CI had |
+
+Per-gate seconds are printed by the script itself (`--- 0.43s` under each banner) and were pasted
+into the umbrella's matrix. The two `cargo test` invocations are 67.2 s and 67.4 s of the 139 s - the
+same 133-of-139 concentration TASK-060 measured, which is why the pod-hw test stays CI-only.
+
+### AC #1 - interface
+
+`--dry-run` with no argument prints 17 commands, so forgetting the tier cannot mean "ran less than
+everything". Unknown argument -> usage on stderr, rc 2. Bad `min-tier` in the table (planted
+`weekly`) -> `gates.sh: bad min-tier: weekly`, rc 2. Tier that matches zero gates (scratch copy with
+every gate raised to `ci`, asked for `commit`) -> `tier "commit" matched no gate. That is a bug in the
+tier table, not a pass.`, rc 1. Planted failing gate (`=== cargo fmt ===` replaced by `false`) ->
+`*** gate failed: === cargo fmt ===` / `*** tier: commit (2 of 3 gates completed before it)`, rc 1,
+and the run stopped there instead of continuing to the lints. Anchoring: a scratch copy placed in
+/tmp resolved ROOT to / and died naming `/scripts/check-doc-artifact-names.sh` - the anchor follows
+the script, not the caller cwd, which is the point.
+
+### AC #3 - mechanical equivalence (/tmp/equiv.sh)
+
+Old lists extracted as text - `yq '.pre-commit.commands[].run'` / `.pre-push...` (with each job's
+`root:` rendered as the `cd <dir> && ` prefix the script uses), and the labelled blocks of
+`.github/ci-steps.sh` (comments, `echo`s and the `set` line dropped; commands inside the firmware
+subshell given their inherited `cd firmware && `). Both sides normalised identically: drop the `env `
+prefix, drop quotes, canonicalise `cd firmware/` to `cd firmware`. Then sorted-set diff against
+`scripts/gates.sh --dry-run <tier>`:
+
+    ### tier commit: old 9 vs new 9     IDENTICAL SETS (ci-steps-parse swapped for self-parse)
+    ### tier push:   old 16 vs new 16   IDENTICAL SETS (same swap)
+    ### tier ci:     old 16 vs new 17   IDENTICAL SETS (self-parse added; CI never had a parse gate)
+
+Zero unexplained differences in any tier. The only membership change anywhere is that the hook's
+`bash -n .github/ci-steps.sh` becomes `bash -n "$BASH_SOURCE"` - it can only be that, since the file
+it parsed is the file this replaces - and that gate now also runs in CI.
+
+### AC #4 - labels
+
+Every banner is copied verbatim from `.github/ci-steps.sh`, including `=== cargo doc (workspace) ===`
+and `=== cargo doc (workspace, all features) ===`, which is what TASK-052 greps runner logs for. Each
+gate gained a `--- N.NNs` line, so per-gate cost survives having one call site instead of sixteen.
+
+### AC #5 - the two ordering rules
+
+Firmware commands carry `-C firmware`, which runs them in a subshell: the directory dies with the
+gate that needed it, so no leaked `cd` can leave a later host gate pointed at the wrong workspace
+where `cargo fmt --all --check` and `cargo clippy --workspace` would both have exited 0 on the wrong
+code. In the declaration order the console cross-build sits immediately before the RTT-only one and
+nothing builds firmware after them; the cross-clippies follow, so they reuse those artifacts (0.42 s
+and 0.22 s here versus ~20 s in a fresh target dir). End state observed: after the `push` and `ci`
+runs `release/main` was the RTT image 16dc9e5c..., exactly what `.github/ci-steps.sh` left behind
+today, and `rm -f $ELF && make -C firmware build-elf` put it back to 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b.
+
+### AC #6 - preflight
+
+With a `rustc` shim that reports a sysroot lacking `lib/rustlib/thumbv7em-none-eabihf`, `ci` exits 3
+printing "this rustc has no thumbv7em-none-eabihf standard library ... Enter the project shell first:
+nix develop .#default" before any gate runs, instead of nine E0463s. Run-mode only: `--dry-run` and
+`--list` answer questions about the list and work outside the shell.
+
+### AC #7 - bench state
+
+`git status --porcelain` empty apart from this ticket's own file. ELF digest restored to
+9b60b8ff... as above. `make -C firmware elf-check` was red before the runs (rc 2, "target/...
+/main is older than src/bin/podtest.rs") and is red after them with the identical message - mtime
+drift owned by TASK-056/TASK-062, untouched here. Note `build-elf` restores the bytes but not the
+mtime, which is TASK-062's finding restated, not a new one.
+
+### Deliberate exclusions
+
+One exists: `cargo test --workspace --features asperitas-pod/pod-hw` is `ci`-only. Its comment carries
+the price (67 s warm, more than every other push gate combined), the reason the runtime half stays
+remote while its compile half runs in `push` as the pod-hw clippy, the precedent (TASK-018.01,
+c44b9c1), the "CI is the authority" claim it rests on, and an explicit reopen condition. It reads as a
+priced decision at the gate itself, not as an absence (TASK-061 AC #3).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+scripts/gates.sh is now the one place a check is named: 17 gates declared as one `gate <tier> "<banner>" <command...>` line each, tagged with the cheapest tier that runs them, cumulative so commit(9) is a subset of push(16) is a subset of ci(17). Nothing calls it yet - ci-steps.sh and lefthook.yml still run their own lists, so this commit cannot break a build; TASK-061.02 switches the callers and deletes what they restated. Equivalence against all three old lists was proven mechanically rather than asserted: extracting the hook run: lines (with root: rendered as `cd dir && `) and the labelled blocks of ci-steps.sh, normalising both sides the same way and diffing sorted sets against --dry-run, gives IDENTICAL SETS in every tier - the only difference anywhere is that the hooks' `bash -n .github/ci-steps.sh` becomes a self-parse which now also runs in CI. All three tiers green end to end on a clean tree inside nix develop: 2.0 s / 74.0 s / 139.0 s against baselines taken from the old lists minutes earlier at 2 s / 74 s / 139 s - no cost change, one gate more in CI. The ordering rules a script can express and hook YAML cannot are preserved as file positions: cheapest-first fail-fast, console cross-build immediately before RTT-only with nothing building firmware after them, cross-clippy after both builds so it reuses their artifacts; firmware commands run through `-C firmware` subshells so a leaked cwd can never hand a host gate the wrong workspace with exit 0. Banner labels kept verbatim (including the two cargo doc banners TASK-052 greps), each gate gained a wall-time print, the thumbv7em preflight exits 3 telling you to enter nix develop instead of nine E0463s, unknown tier exits 2, a tier matching zero gates exits 1, a failed gate names itself and stops, and the single deliberate exclusion - the 67 s pod-hw test, ci-only - reads at its own gate as a priced decision with a reopen condition. Bench left as found: ELF back to 9b60b8ff, tree clean, elf-check exactly as red as before.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+#
+# The gate set, defined once.
+#
+# Every fmt / lint / doc / test / cross-build check this repo enforces is named here exactly once,
+# tagged with the cheapest tier that runs it. Three callers each ask for one tier and add nothing:
+# .github/workflows/ci.yml asks for `ci`, and lefthook's pre-commit and pre-push ask for `commit`
+# and `push`. Before this file the same list existed twice, by hand -- 25 `run:` lines in
+# lefthook.yml plus a second copy in CI's step -- and every check added since TASK-018 drifted
+# between them. TASK-060 itself exists because firmware was invisible to both copies, and four
+# closed tickets declined to notice.
+#
+# Why a script and not "CI just runs the hooks": lefthook sorts the commands in a stage by
+# priority, then leading digits in the name, then name ascending -- NOT by declaration order -- so
+# two decisions this repo has measured money behind are simply unexpressible in hook config:
+# cheapest-gate-first fail-fast, and cross-build-before-cross-clippy so the lints reuse the
+# artifacts the builds just produced. A sequential script can say both; YAML cannot. It also buys
+# deterministic ordering, per-gate timings, and fail-fast that alphabetical names cannot give.
+# What it gives up: lefthook captures a command's stdout and replays it when the command finishes,
+# so a hook now prints nothing until its tier ends (~2 s commit, ~75 s push). Read the per-gate
+# headers and times below as the trade.
+#
+# Tiers are cumulative: `commit` is a subset of `push`, `push` a subset of `ci`. No argument means
+# `ci` -- forgetting the argument must never mean "ran less than everything".
+#
+# Two ordering rules outrank cheapest-first, and both are load-bearing:
+#
+#   1. The console cross-build comes immediately before the RTT-only cross-build, in that order,
+#      and no gate builds firmware after them. Whichever build ran last is what
+#      firmware/target/thumbv7em-none-eabihf/release/main names -- the two images are hardlinks to
+#      different deps/main-<hash> artifacts -- and every `make probe-*` decodes whatever that path
+#      currently holds. TASK-062 owns that cfg-provenance blindness; do not "fix" it here, and do
+#      not collapse the pair.
+#   2. The two cross-clippy gates come after both cross-builds so clippy reuses their artifacts.
+#      They stay `commit`-tier gates, so in the commit tier they simply run with no build above
+#      them, which is what pre-commit does today.
+#
+# Cost figures in the comments are LOCAL warm numbers, aarch64-darwin, measured inside
+# `nix develop .#default` on a clean tree. One figure per gate even where two call sites used to
+# quote different ones. Runner-side figures belong to TASK-052 and TASK-063: main sits ~91 commits
+# ahead of origin/main and ci.yml has no workflow_dispatch, so no agent can observe a runner.
+#
+# Adding a check: add one `gate` line in the position you want it to run, with the tier that should
+# start running it. Nothing else in the repo names checks.
+#
+# Exit codes: 0 every gate passed, 1 a gate failed or the tier matched no gate at all, 2 bad usage,
+# 3 this toolchain cannot build for thumbv7em at all.
+
+set -euo pipefail
+
+# bash 5 only: the per-gate timing reads EPOCHREALTIME, which bash 3.2 (the macOS system shell)
+# leaves empty. Fail here with a sentence rather than arithmetic-erroring on the first gate.
+if [[ -z "${EPOCHREALTIME:-}" ]]; then
+  printf 'gates.sh: needs bash 5 for sub-second gate timings (found: %s)\n' "${BASH_VERSION:-unknown}" >&2
+  exit 2
+fi
+
+usage() {
+  cat <<'EOF'
+usage: scripts/gates.sh [--dry-run | --list] [commit|push|ci]
+
+  run       execute the tier, sequentially, cheapest-first, stopping at the first failure
+  --dry-run print the commands the tier would run, executing nothing
+  --list    print the tier x gate matrix that doc-001 embeds
+  no tier argument means ci: forgetting it must never mean "ran less than everything"
+EOF
+}
+
+MODE=run
+TIER=ci
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --dry-run) MODE=dry ;;
+    --list)    MODE=list ;;
+    -h|--help) usage; exit 0 ;;
+    commit|push|ci) TIER=$1 ;;
+    *) printf 'gates.sh: unknown argument: %s\n\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+# Anchoring is load-bearing, not hygiene. Run from firmware/ an unanchored list produces
+# wrong-workspace passes that exit 0: `cargo fmt --all --check` checks the firmware workspace
+# instead of the host one, `cargo clippy --workspace` means the firmware crates, and
+# `-p asperitas-logging` errors out. Same shape as scripts/check-doc-artifact-names.sh:37-38.
+ROOT=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+cd "$ROOT" || exit 1
+
+case $TIER in
+  commit) RANK=1 ;;
+  push)   RANK=2 ;;
+  ci)     RANK=3 ;;
+esac
+
+N_COMMIT=0 N_PUSH=0 N_CI=0 RAN=0
+
+# gate <min-tier> <banner> [-C dir] <command...>
+#
+# One check, one line. <min-tier> is the cheapest tier that runs it; every higher tier inherits it,
+# which is what makes the three call sites one list. Declaration order IS execution order, so the
+# cheap stuff goes first and the ordering rules in the header are visible as file positions.
+#
+# -C dir runs the command in a subshell whose cwd is dir. Firmware gates need it: .cargo/config.toml
+# supplies the thumbv7em target and link args and cargo discovers that file from the CWD, not from
+# --manifest-path (cargo #9670). A bare `cd` in the parent would leave every later host gate
+# pointed at the firmware workspace -- where `cargo fmt --all --check` and `cargo clippy
+# --workspace` both pass happily on the wrong code with exit 0 -- so the directory dies with the
+# gate that needed it.
+gate() {
+  local min=$1 banner=$2 rank dir="" out a us t
+  case $min in
+    commit) rank=1; N_COMMIT=$(( N_COMMIT + 1 )); N_PUSH=$(( N_PUSH + 1 )); N_CI=$(( N_CI + 1 )) ;;
+    push)   rank=2; N_PUSH=$(( N_PUSH + 1 ));    N_CI=$(( N_CI + 1 )) ;;
+    ci)     rank=3; N_CI=$(( N_CI + 1 )) ;;
+    *) printf 'gates.sh: bad min-tier: %s\n' "$min" >&2; exit 2 ;;
+  esac
+  shift 2
+  if [[ $1 == "-C" ]]; then dir=$2; shift 2; fi
+
+  out=$1
+  for a in "${@:2}"; do
+    if [[ $a == *[[:space:]]* ]]; then out+=" \"$a\""; else out+=" $a"; fi
+  done
+  [[ -z $dir ]] || out="cd $dir && $out"
+
+  if [[ $MODE != run ]]; then
+    if (( RANK >= rank )); then
+      if [[ $MODE == list ]]; then
+        printf '%-6s | %-4s | %-4s | %-2s | %s\n' "$min" \
+          "$([[ 1 -ge $rank ]] && echo yes || echo -)" \
+          "$([[ 2 -ge $rank ]] && echo yes || echo -)" \
+          "$([[ 3 -ge $rank ]] && echo yes || echo -)" "$banner"
+      else
+        printf '%-6s\t%s\n' "$min" "$out"
+      fi
+    fi
+    return 0
+  fi
+
+  (( RANK >= rank )) || return 0
+  RAN=$(( RAN + 1 ))
+  printf '\n%s\n' "$banner"
+  t=${EPOCHREALTIME/./}
+  if ! ( cd "${dir:-$ROOT}" && exec "$@" ); then
+    printf '\n*** gate failed: %s\n*** tier: %s (%d of %d gates completed before it)\n' \
+      "$banner" "$TIER" $(( RAN - 1 )) "$RAN" >&2
+    exit 1
+  fi
+  us=$(( ${EPOCHREALTIME/./} - t ))
+  awk -v us="$us" 'BEGIN { printf "--- %.2fs\n", us / 1000000 }'
+}
+
+# Before anything cross-target runs: without the embedded std every firmware gate dies as E0463
+# ("can't find crate for `core`"), which reads like a code bug rather than a missing toolchain.
+# Outside `nix develop .#default` a user's own cargo has no thumbv7em std installed, and the shim
+# lefthook installs honours LEFTHOOK=0 as a total bypass -- a confusing red hook is exactly what
+# teaches someone to set it. Checked in run mode only: --dry-run and --list answer questions about
+# the list and must work anywhere.
+if [[ $MODE == list ]]; then
+  printf 'tier   | commit | push | ci | gate\n'
+  printf '%s\n' '-------+--------+------+----+--------------------------------------------------'
+fi
+
+if [[ $MODE == run ]]; then
+  if [[ ! -d "$(rustc --print sysroot)/lib/rustlib/thumbv7em-none-eabihf" ]]; then
+    printf 'gates.sh: this rustc has no thumbv7em-none-eabihf standard library, so every firmware\n' >&2
+    printf 'gate below would fail with E0463 no matter what the code looks like.\n' >&2
+    printf 'Enter the project shell first: nix develop .#default\n' >&2
+    exit 3
+  fi
+  printf 'tier: %s\n' "$TIER"
+fi
+
+# The list is a shell script, so the class of bug that ate CI for three days (an inline
+# single-quoted `bash -c '\''...'\''` string cannot carry an apostrophe: the quote closes, and
+# because bash executes a script line by line as it parses it, every check appears to run before
+# the step dies on "unexpected EOF while looking for matching `''" -- 6d7d38a to 70c6fc6, unseen
+# because nothing had been pushed since the last green run) is worth ten milliseconds to rule out
+# locally. Cheapest gate, so a broken definition is the fastest possible failure.
+gate commit "=== gate definition parses ===" bash -n "$BASH_SOURCE"
+
+# Docs name firmware image files; legal names come from the build rules themselves via `make -n`,
+# so this is the only place in the gate set that invokes make, and it stays a dry run -- see the
+# load-bearing warning at scripts/check-doc-artifact-names.sh:25-28. Covers names only: it does not
+# read a line of Rust. Landed with TASK-058.
+gate commit "=== docs artifact names ===" scripts/check-doc-artifact-names.sh
+
+gate commit "=== cargo fmt ===" cargo fmt --all --check
+
+# Root Cargo.toml:3 declares exclude = ["firmware"], so the check above never meant all: firmware/
+# is its own workspace and has drifted under this gate twice (TASK-044, TASK-060). `--check` is not
+# optional -- a bare `cargo fmt` would rewrite firmware/src/**/*.rs, which are elf-check inputs
+# (firmware/Makefile:216, 228-230), and close the bench's log decoder until TASK-056 lands.
+gate commit "=== cargo fmt (firmware workspace) ===" \
+  cargo fmt --manifest-path firmware/Cargo.toml --all --check
+
+gate commit "=== cargo clippy ===" cargo clippy --workspace --all-targets -- -D warnings
+
+# Default features build asperitas-logging without `log-usb`, so every record-path function in it
+# goes unlinted above. This is the only gate that sees them. Landed with TASK-047.
+gate commit "=== cargo clippy (asperitas-logging log-usb) ===" \
+  cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
+
+# The other transport has the same blind spot: the default feature set excludes `log-defmt`, so
+# defmt_log.rs -- the bridge behind the probe's lossless log channel -- is compiled by no other gate
+# here.
+gate commit "=== cargo clippy (asperitas-logging log-defmt) ===" \
+  cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
+
+# pod-hw gates the hardware-backed Pod paths no default-feature build compiles. Its compile-time
+# half runs in the push tier; its runtime half is the one deliberate CI-only item, below.
+gate push "=== cargo clippy (asperitas-pod pod-hw feature) ===" \
+  cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings
+
+# The capture decoder's own verdict: exit 0 means every block the synthetic captures promised, they
+# proved. Exercises the shipped read/decode/assemble path, so it needs no board.
+gate push "=== dump_reassemble --selftest ===" \
+  cargo run -p asperitas-logging --example dump_reassemble -- --selftest
+
+# Rustdoc cross-references. Each member's `[lints] workspace = true` already denies the two
+# intra-doc-link lints via the root table; RUSTDOCFLAGS raises that to every rustdoc warning.
+# Two runs because neither feature set is a superset of the other: default features document
+# logging's fn.init() but not usb.rs / led.rs / panic_handler.rs, while --all-features gains those
+# (and pod's led / pins) and drops fn.init(). Landed with TASK-049. Do not merge them.
+gate push "=== cargo doc (workspace) ===" \
+  env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
+gate push "=== cargo doc (workspace, all features) ===" \
+  env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+
+# Both cross-builds, console first: see ordering rule 1 in the header. Whichever of the two runs
+# last is the ELF the bench then flashes and decodes with, and today that is deliberately the
+# console image in the hook tiers and the RTT image only where CI built it last -- so this pair
+# stays adjacent, in this order, with nothing building firmware after it.
+gate push "=== firmware cross-compile ===" -C firmware cargo build --release --features seed3
+
+# The RTT-only image is the only build that links build.rs's `-Tdefmt.x` fragment and the
+# `#[cfg(not(feature = "log-defmt"))]` logger stubs in the same binary; the console build above
+# leaves both uncompiled. DEFMT_LOG is deliberately unset: it selects which frames get compiled in,
+# not whether this compiles.
+gate push "=== firmware cross-compile (RTT-only, log-defmt) ===" -C firmware \
+  cargo build --release --no-default-features --features "seed3 log-defmt"
+
+# Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses
+# their artifacts: ~20 s in a fresh target dir, ~2 s directly after a build, 0.25 s when nothing
+# changed. --bins is the whole package over there (no lib target, six entries under src/bin/), and
+# --all-targets is unusable on a no_std target with no test harness to link. firmware/ is a second
+# workspace, so every host clippy above says nothing about the six bins that actually run on the
+# board. The RTT-only cfg set is where TASK-036.03's warnings actually surfaced, so linting only the
+# console build leaves it unchecked. Landed with TASK-060.03.
+gate commit "=== firmware clippy (all bins) ===" -C firmware \
+  cargo clippy --release --features seed3 --bins -- -D warnings
+
+gate commit "=== firmware clippy (all bins, RTT-only, log-defmt) ===" -C firmware \
+  cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings
+
+gate push "=== cargo test ===" cargo test --workspace
+
+# THE ONE DELIBERATELY CI-ONLY GATE, and it is priced rather than merely absent (TASK-061 AC #3).
+# 67 s local warm -- more than every other push-tier gate combined -- to re-run the whole host suite
+# under one non-default feature flag. Its compile-time half DOES run in the push tier, as the
+# pod-hw clippy above, so what stays remote is runtime coverage of pod-hw code paths. Accepted
+# because CI is the authority for that coverage, TASK-018.01's fixup made the same split on purpose
+# (commit c44b9c1), and the loop that writes most commits here never pushes: pre-commit is where its
+# work gets gated. Reopen condition, stated as a condition: if pushes become routine, or the
+# autonomous loop starts pushing, re-measure and reconsider. Until then this exclusion is a
+# decision with a price attached, not an oversight.
+gate ci "=== cargo test (asperitas-pod pod-hw feature) ===" cargo test --workspace --features asperitas-pod/pod-hw
+
+if [[ $MODE == list ]]; then
+  printf '\ncounts: commit %d, push %d, ci %d\n' "$N_COMMIT" "$N_PUSH" "$N_CI"
+  exit 0
+elif [[ $MODE == dry ]]; then
+  exit 0
+fi
+
+if (( RAN == 0 )); then
+  printf 'gates.sh: tier "%s" matched no gate. That is a bug in the tier table, not a pass.\n' "$TIER" >&2
+  exit 1
+fi
+
+printf '\ntier %s: %d gates, %.1fs\n' "$TIER" "$RAN" \
+  "$(awk -v s="$SECONDS" 'BEGIN { printf "%.1f", s }')"
