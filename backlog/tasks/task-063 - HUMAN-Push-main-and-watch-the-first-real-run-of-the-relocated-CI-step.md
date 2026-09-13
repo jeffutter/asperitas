@@ -5,9 +5,11 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-13 01:30'
+updated_date: '2026-09-13 03:12'
 labels: []
 dependencies:
   - TASK-060
+  - TASK-061
 references:
   - .github/ci-steps.sh
   - .github/workflows/ci.yml
@@ -35,3 +37,12 @@ Fixed by moving the list to .github/ci-steps.sh and reducing the workflow to one
 <!-- SECTION:NOTES:BEGIN -->
 Cheap to check whether it worked: `gh run list --limit 3`. If the step dies, the likely culprits are runner-side nix behaviour (install-nix-action v31 + flake .#default) or a path assumption in ci-steps.sh, which assumes cwd is the repo root and reaches firmware/ via a subshell cd.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 03:12
+---
+TASK-061 is now planned and changes what this ticket watches. Its AC #2 names "bash .github/ci-steps.sh", but that file is being replaced by scripts/gates.sh (tier argument ci), which prints a label and a wall time for every gate instead of one anonymous block. So: watch the single step run "nix develop .#default --command bash scripts/gates.sh ci" if .02 has landed when you push, and read the per-gate timings it prints as the record AC #3 asks for - those numbers also settle most of TASK-052, which has been owed runner-side figures since TASK-049. If TASK-061 has not landed, the old path still works and this ticket stands as written.
+---
+<!-- COMMENTS:END -->
