@@ -3,14 +3,15 @@ id: TASK-066.01
 title: >-
   Add --explain to unblocked-todo.sh so one call names why each task in a status
   is ineligible
-status: In Progress
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-13 09:03'
-updated_date: '2026-09-13 11:05'
+updated_date: '2026-09-13 11:19'
 labels:
   - planned
-dependencies: []
+dependencies:
+  - TASK-066.01.01
 parent_task_id: TASK-066
 priority: high
 type: chore
@@ -189,6 +190,43 @@ V5 Argument handling and exit codes (AC #3). Measured pre-change, record it as t
 
 Any change to what counts as ready; fixing the unknown-flag-becomes-status trap; rewriting the engine on `backlog task list --json` (it answers the same board in 0.31 s vs 5.3 s and exposes `assignees`/`isReady`, but publishes no individual dependencies so it cannot name which dep is unresolved, its `--ready` ignores containers and assignees - verified it lists `TASK-018` and `TASK-027`, which this script correctly holds back - and the archive/ ID-shadowing ordering exists only here); wiring the flag into the pi extension or the JS workflow, which is TASK-066.02.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Re-checked 2026-09-13: still blocked on the one human step, now parked as Blocked
+
+Nothing agent-satisfiable is left open. AC #5's middle clause - "applied with ~/bin/rebuild" - is a
+`sudo darwin-rebuild switch`, and this session cannot supply the password:
+
+- `sudo -n true` -> `a password is required`.
+- Targeted grant ruled out too: `sudo -n /run/current-system/sw/bin/darwin-rebuild --version` -> same message.
+- No askpass helper configured; `/etc/sudoers.d/` holds only nix-darwin's `10-nix-darwin-extra-config` fragment.
+
+So the blocker is exactly **TASK-066.01.01** (`@human`, both ACs prefixed `HUMAN:`), unchanged since
+it was filed. This parent is now `-s Blocked --depends-on TASK-066.01.01` rather than left In
+Progress, so `backlog task list -s "Blocked" --ready` names it the moment the child closes, and no
+executor re-selects it in the meantime.
+
+Fresh evidence that the rebuild lands one file and nothing else:
+
+- Built home-files tree `/nix/store/qmfi28cw...-home-manager-files/.pi/agent/extensions/ralph/unblocked-todo.sh`
+  hashes to `bea239d84ac544dcdfeed0abfcdf32b4d39ee001e37585c90dbebe82781f12f7` - byte-identical to the
+  source at home-manager `dc43987`, which is the sha the child's AC #1 asks for.
+- The live symlink still resolves into the *previous* generation
+  `/nix/store/vj85rkhmk...-home-manager-files` (script sha `4cf338c07695...`, pre-change). Nothing is
+  half-applied: consumers see the old script until activation.
+- AC #5's last clause, confirmed here: asperitas commit `ee9d554` touches three paths, all under
+  `backlog/` (this ticket, the child, comment-only usage line in `backlog/unblocked-todo.sh`), and
+  `git status --porcelain` is clean. No code change outside `backlog/`.
+
+Next actionable step, for a person: run `~/bin/rebuild`, then
+`shasum -a 256 ~/.pi/agent/extensions/ralph/unblocked-todo.sh` must print `bea239d84ac5...`; close
+TASK-066.01.01 and check AC #5 here. If Jeff would rather ralph deploy nix changes unattended in
+future, an askpass helper or a sudoers `NOPASSWD` fragment narrowed to `darwin-rebuild` would do it -
+that is his security decision to make, not one an agent should quietly take.
+<!-- SECTION:NOTES:END -->
+
 ## AC #1 - what places `.sram1_bss`, measured on the unmodified tree at `d096b28`
 
 Command that works (`-C link-arg=-Wl,-Map=out.map` fails outright with
