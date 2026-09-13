@@ -211,14 +211,54 @@ probe-run: build-elf
 # any `target` directory so build products can't trip the check.
 ELF_INPUTS = src build.rs memory.x Cargo.toml Cargo.lock ../crates
 
-## Fail if any input to $(ELF) is newer than it.
+# Reading the cfg provenance out of the ELF belongs to scripts/elf-provenance.sh, which is the only
+# thing in the repo that parses the `.asp.prov` note firmware/build.rs stamps in. This is the first
+# time the Makefile reaches up into scripts/; scripts/check-doc-artifact-names.sh already reaches
+# down into this file to enumerate legal image names, so the coupling is mutual and both headers say
+# so. `bash` is spelled rather than relying on the executable bit plus shebang, because a checkout
+# on another filesystem can lose the bit and turn every probe target into "command not found".
+PROV = bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-provenance.sh
+
+# What the operator asked for, spelled the way they asked for it, so the line elf-check prints is
+# copy-pasteable rather than a template. BINARY is included even when it is the default `main` for
+# the same reason.
+REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)'$(if $(filter 1,$(NO_DEFAULT)), NO_DEFAULT=1,)
+
+# The remedy for either elf-check failure. `rm -f $(ELF) && make build-elf` does not work: measured
+# again here, cargo re-uplifts the cached deps/main-<hash> hardlink and the file comes back with its
+# ORIGINAL mtime, so the staleness test stays red on a tree whose content equals HEAD (cargo #15313,
+# #8649). Making cargo believe one input changed forces an actual relink, which is what refreshes the
+# timestamp. Measured warm on this tree, console cfg set: touch 0.69 s, deleting
+# target/$(TARGET)/release/.fingerprint/asperitas-firmware-* 1.11 s (works, but reaches into cargo's
+# private layout), and `cargo clean -p asperitas-firmware` 0.23 s while removing nothing at all -
+# "Removed 0 files", no recompile, mtime untouched, so it is not a remedy despite being the public
+# interface one would expect.
+REMEDY = touch src/bin/$(BINARY).rs && make build-elf $(REQUESTED)
+
+## Fail if any input to $(ELF) is newer than it, or if the ELF is a different cfg set than asked for.
 ##
 ## A check and never a build: whether the ELF matches the sources is knowable here, whether it
 ## matches the image on the board is not, and rebuilding would overwrite the only host copy of
 ## the symbols describing whatever is running right now.
+##
+## The provenance clause exists because `release/main` is one name for two images -- the console and
+## RTT-only builds are hardlinks to different artifacts and whichever ran last owns the name -- so an
+## ELF can be current with your sources and still be the wrong binary. Provenance is checked first:
+## asking whether the timestamps agree about an image built from a different cfg set answers a
+## question nobody asked.
+##
+## DEFMT_LOG travels in the blob and `show` prints it, but the check below does not compare it: it
+## selects which frames got compiled in rather than which cfg set this is, and refusing an ELF that
+## is exactly the one on the board because a bench session happens to export DEFMT_LOG would break
+## the command used to read the device.
 elf-check:
 	@test -f $(ELF) || { \
 		echo "no $(ELF) - run 'make build-elf' with the FEATURES and NO_DEFAULT you mean to flash" >&2; \
+		exit 1; \
+	}
+	@$(PROV) check $(ELF) "$(FEATURES)" "$(NO_DEFAULT)" || { \
+		echo "that ELF was built for a different cfg set than you are asking to decode with, so its symbols and defmt metadata describe a binary that is not on the board." >&2; \
+		echo "Force a real relink: $(REMEDY)" >&2; \
 		exit 1; \
 	}
 	@stale=$$(find $(ELF_INPUTS) \( -name target -prune \) -o \
@@ -227,7 +267,7 @@ elf-check:
 	if [ -n "$$stale" ]; then \
 		echo "$(ELF) is older than $$stale" >&2; \
 		echo "an ELF behind your sources describes neither the board nor your edit, and decoding a live stream with it produces output that looks like data. Flash the current build instead - 'make probe-run' flashes and streams in one step." >&2; \
-		echo "If only timestamps moved, as after a git checkout, force a relink: rm -f $(ELF) && make build-elf." >&2; \
+		echo "If only timestamps moved, as after a git checkout, force a real relink: $(REMEDY)" >&2; \
 		exit 1; \
 	fi
 

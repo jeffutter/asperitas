@@ -558,6 +558,14 @@ symptoms that read exactly like "RTT is missing from the firmware". Measured con
 symbols and zero `SEGGER` strings in the console image, 82 and the magic in the RTT one, so the byte
 scan (`strings -a <ELF> | grep -c SEGGER`), not the symbol count, is what tells the two images apart.
 
+The build now answers that question about itself, so nobody has to scan for magic again: every ELF
+carries a non-allocated `.asp.prov` note section stamped by `firmware/build.rs` naming the exact cfg
+set it was compiled for, and `scripts/elf-provenance.sh show <ELF>` prints it. One caveat when you
+read that section by hand: pass an explicit output-file argument, as
+`rust-objcopy --dump-section .asp.prov=/dev/stdout <ELF> /dev/null` does. Measured on LLVM 22, the
+same dump *without* that argument rewrites the input ELF in place - identical bytes, fresh mtime -
+which is enough to defeat any check that asks whether the ELF is older than its sources.
+
 One site worth knowing by name: `{"package":"embassy-stm32","tag":"defmt_error","data":"Ringbuffer
 broken invariants detected!",...}` comes from `embassy-stm32-0.6.0/src/sai/mod.rs:33`, inside
 `impl From<ringbuffer::Error> for Error`, which fires only on `ringbuffer::Error::DmaUnsynced` and
@@ -803,14 +811,25 @@ recipes and nowhere else.
 | `probe-rs download … --non-interactive` (what `make probe-flash` runs) | 1 | 2 | `Error: No connected probes were found.` |
 | `probe-rs attach … --non-interactive --list-rtt` (`make probe-rtt-list`) | 1 | 2 | the same string alone. A ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` line one row above it means the release profile has dropped below `debug = 2`, so locations are off: see the third gate under *Flashing and logging over an ST-Link probe*. Measured both ways on 2026-09-12. |
 | `probe-rs list` | 0 | n/a | `No debug probes were found.` |
-| `make probe-log` or `make probe-rtt-list` with an ELF behind the sources | never runs | 2 | `<ELF> is older than <path>`, then two advisory lines (flash the current build; force a relink with `rm -f $(ELF) && make build-elf` if only timestamps moved), and no probe-rs output whatsoever |
+| `make probe-log` or `make probe-rtt-list` with an ELF behind the sources | never runs | 2 | `<ELF> is older than <path>`, then two advisory lines (flash the current build; force a real relink with `touch src/bin/<binary>.rs && make build-elf BINARY=<binary> FEATURES='<features>' NO_DEFAULT=1` if only timestamps moved), and no probe-rs output whatsoever |
+| `make probe-log` or `make probe-rtt-list` with an ELF from the other cfg set | never runs | 2 | `that ELF was built for a different cfg set than you are asking to decode with, so its symbols and defmt metadata describe a binary that is not on the board.`, then the same `Force a real relink: …` line. Provenance is asked before timestamps, so this fires even when the ELF is perfectly current with your sources. Measured 2026-09-13 by building console, then RTT-only, then running `make elf-check FEATURES="seed3"` on the result |
+
 | `make probe-log` or `make probe-rtt-list` with no ELF on disk at all | never runs | 2 | `no <ELF> - run 'make build-elf' with the FEATURES and NO_DEFAULT you mean to flash`, plus make's own `*** [Makefile:<line>: elf-check] Error 1` below it. Measured 2026-09-12 by pointing the recipe at a binary that was never built: `make probe-log BINARY=nope-not-built` |
 
 Two layers of exit code, because `make` turns any nonzero recipe status into its own 2. A driver
-that shells out to `make` therefore sees rc=2 for "no probe", for "stale ELF" and for "no ELF":
-only the stderr separates them, so match on the message rather than the number. Calling `probe-rs`
-directly removes the ambiguity, but not the last case: without an ELF to hand it there is nothing to
-call it on.
+that shells out to `make` therefore sees rc=2 for "no probe", for "wrong cfg set", for "stale ELF"
+and for "no ELF": only the stderr separates them, so match on the message rather than the number.
+Calling `probe-rs` directly removes the ambiguity, but not the last case: without an ELF to hand it
+there is nothing to call it on.
+
+The two refusal messages that name a fix both name a *real* relink, because the advice they replaced
+could not deliver one. Deleting the top-level name (`rm -f $(ELF) && make build-elf`) leaves cargo's
+per-cfg artifact in `target/.../release/deps/` in place, so the next build considers the unit fresh
+and hardlinks those same bytes back up: measured 2026-09-13, sha256 unchanged and mtime still six
+minutes behind the wall clock after delete-and-rebuild, which keeps `elf-check` red however many
+times it is retried. Touching a source the binary compiles makes cargo link again, and the bytes it
+produces are identical to the ones already there (sha256 compared), so the remedy costs 0.69 s warm
+and moves nothing but the timestamp.
 
 Two different strings for two different questions, and they are not interchangeable evidence.
 `list` reports what enumeration found and exits 0 whether or not anything answered; `download` and
