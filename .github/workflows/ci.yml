@@ -23,6 +23,12 @@ jobs:
             echo "=== cargo fmt ==="
             cargo fmt --all --check
 
+            # Root Cargo.toml:3 declares exclude = ["firmware"], so the check above never meant all:
+            # firmware/ is its own workspace and has drifted under this gate twice (TASK-044,
+            # TASK-060). Same command as lefthook's fmt-check-firmware. ~1 s warm, local figure.
+            echo "=== cargo fmt (firmware workspace) ==="
+            cargo fmt --manifest-path firmware/Cargo.toml --all --check
+
             echo "=== cargo clippy ==="
             cargo clippy --workspace --all-targets -- -D warnings
 

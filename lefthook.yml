@@ -4,13 +4,25 @@
 pre-commit:
   commands:
     # Cheapest gate here on purpose: reads firmware/Makefile's rules with make -n and greps the
-    # docs, so it costs a fifth of a second and never builds. Landed with TASK-058.
+    # docs, so it costs a fifth of a second and never builds. Covers names only -- it does not
+    # read a line of Rust. Landed with TASK-058.
     doc-artifact-names:
       run: scripts/check-doc-artifact-names.sh
       forward_stderr: true
 
     fmt-check:
       run: cargo fmt --all --check
+      forward_stderr: true
+
+    # Root Cargo.toml:3 declares exclude = ["firmware"], so the fmt-check above never meant all: it
+    # stops at the host workspace and firmware/ has drifted twice under it (TASK-044, TASK-060).
+    # `--manifest-path` reaches the second workspace without a cwd dance, and deliberately with no
+    # lefthook `root:` key -- that sets cwd AND filters paths, so a commit touching no firmware file
+    # would skip this with exit 0 and look like a pass. `--check` only: a gate that rewrote sources
+    # at commit time would bump firmware mtimes and fail `make elf-check` closed on the bench.
+    # Cost ~1 s warm, measured local on aarch64-darwin. Landed with TASK-060.02.
+    fmt-check-firmware:
+      run: cargo fmt --manifest-path firmware/Cargo.toml --all --check
       forward_stderr: true
 
     clippy:
@@ -36,6 +48,12 @@ pre-push:
 
     fmt-check:
       run: cargo fmt --all --check
+      forward_stderr: true
+
+    # Same reason as the pre-commit job of the same name, and the same shape: `--manifest-path`
+    # rather than lefthook's `root:`, which filters and skips silently on an empty file set.
+    fmt-check-firmware:
+      run: cargo fmt --manifest-path firmware/Cargo.toml --all --check
       forward_stderr: true
 
     clippy:

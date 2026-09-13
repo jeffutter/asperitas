@@ -3,11 +3,11 @@ id: TASK-060.02
 title: >-
   Gate firmware formatting: cargo fmt --check on the firmware workspace in
   pre-commit, pre-push and CI
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-13 00:09'
-updated_date: '2026-09-13 00:12'
+updated_date: '2026-09-13 00:36'
 labels:
   - planned
 dependencies:
@@ -41,10 +41,10 @@ Rejected alternative, recorded so nobody re-litigates it: folding `firmware/` in
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 lefthook.yml gains fmt-check-firmware in BOTH pre-commit.commands and pre-push.commands, and ci.yml gains the same command beside the existing root fmt line (:24). All three run cargo fmt --manifest-path firmware/Cargo.toml --all --check from the repo root, and none uses lefthook's root: key - root: sets cwd AND filters paths, and a job whose filtered file set is empty is skipped with exit 0 without running anything (verified against the installed lefthook 2.1.10).
-- [ ] #2 Notes carry red-and-green evidence from every call site: one deliberately planted unformatted firmware line makes pre-commit, pre-push and the raw CI invocation each exit non-zero, and all three go green after the plant is reverted.
-- [ ] #3 The gate provably writes nothing: git status --porcelain is empty after a green run. --check stays --check - a fix-at-commit gate would bump firmware source mtimes and make make elf-check fail closed on the bench until TASK-056 lands.
-- [ ] #4 Comments that describe what the gates cover are corrected in the same change (lefthook.yml:6-7 cost rationale, the new ci.yml step header), naming the measured local cost (~1 s warm) and the Cargo.toml:3 exclude = ["firmware"] hole this closes.
+- [x] #1 lefthook.yml gains fmt-check-firmware in BOTH pre-commit.commands and pre-push.commands, and ci.yml gains the same command beside the existing root fmt line (:24). All three run cargo fmt --manifest-path firmware/Cargo.toml --all --check from the repo root, and none uses lefthook's root: key - root: sets cwd AND filters paths, and a job whose filtered file set is empty is skipped with exit 0 without running anything (verified against the installed lefthook 2.1.10).
+- [x] #2 Notes carry red-and-green evidence from every call site: one deliberately planted unformatted firmware line makes pre-commit, pre-push and the raw CI invocation each exit non-zero, and all three go green after the plant is reverted.
+- [x] #3 The gate provably writes nothing: git status --porcelain is empty after a green run. --check stays --check - a fix-at-commit gate would bump firmware source mtimes and make make elf-check fail closed on the bench until TASK-056 lands.
+- [x] #4 Comments that describe what the gates cover are corrected in the same change (lefthook.yml:6-7 cost rationale, the new ci.yml step header), naming the measured local cost (~1 s warm) and the Cargo.toml:3 exclude = ["firmware"] hole this closes.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -92,3 +92,29 @@ Paste into notes, in this order:
 
 ~1 s warm per call site inside `nix develop .#default` on aarch64-darwin. rustfmt reads sources only; no target dir involved, so cold/warm barely differs.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Executed 2026-09-13 on top of TASK-060.01 (commit 4b4738c), inside the direnv-loaded nix develop .#default shell, rust 1.97.1, aarch64-darwin. Every figure LOCAL and warm.
+
+AC #1 - three call sites, one command, no root:. lefthook.yml gained fmt-check-firmware in pre-commit.commands (after fmt-check) and in pre-push.commands; ci.yml gained the same command as a second echo/cargo pair inside the existing single-quoted bash string, immediately after 'cargo fmt --all --check'. All three run exactly: cargo fmt --manifest-path firmware/Cargo.toml --all --check. None carries lefthook's root: key. 'lefthook dump' prints fmt-check-firmware under both hooks with the run line intact, so the YAML is live rather than merely present. Also verified the embedded CI script still parses: extracted the block scalar and its single-quoted bash body and ran 'bash -n' over it - clean, 14 echo-marked steps now, up from 13. The added comment lines contain no apostrophes, which is what keeps that quoting intact.
+
+AC #2 - red and green at every call site, same planted diff each time. Plant: appended an unformatted two-statement fn to firmware/src/bin/podtest.rs (file reverted afterwards by byte-identical copy, git shows it clean).
+  raw CI line                      -> rc 1, 'Diff in .../podtest.rs:359'
+  lefthook run pre-commit --command fmt-check-firmware --force --file firmware/src/bin/podtest.rs -> rc 1, exit status 1, same diff
+  lefthook run pre-push   --command fmt-check-firmware --file firmware/src/bin/podtest.rs          -> rc 1, exit status 1, same diff
+After reverting the plant all three exit 0 (0.41 s each). Control probe that makes the no-root: choice concrete: 'lefthook run pre-push --command firmware-cross-compile --file README.md' prints 'firmware-cross-compile (skip) no matching push files' and exits 0 in 0.00 s without invoking cargo. That job already has root: "firmware/", so today a push touching no firmware file gets no cross-compile and sees a green hook - the new gate deliberately does not copy that shape.
+
+AC #3 - writes nothing. sha256 over every file under firmware/src plus firmware/Cargo.toml is identical before and after the three green runs ('FW SOURCES UNCHANGED'), and git status --porcelain lists only the two edited gate files plus this ticket file. --check kept; no bare cargo fmt anywhere in the new lines. This is what keeps make elf-check (Makefile:223-236, mtime-based until TASK-056) from failing closed on the bench because a hook rewrote a source at commit time.
+
+AC #4 - comments corrected in the same change. lefthook.yml's doc-artifact-names note now says it covers names only and does not read a line of Rust, so 'cheapest gate here on purpose' is no longer a claim about coverage. The new pre-commit note names the hole (root Cargo.toml:3 exclude = ["firmware"] means fmt-check --all never meant all), the drift that proves it (TASK-044, TASK-060), why --manifest-path instead of cd or root:, why --check instead of fmt, and the measured cost. ci.yml's new step header carries the same exclude citation and the local cost.
+
+Cost, labelled local: 0.41 s warm per call site (planned estimate was ~1 s; rustfmt reads sources only, no target dir, so cold/warm barely differ). Pre-commit therefore goes from ~1.1 s to ~1.5 s warm.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Firmware formatting is now gated in three places with one command shape: cargo fmt --manifest-path firmware/Cargo.toml --all --check, added to lefthook's pre-commit and pre-push and to ci.yml beside the root fmt line. Deliberately no lefthook root: key - a control probe shows the existing root:-scoped firmware-cross-compile job skips with exit 0 when no push file matches, which is the silent-pass class this ticket exists to kill. Proven red at all three call sites from one planted unformatted fn in podtest.rs (rc 1 each) and green after revert (0.41 s each), with sha256 over all firmware sources identical before and after so the gate demonstrably writes nothing. Stale comment claims about what the gates cover corrected in lefthook.yml and ci.yml; local cost ~0.4 s warm per site.
+<!-- SECTION:FINAL_SUMMARY:END -->
