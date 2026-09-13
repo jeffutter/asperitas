@@ -44,6 +44,15 @@
 #
 # Any check that runs in one tier and not another is an exception written down with its price at the
 # gate itself in scripts/gates.sh - currently one: the `pod-hw` test, ci-only at 67 s warm.
+#
+# No `forward_stderr:` key here, though every command carried one until TASK-061 asked whether it
+# does anything. It does not: the key exists in no lefthook release - absent from the 2.1.10 this
+# repo pins and from 2.1.12's source, in the Go structs, the JSON schema, and the docs alike - and
+# an unrecognised key is accepted and ignored without a warning, which is how it survived a dozen
+# tickets that each copied it "like its neighbours". A command's stderr reaches the terminal either
+# way (measured on 2.1.10: `echo ERR >&2` printed, and its exit status 3 became lefthook's 1). This
+# file's whole contract is that a line here means something, so a key that silently means nothing is
+# the bug this ticket was filed for, wearing a different hat.
 
 min_version: 2.1.10
 
@@ -51,10 +60,8 @@ pre-commit:
   commands:
     gates:
       run: bash scripts/gates.sh commit
-      forward_stderr: true
 
 pre-push:
   commands:
     gates:
       run: bash scripts/gates.sh push
-      forward_stderr: true

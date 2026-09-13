@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-13 01:30'
-updated_date: '2026-09-13 04:18'
+updated_date: '2026-09-13 05:38'
 labels: []
 dependencies:
   - TASK-060
@@ -51,5 +51,10 @@ created: 2026-09-13 04:16
 Repoint from TASK-061.02, which landed between this ticket being filed and anyone pushing. The step to watch is no longer `nix develop .#default --command bash .github/ci-steps.sh`: that file is deleted, and the step is now `nix develop .#default --command bash scripts/gates.sh ci`. This ticket's `references` entry was repointed from the deleted file to `scripts/gates.sh` for the same reason - flagging it out loud because it is your ticket, not mine, and the alternative was leaving a dead path in it.
 
 Substance unchanged and still entirely human: push main, watch the one step go green, read the times. It is easier than when this ticket was filed - the script prints a per-gate `--- N.NNs` line under each banner, so one observed run discharges most of TASK-052's debt as well as this step's total. Local warm expectation for the whole tier: 139 s, of which the two `cargo test` invocations are 134 s.
+---
+
+created: 2026-09-13 05:38
+---
+TASK-061's integration pass re-measured what you should expect locally before you read a runner number: the new `ci` tier is **140 s warm** on aarch64-darwin, against **141 s** for the old list run in the same session ten minutes earlier - so the shape did not get slower, and the 138 s figure in older prose does not reproduce even for the list it was measured from. Expect the per-gate `--- N.NNs` lines to look like this at the top: gate definition parses 0.01, docs artifact names 0.16, cargo fmt 0.25, firmware fmt 0.41, clippy 0.35, then five gates under 0.7 s, two `cargo doc` runs at 1.33 and 1.58, both cross-builds at 0.34 and 0.13, both cross-clippies at 0.43 and 0.22 - and then cargo test at 66.30 and cargo test (pod-hw) at 66.52, which are 132.8 of the 140 s. If your runner spends far more than that, the extra is almost certainly cold compilation rather than anything the relocation broke: ci.yml has no cache at all today, and that gap now has its own ticket, TASK-064.
 ---
 <!-- COMMENTS:END -->
