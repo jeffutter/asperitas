@@ -3,11 +3,11 @@ id: TASK-059
 title: >-
   Place .sram1_bss as a NOLOAD section so plain -O binary stops emitting a 469
   MB image
-status: Dev Ready
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-12 21:26'
-updated_date: '2026-09-13 07:04'
+updated_date: '2026-09-13 08:08'
 labels:
   - planned
 dependencies:
@@ -207,6 +207,35 @@ follow) leaves 1,027 bytes of junk zeros in flash that nothing copies, and contr
 `link.x.in:169-172`, which forbids changing the load region of sections injected after `.bss`. Also
 corrected: ARMmbed/mbed-os #14572, cited in the references, is an **issue**, not a PR - NXP fixed it
 in `LPC1549.ld`.
+
+## Parked by an agent run that could not execute it (2026-09-13)
+
+The ralph loop handed this umbrella to `/backlog-execute`. It is not executable by an agent, and
+nothing here was changed except its status. Evidence read off the tree, not off ticket statuses:
+
+- Assignee is `@human`, and CLAUDE.md forbids an agent picking up or closing such a ticket. The
+  parent inherits `@human` because TASK-059.03 is a bench task.
+- Its only AC (#1) requires all three leaves Done. Measured state: .01 Done at commit f746e54
+  (`firmware/memory.x` now carries the `(NOLOAD)` + `INSERT AFTER .bss` rule; the six
+  `--only-section` flags are gone from `firmware/Makefile`). .02 To Do - `scripts/` contains
+  only `check-doc-artifact-names.sh` and `gates.sh`, so the load-address gate does not exist.
+  .03 To Do and needs a board, ears and a line-level source.
+- The parent has no direct work of its own beyond the umbrella criterion, so there was no partial
+  agent contribution available to make on it.
+
+AC #1 left unchecked deliberately: checking it would assert two unfinished children are Done.
+
+**Next actionable step.** TASK-059.02 (`@agent`, deps satisfied since .01 landed) is the only
+agent-owned work left in this tree; it appears in `./backlog/unblocked-todo.sh`. When .02 and .03
+are both Done, `backlog task list -s Blocked --ready` releases this ticket and the flip to Done
+belongs to a person.
+
+**Why it reached Dev Ready at all.** Planning promoted the container to Dev Ready, and the pi ralph
+extension's execute stage selects it with `findFirstByStatus(cwd, "Dev Ready")`
+(~/.pi/agent/extensions/ralph/index.ts:2030-2033), which applies neither the assignee filter nor
+the unfinished-child hold-back that `unblocked-todo.sh` implements. The Claude workflow in
+`.claude/workflows/ralph-backlog-loop.js:219-227` does check readiness and forces such a ticket
+back to Blocked; the pi extension has no equivalent. Filed as TASK-066.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
