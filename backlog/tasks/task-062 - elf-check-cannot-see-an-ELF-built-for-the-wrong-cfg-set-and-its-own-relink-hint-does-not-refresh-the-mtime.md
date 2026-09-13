@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-13 00:52'
-updated_date: '2026-09-13 04:16'
+updated_date: '2026-09-13 07:02'
 labels:
   - planned
 dependencies: []
@@ -51,5 +51,10 @@ Second reproduction while executing TASK-060.04 minutes later, same shell: pre-p
 created: 2026-09-13 04:16
 ---
 Path update from TASK-061.02: the pair of builds that alternate `release/main` between the console and RTT-only artifacts now live in `scripts/gates.sh` (`=== firmware cross-compile ===` then `=== firmware cross-compile (RTT-only, log-defmt) ===`), not in ci.yml. Their adjacency and order are load-bearing enough that the script states them as an ordering rule in its header and lets no later gate build firmware at all. So the alternation you describe keeps happening in the same shape, and any fix here has to work with the end state being "whatever build ran last" rather than assume a fresh checkout.
+---
+
+created: 2026-09-13 07:02
+---
+Coordination note from planning TASK-059 (2026-09-13): TASK-059.02 adds scripts/check-image-load-addresses.sh plus one push-tier gate line in scripts/gates.sh, and its header will state plainly that it validates whichever cfg set built last - your provenance blindness, acknowledged rather than papered over. Its ACs forbid the `test -f ... || true` else-branch pattern this ticket calls out. If you land first, say so in .02's notes so it reuses your mechanism instead of duplicating it.
 ---
 <!-- COMMENTS:END -->

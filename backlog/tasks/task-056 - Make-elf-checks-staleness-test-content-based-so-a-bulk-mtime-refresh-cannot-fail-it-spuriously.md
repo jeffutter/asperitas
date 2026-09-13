@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-12 09:25'
-updated_date: '2026-09-13 04:16'
+updated_date: '2026-09-13 07:02'
 labels: []
 dependencies:
   - TASK-053
@@ -97,5 +97,10 @@ wants them). Do not touch the `probe-*` recipes.
 created: 2026-09-13 04:16
 ---
 Path update from TASK-061.02: AC #5's "the host gates in ci.yml are green" now means `scripts/gates.sh commit` (2 s warm) or the whole thing via `scripts/gates.sh ci` (139 s warm), because ci.yml holds no list any more. Nothing about your fix changes. Worth recording alongside it: no gate writes to firmware sources - every fmt gate is `--check` precisely so a commit cannot bump mtimes and send the bench's elf-check red - and `make -C firmware elf-check` is red on today's clean tree for exactly the mtime reason this ticket owns.
+---
+
+created: 2026-09-13 07:02
+---
+Coordination note from planning TASK-059 (2026-09-13): TASK-059.02 adds scripts/check-image-load-addresses.sh and one gate line in scripts/gates.sh (push tier, after the doc-artifact gate). It reads the six release ELFs with the bare rust-objdump/rust-objcopy shims precisely so it never rebuilds, and hard-fails on a missing ELF rather than skipping on mtime - the same staleness trap this ticket is about. If you land first, tell .02's executor what the freshness contract became; the two checks should not each invent their own.
 ---
 <!-- COMMENTS:END -->

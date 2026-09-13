@@ -1,19 +1,25 @@
 ---
 id: TASK-059
 title: >-
-  Give .sram1_bss a flash load address so plain -O binary stops emitting a 469
+  Place .sram1_bss as a NOLOAD section so plain -O binary stops emitting a 469
   MB image
-status: Needs Plan
+status: Dev Ready
 assignee:
-  - '@agent'
+  - '@human'
 created_date: '2026-09-12 21:26'
-updated_date: '2026-09-12 21:39'
-labels: []
-dependencies: []
+updated_date: '2026-09-13 07:04'
+labels:
+  - planned
+dependencies:
+  - TASK-059.01
+  - TASK-059.02
+  - TASK-059.03
 references:
   - 'firmware/Makefile:101-109'
   - firmware/memory.x
-  - 'https://github.com/ARMmbed/mbed-os/pull/14572'
+  - 'https://github.com/ARMmbed/mbed-os/issues/14572'
+  - firmware/Cargo.toml
+  - scripts/gates.sh
 priority: low
 type: task
 ordinal: 91800
@@ -78,8 +84,152 @@ Out of scope: the docs (TASK-057) and the docs gate (TASK-058).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A link map (`-C link-arg=-Wl,-Map`) establishes which linker input actually places `.sram1_bss`, and the answer plus the command that produced it go in the ticket notes - the measurement in the description says daisy-embassy's own NOLOAD rule is not what placed it, and that has to be confirmed rather than assumed.
-- [ ] #2 Plain `cargo objcopy --release --features seed3 --bin main -- -O binary /tmp/out.bin`, with no `--only-section` flags, yields an image within a few percent of what `make build BINARY=main` produces instead of 469,763,480 bytes, and the same holds for `rig`.
-- [ ] #3 All six bin targets still link, and the resulting flash image sizes are recorded before and after with any real difference explained.
-- [ ] #4 HUMAN: before this ticket is Dev Ready, every criterion needing the board is split into its own @human sub-task - audio in and out on real hardware for `main` and `rig`, since the buffers being moved are the SAI DMA buffers.
+- [ ] #1 Parent umbrella: TASK-059.01, TASK-059.02 and TASK-059.03 are all Done. The substantive criteria this ticket carried before planning live in those subtasks - the link-map confirmation, the size table and the deletion of the `--only-section` keep-list in .01, the regression gate in .02, and every board-touching criterion in .03.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+## What this ticket is now
+
+An umbrella. Planning established the mechanism, chose the fix, and found that the work splits into
+three leaves with different owners - two agent-owned and one that only a person at the bench can
+close. This plan says how they fit; each leaf carries its own step-by-step plan.
+
+## The fix, in one paragraph
+
+`.sram1_bss` is an orphan output section, so rust-lld placed it and gave it LMA == VMA in AXI SRAM,
+which makes `llvm-objcopy -O binary` span flash-to-RAM and pad with zeros. daisy-embassy's rule for
+it never applies because cortex-m-rt includes exactly one `memory.x` and ours wins. The fix therefore
+goes in *our* `firmware/memory.x`, using the hook cortex-m-rt documents:
+
+    SECTIONS { .sram1_bss (NOLOAD) : ALIGN(4) { *(.sram1_bss) *(.sram1_bss*) } > RAM } INSERT AFTER .bss;
+
+`(NOLOAD)` is what turns it into `SHT_NOBITS`; `INSERT AFTER .bss` is the sanctioned injection point
+and forbids changing its load region, which is why the `AT> FLASH` shape this ticket was originally
+filed to copy is wrong here. Keep `> RAM`: our AXI region, which DMA1 reaches. daisy-embassy's
+regions alias `RAM` to DTCMRAM, and audio would die silently there.
+
+## Execution order
+
+1. **TASK-059.01** (`@agent`) - confirm the placement with a link map, land the `memory.x` rule,
+   measure all six bins in both cfg sets before and after, delete the six `--only-section` flags, and
+   correct every sentence in `firmware/Makefile`, `firmware/Cargo.toml` and
+   `docs/reference/daisy-seed3.md` that presents the 469 MB story as current behavior. One commit on
+   purpose: layout, crutch and prose describe one fact, and shipping any subset of them leaves the
+   repo either half-fixed or describing a hazard it no longer has.
+2. **TASK-059.02** (`@agent`, depends on .01) - add `scripts/check-image-load-addresses.sh` to the
+   push tier: no file-backed section may load outside flash. It must land second because a gate that
+   fails on today's tree cannot land first, and it must exist before anyone is tempted to re-add a
+   keep-list. Its red-run demonstration is what proves the class is actually closed.
+3. **TASK-059.03** (`@human`, depends on .01 only) - flash and listen. Sizes stay identical across
+   the change while roughly 200 bytes of `.text` content move, so no host-side check can settle this.
+   It does not wait on .02, which changes no image bytes.
+
+.01 is the only leaf with real risk and the only one worth reading closely before executing; .02 and
+.03 are mechanical once it lands.
+
+## How to tell the whole thing worked
+
+All three leaves Done, plus these read straight off the tickets' notes rather than being asserted: a
+link-map answer naming the linker input that placed the section; a before/after byte table for six
+bins x two cfg sets with every delta explained; `.sram1_bss` reported as `NOBITS`; `_stack_end`
+unchanged; a recorded red run of the new gate; and a bench report with counter values rather than
+pass/fail claims.
+
+## Deliberately not in scope
+
+- **Upstream.** TASK-065 reports that daisy-embassy's `memory.x` is silently ignored whenever an app
+  ships its own, and offers the one-character alternative fix (rename the attribute to
+  `.bss.sram1_bss`). Filed separately and *not* as a child, so an outward-facing conversation cannot
+  block a local fix that already works. Delete it if you would rather not file it.
+- **The objective audio bench.** TASK-034 and TASK-035 would turn .03's listening into metrics. Until
+  they land, ears and console counters are the best available evidence, and .03 says so instead of
+  pretending otherwise.
+- **elf-check's own weaknesses** (TASK-056, TASK-062). Both touch `scripts/gates.sh` and the ELF
+  freshness question; coordination notes are on both tickets, and .02's plan is written to avoid
+  colliding with either.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Root cause, as measured during planning (not evidence for any criterion)
+
+Every figure below was taken by the planning session at `80c7276`, rustc 1.97.1, linker
+`rust-lld`, llvm tools 21.1.8 via cargo-binutils 0.4.0. It is orientation for whoever executes, not
+a substitute for measuring it yourself - TASK-059.01 AC #1 exists precisely because this paragraph
+is someone else's run.
+
+- `.sram1_bss` is an **orphan output section**, placed by rust-lld's built-in orphan rules directly
+  after `.data`, fed from a `daisy_embassy-*.rlib` member. VMA == LMA == `0x24000198`.
+- LMA equals VMA because of lld's documented rule (*Output section LMA*): with no `AT()` or
+  `AT>region`, an orphan whose previous section is *not* in the default LMA region gets LMA = VMA.
+  `.data` uses `AT>FLASH`, so the orphan lands in RAM. Ordering follows lld's rank-based orphan
+  placement, which MaskRay advises never relying on.
+- daisy-embassy's `.sram1_bss (NOLOAD) ... > RAM_D2` rule is **dead code here**: `link.x.in` does one
+  `INCLUDE memory.x` and ours is first on the `-L` path (order observed on the link line:
+  `asperitas-firmware/out`, cortex-m, embassy-stm32, cortex-m-rt, defmt, daisy-embassy,
+  stm32-metapac). So their MEMORY block, including `REGION_ALIAS(RAM, DTCMRAM)`, never applies.
+- File-backed despite `MaybeUninit::uninit()`: rustc emits custom-named sections as `SHT_PROGBITS`
+  whatever the initialiser; only names starting `.bss.` become `NOBITS`. link.x's own `.bss` and
+  `.uninit` avoid the blowup solely because those *output* sections are declared `(NOLOAD)`. Hence
+  `-R .bss -R .uninit` cannot help, as the description found.
+
+## Two commands in this ticket that do not work as written
+
+- `-C link-arg=-Wl,-Map=out.map` fails outright: `rust-lld: error: unknown argument '-Wl,-Map=...'`.
+  Use the lld-native form: `cargo rustc --release --features seed3 --bin main -- -C link-arg=-Map=/tmp/main.map`.
+- `--orphan-handling=error` is accepted by rust-lld but names only `.debug_*`, `.comment` and
+  `.ARM.attributes` - **not** `.sram1_bss`. It is not a usable guard; do not propose it.
+
+Invariants that do work from a script: `rust-objdump -h` prints VMA and LMA columns (note that
+`.defmt.*` section names contain spaces, so parse right-to-left), and comparing a plain `-O binary`
+length against the highest flash LMA end catches drops. Both became TASK-059.02.
+
+## Baselines for the before/after table
+
+Plain `-O binary`, console cfg (`--features seed3`), at `80c7276`: main 469,763,480 / rig 469,763,480
+/ blinky 65,638 / ledtest 17,774 / podtest 72,689 / panictest 65,958. Only `main` and `rig` link the
+audio module, which is why the blowup looks intermittent. `make build` produces main 88,581 and rig
+106,811; the RTT-only cfg (`--no-default-features --features "seed3 log-defmt"`) gives 48,360 and
+65,696, matching `firmware/Cargo.toml`.
+
+Fix shape chosen: `(NOLOAD)` + `INSERT AFTER .bss` in our `memory.x`, keeping `> RAM` (AXI). Measured
+during planning: `.sram1_bss` becomes `NOBITS` at `0x240021b8`, plain images collapse to 88,581 /
+106,811 - exactly what `make build` already writes - `_stack_end` unchanged at `0x240025b8`, and ~209
+bytes of `.text` *content* differ at identical size because literal pools follow the moved statics.
+That last point is why the HUMAN bench session cannot be skipped: byte-identical sizes are not
+byte-identical images.
+
+Rejected: `> RAM AT> FLASH` without `NOLOAD` (the ARMmbed/NXP prior art this ticket was filed to
+follow) leaves 1,027 bytes of junk zeros in flash that nothing copies, and contradicts
+`link.x.in:169-172`, which forbids changing the load region of sections injected after `.bss`. Also
+corrected: ARMmbed/mbed-os #14572, cited in the references, is an **issue**, not a PR - NXP fixed it
+in `LPC1549.ld`.
+<!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 07:01
+---
+Planning 2026-09-13: the diagnosis landed opposite to the hypothesis this ticket was filed with, so
+the title changed from "give `.sram1_bss` a flash load address" to placing it `NOLOAD`. The mbed/NXP
+prior art named in the description is the wrong fix here: it works, but writes ~1 KB of zeros into
+flash that no startup code copies, and `link.x.in:169-172` explicitly forbids changing the load region
+of sections injected after `.bss`. Three children, all planned. `.01` fixes the layout AND deletes the
+six `--only-section` flags AND corrects the ~18 sentences across `firmware/Makefile`,
+`firmware/Cargo.toml` and `docs/reference/daisy-seed3.md` that present the 469 MB story as current
+behavior - deliberately one commit, because splitting them would leave main green while documenting a
+hazard it no longer has, and TASK-058's doc gate would then be enforcing prose that lies. `.02` adds
+the invariant as a push-tier gate ("no file-backed section may load outside flash"), which is what
+makes deleting the keep-list safe to keep deleted; it must land after `.01` because a gate that fails
+cannot land first. `.03` is `@human`: only `main` and `rig` carry the buffers, sizes stay identical
+while roughly 200 bytes of `.text` content move, and the objective loopback metrics that would make
+this digital do not exist yet (TASK-034 and TASK-035 both still To Do), so the evidence is ears plus
+the console counters. Parent inherits `@human` from `.03` and stays unclosable until someone listens.
+Filed TASK-065 separately, deliberately NOT as a child, so reporting upstream cannot block the local
+fix that already works.
+---
+<!-- COMMENTS:END -->
