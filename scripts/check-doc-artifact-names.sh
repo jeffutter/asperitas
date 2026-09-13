@@ -8,9 +8,9 @@
 #   R1  Every `*.bin` token in README.md or docs/**/*.md must be an image firmware/Makefile really
 #       builds, or one of the explicitly allowlisted non-images below. TASK-057 found `firmware.bin`
 #       still quoted in six places (README.md, firmware/Cargo.toml) long after each target started
-#       writing `$(BINARY).bin`, and nothing could see it: CI and lefthook run cargo only, so no
-#       gate in this repo had ever invoked make, let alone compared a doc string against what make
-#       produces. Prose fixes decay; this makes the class self-policing.
+#       writing `$(BINARY).bin`, and nothing could see it: at that point every gate in the repo was a
+#       cargo invocation, so make was nobody's input and no check compared a doc string against what
+#       the build produces. Prose fixes decay; this makes the class self-policing.
 #
 #   R2  No `cargo objcopy` invocation appears in those files at all. The recipe belongs in
 #       firmware/Makefile's `build:` target (around :116-124) and nowhere else, because a second
@@ -23,8 +23,10 @@
 #       board that does not boot. TASK-057's prose copy had already lost the flags.
 #
 # THE -n FLAG ON EVERY make INVOCATION HERE IS LOAD-BEARING. firmware/Makefile's default goal is
-# `all: build` (firmware/Makefile:89). Drop -n and this lint stops reading the build rules and
-# starts cross-compiling firmware inside a pre-commit hook.
+# `all: build` (firmware/Makefile:89). Drop -n and this lint stops reading the build rules and starts
+# cross-compiling firmware inside every tier of the gate set, including the pre-commit hook that fires
+# on every commit. It is the only make invocation any tier has (`scripts/gates.sh` runs it as the
+# second gate, cheapest-first); everything else in the gate set is raw cargo.
 #
 # Scope is README.md and docs/ on purpose. It does NOT extend to backlog/**: historical ticket
 # files quote `firmware.bin` as evidence of what was broken, and must keep doing so.

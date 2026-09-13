@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:23'
-updated_date: '2026-09-10 06:18'
+updated_date: '2026-09-13 04:16'
 labels:
   - planned
 dependencies:
@@ -455,5 +455,10 @@ the resolved versions, not recalled):
    `impl From<EndpointError> for Disconnected` at `usb.rs:42-53`, not the doc comment at `:26-33`). Corrected
    inline in the child plan; `.02` also gained ACs #10 (short-packet termination), #11 (saturation vs seq
    wrap) and #12 (STATUS layout and debounce as pure, host-tested functions). No change to §3's wire grammar.
+---
+
+created: 2026-09-13 04:16
+---
+Path update from TASK-061.02: AC #4's evidence names `lefthook.yml` pre-push and `ci.yml:27-36` as where the build/test gates live. Both hook stages are now one command each and CI's step is one command; the checks themselves are in `scripts/gates.sh`, at tiers `commit` / `push` / `ci`. Coverage is unchanged - the equivalence diff is in TASK-061.01's notes - so nothing here needs re-planning, only a pointer for whoever goes looking for the gate that should have caught something.
 ---
 <!-- COMMENTS:END -->

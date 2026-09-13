@@ -5,14 +5,14 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-13 01:30'
-updated_date: '2026-09-13 03:12'
+updated_date: '2026-09-13 04:18'
 labels: []
 dependencies:
   - TASK-060
   - TASK-061
 references:
-  - .github/ci-steps.sh
   - .github/workflows/ci.yml
+  - scripts/gates.sh
 type: chore
 ordinal: 99800
 ---
@@ -44,5 +44,12 @@ Cheap to check whether it worked: `gh run list --limit 3`. If the step dies, the
 created: 2026-09-13 03:12
 ---
 TASK-061 is now planned and changes what this ticket watches. Its AC #2 names "bash .github/ci-steps.sh", but that file is being replaced by scripts/gates.sh (tier argument ci), which prints a label and a wall time for every gate instead of one anonymous block. So: watch the single step run "nix develop .#default --command bash scripts/gates.sh ci" if .02 has landed when you push, and read the per-gate timings it prints as the record AC #3 asks for - those numbers also settle most of TASK-052, which has been owed runner-side figures since TASK-049. If TASK-061 has not landed, the old path still works and this ticket stands as written.
+---
+
+created: 2026-09-13 04:16
+---
+Repoint from TASK-061.02, which landed between this ticket being filed and anyone pushing. The step to watch is no longer `nix develop .#default --command bash .github/ci-steps.sh`: that file is deleted, and the step is now `nix develop .#default --command bash scripts/gates.sh ci`. This ticket's `references` entry was repointed from the deleted file to `scripts/gates.sh` for the same reason - flagging it out loud because it is your ticket, not mine, and the alternative was leaving a dead path in it.
+
+Substance unchanged and still entirely human: push main, watch the one step go green, read the times. It is easier than when this ticket was filed - the script prints a per-gate `--- N.NNs` line under each banner, so one observed run discharges most of TASK-052's debt as well as this step's total. Local warm expectation for the whole tier: 139 s, of which the two `cargo test` invocations are 134 s.
 ---
 <!-- COMMENTS:END -->

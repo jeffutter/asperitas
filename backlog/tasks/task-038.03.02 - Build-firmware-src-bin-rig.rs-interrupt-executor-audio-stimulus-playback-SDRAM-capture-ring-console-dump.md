@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-11 13:28'
-updated_date: '2026-09-13 00:11'
+updated_date: '2026-09-13 04:16'
 labels:
   - task
   - planned
@@ -668,5 +668,10 @@ Every item below was verified against the sources the build actually resolves (d
 created: 2026-09-13 00:11
 ---
 Planning note from TASK-060 (2026-09-12): AC #13's clause "CI gains a firmware clippy step (cargo clippy --release --features seed3 -- -D warnings inside firmware/)" is superseded by TASK-060 and its leaves TASK-060.01-.04. The gate lands there instead, running 'cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings' plus an RTT-only pass (--no-default-features --features "seed3 log-defmt"), in pre-commit, pre-push AND ci.yml, placed after CI's existing firmware builds. Whole-package coverage is preserved, so this ticket's Key Decision 5 intent survives; --bins is spelled explicitly rather than relying on a lib-less package defaulting to all bins (measured: omitting --bin works too and covers blinky, ledtest, main, panictest, podtest, rig). Nothing else in AC #13 changes here: cargo fmt --all --check / cargo test --workspace / cargo clippy --workspace --all-targets stay this ticket's, and note that root cargo fmt --all has never seen firmware/ (Cargo.toml:3 exclude), which is TASK-060.02's reason for existing.
+---
+
+created: 2026-09-13 04:16
+---
+Path update from TASK-061.02: the note that lefthook's pre-push hook runs the console cross-build is now phrased "the `push` tier of `scripts/gates.sh` runs it". The two firmware cross-builds live there, console first then RTT-only, with nothing building firmware after them. Same commands, same order, one file instead of three lists. Relevant to TASK-062 too: whichever of those two builds ran last is what `release/main` names on the bench.
 ---
 <!-- COMMENTS:END -->

@@ -126,7 +126,7 @@ gate() {
   if [[ $MODE != run ]]; then
     if (( RANK >= rank )); then
       if [[ $MODE == list ]]; then
-        printf '%-6s | %-4s | %-4s | %-2s | %s\n' "$min" \
+        printf '%-6s | %-3s | %-3s | %-2s | %s\n' "$min" \
           "$([[ 1 -ge $rank ]] && echo yes || echo -)" \
           "$([[ 2 -ge $rank ]] && echo yes || echo -)" \
           "$([[ 3 -ge $rank ]] && echo yes || echo -)" "$banner"
@@ -157,8 +157,8 @@ gate() {
 # teaches someone to set it. Checked in run mode only: --dry-run and --list answer questions about
 # the list and must work anywhere.
 if [[ $MODE == list ]]; then
-  printf 'tier   | commit | push | ci | gate\n'
-  printf '%s\n' '-------+--------+------+----+--------------------------------------------------'
+  printf 'min    | com | psh | ci | gate\n'
+  printf '%s\n' '-------+-----+-----+----+------------------------------------------------'
 fi
 
 if [[ $MODE == run ]]; then
@@ -177,7 +177,7 @@ fi
 # the step dies on "unexpected EOF while looking for matching `''" -- 6d7d38a to 70c6fc6, unseen
 # because nothing had been pushed since the last green run) is worth ten milliseconds to rule out
 # locally. Cheapest gate, so a broken definition is the fastest possible failure.
-gate commit "=== gate definition parses ===" bash -n "$BASH_SOURCE"
+gate commit "=== gate definition parses ===" bash -n "${BASH_SOURCE[0]}"
 
 # Docs name firmware image files; legal names come from the build rules themselves via `make -n`,
 # so this is the only place in the gate set that invokes make, and it stays a dry run -- see the

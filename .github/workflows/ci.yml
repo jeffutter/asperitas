@@ -14,13 +14,15 @@ jobs:
 
       - uses: cachix/install-nix-action@v31
 
-      # The check list itself lives in .github/ci-steps.sh, not in an inline `bash -c '...'`
-      # string here. That shape cannot carry comments: the whole list is one single-quoted argument,
-      # so an apostrophe in a comment closes the quote and the outer shell re-parses what follows.
-      # bash runs a script command by command as it reads it, so every check appears to pass and
-      # the step only then dies on an unterminated-quote error -- which is how
-      # it sat broken since 6d7d38a, unnoticed because nothing was pushed after CI last ran.
-      # A committed file takes normal comments, gets `bash -n`'d by lefthook before commit, and
-      # diffs on its own. Add checks there.
-      - name: fmt + clippy + test + firmware cross-compile
-        run: nix develop .#default --command bash .github/ci-steps.sh
+      # No check list lives here, and none belongs here. scripts/gates.sh defines every gate once;
+      # this step asks for the whole thing. The same script backs lefthook's pre-commit (`commit`
+      # tier) and pre-push (`push`), which is the point: before it, CI and both hook stages each
+      # restated the list by hand and drifted, and firmware was invisible to all three (TASK-060).
+      # Checks are added by adding one `gate` line in that script.
+      #
+      # The tier is passed explicitly even though `ci` is also the script's default: a workflow file
+      # should state what it runs. This replaced .github/ci-steps.sh, whose reason for existing at
+      # all - an inline single-quoted `bash -c '...'` string cannot carry comments - is now the first
+      # gate's problem instead, and is explained there.
+      - name: fmt + clippy + doc + test + firmware cross-build
+        run: nix develop .#default --command bash scripts/gates.sh ci

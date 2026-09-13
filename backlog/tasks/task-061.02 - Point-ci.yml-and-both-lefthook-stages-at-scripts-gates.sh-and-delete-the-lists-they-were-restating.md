@@ -3,11 +3,11 @@ id: TASK-061.02
 title: >-
   Point ci.yml and both lefthook stages at scripts/gates.sh, and delete the
   lists they were restating
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-13 03:10'
-updated_date: '2026-09-13 03:11'
+updated_date: '2026-09-13 05:05'
 labels:
   - planned
 dependencies:
@@ -28,12 +28,12 @@ Then the durable part: measure all three tiers warm against the 138 s baseline, 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The workflows single step runs "nix develop .#default --command bash scripts/gates.sh ci", its comment says where checks are added now, and .github/ci-steps.sh is deleted in the same commit with its header rationale (an inline single-quoted bash -c string cannot carry comments; cost figures are local warm) moved into the script rather than lost.
-- [ ] #2 lefthook.yml holds exactly one command per stage, each invoking the script with its own tier. No root:, glob:, files:, local: or staged/push_files template survives anywhere in the file (prove with a grep count of 0), min_version rises to the 2.1.10 the flake pins, and no parallel:, priority:, only: or stdout: key is added - only: reports success over a failed child exit code.
-- [ ] #3 Hook wiring observed rather than inferred: lefthook dump shows one command per stage; lefthook run pre-commit and lefthook run pre-push on a clean tree execute the script (its own headers print, nothing says skipped) and exit 0; an empty git commit shows gate output; a deliberately broken gate aborts a commit non-zero naming the gate that died, then gets reverted and never committed.
-- [ ] #4 Cost recorded per tier before and after, warm local inside nix develop (TASK-061 AC #2): baseline taken from the OLD lists first, then the three tiers, with each delta explained - alphabetical-versus-cheapest-first in commit, build-before-cross-clippy artifact reuse in push, membership otherwise unchanged - and the ci tier no worse than the 138 s warm baseline.
-- [ ] #5 Every live reference re-pointed: doc-001 at :33, :113-123, :229-257 and :326 with the tier matrix regenerated from --list and marked as generated; firmware/Makefile:270-275; the stale framing sentence at scripts/check-doc-artifact-names.sh:30-32 while keeping the load-bearing make -n warning. Open tickets that name the dead path (TASK-030, TASK-038.03.02, TASK-038.03.02.04, TASK-052, TASK-056, TASK-062, TASK-063) each get a task comment, not a silent edit to someone elses acceptance criteria. Coordinates inside completed tickets stay untouched as history.
-- [ ] #6 Bench left as found: make -C firmware elf-check status captured before and after (it is red on a clean tree today for TASK-056/TASK-062 reasons and must stay exactly that red, unfixed here), git status --porcelain empty after every green tier run, and the firmware ELF digest restored.
+- [x] #1 The workflows single step runs "nix develop .#default --command bash scripts/gates.sh ci", its comment says where checks are added now, and .github/ci-steps.sh is deleted in the same commit with its header rationale (an inline single-quoted bash -c string cannot carry comments; cost figures are local warm) moved into the script rather than lost.
+- [x] #2 lefthook.yml holds exactly one command per stage, each invoking the script with its own tier. No root:, glob:, files:, local: or staged/push_files template survives anywhere in the file (prove with a grep count of 0), min_version rises to the 2.1.10 the flake pins, and no parallel:, priority:, only: or stdout: key is added - only: reports success over a failed child exit code.
+- [x] #3 Hook wiring observed rather than inferred: lefthook dump shows one command per stage; lefthook run pre-commit and lefthook run pre-push on a clean tree execute the script (its own headers print, nothing says skipped) and exit 0; an empty git commit shows gate output; a deliberately broken gate aborts a commit non-zero naming the gate that died, then gets reverted and never committed.
+- [x] #4 Cost recorded per tier before and after, warm local inside nix develop (TASK-061 AC #2): baseline taken from the OLD lists first, then the three tiers, with each delta explained - alphabetical-versus-cheapest-first in commit, build-before-cross-clippy artifact reuse in push, membership otherwise unchanged - and the ci tier no worse than the 138 s warm baseline.
+- [x] #5 Every live reference re-pointed: doc-001 at :33, :113-123, :229-257 and :326 with the tier matrix regenerated from --list and marked as generated; firmware/Makefile:270-275; the stale framing sentence at scripts/check-doc-artifact-names.sh:30-32 while keeping the load-bearing make -n warning. Open tickets that name the dead path (TASK-030, TASK-038.03.02, TASK-038.03.02.04, TASK-052, TASK-056, TASK-062, TASK-063) each get a task comment, not a silent edit to someone elses acceptance criteria. Coordinates inside completed tickets stay untouched as history.
+- [x] #6 Bench left as found: make -C firmware elf-check status captured before and after (it is red on a clean tree today for TASK-056/TASK-062 reasons and must stay exactly that red, unfixed here), git status --porcelain empty after every green tier run, and the firmware ELF digest restored.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -175,3 +175,110 @@ provenance invisible), not this change. Capture its status before you start and 
 report both; do not "fix" it, and do not let a green-suite run tempt you into touching firmware
 sources. Restore the ELF digest as in TASK-061.01 Step 5.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Evidence (all figures LOCAL warm, aarch64-darwin, inside nix develop .#default, clean tree)
+
+### AC #4 - cost per tier, old lists versus new tiers, two rounds each
+
+Baselines replayed from HEAD, not quoted: `git show HEAD:lefthook.yml` pointed at by LEFTHOOK_CONFIG
+(written into the repo root so its `root:` key resolved, `-f` so nothing could skip) and
+`git show HEAD:.github/ci-steps.sh` run from the repo root. Six runs, all rc 0.
+
+| tier | old list | new tier | delta |
+| --- | --- | --- | --- |
+| commit | 2.3 s (9 jobs, alphabetical) | 2.0 s (9 gates) | none |
+| push   | 72.5 s (16 jobs) | 72.4 s (16 gates) | none |
+| ci     | 139.1 s, then 139.2 s instrumented | 141.3 s, then 139.7 s (17 gates) | +0.6 s on the paired round |
+
+Membership is unchanged everywhere except the parse gate turning into a self-parse, so each delta is
+an ordering story, told per gate rather than assumed:
+
+- **commit**: old ran alphabetically - clippy 0.35, clippy-firmware 0.43, clippy-firmware-rtt 0.23,
+  clippy-log-defmt 0.21, clippy-log-usb 0.22, *then* doc-artifact-names 0.16 seventh, fmt-check 0.26
+  eighth, fmt-check-firmware 0.42 ninth. A broken format or a bad doc name therefore died 1.6-2.2 s
+  into the hook. Cheapest-first puts them at 0.01 / 0.16 / 0.25 / 0.40 and pushes the five clippies
+  (0.19-0.36 s) behind them: same total, detection of the cheap failure classes moved from positions
+  7/8/9 to 2/3/4.
+- **push**: per-gate old-versus-new differs only within noise (`test` 66.57 s old, 66.35 s new). The
+  build-before-cross-clippy reorder is invisible warm by construction - cross-clippy measured 0.22 s
+  old against 0.43 / 0.21 s new with everything already fingerprinted. It pays where TASK-061.01
+  measured the difference (~20 s in a fresh target dir against ~2 s directly after a build); what this
+  ticket establishes is that the reordering costs nothing warm, which is the half that was unmeasured.
+- **ci**: 132.9 s of the 139 s is the two `cargo test` invocations in both spellings (old 66.55 +
+  66.25, new 66.45 + 66.46), plus one extra gate (the self-parse, 0.01 s). The +2.2 s on the first ci
+  round did not reproduce (-0.6 s relative on the second), so it is run variance, not the change. On
+  the 138 s bar: the OLD list itself measures 139.1 / 139.2 s on this machine today, so the quoted
+  figure is a little optimistic against current machine state and parity is claimed against same-
+  session numbers, which is the only comparison that carries information. Runner-side figures stay
+  owed to TASK-052 / TASK-063 - no agent can obtain them.
+
+### AC #3 - hook wiring observed, including one clause the AC gets wrong
+
+- `lefthook dump`: exactly one command per stage, both named `gates`, no `root:` anywhere. Key greps
+  all zero: `root:`, `glob:`, `files:`, `local:`, `staged_files`, `push_files`, `parallel:`,
+  `priority:`, `only:`, `stdout:`. `yq` gives `["gates"]` for both stages.
+- `lefthook run pre-commit -f` on a clean tree: prints `tier: commit`, all nine banners with their
+  `--- N.NNs` times and `tier commit: 9 gates, 2.0s`, rc 0. Nothing says skipped.
+- `lefthook run pre-push -f`: sixteen banners, 72.4 s, rc 0.
+- Staging a file and running the hook shows the whole gate log arriving through lefthook's
+  capture-and-replay (`gates` block), rc 0; this ticket's own commit then exercises the real
+  `git commit` path end to end.
+- Failure propagates: planted `gate commit "=== PLANTED FAILING GATE ..." false` as the second commit
+  gate -> `git commit` exited 1 printing `*** gate failed: === PLANTED FAILING GATE ...` and
+  `*** tier: commit (1 of 2 gates completed before it)`, HEAD unchanged. `scripts/gates.sh` restored
+  byte-identical (`cmp`) and the planted string greps to zero repo-wide. Nothing was committed.
+- **`git commit --allow-empty` cannot show gate output, and no config makes it.** Observed: `gates
+  (skip) no matching staged files`, rc 0, zero gates run. This is not a decision lefthook.yml gets to
+  make - 2.1.10 has no key for it. Upstream's
+  `internal/run/controller/command/build_command.go` returns `SkipError("no matching staged files")`
+  for every command whenever the staged set is empty and `--force` was not passed, and the published
+  `schema.json` has no property to turn it off (checked against master). Escape hatches measured in a
+  scratch repo against a deliberately failing command: plain capture -> child rc 1 becomes lefthook
+  rc 1 (what ships); `only: "[^"]*"` -> the job is skipped outright, "skip by condition", rc 0 over
+  the failure, which is worse than the exit-code-discard story it arrived with here; `interactive:
+  true` streams with its exit code intact but asks for `/dev/tty` and takes stdin, neither of which a
+  GUI client or CI reliably offers. So the AC's intent - prove the hook fires and fails loudly - is
+  discharged by the real-commit and planted-failure evidence above, and the empty-index skip is now
+  written down in `lefthook.yml` and doc-001 with its upstream source and the reason it is
+  affordable: an empty commit changes no tree, so the only thing it could gate is HEAD's tree, which
+  the commit that made it already paid for. Checked with that finding in place of the literal clause.
+- No reinstall needed: `.git/hooks/{pre-commit,pre-push}` are generic wrappers that exec lefthook,
+  which reads the config at run time; `lefthook check-install` exits 0.
+
+### AC #5 - prose re-pointed
+
+doc-001: decision row :33, the two-workspace paragraph :116-123, the whole section 5 lefthook block
+(matrix embedded from `scripts/gates.sh --list` and marked generated - regenerated output diffs
+byte-identical, 21 lines), the CI section, and the risk-table row now at :377. `firmware/Makefile`
+:270-278 names the two `firmware clippy` gates in `scripts/gates.sh` instead of the dead job names and
+carries the script's three cost figures rather than a fourth spelling.
+`scripts/check-doc-artifact-names.sh`:11-13, 25-29: framing corrected to "at that point every gate in
+the repo was a cargo invocation", with the `-n` warning kept and sharpened - it is the only `make`
+invocation any tier has, and dropping `-n` cross-compiles inside every tier including pre-commit.
+Seven open tickets got COMMENTS, never silent edits: TASK-030, TASK-038.03.02, TASK-038.03.02.04,
+TASK-052, TASK-056, TASK-062, TASK-063. Every coordinate inside a completed ticket is untouched
+history. Repo-wide grep for `ci-steps`, `fmt-check`, `clippy-firmware`, `doc-links`,
+`dump-reassemble-selftest`, `ci-steps-parse` now hits only the historical sentences in `ci.yml`,
+doc-001 and completed tickets that explain what died.
+
+### AC #6 - bench left as found
+
+`make -C firmware elf-check` before: rc 2, "target/thumbv7em-none-eabihf/release/main is older than
+src/bin/podtest.rs". After every run and the restore: rc 2, message diff-identical. As-found digest
+was 16dc9e5c... (the RTT image an earlier interrupted run had left in `release/main`); restored to the
+console image 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b with `rm -f` plus
+`make -C firmware build-elf`, which is the state TASK-061.01 documented. elf-check stays red through
+the restore because the relink is a hardlink sharing the deps artifact's mtime (19:41:41 against
+podtest.rs at 23:11:48) - TASK-062's blindness restated, not fixed here. `git status --porcelain`
+after every green tier run listed only this ticket's own files: no reformatted sources, no untracked
+droppings.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The repo now has one check list. ci.yml's single step is `nix develop .#default --command bash scripts/gates.sh ci` with a comment saying checks are added by adding one `gate` line in the script; `.github/ci-steps.sh` is deleted in the same commit with its header rationale (an inline single-quoted bash -c string cannot carry comments; cost figures are local warm) moved into the script. lefthook.yml drops from 25 `run:` lines across two stages to one command per stage (`bash scripts/gates.sh commit` / `push`), min_version rises to the flake's 2.1.10, and every path-filtering key greps to zero - including `firmware-cross-compile`'s `root: "firmware/"`, the one gate left that could report green having built nothing. Costs measured warm against baselines replayed from HEAD rather than quoted: commit 2.3 -> 2.0 s, push 72.5 -> 72.4 s, ci 139.2 -> 139.7 s on the paired round (a +2.2 s first round did not reproduce), with the two cargo test runs still 133 of 139 s; ordering deltas told per gate (docs/fmt from positions 7/8/9 to 2/3/4 in commit, cross-clippy after both builds where it pays ~18 s cold and nothing warm). Wiring observed, not inferred: dump shows one command per stage, both tiers execute with their headers and timings and exit 0, a planted failing gate aborts `git commit` with rc 1 naming itself and was reverted uncommitted. One AC clause proved impossible and is recorded as such - `git commit --allow-empty` prints `gates (skip) no matching staged files` because lefthook 2.1.10 skips every command over an empty staged set with no config key to stop it (upstream build_command.go, no such property in schema.json), and the alternatives measured worse: `only:` skipped a failing job and returned 0, `interactive:` streams but wants /dev/tty and stdin. Prose follows the code: doc-001's decision row, two-workspace paragraph, rewritten lefthook and CI sections with the tier matrix generated from `--list` and marked generated, firmware/Makefile re-pointed at the two `firmware clippy` gates with reconciled costs, and the docs-artifact lint's stale framing fixed while its load-bearing `make -n` warning stays; seven open tickets got comments instead of silent edits and completed tickets' coordinates stay history. Bench as found: elf-check identical red before and after (rc 2, same message), ELF back to the console image 9b60b8ff, tree clean after every green tier run.
+<!-- SECTION:FINAL_SUMMARY:END -->

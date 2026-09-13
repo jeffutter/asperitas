@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-13 00:52'
-updated_date: '2026-09-13 01:02'
+updated_date: '2026-09-13 04:16'
 labels:
   - planned
 dependencies: []
@@ -44,3 +44,12 @@ Discovered by TASK-060.03's executor, which hit both facts while proving the new
 
 Second reproduction while executing TASK-060.04 minutes later, same shell: pre-push's new firmware-cross-compile-rtt job left target/thumbv7em-none-eabihf/release/main at sha256 16dc9e5cdff48c3e433171060bb04c33fa137dd1fec0effd0dac6150206ee431 (9,497,564 B, RTT-only cfg) with mtime unchanged at Sep 12 19:41; 'rm -f $ELF && make build-elf' put it back to 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b (10,941,616 B, console cfg), again WITHOUT a fresh mtime, which is why 'make elf-check' stayed red afterwards. Two things this ticket owns: the name cannot tell the two cfg sets apart, and the remedy elf-check prints does not refresh the timestamp it compares.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 04:16
+---
+Path update from TASK-061.02: the pair of builds that alternate `release/main` between the console and RTT-only artifacts now live in `scripts/gates.sh` (`=== firmware cross-compile ===` then `=== firmware cross-compile (RTT-only, log-defmt) ===`), not in ci.yml. Their adjacency and order are load-bearing enough that the script states them as an ordering rule in its header and lets no later gate build firmware at all. So the alternation you describe keeps happening in the same shape, and any fix here has to work with the end state being "whatever build ran last" rather than assume a fresh checkout.
+---
+<!-- COMMENTS:END -->

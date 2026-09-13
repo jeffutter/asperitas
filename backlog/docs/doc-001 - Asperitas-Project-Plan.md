@@ -30,7 +30,7 @@ relitigated.
 | Debug probe | **None for the first few weeks.** Flash by DFU over USB-C; debug over USB CDC serial with Pod LEDs as boot-stage fallback. `probe-rs` + `defmt` slots in later without rework |
 | Desktop tooling | WAV CLI first, then live `cpal` TUI, then analysis output, then a CPU-cost harness |
 | Test corpus | Real instrument recordings **committed to git**, alongside synthetic signals |
-| CI | `lefthook` locally **and** GitHub Actions. Pre-commit is the one that runs on every commit; CI is pre-push plus one priced check deliberately kept off the hook (see §5) |
+| CI | `lefthook` locally **and** GitHub Actions, all three executing `scripts/gates.sh` at ascending tiers (`commit` / `push` / `ci`). Pre-commit is the one the commit loop always runs; CI adds one priced gate the hook skips (see §5) |
 
 ### Assumptions made without asking
 
@@ -116,8 +116,8 @@ asperitas/
 and carries its own `.cargo/config.toml`. The cost is that nothing reaches `firmware/` by
 default: `cargo fmt --all`, `cargo clippy --workspace`, `cargo doc` and `cargo test` at the
 root all stop at that exclusion, so each needs a second invocation naming the firmware
-workspace, and those exist now (`fmt-check-firmware`, the `clippy-firmware` pair, CI's two
-firmware clippy steps). Tests remain the honest gap: a `no_std` target has no test harness to
+workspace, and those exist now, as gates in `scripts/gates.sh`: firmware fmt, cross clippy over
+all six bins in both cfg sets, and two cross-compiles. Tests remain the honest gap: a `no_std` target has no test harness to
 link, so over there correctness is carried by the cross-compile, the lints, and the bench.
 TASK-060 is what the ungated version looked like - `rig.rs` sat unformatted for days while
 root `cargo fmt --all --check` exited 0.
@@ -228,33 +228,87 @@ embedded target.
 
 ### lefthook
 
-Both hooks run their whole command set rather than a changed-files subset, and no lint job
-uses lefthook's `root:` key - it filters paths, and a job whose filtered set is empty exits 0
-without running anything. Costs are local warm figures on aarch64-darwin.
+Both hook stages run one command each - `bash scripts/gates.sh commit` and `bash scripts/gates.sh
+push`. The gate set is defined once, in that script: every check named once, tagged with the cheapest
+tier that runs it, so neither the hooks nor CI can restate it and drift. Restating it *was* the bug -
+`lefthook.yml` held 25 hand-written `run:` lines and CI kept a second copy of the same list, and every
+check added since TASK-018 landed on one side only (TASK-060 exists because firmware was invisible to
+both).
 
-- **pre-commit** - about 1.5 s: `doc-artifact-names`; `fmt` and `fmt --check` on the firmware
-  workspace; `clippy -D warnings` on the host workspace plus the two feature-gated
-  `asperitas-logging` transports; and cross-target `clippy -D warnings` over all six firmware
-  bins in both cfg sets (20 s on a fresh target dir, ~2 s once dependencies exist). Fast enough
-  not to be resented, and it is the only gate the autonomous commit loop reliably executes.
-- **pre-push** - about 75 s, of which `cargo test --workspace` alone is 67 s. Everything
-  pre-commit runs, plus `cargo doc` twice under `RUSTDOCFLAGS=-D warnings`, the full test suite,
-  the `pod-hw` clippy, `dump_reassemble --selftest`, and both firmware cross-compiles (console
-  and RTT-only). The cross-compile is the important one: without it the firmware silently rots
-  while all the work happens on desktop.
+Nothing filters paths any more: no `root`, `glob`, `files` or `local` key survives in `lefthook.yml`,
+and no job carries a staged-files template. A filtered job whose set is empty exits 0 without running,
+so a lint behind one reads as green having checked nothing. `firmware-cross-compile` sat behind the
+last such filter until TASK-061.02 deleted it; grep the file for those keys and count zero, which is
+the durable check rather than this sentence. One skip survives and it is benign: lefthook ignores a
+stage whose staged-file set is empty, so `git commit --allow-empty` runs no gates and a manual
+`lefthook run <stage>` on an empty index needs `-f`. That one is not configurable - 2.1.10 has no key
+for it, its builder skips such a command before reading any, and the only override besides `-f` is
+`only:`, which measured worse still: given a failing check it reported "skip by condition" and exit 0.
+An empty commit changes no tree, so the only thing it could gate is HEAD's tree - already paid for by
+the commit that made it.
+
+The tiers, as `scripts/gates.sh --list` prints them. This block is generated - regenerate it with
+that command, do not hand-edit rows:
+
+```text
+min    | com | psh | ci | gate
+-------+-----+-----+----+------------------------------------------------
+commit | yes | yes | yes | === gate definition parses ===
+commit | yes | yes | yes | === docs artifact names ===
+commit | yes | yes | yes | === cargo fmt ===
+commit | yes | yes | yes | === cargo fmt (firmware workspace) ===
+commit | yes | yes | yes | === cargo clippy ===
+commit | yes | yes | yes | === cargo clippy (asperitas-logging log-usb) ===
+commit | yes | yes | yes | === cargo clippy (asperitas-logging log-defmt) ===
+push   | -   | yes | yes | === cargo clippy (asperitas-pod pod-hw feature) ===
+push   | -   | yes | yes | === dump_reassemble --selftest ===
+push   | -   | yes | yes | === cargo doc (workspace) ===
+push   | -   | yes | yes | === cargo doc (workspace, all features) ===
+push   | -   | yes | yes | === firmware cross-compile ===
+push   | -   | yes | yes | === firmware cross-compile (RTT-only, log-defmt) ===
+commit | yes | yes | yes | === firmware clippy (all bins) ===
+commit | yes | yes | yes | === firmware clippy (all bins, RTT-only, log-defmt) ===
+push   | -   | yes | yes | === cargo test ===
+ci     | -   | -   | yes | === cargo test (asperitas-pod pod-hw feature) ===
+
+counts: commit 9, push 16, ci 17
+```
+
+Costs are local warm figures on aarch64-darwin inside `nix develop .#default`: **commit 2 s**, **push
+74 s**, **ci 139 s**. The two `cargo test` invocations are 134 of those 139 s.
+
+Order within a tier is whatever the script declares, cheapest-first, with two rules that outrank cost:
+the console cross-build comes immediately before the RTT-only one with nothing building firmware after
+them (whichever ran last is the ELF the bench then flashes and decodes), and the two cross-clippy gates
+follow both builds so they reuse the artifacts. Neither rule is expressible in hook config - lefthook
+sorts a stage by priority, then leading digits, then command name, never by declaration order - which
+is the reason the definition is a script and not YAML.
+
+What the one-command shape costs: lefthook buffers a command's stdout and replays it when the command
+finishes, so a hook prints nothing for its first ~2 s (commit) or ~75 s (push). In exchange the log
+carries per-gate headers and wall times it never had, and the run stops at the first failure naming the
+gate that died.
 
 ### CI
 
-GitHub Actions runs a superset of pre-push, and its check list lives in `.github/ci-steps.sh`
-rather than inline in the workflow: as an inline `bash -c '...'` string any apostrophe in a
-comment closed the quote and broke the step, which sat broken unnoticed for three days until
-TASK-060. Both hooks now run `bash -n` on that file. Exactly one check lives only in CI:
-`cargo test --workspace --features asperitas-pod/pod-hw`, 67 s local warm - more than every
-other pre-push command combined, spent re-running the host suite under one non-default flag
-whose compile-time half is already gated here. Priced and recorded in TASK-060.04, taking the
-same split TASK-018.01's fixup made deliberately (`c44b9c1`). Reopen it if pushes become
-routine or the commit loop starts pushing. CI stays the authority either way, immune to
-`--no-verify`.
+GitHub Actions runs the same script at full tilt - `nix develop .#default --command bash
+scripts/gates.sh ci` - so the repo holds exactly one list and the runner executes it verbatim. CI used
+to keep its own copy inline in a single-quoted `bash -c '...'` string, a shape that cannot carry
+comments: an apostrophe closed the quote and the step died at end of file, unnoticed for three days
+because nothing had been pushed since the last green run (TASK-060 found it that way). The workflow now
+names no checks at all; `.github/ci-steps.sh`, the intermediate fix, is gone, and the parse check that
+file needed is now the first gate in the script.
+
+Exactly one gate lives in the `ci` tier alone: `cargo test --workspace --features
+asperitas-pod/pod-hw`, 67 s local warm - more than every push-tier gate combined - re-running the host
+suite under one non-default feature flag whose compile-time half (`clippy --features
+asperitas-pod/pod-hw`) does run on push. Priced and argued at its own gate in `scripts/gates.sh`,
+taking the split TASK-018.01's fixup made deliberately (`c44b9c1`). Reopen it if pushes become routine
+or the commit loop starts pushing. CI stays the authority either way, immune to `--no-verify`, and it
+remains the only place these numbers have ever been observed on a real runner: main sits far ahead of
+`origin/main` and the workflow has no `workflow_dispatch`, so runner-side figures stay owed to TASK-052
+and TASK-063.
+
 
 ---
 
@@ -323,7 +377,7 @@ would need hardware in the loop.
 | No prior DSP experience | Medium | From-scratch on `dasp` is the *learning* choice, not the fast one. Analysis output makes behaviour visible. Resonators are the right first algorithm — a comb filter is a delay line plus feedback |
 | CPU headroom exhausted late | Medium | CPU-cost harness in M7 is arguably too late; if voice counts start feeling ambitious, pull it forward |
 | Committed audio corpus bloats the repo | Low | Short mono clips, deliberate regeneration only |
-| Two-workspace friction | Low | Every root-level cargo command stops at the exclusion, so firmware gets its own invocations: fmt, cross clippy over all six bins in both cfg sets, and two cross-compiles, in pre-commit, pre-push and CI alike (TASK-060). Residuals named rather than glossed: firmware docs are ungated - `cargo doc` covers `crates/*` only - pedantic clippy lints are unadopted, and the `pod-hw` *test* runs in CI alone |
+| Two-workspace friction | Low | Every root-level cargo command stops at the exclusion, so firmware gets its own invocations: fmt, cross clippy over all six bins in both cfg sets, and two cross-compiles, in every tier of `scripts/gates.sh` (TASK-060, TASK-061). Residuals named rather than glossed: firmware docs are ungated - `cargo doc` covers `crates/*` only - pedantic clippy lints are unadopted, and the `pod-hw` *test* runs in CI alone |
 
 ---
 

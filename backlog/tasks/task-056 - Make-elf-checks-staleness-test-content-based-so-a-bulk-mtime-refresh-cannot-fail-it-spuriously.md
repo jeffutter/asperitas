@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-12 09:25'
-updated_date: '2026-09-12 09:26'
+updated_date: '2026-09-13 04:16'
 labels: []
 dependencies:
   - TASK-053
@@ -90,3 +90,12 @@ Do not add dependency-file support or ask cargo for its freshness view (`cargo b
 not exist; `--message-format json` recompilation reports are a different ticket's problem if anyone
 wants them). Do not touch the `probe-*` recipes.
 <!-- SECTION:PLAN:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 04:16
+---
+Path update from TASK-061.02: AC #5's "the host gates in ci.yml are green" now means `scripts/gates.sh commit` (2 s warm) or the whole thing via `scripts/gates.sh ci` (139 s warm), because ci.yml holds no list any more. Nothing about your fix changes. Worth recording alongside it: no gate writes to firmware sources - every fmt gate is `--check` precisely so a commit cannot bump mtimes and send the bench's elf-check red - and `make -C firmware elf-check` is red on today's clean tree for exactly the mtime reason this ticket owns.
+---
+<!-- COMMENTS:END -->

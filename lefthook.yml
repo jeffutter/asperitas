@@ -1,154 +1,60 @@
-# lefthook config — local git hooks for Asperitas
-# Installed automatically by the nix shell (see flake.nix shellHook).
+# lefthook config - local git hooks for Asperitas
+# Installed automatically by the nix shell (`lefthook install`, flake.nix:67).
+#
+# Each stage runs exactly one command: the shared gate script, at the tier that fits this stage's
+# budget. The gate set is defined once, in scripts/gates.sh; adding a check means adding a `gate`
+# line there and never anything here. Before that script existed, this file hand-maintained 25
+# `run:` lines across two stages and CI kept a second copy of the same list, and every check added
+# since TASK-018 drifted between them - TASK-060 exists because firmware was invisible to both.
+#
+# What that shape trades away, recorded so nobody "fixes" the silence later: lefthook captures a
+# command's stdout and replays it when the command finishes, so a hook now prints nothing until its
+# tier ends (~2 s commit, ~75 s push). What comes back is per-gate headers and wall times in the log,
+# fail-fast naming the gate that died, and an order the script declares rather than one lefthook
+# infers - it sorts a stage's commands by priority, then leading digits, then name ascending, NOT by
+# declaration order, so cheapest-gate-first and cross-build-before-cross-clippy are unexpressible in
+# this file. If the muteness ever becomes unbearable, two keys stream output, and both were measured
+# rather than assumed: `parallel` with `priority` 100000 streams but stops guaranteeing that the
+# first job to fail is the first one reported, and `interactive` streams with its exit code intact
+# yet asks for /dev/tty and takes stdin -- neither of which a hook run from a GUI client or CI can
+# be relied on to have. Neither is used: what a hook owes this repo is a quiet run and a true exit
+# code.
+#
+# Nothing here filters paths, and nothing may: no `root`, `glob`, `files` or `local` key, and no
+# staged-files or push-files template token survives anywhere in this file. A filtered job whose set
+# is empty exits 0 without running, so a lint behind one reads as green having checked nothing -
+# `firmware-cross-compile` sat behind the last such filter until TASK-061.02 deleted it. Every key
+# listed above greps to zero in this file, which makes grep the durable check rather than this prose.
+#
+# One skip remains and it is benign by construction: lefthook skips a stage whose staged-file set is
+# empty, so `git commit --allow-empty` runs nothing and a manual `lefthook run <stage>` on an empty
+# index needs `-f`. Measured, not assumed (TASK-061.02), and it is not a choice this file gets to
+# make: 2.1.10 has no key for it. Upstream's builder returns a SkipError("no matching staged files")
+# for every command whenever the staged set is empty and `--force` was not passed, before looking at
+# anything configurable, and its published schema.json carries no option to turn that off. So the
+# alternatives to `-f` are all worse than the skip they avoid. The skip itself is affordable because
+# an empty commit changes no tree: what it would gate is HEAD's tree, which the commit that produced
+# it already paid for. A path-filtered job has no such excuse - its set goes empty on commits that DO
+# change files.
+#
+# Three more keys stay out on purpose. `only` was measured on a deliberately failing command and it
+# came back greener than expected: lefthook skipped the job outright ("skip by condition") and exited
+# 0 without running the check at all. Turning off `stdout` reports success while hiding everything.
+# And `parallel` starts every cargo job at once and loses fail-fast.
+#
+# Any check that runs in one tier and not another is an exception written down with its price at the
+# gate itself in scripts/gates.sh - currently one: the `pod-hw` test, ci-only at 67 s warm.
+
+min_version: 2.1.10
 
 pre-commit:
   commands:
-    # Cheapest gate here on purpose: reads firmware/Makefile's rules with make -n and greps the
-    # docs, so it costs a fifth of a second and never builds. Covers names only -- it does not
-    # read a line of Rust. Landed with TASK-058.
-    doc-artifact-names:
-      run: scripts/check-doc-artifact-names.sh
-      forward_stderr: true
-
-    # The CI check list is a shell script now (see .github/workflows/ci.yml), and an unparseable one
-    # fails only on GitHub -- where nothing has run since 2026-09-09. Ten ms to learn it here instead.
-    ci-steps-parse:
-      run: bash -n .github/ci-steps.sh
-
-    fmt-check:
-      run: cargo fmt --all --check
-      forward_stderr: true
-
-    # Root Cargo.toml:3 declares exclude = ["firmware"], so the fmt-check above never meant all: it
-    # stops at the host workspace and firmware/ has drifted twice under it (TASK-044, TASK-060).
-    # `--manifest-path` reaches the second workspace without a cwd dance, and deliberately with no
-    # lefthook `root:` key -- that sets cwd AND filters paths, so a commit touching no firmware file
-    # would skip this with exit 0 and look like a pass. `--check` only: a gate that rewrote sources
-    # at commit time would bump firmware mtimes and fail `make elf-check` closed on the bench.
-    # Cost ~1 s warm, measured local on aarch64-darwin. Landed with TASK-060.02.
-    fmt-check-firmware:
-      run: cargo fmt --manifest-path firmware/Cargo.toml --all --check
-      forward_stderr: true
-
-    clippy:
-      run: cargo clippy --workspace --all-targets -- -D warnings
-      forward_stderr: true
-
-    # Default features leave asperitas-logging's record-path code unlinted; this is the only gate
-    # that compiles it with warnings fatal. Landed with TASK-047.
-    clippy-log-usb:
-      run: cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
-      forward_stderr: true
-
-    # And the same for the defmt-over-RTT bridge, which no default-feature build compiles at all.
-    clippy-log-defmt:
-      run: cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
-      forward_stderr: true
-
-    # firmware/ is a second workspace, so every clippy above stops at the host crates and says
-    # nothing about the six bins that actually run on the board. Cross clippy needs cwd = firmware/
-    # because .cargo/config.toml's target and link-args are discovered from the CWD (cargo #9670),
-    # hence `cd` rather than lefthook's root: -- that would also filter paths, and a job whose
-    # filtered set is empty exits 0 without linting anything. Cost, local warm: ~1.6 s this run,
-    # ~1.2 s for the RTT-only pair below; ~20 s cold in a fresh target dir. Landed with TASK-060.03.
-    clippy-firmware:
-      run: cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings
-      forward_stderr: true
-
-    # Mirrors CI's RTT-only build: the transport-less cfg set is where TASK-036.03's warnings
-    # actually surfaced, so linting only the console build leaves it unchecked.
-    clippy-firmware-rtt:
-      run: cd firmware && cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings
+    gates:
+      run: bash scripts/gates.sh commit
       forward_stderr: true
 
 pre-push:
-  # One CI check is deliberately missing here, and it is the expensive one:
-  # `cargo test --workspace --features asperitas-pod/pod-hw`, 67 s local warm -- more than every
-  # other command in this hook combined -- to re-run the whole host suite under one non-default
-  # feature flag. Its compile-time half IS here (clippy-pod-hw), so what stays in CI is runtime
-  # coverage of pod-hw code paths. Accepted because CI is the authority for that check, TASK-018.01's
-  # fixup made the same split on purpose (CI-only, commit c44b9c1), and the commit loop that writes
-  # most commits here never pushes -- pre-commit is where its work gets gated. Reopen this if pushes
-  # become routine or the loop starts pushing, and re-measure before deciding either way.
   commands:
-    doc-artifact-names:
-      run: scripts/check-doc-artifact-names.sh
-      forward_stderr: true
-
-    ci-steps-parse:
-      run: bash -n .github/ci-steps.sh
-
-    fmt-check:
-      run: cargo fmt --all --check
-      forward_stderr: true
-
-    # Same reason as the pre-commit job of the same name, and the same shape: `--manifest-path`
-    # rather than lefthook's `root:`, which filters and skips silently on an empty file set.
-    fmt-check-firmware:
-      run: cargo fmt --manifest-path firmware/Cargo.toml --all --check
-      forward_stderr: true
-
-    clippy:
-      run: cargo clippy --workspace --all-targets -- -D warnings
-      forward_stderr: true
-
-    clippy-log-usb:
-      run: cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
-      forward_stderr: true
-
-    clippy-log-defmt:
-      run: cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
-      forward_stderr: true
-
-    # Same two invocations as pre-commit, for the same reason: no gate above reads firmware/, and
-    # `cd` is load-bearing here too (.cargo/config.toml is found from the CWD). Landed with
-    # TASK-060.03.
-    clippy-firmware:
-      run: cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings
-      forward_stderr: true
-
-    clippy-firmware-rtt:
-      run: cd firmware && cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings
-      forward_stderr: true
-
-    # pod-hw gates the hardware-backed Pod paths no default-feature build compiles. Mirrors CI; the
-    # matching test stays CI-only per the note above.
-    clippy-pod-hw:
-      run: cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings
-      forward_stderr: true
-
-    # Root Cargo.toml's [workspace.lints.rustdoc] denies the two cross-reference lints for every
-    # member that opts in, from the source tree only. These two commands are the other layer:
-    # RUSTDOCFLAGS makes *every* rustdoc warning fatal across the whole workspace. Neither run is
-    # a superset of the other -- default features document logging's fn.init() but not usb.rs,
-    # led.rs or panic_handler.rs; --all-features gains those and loses fn.init().
-    doc-links:
-      run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-      forward_stderr: true
-
-    doc-links-all-features:
-      run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
-      forward_stderr: true
-
-    test:
-      run: cargo test --workspace
-      forward_stderr: true
-
-    # The capture decoder's own verdict: exit 0 means every block the synthetic captures promised,
-    # they proved. Exercises the shipped read/decode/assemble path, so it needs no board. ~0 s.
-    dump-reassemble-selftest:
-      run: cargo run -p asperitas-logging --example dump_reassemble -- --selftest
-      forward_stderr: true
-
-    firmware-cross-compile:
-      root: "firmware/"
-      run: cargo build --release --features seed3
-      forward_stderr: true
-
-    # The RTT-only image links build.rs's `-Tdefmt.x` fragment and the logger stubs the console build
-    # leaves uncompiled. `cd` rather than this job's sibling's `root: "firmware/"`: that filters
-    # paths, and lefthook skips a command whose filtered set is empty with exit 0, so a toolchain
-    # bump touching no firmware file would pass without building anything. ~1 s warm.
-    firmware-cross-compile-rtt:
-      run: cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt"
+    gates:
+      run: bash scripts/gates.sh push
       forward_stderr: true

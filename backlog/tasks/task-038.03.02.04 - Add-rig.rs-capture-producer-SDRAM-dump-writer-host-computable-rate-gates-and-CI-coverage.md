@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-12 12:00'
-updated_date: '2026-09-13 00:12'
+updated_date: '2026-09-13 04:16'
 labels:
   - planned
 dependencies:
@@ -145,5 +145,12 @@ Depends on TASK-038.03.02.03 for: `rig.rs` existing and linking, `Peripherals::t
 created: 2026-09-13 00:12
 ---
 Planning note from TASK-060 (2026-09-12): AC #10's FIRST command - 'cd firmware && cargo clippy --release --features seed3 -- -D warnings' - is superseded by TASK-060.03, which lands that gate in pre-commit, pre-push and ci.yml rather than here, placed after CI's existing firmware builds so clippy reuses their artifacts, and adds a second whole-package pass at --no-default-features --features "seed3 log-defmt". Key Decision 5 (whole-package, not --bin rig) survives intact; --bins is just spelled out. WHAT STAYS HERE: AC #10's stim-variant builds (cargo build --release --features seed3,stim-ess --bin rig and stim-pulse), the window-override build, and the rate gates. One follow-on for whoever executes .04: each new stim-variant BUILD should gain a matching -D warnings CLIPPY line (~1-2 s warm each, measured) - cfg-gated stimulus code that no default-feature build compiles is otherwise unlinted, the same blind spot ci.yml:29-38 already closed twice for asperitas-logging. Also: make clippy FEATURES="seed3 stim-ess" already lints one binary today (BINARY defaults to main, so pass BINARY=rig); TASK-060.03 updates the Makefile comment at :264-269 that claims nothing gates this.
+---
+
+created: 2026-09-13 04:16
+---
+Blocking correction from TASK-061.02, filed before anyone executes this ticket as written. AC #10 and plan step 7 both say to append commands inside the existing single-quoted `nix develop --command bash -c '...'` string in ci.yml. That string has not existed since 70c6fc6, and its successor `.github/ci-steps.sh` is deleted by TASK-061.02: the CI step is now `nix develop .#default --command bash scripts/gates.sh ci`.
+
+Adding a check means adding one `gate <tier> "<banner>" <command...>` line in `scripts/gates.sh`, positioned where it should run, tagged with the cheapest tier that should run it. Two consequences worth knowing. Quoting is normal shell argument passing, so the comma form (`--features seed3,stim-ess`) invented to survive a single-quoted script is no longer needed, though it stays legal. And the firmware clippy coverage AC #10 asks to add already exists - `=== firmware clippy (all bins) ===` and its RTT-only twin lint all six bins in both cfg sets with `-D warnings` in every tier - so re-read AC #10 against the script before adding anything: the genuinely new items are the two extra `rig` feature-set builds.
 ---
 <!-- COMMENTS:END -->

@@ -267,12 +267,15 @@ check:
 ## -- and it stays handier than anything the gates offer, because the recipe below hard-wires
 ## --bin $(BINARY) and cannot express the whole package.
 ##
-## It is no longer the only place firmware clippy runs. pre-commit, pre-push and CI now run
-## whole-package `cargo clippy --release ... --bins -- -D warnings` directly against raw cargo for
-## the console and RTT-only cfg sets (lefthook.yml's clippy-firmware pair, ci.yml's firmware
-## section). Raw cargo rather than `make clippy` on purpose: the gates need --bins, and ci.yml's
-## docs check remains the only place CI invokes make here. Local cost of those two gate runs: ~2 s
-## warm, ~20 s in a fresh target dir. Landed with TASK-060.03.
+## It is no longer the only place firmware clippy runs. Every tier of the gate set runs
+## whole-package `cargo clippy --release ... --bins -- -D warnings` against raw cargo for the console
+## and RTT-only cfg sets -- the two "firmware clippy" gates in `scripts/gates.sh`, which both hook
+## stages and CI execute. Raw cargo rather than `make clippy` on purpose: the gates need --bins, and
+## the recipe above hard-wires one binary. The only place any tier still reaches make is the
+## docs-artifact-name lint, and only with `-n` (see its header warning about why that flag is not
+## optional). Cost of those two gates, local warm inside `nix develop .#default`: 0.42 s and 0.22 s
+## when nothing changed, ~2 s straight after a build, ~20 s in a fresh target dir. Landed with
+## TASK-060.03, re-pointed by TASK-061.02 when the hook job names died.
 clippy:
 	cargo clippy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- -D warnings
 

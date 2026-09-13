@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-11 02:46'
-updated_date: '2026-09-13 00:12'
+updated_date: '2026-09-13 04:16'
 labels:
   - review-followup
 dependencies:
@@ -45,5 +45,10 @@ SETUP (read first): This is the Asperitas Rust firmware/host workspace (crates/a
 created: 2026-09-13 00:12
 ---
 Heads-up from TASK-060 planning (2026-09-12), same failure class as your TASK-049 AC #5 finding: TASK-060 AC #2 asks for 'the measured wall time recorded' on a new cross-target firmware clippy gate. An agent cannot observe CI's number for it either - ci.yml still triggers only on push/PR to main with no workflow_dispatch, and main is 84 commits ahead of origin/main. So TASK-060's plan requires every figure to be labelled LOCAL (nix develop .#default, aarch64-darwin) and forbids presenting any of them as CI's. When a person next pushes, these steps join the queue behind your two doc-links figures: firmware fmt --check on the firmware workspace (~1 s local warm), and two whole-package cross clippy runs (--bins, -D warnings) whose local figures are 20 s cold standalone / 11 s immediately after CI's release build / ~2 s warm, plus ~1 s for the RTT-only set. Recorded here rather than in a HUMAN subtask under TASK-060 because a @human child would inherit up the tree and hide the remaining agent work while changing nothing about who can push.
+---
+
+created: 2026-09-13 04:16
+---
+Path update from TASK-061.02, and it makes your debt smaller. The doc gates keep their banner strings verbatim - `=== cargo doc (workspace) ===` and `=== cargo doc (workspace, all features) ===` - so anything that greps runner logs still matches; only the file that holds them moved, to `scripts/gates.sh`, which CI runs as `bash scripts/gates.sh ci`. Better: every gate now prints its own wall time under its banner (`--- 1.45s`), so the first real push yields per-gate runner figures rather than one job total, including the two doc numbers you specifically owe. Local warm from the switch: doc workspace 1.30 s, doc all-features 1.45 s, whole ci tier 139.0 s. Runner-side figures stay unmeasured for the exact reason this ticket was filed - no workflow_dispatch, main far ahead of origin.
 ---
 <!-- COMMENTS:END -->
