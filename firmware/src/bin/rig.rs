@@ -21,13 +21,13 @@
 #![no_main]
 
 use asperitas_dsp::processor::{Frame, Processor};
-use asperitas_dsp::stimulus::Stimulus;
 #[cfg(feature = "stim-ess")]
 use asperitas_dsp::stimulus::ExponentialSweep;
 #[cfg(feature = "stim-pulse")]
 use asperitas_dsp::stimulus::PulseTrain;
 #[cfg(not(any(feature = "stim-ess", feature = "stim-pulse")))]
 use asperitas_dsp::stimulus::Sine;
+use asperitas_dsp::stimulus::Stimulus;
 use asperitas_logging::{console, error, info};
 use cortex_m::peripheral::NVIC;
 use daisy_embassy::audio::{Interface, Running};
@@ -445,8 +445,7 @@ async fn measure_time_base(
     let elapsed_us = start.elapsed().as_micros();
     // Wrapping, because CYCCNT is 32 bits and wraps every 8.947 s at 480 MHz. A 200 ms window
     // cannot wrap; the subtraction is written so that it stays correct if this window grows.
-    let cycles = cortex_m::peripheral::DWT::cycle_count()
-        .wrapping_sub(cal_before) as u64;
+    let cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(cal_before) as u64;
     if elapsed_us == 0 || cycles == 0 {
         error!("rig: calibration window produced nothing (us={elapsed_us}, cycles={cycles})");
         return None;
@@ -554,7 +553,9 @@ async fn main(_spawner: Spawner) {
     let mut cp = match core_peripherals {
         Some(cp) => cp,
         None => {
-            error!("rig: cortex_m::Peripherals was already claimed; refusing to guess at durations");
+            error!(
+                "rig: cortex_m::Peripherals was already claimed; refusing to guess at durations"
+            );
             boot_halt();
         }
     };

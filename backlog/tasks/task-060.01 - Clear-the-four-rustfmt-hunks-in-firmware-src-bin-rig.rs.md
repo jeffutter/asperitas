@@ -1,11 +1,11 @@
 ---
 id: TASK-060.01
 title: Clear the four rustfmt hunks in firmware/src/bin/rig.rs
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-13 00:08'
-updated_date: '2026-09-13 00:11'
+updated_date: '2026-09-13 00:32'
 labels:
   - planned
 dependencies: []
@@ -25,9 +25,9 @@ Nothing gated it and nothing will until TASK-060.02 lands. That gate must arrive
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 cd firmware && cargo fmt --all --check exits 0, and root cargo fmt --all --check still exits 0.
-- [ ] #2 The change is formatting only: git show --stat lists exactly one file (firmware/src/bin/rig.rs), and cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings exits 0 both before and after (measured exit 0 at HEAD today, so any warning appearing after the edit means the edit was not formatting-only - stop rather than fix it here).
-- [ ] #3 Notes record the bench side effect honestly: editing rig.rs legitimately makes firmware/target/thumbv7em-none-eabihf/release/main older than its input, so make elf-check fails closed afterwards. That is the check working, not the mtime false positive TASK-056 owns; do not delete or relink the ELF as part of this ticket.
+- [x] #1 cd firmware && cargo fmt --all --check exits 0, and root cargo fmt --all --check still exits 0.
+- [x] #2 The change is formatting only: git show --stat lists exactly one file (firmware/src/bin/rig.rs), and cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings exits 0 both before and after (measured exit 0 at HEAD today, so any warning appearing after the edit means the edit was not formatting-only - stop rather than fix it here).
+- [x] #3 Notes record the bench side effect honestly: editing rig.rs legitimately makes firmware/target/thumbv7em-none-eabihf/release/main older than its input, so make elf-check fails closed afterwards. That is the check working, not the mtime false positive TASK-056 owns; do not delete or relink the ELF as part of this ticket.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -59,3 +59,21 @@ Cross clippy over all six bins exits 0 at HEAD today (measured), so any warning 
 
 Editing `rig.rs` legitimately makes `firmware/target/thumbv7em-none-eabihf/release/main` older than one of its inputs, so `make elf-check` (`firmware/Makefile:223-236`) fails closed afterwards. That is the check working, not the false positive TASK-056 owns. Do not delete or relink the ELF: it is the decoder for whatever image is on the board right now, and rebuilding it overwrites the only host copy of those symbols.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Executed 2026-09-13 in nix develop .#default (direnv-loaded, rust 1.97.1, arm64-apple-darwin), all figures LOCAL and warm.
+
+AC #1: 'cargo fmt --all --check' at root exits 0 before and after; inside firmware/ it was red at exactly four hunks (rig.rs:21, :28, :445, :554) and exits 0 after 'cargo fmt -- src/bin/rig.rs'. The targeted form was used, as planned, so no unrelated drift could ride along.
+
+AC #2: git show --stat lists one file, firmware/src/bin/rig.rs, 5 insertions / 4 deletions - the three import-order/line-wrap hunks plus the let-chain-style hunk at :554 that the ticket body missed. Baseline clippy BEFORE the edit: 'cargo clippy --release --features seed3 --bins -- -D warnings' exit 0 in 0.40 s warm (six bins, thumbv7em-none-eabihf). Same command AFTER the edit: exit 0 in 0.48 s. Formatting-only confirmed by the two identical greens, so nothing was fixed beyond whitespace.
+
+AC #3 bench side effect, observed rather than asserted: 'make elf-check' now fails closed with 'target/thumbv7em-none-eabihf/release/main is older than src/bin/rig.rs' (Makefile:225, exit 2). That is the staleness check doing its job on a real source edit - touching an input legitimately invalidates the ELF - not the bulk-mtime false positive TASK-056 owns. The ELF was left untouched: sha256 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b, 10,941,616 bytes, mtime Sep 12 16:46, identical before and after this change. Not deleted, not relinked, not rebuilt, so it remains the host copy of the symbols for whatever image is on the board.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+rig.rs formatted: 'cargo fmt -- src/bin/rig.rs' clears all four hunks (:21, :28, :445, :554), one file, 5 insertions / 4 deletions. Root and firmware 'cargo fmt --all --check' both exit 0; cross clippy over all six bins with -D warnings exits 0 at 0.40 s warm before the edit and 0.48 s after, so the diff is formatting and nothing else. 'make elf-check' now fails closed on the touched source by design; the ELF itself is untouched and its sha256 is recorded in the notes. Ships alone - the gates that would have caught this arrive in TASK-060.02.
+<!-- SECTION:FINAL_SUMMARY:END -->
