@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-11 13:28'
-updated_date: '2026-09-12 03:44'
+updated_date: '2026-09-13 00:11'
 labels:
   - task
   - planned
@@ -661,3 +661,12 @@ Every item below was verified against the sources the build actually resolves (d
 
 `.02` arrived as "everything cross-compiled": eleven of its fourteen criteria, one new 1 000-line binary, four novel API surfaces (`InterruptExecutor`, `Peripherals::take`, `SdRam`, DWT bring-up) and a CI edit. That is the same shape that killed the parent twice, and the umbrella had already learned that the seam which matters is *novel-API risk versus mechanical work*, not host versus firmware. So `.02.03` takes boot skeleton, DWT, executor topology and stimulus gates (the parts that can fail to compile or hang at boot), and `.02.04` takes capture producer, dump writer, rate gates and CI (mechanical, and only possible once the first exists). `.02` keeps its acceptance criteria as the definition of done and becomes the integration owner. Children numbered `.03`/`.04` rather than `.02.01`/`.02.02` because `.02.01` already exists and is Done, and a fifth level of ID depth is worse for everyone who has to type it.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 00:11
+---
+Planning note from TASK-060 (2026-09-12): AC #13's clause "CI gains a firmware clippy step (cargo clippy --release --features seed3 -- -D warnings inside firmware/)" is superseded by TASK-060 and its leaves TASK-060.01-.04. The gate lands there instead, running 'cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings' plus an RTT-only pass (--no-default-features --features "seed3 log-defmt"), in pre-commit, pre-push AND ci.yml, placed after CI's existing firmware builds. Whole-package coverage is preserved, so this ticket's Key Decision 5 intent survives; --bins is spelled explicitly rather than relying on a lib-less package defaulting to all bins (measured: omitting --bin works too and covers blinky, ledtest, main, panictest, podtest, rig). Nothing else in AC #13 changes here: cargo fmt --all --check / cargo test --workspace / cargo clippy --workspace --all-targets stay this ticket's, and note that root cargo fmt --all has never seen firmware/ (Cargo.toml:3 exclude), which is TASK-060.02's reason for existing.
+---
+<!-- COMMENTS:END -->

@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-11 15:53'
-updated_date: '2026-09-12 12:46'
+updated_date: '2026-09-13 00:11'
 labels:
   - task
   - planned
@@ -153,3 +153,12 @@ are recorded in TASK-038.03.02.03's notes so nothing depends on the stash surviv
 rather than dropped here because this run made no code changes and a parked umbrella should not be
 the thing that destroys state - .03 drops it once the comment is applied.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 00:11
+---
+Planning note from TASK-060 (2026-09-12): AC #13's firmware-clippy-in-CI clause is superseded by TASK-060 / TASK-060.03, which adds whole-package cross clippy with -D warnings to pre-commit, pre-push and ci.yml, plus an RTT-only feature-set pass, placed after CI's existing firmware builds (measured local: 20 s cold standalone, 11 s after the build, ~2 s warm). AC #13's other clauses remain this ticket's. Two corrections for whoever executes .02: (a) the AC says root 'cargo fmt --all --check' will cover rig.rs - it cannot, Cargo.toml:3 excludes firmware/, and that blind spot is exactly why rig.rs drifted unformatted since 41f9cae (TASK-060.02 closes it); (b) firmware/Makefile's make clippy target is now at :264-269, not :252-255, and its comment claiming it is the only place firmware clippy runs becomes false when TASK-060.03 lands.
+---
+<!-- COMMENTS:END -->

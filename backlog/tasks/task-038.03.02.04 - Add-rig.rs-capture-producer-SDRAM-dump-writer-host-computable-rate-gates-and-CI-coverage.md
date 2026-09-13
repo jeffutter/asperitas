@@ -1,22 +1,23 @@
 ---
 id: TASK-038.03.02.04
 title: >-
-  Add rig.rs capture producer, SDRAM dump writer, host-computable rate gates and CI coverage
+  Add rig.rs capture producer, SDRAM dump writer, host-computable rate gates and
+  CI coverage
 status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-12 12:00'
-updated_date: '2026-09-12 12:05'
+updated_date: '2026-09-13 00:12'
 labels:
   - planned
 dependencies:
   - TASK-038.03.02.03
-parent_task_id: TASK-038.03.02
-priority: high
-ordinal: 88800
 modified_files:
   - firmware/src/bin/rig.rs
   - .github/workflows/ci.yml
+parent_task_id: TASK-038.03.02
+priority: high
+ordinal: 88800
 ---
 
 ## Description
@@ -137,3 +138,12 @@ Depends on TASK-038.03.02.03 for: `rig.rs` existing and linking, `Peripherals::t
 - Audio period is 20 833 µs for 32 frames at 48 kHz; the gap gate is 21 000 µs.
 - Warm incremental firmware rebuild is ~0.13 s, so iterate with `touch` rather than cleaning.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 00:12
+---
+Planning note from TASK-060 (2026-09-12): AC #10's FIRST command - 'cd firmware && cargo clippy --release --features seed3 -- -D warnings' - is superseded by TASK-060.03, which lands that gate in pre-commit, pre-push and ci.yml rather than here, placed after CI's existing firmware builds so clippy reuses their artifacts, and adds a second whole-package pass at --no-default-features --features "seed3 log-defmt". Key Decision 5 (whole-package, not --bin rig) survives intact; --bins is just spelled out. WHAT STAYS HERE: AC #10's stim-variant builds (cargo build --release --features seed3,stim-ess --bin rig and stim-pulse), the window-override build, and the rate gates. One follow-on for whoever executes .04: each new stim-variant BUILD should gain a matching -D warnings CLIPPY line (~1-2 s warm each, measured) - cfg-gated stimulus code that no default-feature build compiles is otherwise unlinted, the same blind spot ci.yml:29-38 already closed twice for asperitas-logging. Also: make clippy FEATURES="seed3 stim-ess" already lints one binary today (BINARY defaults to main, so pass BINARY=rig); TASK-060.03 updates the Makefile comment at :264-269 that claims nothing gates this.
+---
+<!-- COMMENTS:END -->

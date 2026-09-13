@@ -5,6 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-11 02:46'
+updated_date: '2026-09-13 00:12'
 labels:
   - review-followup
 dependencies:
@@ -37,3 +38,12 @@ SETUP (read first): This is the Asperitas Rust firmware/host workspace (crates/a
 4. Edit backlog/tasks/task-049*.md's Implementation Notes: replace the paragraph beginning 'CI wall time is NOT observed and cannot be from here' with the two observed durations and the run URL/id.
 5. Mark this ticket Done.
 <!-- SECTION:PLAN:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 00:12
+---
+Heads-up from TASK-060 planning (2026-09-12), same failure class as your TASK-049 AC #5 finding: TASK-060 AC #2 asks for 'the measured wall time recorded' on a new cross-target firmware clippy gate. An agent cannot observe CI's number for it either - ci.yml still triggers only on push/PR to main with no workflow_dispatch, and main is 84 commits ahead of origin/main. So TASK-060's plan requires every figure to be labelled LOCAL (nix develop .#default, aarch64-darwin) and forbids presenting any of them as CI's. When a person next pushes, these steps join the queue behind your two doc-links figures: firmware fmt --check on the firmware workspace (~1 s local warm), and two whole-package cross clippy runs (--bins, -D warnings) whose local figures are 20 s cold standalone / 11 s immediately after CI's release build / ~2 s warm, plus ~1 s for the RTT-only set. Recorded here rather than in a HUMAN subtask under TASK-060 because a @human child would inherit up the tree and hide the remaining agent work while changing nothing about who can push.
+---
+<!-- COMMENTS:END -->
