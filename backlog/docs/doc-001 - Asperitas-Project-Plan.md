@@ -245,7 +245,10 @@ without running anything. Costs are local warm figures on aarch64-darwin.
 
 ### CI
 
-GitHub Actions runs a superset of pre-push. Exactly one check lives only there:
+GitHub Actions runs a superset of pre-push, and its check list lives in `.github/ci-steps.sh`
+rather than inline in the workflow: as an inline `bash -c '...'` string any apostrophe in a
+comment closed the quote and broke the step, which sat broken unnoticed for three days until
+TASK-060. Both hooks now run `bash -n` on that file. Exactly one check lives only in CI:
 `cargo test --workspace --features asperitas-pod/pod-hw`, 67 s local warm - more than every
 other pre-push command combined, spent re-running the host suite under one non-default flag
 whose compile-time half is already gated here. Priced and recorded in TASK-060.04, taking the
