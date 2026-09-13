@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-13 06:56'
-updated_date: '2026-09-13 06:56'
+updated_date: '2026-09-13 13:05'
 labels:
   - planned
 dependencies:
@@ -127,3 +127,22 @@ It should land near zero because it builds nothing; if it does not, find out why
 **Step 9 - Land it.** `bash scripts/gates.sh ci` green from the repo root, one commit adding the
 script and touching only `scripts/gates.sh` besides, with the red-run transcript in the commit body.
 <!-- SECTION:PLAN:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-13 13:05
+---
+Coordination note from planning TASK-062 (2026-09-13), answering the note left here earlier.
+
+TASK-062 landed its plan as three leaves. .01 stamps a non-allocated .asp.prov note section into all six firmware ELFs from build.rs (measured: VMA/LMA 0x0 beside .defmt, no KEEP fragment needed, boardless probe-rs still reaches "No connected probes were found", main.bin grows 156 B). .02 adds scripts/elf-provenance.sh, the one host-side reader, plus elf-check enforcement and a remedy that forces a real relink. .03 registers a push-tier gate asserting what the two cross-builds leave in target/.
+
+Three things this ticket should then do differently from its current plan.
+
+1. Do not write your own ELF reader. Call scripts/elf-provenance.sh show <elf> instead of duplicating objcopy plumbing, and keep rust-objdump -h for the load-address rules themselves.
+2. Gate position. Your AC #5 wants "after the doc-artifact gate AND after both cross-build gates", and your step 6 points at gates.sh:264 for the doc-artifact gate - that coordinate is stale, the doc-artifact gate is at :186, well before both cross-builds, and :264 is inside the ci-only pod-hw block. Put your line after TASK-062.03's provenance gate, which sits directly after the RTT-only cross-build at :241-242, and both halves of AC #5 become satisfiable with one coordinate.
+3. Your header no longer has to confess provenance blindness as accepted. Once .03 lands, the gate above you names the cfg set of the ELF you are about to read, so say which set that is and drop the apology. What stays true is that you validate one cfg set per run, not both at once.
+
+Your ban on the test -f ... || true else-branch is the same rule .02's AC #5 implements for the provenance path, so the two checks will fail alike on a missing artifact. Good riddance to the skip path either way.
+---
+<!-- COMMENTS:END -->

@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-12 09:25'
-updated_date: '2026-09-13 07:02'
+updated_date: '2026-09-13 13:04'
 labels: []
 dependencies:
   - TASK-053
@@ -102,5 +102,16 @@ Path update from TASK-061.02: AC #5's "the host gates in ci.yml are green" now m
 created: 2026-09-13 07:02
 ---
 Coordination note from planning TASK-059 (2026-09-13): TASK-059.02 adds scripts/check-image-load-addresses.sh and one gate line in scripts/gates.sh (push tier, after the doc-artifact gate). It reads the six release ELFs with the bare rust-objdump/rust-objcopy shims precisely so it never rebuilds, and hard-fails on a missing ELF rather than skipping on mtime - the same staleness trap this ticket is about. If you land first, tell .02's executor what the freshness contract became; the two checks should not each invent their own.
+---
+
+created: 2026-09-13 13:04
+---
+Coordination note from planning TASK-062 (2026-09-13). TASK-062 split into three leaves: .01 stamps a non-allocated .asp.prov note section into every firmware ELF from build.rs, .02 makes elf-check read it and fixes the remedy line, .03 gates what the two cross-builds leave in target/.
+
+Overlap with this ticket is exactly one place: the body of elf-check and its printed failure lines. No hard dependency was added, because .02 fixes the remedy independently of the staleness test - measured again while planning, rm -f $(ELF) && make build-elf leaves the mtime unchanged (mtime 1789302036 against wall clock 1789302070 on a scratch crate), whereas cargo clean -p asperitas-firmware or deleting target/<triple>/release/.fingerprint/asperitas-firmware-* really relinks and refreshes it. So .02's remedy becomes the forced-relink form and its AC passes whether or not this ticket has landed.
+
+Consequences for this plan, whichever order we land in. If .02 lands first: elf-check will have grown a provenance clause that calls scripts/elf-provenance.sh and a third named failure line; keep both, replace only the find -newer test with your content digest, and do not reintroduce an mtime comparison. Your AC #6 prose list and .02's overlap at docs/reference/daisy-seed3.md:806 exit-code row, the two-layer rc paragraph at :809-813, README.md:268-270 and the byte-scan paragraph at :555-558 - edit each once, after both mechanisms exist, and note that the rc=2 ambiguity grows to four cases (no probe, stale content, cfg mismatch, no ELF), so the paragraph should say match on the message rather than enumerate forever.
+
+Also worth knowing before you write the sidecar: the sidecar lives beside release/main, which the raw-cargo gates rewrite without going through make, so it can only ever describe the last make build-elf, not the bytes the name currently holds. That is fine for your purpose (you hash sources, not cfg sets) but it is why TASK-062.01 puts cfg provenance inside the image instead, and why your stamp should stay clearly labelled as a source-content stamp so nobody reads it as a description of the artifact.
 ---
 <!-- COMMENTS:END -->
