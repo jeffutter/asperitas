@@ -108,24 +108,25 @@ programs `main.bin` while printing a completely successful DFU transcript. Verif
 `-O binary blinky.bin` and `-D blinky.bin`, the second to `-D main.bin`. `firmware/Makefile:11-14`
 carries why each image carries its binary's name instead of sharing one file.
 
-No hand-typed objcopy recipe is transcribed here, deliberately. That command belongs to the
-`build` rule of `firmware/Makefile` alone, because the six `--only-section` flags it passes are
-load-bearing rather than cosmetic. `-O binary` asks llvm-objcopy for a *memory* image, which spans
-from the lowest to the highest **load** address, and `.sram1_bss` is loaded where it runs: two
-`GroundedArrayCell::uninit()` DMA buffers that daisy-embassy `ca9bcc9` places with
-`#[link_section = ".sram1_bss"]` (`src/audio.rs:20-22`), uninitialised data that is nonetheless
-file-backed, with LMA equal to VMA at `0x24000198` in AXI SRAM. Anything that links the audio
-module therefore spans `0x08000000..0x24000598` and comes out at **469,763,480 bytes** of mostly
-zeros: measured 2026-09-12 at `a1376f3` for both `main` and `rig`, against the 88,581 and 106,811
-bytes the flag list produces. `blinky` links no audio module, which is how a hand-copied command
-survives looking fine: its raw image is 65,638 bytes and byte-for-byte identical to what
-`make build BINARY=blinky` writes. Two more things worth knowing before simplifying it. `.data` is
-not the culprit, despite the RAM-shaped address: its VMA is `0x24000000` but its LMA is
-`0x08015808`, in flash, and the span follows load addresses. And a section name that no longer
-exists fails silently: `--only-section=.no_such_section` exits 0 and writes a 0-byte file (measured
-the same day), so a hand-kept copy of that list is a truncated image waiting to happen. TASK-059
-gives `.sram1_bss` a flash load address, which is the real fix; until it lands, copy the recipe from
-the Makefile rather than retyping it.
+Use `make build`. A hand-typed `llvm-objcopy -O binary` also works now, and did not used to, which
+is worth knowing before you copy one from an old note. `-O binary` asks for a *memory* image,
+spanning the lowest to the highest **load** address, so the image is right only when every
+file-backed section is loaded in flash. It is: `.data` runs from a RAM VMA of `0x24000000` but a
+flash LMA of `0x08015808`, and `.sram1_bss` - the two `GroundedArrayCell::uninit()` SAI DMA buffers
+daisy-embassy `ca9bcc9` tags `#[link_section = ".sram1_bss"]` (`src/audio.rs:20-22`) - gets
+`(NOLOAD)` placement from `firmware/memory.x`. Measured 2026-09-13, a plain `-O binary` and
+`make build` agree byte-for-size on all six binaries: `main` 88,581, `rig` 106,811, `blinky`
+65,638, `ledtest` 17,774, `podtest` 72,689, `panictest` 65,958.
+
+Before TASK-059 landed, `.sram1_bss` was an orphan section rust-lld placed with LMA == VMA in AXI
+SRAM, so anything linking the audio module spanned `0x08000000..0x24000598` and came out at
+**469,763,480 bytes** of mostly zeros while `blinky`, which links no audio, stayed at 65,638 and
+byte-for-byte matched the Makefile's output. That combination is the reason this page spent a week
+insisting the Makefile's `--only-section` keep-list was load-bearing: a recipe checked against
+`blinky` looked fine and quietly broke on `main`. The keep-list is gone, and so is the trap it
+worked around - but the failure mode is silent, not loud. If a section ever comes back loaded
+outside flash, the image grows to span the gap rather than erroring. TASK-059.02 files the gate
+that reads load addresses off the ELF instead of trusting anyone to notice.
 
 The blinky binary (`firmware/src/bin/blinky.rs`) drives **Pod RGB LED 1** (D20/D19/D18
 = PC1/PA6/PA7) through the shared LED state machine — it does *not* touch the Seed's
@@ -618,7 +619,11 @@ cd firmware && CARGO_TARGET_DIR=$(mktemp -d) cargo nm --release --no-default-fea
 The temporary target dir earns its place: `cargo nm` re-runs the build, so without it this line
 replaces the ELF sitting in `target/` with the image built by whatever flags you happened to type,
 which is the trap spelled out under *"Nothing logs except the facade" is not true of the linked
-image*. Re-running the command as written on 2026-09-12 reproduces both addresses.
+image*. Re-running the command as written reproduces both addresses - on 2026-09-12 and again on
+2026-09-13 after TASK-059 moved `.sram1_bss` from directly after `.data` to just below `.uninit`.
+That move pushed everything it sat above down by 1 KiB and pulled `.uninit` up to fill the hole, so
+these two objects happen to land where they always did; an object in `.bss` does not, which is why
+this table is a measurement and not a derivation.
 
 | Object | Address | Size | Output section | Bytes into its 32-byte cache line |
 |---|---|---|---|---|

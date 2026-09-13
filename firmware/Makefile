@@ -91,17 +91,19 @@ all: build
 ## Build $(BINARY) as a release binary and produce raw .bin for DFU
 ##
 ## llvm-objcopy's `-O binary` output is a memory image spanning the lowest to the highest
-## *load* address, and `.sram1_bss` is loaded where it runs: daisy-embassy places its SAI DMA
-## buffers there with `#[link_section = ".sram1_bss"]` (`src/audio.rs:20-22`), uninitialised
-## data that is nonetheless file-backed, LMA == VMA at 0x24000198 in AXI SRAM. A bare `-O binary`
-## of anything that links the audio module therefore covers 0x08000000..0x24000598 and comes out
-## at 469,763,480 bytes. Load address, not VMA, is what matters here: `.data` has a RAM VMA of
-## 0x24000000 and a flash LMA of 0x08015808, so it costs nothing. `--only-section` extracts only
-## FLASH-loadable sections, so the result is what flash actually holds. The blowup is per binary:
-## `blinky` links no audio module, and its raw image is 65,638 bytes, byte-identical to this
-## recipe's output, which is how a hand-copied command without the flags looks fine.
+## *load* address, so with every file-backed section loaded in flash the plain image is exactly
+## what flash must hold -- and it is. `.data` runs from a RAM VMA of 0x24000000 but a flash LMA
+## of 0x08015808, and `.sram1_bss`, where daisy-embassy puts its SAI DMA buffers
+## (`src/audio.rs:20-22`), is `(NOLOAD)` placement from `firmware/memory.x`. No keep-list is
+## needed here, and none belongs here.
 ##
-## Measured 2026-09-12 at `[profile.release] debug = 2`, against the 131,072-byte internal-flash
+## What this buys is worth one sentence of vigilance. Before that `(NOLOAD)` rule the section was
+## an orphan rust-lld placed with LMA == VMA in AXI SRAM, and a plain `-O binary` of `main` came
+## out at 469,763,480 bytes of mostly zeros (TASK-059) while `blinky`, which links no audio, stayed
+## at 65,638 -- so the symptom looked intermittent. Nothing fails if that comes back: the image
+## silently spans the gap instead. TASK-059.02 files the gate that reads load addresses off the ELF.
+##
+## Measured 2026-09-13 at `[profile.release] debug = 2`, against the 131,072-byte internal-flash
 ## budget:
 ##
 ##   FEATURES="seed3"                        main.bin 88,581   rig.bin 106,811
@@ -115,13 +117,7 @@ all: build
 ## it. See the note beside `BINARY` above.
 build:
 	cargo objcopy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
-		-O binary $(BINARY).bin \
-		--only-section=.vector_table \
-		--only-section=.text \
-		--only-section=.rodata \
-		--only-section=.data \
-		--only-section='*.sgstubs' \
-		--only-section='*.defmt*'
+		-O binary $(BINARY).bin
 
 ## Flash $(BINARY).bin to the Seed3 via DFU and start it
 ## Prerequisite: hold BOOT, tap RESET, release BOOT on the board
