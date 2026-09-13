@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see build.rs
+
 use asperitas_logging::info;
 use asperitas_pod::encoder::{ControlEvent, ControlSurface};
 use asperitas_pod::knob::Knobs;

@@ -35,6 +35,8 @@
 #![no_std]
 #![no_main]
 
+include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see build.rs
+
 use daisy_embassy::hal::gpio::{Level, Output, Speed};
 use embassy_time::Timer;
 

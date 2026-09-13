@@ -20,6 +20,8 @@
 #![no_std]
 #![no_main]
 
+include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see build.rs
+
 use asperitas_dsp::processor::{Frame, Processor};
 #[cfg(feature = "stim-ess")]
 use asperitas_dsp::stimulus::ExponentialSweep;

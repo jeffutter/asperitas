@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see build.rs
+
 use asperitas_logging::info;
 use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
 use daisy_embassy::DaisyBoard;
