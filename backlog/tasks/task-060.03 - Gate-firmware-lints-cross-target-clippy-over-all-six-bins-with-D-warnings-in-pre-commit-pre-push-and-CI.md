@@ -3,11 +3,11 @@ id: TASK-060.03
 title: >-
   Gate firmware lints: cross-target clippy over all six bins with -D warnings in
   pre-commit, pre-push and CI
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-13 00:09'
-updated_date: '2026-09-13 00:22'
+updated_date: '2026-09-13 00:53'
 labels:
   - planned
 dependencies:
@@ -48,12 +48,12 @@ Why this belongs in `pre-commit` too, against that hook's "cheapest gate here on
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Three call sites run cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings: lefthook pre-commit.commands, lefthook pre-push.commands, and ci.yml placed AFTER the existing cargo build --release --features seed3 so clippy reuses its compiled dependencies (local: 20 s cold in a fresh target dir, 11 s right after that build, ~2 s warm).
-- [ ] #2 A second invocation covers the RTT-only feature set, mirroring ci.yml:79: cd firmware && cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings. cfg-gated code no default-feature build compiles is the same blind spot ci.yml:29-38 already closed twice for asperitas-logging.
-- [ ] #3 Wall time is recorded in the notes explicitly labelled LOCAL, naming machine, command and target-dir warmth. No number is presented as CI's: ci.yml has no workflow_dispatch trigger and main is 84 commits ahead of origin/main, so no agent can observe a CI run - TASK-052 exists because TASK-049 checked an AC citing exactly such an unobservable figure.
-- [ ] #4 The zero-warning claim is proven rather than assumed: both invocations' exit codes at HEAD are pasted (measured 0 and 0 on 2026-09-12). If either turns red during implementation, nothing is silenced and nothing is narrowed - the cleanup becomes its own ticket, per TASK-060 AC #2.
-- [ ] #5 firmware/Makefile:264-269 is corrected in the same commit: its "this target is the only place firmware clippy runs" claim becomes false once these gates land. The gates call raw cargo, not make - make clippy hard-wires --bin $(BINARY) at :269 and cannot express the whole-package form, and ci.yml:65-67's claim that the docs check is the only place CI invokes make stays true.
-- [ ] #6 Non-interference with bench state is evidenced, not asserted: git status --porcelain empty and sha256 of firmware/target/thumbv7em-none-eabihf/release/main identical before and after both invocations (measured unchanged locally). That ELF is the decoder every make probe-* command reads with; TASK-058 AC #4 is the precedent.
+- [x] #1 Three call sites run cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings: lefthook pre-commit.commands, lefthook pre-push.commands, and ci.yml placed AFTER the existing cargo build --release --features seed3 so clippy reuses its compiled dependencies (local: 20 s cold in a fresh target dir, 11 s right after that build, ~2 s warm).
+- [x] #2 A second invocation covers the RTT-only feature set, mirroring ci.yml:79: cd firmware && cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings. cfg-gated code no default-feature build compiles is the same blind spot ci.yml:29-38 already closed twice for asperitas-logging.
+- [x] #3 Wall time is recorded in the notes explicitly labelled LOCAL, naming machine, command and target-dir warmth. No number is presented as CI's: ci.yml has no workflow_dispatch trigger and main is 84 commits ahead of origin/main, so no agent can observe a CI run - TASK-052 exists because TASK-049 checked an AC citing exactly such an unobservable figure.
+- [x] #4 The zero-warning claim is proven rather than assumed: both invocations' exit codes at HEAD are pasted (measured 0 and 0 on 2026-09-12). If either turns red during implementation, nothing is silenced and nothing is narrowed - the cleanup becomes its own ticket, per TASK-060 AC #2.
+- [x] #5 firmware/Makefile:264-269 is corrected in the same commit: its "this target is the only place firmware clippy runs" claim becomes false once these gates land. The gates call raw cargo, not make - make clippy hard-wires --bin $(BINARY) at :269 and cannot express the whole-package form, and ci.yml:65-67's claim that the docs check is the only place CI invokes make stays true.
+- [x] #6 Non-interference with bench state is evidenced, not asserted: git status --porcelain empty and sha256 of firmware/target/thumbv7em-none-eabihf/release/main identical before and after both invocations (measured unchanged locally). That ELF is the decoder every make probe-* command reads with; TASK-058 AC #4 is the precedent.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -113,3 +113,37 @@ Scope guard, so this leaf does not drift: `.04` AC #10's other half stays there 
 
 Two constraints from that file that bite here: the check list is one single-quoted bash string, so **no nested single quotes** in anything added to it, and `cargo clippy --workspace --all-targets` cannot be used for firmware at all - `--all-targets` builds host-profile tests and benches and fails on `no_std` code. That is why CI's pod-hw pair at `:40-41`/`:57-58` covers `crates/*` only, and why firmware gets `--bins`.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Executed 2026-09-13 on top of TASK-060.02 (commit e84282f), inside the direnv-loaded nix develop .#default shell, rust 1.97.1, aarch64-apple-darwin. EVERY NUMBER BELOW IS LOCAL - see AC #3.
+
+AC #1 - three call sites for the console-feature invocation. lefthook.yml gained clippy-firmware in pre-commit.commands and pre-push.commands; ci.yml gained it after both firmware builds. 'lefthook dump' prints clippy-firmware under both hooks. The two new CI lines sit inside a new subshell that wraps the whole firmware section ('one place where cwd firmware/ is established') rather than inheriting the cd from the build line above them - verified by extracting the block scalar and running 'bash -n' over its single-quoted body: parses clean, 16 echo-marked steps, up from 14. Running that extracted firmware section verbatim from the repo root - the two cross-builds plus the two clippy invocations - exits 0 in 4.3 s warm.
+
+AC #2 - clippy-firmware-rtt mirrors ci.yml's RTT-only build at all three sites: cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings.
+
+AC #3 - wall time, LOCAL figures only, machine aarch64-darwin, rust 1.97.1, commands exactly as written in the gates:
+  fresh target dir (CARGO_TARGET_DIR=/tmp/t060-cold-target, rm -rf first): 20.4 s for the console set, then 1.4 s for the RTT-only set in that same now-warm scratch dir. Both rc 0.
+  own crate rechecked only (find src build.rs Cargo.toml | xargs touch, deps cached): 1.6 s console, 1.2 s RTT-only.
+  fully cached (nothing touched since the last clippy run): 0.35 s and 0.38 s.
+  whole firmware section as CI runs it (2 builds + 2 clippies) after those caches existed: 4.3 s.
+No figure here is CI's: ci.yml triggers only on push/PR to main, has no workflow_dispatch, and main is ahead of origin/main by many commits, so no agent can observe a run. Observed CI wall time stays TASK-052's.
+
+AC #4 - zero-warning claim proven twice at HEAD, before any edit and again after the plant was reverted: console set rc 0, RTT-only set rc 0 each time. Nothing silenced, no allow added, no narrowing to --bin. Red proof from one planted fn in firmware/src/bin/podtest.rs (fn planted_lint() -> u32 { let a = 1u32; 1 + 1; a }): raw console invocation rc 101, raw RTT-only invocation rc 101, 'lefthook run pre-commit --command clippy-firmware --force --file firmware/src/bin/podtest.rs' rc 1 with exit status 101, 'lefthook run pre-push --command clippy-firmware-rtt --file firmware/src/bin/podtest.rs' rc 1 with exit status 101. Errors quoted verbatim from the log: 'error: function `planted_lint` is never used', 'error: statement with no effect', 'error: unused arithmetic operation that must be used'. Same plant leaves 'cargo fmt --manifest-path firmware/Cargo.toml --all --check' at rc 0, so the two gates are independently sensitive. File restored from a byte copy; git status shows no firmware source modified.
+
+AC #5 - firmware/Makefile's clippy target comment rewritten in this commit. It no longer claims to be the only place firmware clippy runs; it says what it is now (the interactive per-binary route, which the gates cannot express because the recipe hard-wires --bin $(BINARY)) and names the three gate call sites, the raw-cargo choice, and the local cost. ci.yml's claim that the docs check is the only place CI invokes make stays true - these gates call cargo, not make.
+
+AC #6 - non-interference, measured. Across both clippy invocations the bench ELF is byte-identical: sha256 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b before and after (clippy emits metadata, never an ELF), and git status --porcelain lists no firmware source.
+
+Two findings from doing this properly, neither caused by the gates:
+
+1. Running CI's firmware section verbatim LOCALLY flips which ELF the name 'target/thumbv7em-none-eabihf/release/main' refers to. CI builds main twice, once with the console cfg set and once RTT-only, and cargo alternates that single top-level name between the two deps/main-<metadata-hash> artifacts (measured: 10,941,616-byte console ELF vs 9,497,564-byte RTT-only ELF, both mtime 19:41). Since Makefile's ELF variable is exactly that name and every probe-* target reads it, a local run of the CI suite silently replaces the bench decoder with one for a different cfg set. Restored with 'rm -f $ELF && make build-elf', which came back byte-for-byte identical to the session-start digest, so nothing was lost; the reproduction is recorded here rather than assumed. Filed as its own ticket - elf-check cannot see this failure mode at all, because both ELFs are real builds and only their cfg provenance differs.
+2. elf-check's own recovery hint does not work when cargo considers the target fresh: after 'rm -f $ELF && make build-elf' the file reappeared with its ORIGINAL 19:41 mtime (cargo re-hardlinked deps/main-9a4db457eb5c4e1d instead of relinking), so the check stayed red on a tree whose content equals HEAD. That is TASK-056's false-positive class reached by a content-free mtime move (my cp revert of podtest.rs), and it is left red deliberately: the ELF is a faithful build of HEAD sources, its digest is unchanged from session start, and forcing green would paper over the very weakness TASK-056 exists to fix.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Cross-target clippy is now a gate in three places: lefthook's pre-commit and pre-push gained clippy-firmware and clippy-firmware-rtt, and ci.yml gained the same two invocations after its firmware builds, inside a subshell that establishes cwd firmware/ once instead of inheriting a cd. Both arrive green - console and RTT-only sets exit 0 at HEAD, measured before and after the change - so nothing was silenced or narrowed. Red proven with a planted no_effect fn: rc 101 from the raw cargo line, from both RTT/console variants, and from each lefthook call site; green again after revert. Local costs labelled as such: 20.4 s cold in a fresh target dir, ~1.6/1.2 s rechecking only our crate, 0.35/0.38 s fully cached, 4.3 s for CI's whole firmware section warm. firmware/Makefile's stale 'only place firmware clippy runs' claim rewritten. Bench ELF digest unchanged across both clippy runs (9b60b8ff...); running CI's section locally exposed that release/main names whichever cfg set was linked last, filed as TASK-062.
+<!-- SECTION:FINAL_SUMMARY:END -->

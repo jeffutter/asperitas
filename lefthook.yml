@@ -40,6 +40,22 @@ pre-commit:
       run: cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
       forward_stderr: true
 
+    # firmware/ is a second workspace, so every clippy above stops at the host crates and says
+    # nothing about the six bins that actually run on the board. Cross clippy needs cwd = firmware/
+    # because .cargo/config.toml's target and link-args are discovered from the CWD (cargo #9670),
+    # hence `cd` rather than lefthook's root: -- that would also filter paths, and a job whose
+    # filtered set is empty exits 0 without linting anything. Cost, local warm: ~1.6 s this run,
+    # ~1.2 s for the RTT-only pair below; ~20 s cold in a fresh target dir. Landed with TASK-060.03.
+    clippy-firmware:
+      run: cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings
+      forward_stderr: true
+
+    # Mirrors CI's RTT-only build: the transport-less cfg set is where TASK-036.03's warnings
+    # actually surfaced, so linting only the console build leaves it unchecked.
+    clippy-firmware-rtt:
+      run: cd firmware && cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings
+      forward_stderr: true
+
 pre-push:
   commands:
     doc-artifact-names:
@@ -66,6 +82,17 @@ pre-push:
 
     clippy-log-defmt:
       run: cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
+      forward_stderr: true
+
+    # Same two invocations as pre-commit, for the same reason: no gate above reads firmware/, and
+    # `cd` is load-bearing here too (.cargo/config.toml is found from the CWD). Landed with
+    # TASK-060.03.
+    clippy-firmware:
+      run: cd firmware && cargo clippy --release --features seed3 --bins -- -D warnings
+      forward_stderr: true
+
+    clippy-firmware-rtt:
+      run: cd firmware && cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings
       forward_stderr: true
 
     # Root Cargo.toml's [workspace.lints.rustdoc] denies the two cross-reference lints for every

@@ -263,8 +263,16 @@ check:
 
 ## Lint the firmware for the embedded target, warnings fatal.
 ##
-## Neither CI (.github/workflows/ci.yml) nor lefthook invokes make inside firmware/,
-## so this target is the only place firmware clippy runs.
+## This is the interactive per-binary route -- `make clippy BINARY=rig FEATURES="seed3 stim-ess"`
+## -- and it stays handier than anything the gates offer, because the recipe below hard-wires
+## --bin $(BINARY) and cannot express the whole package.
+##
+## It is no longer the only place firmware clippy runs. pre-commit, pre-push and CI now run
+## whole-package `cargo clippy --release ... --bins -- -D warnings` directly against raw cargo for
+## the console and RTT-only cfg sets (lefthook.yml's clippy-firmware pair, ci.yml's firmware
+## section). Raw cargo rather than `make clippy` on purpose: the gates need --bins, and ci.yml's
+## docs check remains the only place CI invokes make here. Local cost of those two gate runs: ~2 s
+## warm, ~20 s in a fresh target dir. Landed with TASK-060.03.
 clippy:
 	cargo clippy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- -D warnings
 

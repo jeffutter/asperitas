@@ -25,7 +25,7 @@ jobs:
 
             # Root Cargo.toml:3 declares exclude = ["firmware"], so the check above never meant all:
             # firmware/ is its own workspace and has drifted under this gate twice (TASK-044,
-            # TASK-060). Same command as lefthook's fmt-check-firmware. ~1 s warm, local figure.
+            # TASK-060). Same command as lefthook's fmt-check-firmware. ~0.4 s warm, local figure.
             echo "=== cargo fmt (firmware workspace) ==="
             cargo fmt --manifest-path firmware/Cargo.toml --all --check
 
@@ -74,6 +74,10 @@ jobs:
             echo "=== docs artifact names ==="
             scripts/check-doc-artifact-names.sh
 
+            # One subshell for everything that must run with cwd firmware/, where .cargo/config.toml
+            # supplies the thumbv7em target and link args (cargo #9670: discovered from the CWD, not
+            # from --manifest-path). Grouping beats inheriting a cd from the line above.
+            (
             echo "=== firmware cross-compile ==="
             cd firmware && cargo build --release --features seed3
 
@@ -83,4 +87,15 @@ jobs:
             # compiled in, not whether this compiles.
             echo "=== firmware cross-compile (RTT-only, log-defmt) ==="
             cargo build --release --no-default-features --features "seed3 log-defmt"
+
+            # Lint the same two cfg sets the builds above just compiled. Placed after them so clippy
+            # reuses their artifacts -- local: 20 s in a fresh target dir, 11 s right after a cold
+            # build, ~2 s warm. --bins is the whole package here (no lib target, six entries under
+            # src/bin/), and --all-targets is unusable on a no_std target with no test harness to link.
+            echo "=== firmware clippy (all bins) ==="
+            cargo clippy --release --features seed3 --bins -- -D warnings
+
+            echo "=== firmware clippy (all bins, RTT-only, log-defmt) ==="
+            cargo clippy --release --no-default-features --features "seed3 log-defmt" --bins -- -D warnings
+            )
           '
