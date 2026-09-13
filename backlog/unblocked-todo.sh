@@ -14,9 +14,11 @@
 #   ~/.config/home-manager/modules/home/languages/ai/pi-extensions/ralph/unblocked-todo.sh
 # deployed by ai.nix to ~/.pi/agent/extensions/ralph/unblocked-todo.sh. It lists tasks in a
 # status whose dependencies are all Done, holds back containers with an unfinished child, and
-# splits the result by owner: `--assignee agent|human|all`, default `agent`.
+# splits the result by owner: `--assignee agent|human|all`, default `agent`. `--explain` adds a
+# separate output mode: one `id|reason` line per task in the status, ineligible ones included, for
+# a caller that has to say why a ticket was refused rather than just that it was.
 #
-# Usage: unblocked-todo.sh [status] [--assignee agent|human|all]
+# Usage: unblocked-todo.sh [status] [--assignee agent|human|all] [--explain]
 set -euo pipefail
 
 # The deployed script cds into a *relative* `backlog/`, so anchor on this file's own repo root
