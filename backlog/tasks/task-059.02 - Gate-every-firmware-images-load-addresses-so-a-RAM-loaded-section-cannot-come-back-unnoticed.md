@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-13 06:56'
-updated_date: '2026-09-13 13:05'
+updated_date: '2026-09-13 14:50'
 labels:
   - planned
 dependencies:
@@ -127,6 +127,23 @@ It should land near zero because it builds nothing; if it does not, find out why
 **Step 9 - Land it.** `bash scripts/gates.sh ci` green from the repo root, one commit adding the
 script and touching only `scripts/gates.sh` besides, with the red-run transcript in the commit body.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Landed today, with the coordinates this time (2026-09-13, TASK-062.03).
+
+`=== firmware ELF cfg provenance ===` is now registered at scripts/gates.sh:268 (`gate push`, calling
+`bash scripts/elf-provenance.sh check firmware/target/thumbv7em-none-eabihf/release/main
+"$RTT_ONLY_FEATURES" 1`), between the RTT-only cross-build at :249 and the two cross-clippy gates at
+:279/:282. Put your line after :268 and before those clippy gates and both halves of your AC #5 hold
+with one coordinate. Counts after this change: commit 9, push 17, ci 18.
+
+Point 1 stands as written: call `scripts/elf-provenance.sh show <elf>` rather than writing objcopy
+plumbing again. Point 3 also stands - the apology about provenance blindness can come out, because the
+gate above you now names the cfg set of the ELF you are about to read, and it is always the RTT-only
+one in every tier that runs the pair.
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 

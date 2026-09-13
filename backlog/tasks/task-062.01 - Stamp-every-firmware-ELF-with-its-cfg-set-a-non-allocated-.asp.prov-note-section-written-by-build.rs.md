@@ -3,11 +3,11 @@ id: TASK-062.01
 title: >-
   Stamp every firmware ELF with its cfg set: a non-allocated .asp.prov note
   section written by build.rs
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-13 12:54'
-updated_date: '2026-09-13 13:09'
+updated_date: '2026-09-13 14:54'
 labels:
   - task
   - planned
@@ -31,12 +31,12 @@ Rejected, with reasons: (a) dual [[bin]] targets with required-features, because
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All six release ELFs (blinky ledtest main panictest podtest rig) carry a .asp.prov section whose VMA and LMA are 0x0, i.e. non-allocated exactly like .defmt. Evidence is the rust-objdump -h section table pasted for all six, not a claim.
-- [ ] #2 rust-objcopy --dump-section .asp.prov=<out> <elf> yields a blob that differs between the two cfg sets, in the canonical form asp-prov1 / default=<0|1> / features=<sorted comma list, lowercased, hyphens to underscores, the implicit "default" feature omitted because it is already the default= field> / defmt_log=<verbatim>. cargo build --release --features seed3 must report default=1 features=log_usb,seed3 and --no-default-features --features "seed3 log-defmt" must report default=0 features=log_defmt,seed3. Both were measured on a patched copy of this tree before this ticket existed (the raw dump there also listed default inside the feature list; drop that duplicate).
-- [ ] #3 Flash cost is a measurement, not a promise. Record .text and .rodata size plus $(BINARY).bin byte count for all six bins before and after. Pre-change baseline measured in /tmp/pl62fw: five bins byte-for-byte unchanged, main grew .text from 0x11cf4 to 0x11d90 (+156 B) because the asm blob is one more input object, taking main.bin from 88,613 to 88,773 bytes. Land only with every bin under +512 B and the numbers in the notes; if main grows more than that, try the linker-fragment route in the notes before landing anything.
-- [ ] #4 Boardless proof that probe-rs still parses the image: make probe-rtt-list FEATURES="seed3 log-defmt" NO_DEFAULT=1 with no board attached ends at "No connected probes were found", NOT at an ELF parse error. Paste stderr and rc. Measured once already on a provenance-bearing RTT-only ELF.
-- [ ] #5 make -n build flash flash-all check stays byte-identical to HEAD (the DFU guard TASK-053 set and TASK-056 restates), and scripts/gates.sh ci is green.
-- [ ] #6 Section name, format tag and key order are defined in exactly one place in firmware/build.rs, the blob starts with an asp-prov1 tag so a future format change is detectable by its absence, and the comment there names the reader (TASK-062.02) rather than restating what the reader does.
+- [x] #1 All six release ELFs (blinky ledtest main panictest podtest rig) carry a .asp.prov section whose VMA and LMA are 0x0, i.e. non-allocated exactly like .defmt. Evidence is the rust-objdump -h section table pasted for all six, not a claim.
+- [x] #2 rust-objcopy --dump-section .asp.prov=<out> <elf> yields a blob that differs between the two cfg sets, in the canonical form asp-prov1 / default=<0|1> / features=<sorted comma list, lowercased, hyphens to underscores, the implicit "default" feature omitted because it is already the default= field> / defmt_log=<verbatim>. cargo build --release --features seed3 must report default=1 features=log_usb,seed3 and --no-default-features --features "seed3 log-defmt" must report default=0 features=log_defmt,seed3. Both were measured on a patched copy of this tree before this ticket existed (the raw dump there also listed default inside the feature list; drop that duplicate).
+- [x] #3 Flash cost is a measurement, not a promise. Record .text and .rodata size plus $(BINARY).bin byte count for all six bins before and after. Pre-change baseline measured in /tmp/pl62fw: five bins byte-for-byte unchanged, main grew .text from 0x11cf4 to 0x11d90 (+156 B) because the asm blob is one more input object, taking main.bin from 88,613 to 88,773 bytes. Land only with every bin under +512 B and the numbers in the notes; if main grows more than that, try the linker-fragment route in the notes before landing anything.
+- [x] #4 Boardless proof that probe-rs still parses the image: make probe-rtt-list FEATURES="seed3 log-defmt" NO_DEFAULT=1 with no board attached ends at "No connected probes were found", NOT at an ELF parse error. Paste stderr and rc. Measured once already on a provenance-bearing RTT-only ELF.
+- [x] #5 make -n build flash flash-all check stays byte-identical to HEAD (the DFU guard TASK-053 set and TASK-056 restates), and scripts/gates.sh ci is green.
+- [x] #6 Section name, format tag and key order are defined in exactly one place in firmware/build.rs, the blob starts with an asp-prov1 tag so a future format change is detectable by its absence, and the comment there names the reader (TASK-062.02) rather than restating what the reader does.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -117,4 +117,28 @@ after the #![...] attribute block.
   distinguishes seed3, slow-boot or stim-* at all.
 - One build-script run per package covers all six bins, so the blob cannot vary per binary within
   one cargo invocation. Fine here, but it means `--bin main` and `--bins` never disagree.
+
+## Closed by the TASK-062 umbrella run 2026-09-13 (code landed in b40e1b9)
+
+The code shipped in b40e1b9 but this leaf never got its checkboxes or status, so the umbrella could
+not close. Re-measured against the tip then current, 7251cd8, rather than trusting the commit message:
+
+    $ for b in blinky ledtest main panictest podtest rig; do bash ../scripts/elf-provenance.sh show         target/thumbv7em-none-eabihf/release/$b; done
+    -> all six print a blob; none reports "no .asp.prov section"
+
+    $ rust-objdump -h target/thumbv7em-none-eabihf/release/main | grep -E '\.defmt|\.asp\.prov'
+       9 .defmt     0000005b 00000000 00000000
+      20 .asp.prov  00000039 00000000 00000000      <- VMA 0x0, LMA 0x0, non-allocated as promised
+
+    $ make probe-rtt-list FEATURES="seed3 log-defmt" NO_DEFAULT=1      # no board attached
+      probe-rs attach target/.../release/main --chip STM32H750IBKx --non-interactive --list-rtt
+      Error: No connected probes were found.                            rc=2 through make
+    It reached probe-rs's own "no probe" complaint, not an ELF parse error, which is AC #4.
+
+    $ make -C <tree exported from 6083953> -n build flash flash-all check   vs   make -n build flash flash-all check
+      byte-identical except make's entering/leaving-directory banner lines
+
+AC #3's before/after image sizes are recorded in b40e1b9's message next to the diff they describe
+(main/console +160 B of .text, main/RTT-only -736 B, five bins unchanged); every bin stayed inside
+the +512 B budget, so nothing needed the linker-fragment fallback.
 <!-- SECTION:NOTES:END -->

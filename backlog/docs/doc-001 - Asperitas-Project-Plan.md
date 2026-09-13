@@ -266,26 +266,36 @@ push   | -   | yes | yes | === cargo doc (workspace) ===
 push   | -   | yes | yes | === cargo doc (workspace, all features) ===
 push   | -   | yes | yes | === firmware cross-compile ===
 push   | -   | yes | yes | === firmware cross-compile (RTT-only, log-defmt) ===
+push   | -   | yes | yes | === firmware ELF cfg provenance ===
 commit | yes | yes | yes | === firmware clippy (all bins) ===
 commit | yes | yes | yes | === firmware clippy (all bins, RTT-only, log-defmt) ===
 push   | -   | yes | yes | === cargo test ===
 ci     | -   | -   | yes | === cargo test (asperitas-pod pod-hw feature) ===
 
-counts: commit 9, push 16, ci 17
+counts: commit 9, push 17, ci 18
 ```
 
 Costs are local warm figures on aarch64-darwin inside `nix develop .#default`: **commit 2 s**, **push
-74 s**, **ci 139 s**. The two `cargo test` invocations are 134 of those 139 s.
+73 s** (measured twice, 73.0 s and 74.0 s), **ci 140 s**. The two `cargo test` invocations are 133 of
+those 140 s.
 
 Order within a tier is whatever the script declares, cheapest-first, with two rules that outrank cost:
 the console cross-build comes immediately before the RTT-only one with nothing building firmware after
-them (whichever ran last is the ELF the bench then flashes and decodes), and the two cross-clippy gates
-follow both builds so they reuse the artifacts. Neither rule is expressible in hook config - lefthook
-sorts a stage by priority, then leading digits, then command name, never by declaration order - which
-is the reason the definition is a script and not YAML.
+them, and the two cross-clippy gates follow both builds so they reuse the artifacts. Neither rule is
+expressible in hook config - lefthook sorts a stage by priority, then leading digits, then command name,
+never by declaration order - which is the reason the definition is a script and not YAML.
+
+Rule one is now checked, not just declared. `release/main` is one name for two
+images - the console and RTT-only builds are hardlinks to different `deps/main-<hash>` artifacts, and
+whichever ran last owns the path every `make probe-*` decodes with - so "the pair ran in this order"
+and "that path holds the RTT-only image" are one claim stated twice. `=== firmware ELF cfg provenance
+===` reads the second statement out of the ELF's `.asp.prov` note via `scripts/elf-provenance.sh`, so
+swapping the pair or inserting a gate that compiles firmware after it fails the run naming both cfg
+sets; measured by swapping the two lines, running the tier, and restoring them. It costs 0.09 s warm,
+reads only, and asks cargo for nothing - a rebuild there would re-point the very path it audits.
 
 What the one-command shape costs: lefthook buffers a command's stdout and replays it when the command
-finishes, so a hook prints nothing for its first ~2 s (commit) or ~75 s (push). In exchange the log
+finishes, so a hook prints nothing for its first ~2 s (commit) or ~73 s (push). In exchange the log
 carries per-gate headers and wall times it never had, and the run stops at the first failure naming the
 gate that died.
 

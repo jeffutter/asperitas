@@ -3,11 +3,11 @@ id: TASK-062
 title: >-
   elf-check cannot see an ELF built for the wrong cfg set, and its own relink
   hint does not refresh the mtime
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-13 00:52'
-updated_date: '2026-09-13 13:09'
+updated_date: '2026-09-13 14:55'
 labels:
   - planned
 dependencies:
@@ -32,10 +32,10 @@ Two facts measured 2026-09-13 while TASK-060.03 ran CI's firmware section verbat
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 #1 The cfg provenance of the ELF at target/thumbv7em-none-eabihf/release/$(BINARY) is knowable to the host without a board - either the artifact name carries it or elf-check reads it from the ELF itself - and a mismatch against FEATURES/NO_DEFAULT is reported by name, not inferred from mtimes.
-- [ ] #2 #2 Reproduced boardless: build main console, then main RTT-only, then confirm the check distinguishes the two states instead of passing both. Measured digests to aim at: 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b (console, 10,941,616 B) and 16dc9e5cdff48c3e433171060bb04c33fa137dd1fec0effd0dac6150206ee431 (RTT-only, 9,497,564 B).
-- [ ] #3 #3 The remedy elf-check prints actually restores a usable state: after following it verbatim, 'make elf-check' exits 0 and the ELF's mtime is newer than every source it was built from.
-- [ ] #4 #4 Notes record whether the fix changes what CI's two firmware builds leave behind in target/, since TASK-060.03's clippy gates now run in the same section.
+- [x] #1 #1 The cfg provenance of the ELF at target/thumbv7em-none-eabihf/release/$(BINARY) is knowable to the host without a board - either the artifact name carries it or elf-check reads it from the ELF itself - and a mismatch against FEATURES/NO_DEFAULT is reported by name, not inferred from mtimes.
+- [x] #2 #2 Reproduced boardless: build main console, then main RTT-only, then confirm the check distinguishes the two states instead of passing both. Measured digests to aim at: 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b (console, 10,941,616 B) and 16dc9e5cdff48c3e433171060bb04c33fa137dd1fec0effd0dac6150206ee431 (RTT-only, 9,497,564 B).
+- [x] #3 #3 The remedy elf-check prints actually restores a usable state: after following it verbatim, 'make elf-check' exits 0 and the ELF's mtime is newer than every source it was built from.
+- [x] #4 #4 Notes record whether the fix changes what CI's two firmware builds leave behind in target/, since TASK-060.03's clippy gates now run in the same section.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -108,6 +108,43 @@ gate matrix matches `scripts/gates.sh --list`. Then this ticket can close, and g
 Discovered by TASK-060.03's executor, which hit both facts while proving the new gates and had to restore the session-start ELF digest by hand. Related but distinct: TASK-056 makes the staleness test content-based so a bulk mtime refresh cannot fail it spuriously - that ticket covers false RED, this one covers the false GREEN from cfg ambiguity plus a broken recovery path. Coordinate so one does not rewrite what the other depends on.
 
 Second reproduction while executing TASK-060.04 minutes later, same shell: pre-push's new firmware-cross-compile-rtt job left target/thumbv7em-none-eabihf/release/main at sha256 16dc9e5cdff48c3e433171060bb04c33fa137dd1fec0effd0dac6150206ee431 (9,497,564 B, RTT-only cfg) with mtime unchanged at Sep 12 19:41; 'rm -f $ELF && make build-elf' put it back to 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b (10,941,616 B, console cfg), again WITHOUT a fresh mtime, which is why 'make elf-check' stayed red afterwards. Two things this ticket owns: the name cannot tell the two cfg sets apart, and the remedy elf-check prints does not refresh the timestamp it compares.
+
+## Integration check, run 2026-09-13 with all three leaves landed (tip was 7251cd8)
+
+The plan's four-part check, each part executed rather than asserted:
+
+- `bash scripts/gates.sh ci` -> 18 gates, 140.0 s, rc=0.
+- `make elf-check FEATURES="seed3 log-defmt" NO_DEFAULT=1` -> rc=0 against the residue a full push
+  run leaves; `make elf-check FEATURES="seed3"` against the same ELF -> rc=2 with the first line
+  naming `default=0 features=log_defmt,seed3` against what was asked. One name, two images, now two
+  verdicts.
+- The remedy that check prints was eval'd verbatim and restored rc=0 plus an ELF newer than every
+  input (numbers in TASK-062.02's notes).
+- `make -n build flash flash-all check` from this tree is byte-identical to the same command from the
+  tree at 6083953, before .01 touched build.rs, apart from make's own directory banner. Nothing in the
+  DFU path moved.
+- doc-001's matrix block equals `scripts/gates.sh --list` output compared programmatically.
+
+### AC #4, answered as a measurement rather than a paragraph
+
+CI's two firmware builds leave `release/main` holding the **RTT-only** image, and they always did:
+both cross-builds are push-tier, so every tier that runs them ends on the second one. The comment that
+claimed the hook tiers deliberately ended on the console image was wrong and is corrected in
+`scripts/gates.sh`. What changed for TASK-060.03's two cross-clippy gates, which sit directly below
+the pair and reuse its artifacts: nothing observable. `cargo clippy` links no binary, so it cannot
+re-point the top-level name - measured by running the whole push tier and reading the provenance
+afterwards (`default=0 features=log_defmt,seed3`, matching what the gate asserts mid-run). The new
+gate sits between the pair and those clippy gates, costs 0.08-0.09 s, and touches nothing under
+`firmware/target`: a stat-and-size digest of the whole tree is identical across a run of it.
+
+### Scope note, said plainly
+
+This ticket arrived assigned as the umbrella while .01 and .02 had their code committed (b40e1b9 and
+7251cd8) but their statuses still saying To Do with every box unchecked. Closing the umbrella therefore
+meant verifying both leaves against that tip and finalizing them, doing .03 itself, and closing the parent
+- not starting a fourth thing. One gap surfaced and went to a follow-up ticket instead of being
+papered over: 7251cd8's commit message claims elf-provenance's behaviours are covered by "the script's
+own tests", and no such file exists in the repo.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -123,3 +160,26 @@ created: 2026-09-13 07:02
 Coordination note from planning TASK-059 (2026-09-13): TASK-059.02 adds scripts/check-image-load-addresses.sh plus one push-tier gate line in scripts/gates.sh, and its header will state plainly that it validates whichever cfg set built last - your provenance blindness, acknowledged rather than papered over. Its ACs forbid the `test -f ... || true` else-branch pattern this ticket calls out. If you land first, say so in .02's notes so it reuses your mechanism instead of duplicating it.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All three leaves are Done and the blindness is gone. Every firmware ELF carries the cfg set it was
+linked with in a non-allocated `.asp.prov` note written by `firmware/build.rs` (TASK-062.01);
+`scripts/elf-provenance.sh` is the repo's only reader and `make elf-check` refuses an ELF whose set
+differs from the FEATURES/NO_DEFAULT it was handed, naming both sides, with a remedy that forces a
+real relink instead of the one that demonstrably left the old mtime (TASK-062.02); and
+`=== firmware ELF cfg provenance ===` makes gates.sh ordering rule 1 machine-checked, so a swapped
+cross-build pair or a later firmware build fails the push tier rather than quietly mislabelling every
+defmt frame the bench decodes (TASK-062.03).
+
+Measured, all boardless: the same `make elf-check` passes one cfg set and refuses the other in both
+directions; its printed remedy restores rc=0 in 2 s with a fresh mtime; the new gate costs 0.08-0.09 s,
+builds nothing (stat digest of `firmware/target` identical across a run), goes red through the real
+runner when the pair is reversed and green once restored; `gates.sh ci` is 18 gates in 140.0 s;
+`make -n build flash flash-all check` is unchanged against the pre-.01 tree; doc-001's matrix equals
+`gates.sh --list`.
+
+One honest gap went to a follow-up instead of into a checkbox: 7251cd8's commit message describes tests
+for the provenance reader that no file in the repo contains.
+<!-- SECTION:FINAL_SUMMARY:END -->

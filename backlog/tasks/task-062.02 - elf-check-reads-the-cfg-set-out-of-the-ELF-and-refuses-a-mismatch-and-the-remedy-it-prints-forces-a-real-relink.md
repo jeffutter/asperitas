@@ -3,11 +3,11 @@ id: TASK-062.02
 title: >-
   elf-check reads the cfg set out of the ELF and refuses a mismatch, and the
   remedy it prints forces a real relink
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-13 12:58'
-updated_date: '2026-09-13 13:03'
+updated_date: '2026-09-13 14:54'
 labels:
   - task
   - planned
@@ -32,14 +32,14 @@ One script holds the whole mechanism: scripts/elf-provenance.sh, called by elf-c
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 scripts/elf-provenance.sh is the only thing in the repo that reads the blob. Interface: "show <elf>" prints the normalized provenance on stdout; "check <elf> <FEATURES> <NO_DEFAULT>" exits 0 on a match, 1 on a mismatch naming both sets, and 2 when the check itself cannot run (no ELF, no .asp.prov section, unparseable blob). Header states that contract, following scripts/check-doc-artifact-names.sh:44-45. Quiet on success.
-- [ ] #2 Reproduced boardless with the real Makefile: build main console, then main RTT-only, and the SAME elf-check invocation passes the first and fails the second naming features=log_defmt,seed3 default=0 against what was asked. Paste both stderr blocks plus rc. The two digests quoted in TASK-062 AC #2 (9b60b8ff..., 16dc9e5c...) identify the two pre-.01 artifacts only - after TASK-062.01 lands every digest moves, so distinguish the states by the blob, never by digest.
-- [ ] #3 The expected feature set is derived, not restated: FEATURES plus the closure of the default feature taken from cargo metadata --format-version 1 --no-deps --offline (measured 0.074 s warm, jq is in the dev shell), normalized the same way build.rs normalizes CARGO_FEATURE_*. Nothing hard-codes that default means log-usb. Show the derivation is right for a third cfg set too, e.g. BINARY=rig FEATURES="seed3 stim-ess", where the expected set must include stim_ess.
-- [ ] #4 The remedy elf-check prints restores a usable state, proven by running it verbatim: afterwards make elf-check exits 0 AND the ELF mtime is not older than any file under ELF_INPUTS. Record the measured wall seconds of whatever remedy is printed. rm -f $(ELF) && make build-elf may not appear as a remedy anywhere any more - it demonstrably leaves the old mtime.
-- [ ] #5 An ELF with no .asp.prov section fails loudly with a message saying the artifact predates the mechanism or came from an older tree, and telling the operator how to get one. No test -f ... || true, no silent pass, no skip when FEATURES is empty.
-- [ ] #6 DEFMT_LOG is carried in the blob and reported by show, but is NOT enforced by check, and the Makefile comment says why in one sentence: it selects which frames got compiled in rather than which cfg set this is, and a bench session that exports DEFMT_LOG without rebuilding would otherwise be refused an ELF that is exactly the one on the board.
-- [ ] #7 Prose stays truthful where it quotes elf-check today: docs/reference/daisy-seed3.md:806 exit-code row and the two-layer rc paragraph at :809-813 (a cfg mismatch is now a third thing that arrives as rc=2 through make, so the paragraph must say match on the message), README.md:268-270, daisy-seed3.md:555-558 where the byte scan strings -a <ELF> | grep -c SEGGER is offered as the way to tell the two images apart (supersede it with rust-objcopy --dump-section, spelled rust-objcopy because rule R2 forbids the cargo objcopy token in docs), and the two "with the elf-check lines left out" preambles at :400 and :837 if the guarded expansion changed shape.
-- [ ] #8 DFU guard holds: make -n build flash flash-all check byte-identical to HEAD. probe-* recipes untouched. If TASK-056 has landed, keep its content-digest staleness test exactly as it wrote it and add the provenance clause beside it; if it has not, leave the find -newer test alone and do not half-implement a digest. Whichever lands second updates the shared failure-message shape once.
+- [x] #1 scripts/elf-provenance.sh is the only thing in the repo that reads the blob. Interface: "show <elf>" prints the normalized provenance on stdout; "check <elf> <FEATURES> <NO_DEFAULT>" exits 0 on a match, 1 on a mismatch naming both sets, and 2 when the check itself cannot run (no ELF, no .asp.prov section, unparseable blob). Header states that contract, following scripts/check-doc-artifact-names.sh:44-45. Quiet on success.
+- [x] #2 Reproduced boardless with the real Makefile: build main console, then main RTT-only, and the SAME elf-check invocation passes the first and fails the second naming features=log_defmt,seed3 default=0 against what was asked. Paste both stderr blocks plus rc. The two digests quoted in TASK-062 AC #2 (9b60b8ff..., 16dc9e5c...) identify the two pre-.01 artifacts only - after TASK-062.01 lands every digest moves, so distinguish the states by the blob, never by digest.
+- [x] #3 The expected feature set is derived, not restated: FEATURES plus the closure of the default feature taken from cargo metadata --format-version 1 --no-deps --offline (measured 0.074 s warm, jq is in the dev shell), normalized the same way build.rs normalizes CARGO_FEATURE_*. Nothing hard-codes that default means log-usb. Show the derivation is right for a third cfg set too, e.g. BINARY=rig FEATURES="seed3 stim-ess", where the expected set must include stim_ess.
+- [x] #4 The remedy elf-check prints restores a usable state, proven by running it verbatim: afterwards make elf-check exits 0 AND the ELF mtime is not older than any file under ELF_INPUTS. Record the measured wall seconds of whatever remedy is printed. rm -f $(ELF) && make build-elf may not appear as a remedy anywhere any more - it demonstrably leaves the old mtime.
+- [x] #5 An ELF with no .asp.prov section fails loudly with a message saying the artifact predates the mechanism or came from an older tree, and telling the operator how to get one. No test -f ... || true, no silent pass, no skip when FEATURES is empty.
+- [x] #6 DEFMT_LOG is carried in the blob and reported by show, but is NOT enforced by check, and the Makefile comment says why in one sentence: it selects which frames got compiled in rather than which cfg set this is, and a bench session that exports DEFMT_LOG without rebuilding would otherwise be refused an ELF that is exactly the one on the board.
+- [x] #7 Prose stays truthful where it quotes elf-check today: docs/reference/daisy-seed3.md:806 exit-code row and the two-layer rc paragraph at :809-813 (a cfg mismatch is now a third thing that arrives as rc=2 through make, so the paragraph must say match on the message), README.md:268-270, daisy-seed3.md:555-558 where the byte scan strings -a <ELF> | grep -c SEGGER is offered as the way to tell the two images apart (supersede it with rust-objcopy --dump-section, spelled rust-objcopy because rule R2 forbids the cargo objcopy token in docs), and the two "with the elf-check lines left out" preambles at :400 and :837 if the guarded expansion changed shape.
+- [x] #8 DFU guard holds: make -n build flash flash-all check byte-identical to HEAD. probe-* recipes untouched. If TASK-056 has landed, keep its content-digest staleness test exactly as it wrote it and add the provenance clause beside it; if it has not, leave the find -newer test alone and do not half-implement a digest. Whichever lands second updates the shared failure-message shape once.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -136,4 +136,60 @@ failure gets its own named line, e.g. `<ELF> was linked with default=0 features=
 you asked for default=1 features=log_usb,seed3 (FEATURES="seed3", NO_DEFAULT unset)`. Say what the
 ELF is, not what the operator did wrong: probe-log and probe-rtt-list are the callers and the
 operator is usually mid-capture.
+
+## Closed by the TASK-062 umbrella run 2026-09-13 (code landed in 7251cd8)
+
+Scripts, Makefile and docs shipped; the checkboxes never got ticked, so the umbrella could not close.
+Everything below was re-run against 7251cd8 on this tree, boardless, GNU Make 4.4.1, cargo 1.97.1.
+
+### AC #2: the real-Makefile cfg switch, both directions
+
+    make build-elf FEATURES="seed3"                          -> sha 7407afed..., default=1 features=log_usb,seed3
+    make elf-check FEATURES="seed3"                          -> rc=0
+    make build-elf FEATURES="seed3 log-defmt" NO_DEFAULT=1   -> sha 1516e909..., default=0 features=log_defmt,seed3
+    make elf-check FEATURES="seed3"                          -> rc=2 through make, first line:
+      target/thumbv7em-none-eabihf/release/main was linked with default=0 features=log_defmt,seed3;
+      you asked for default=1 features=log_usb,seed3 (FEATURES="seed3", NO_DEFAULT=unset)
+    make elf-check FEATURES="seed3 log-defmt" NO_DEFAULT=1   -> rc=0
+    make build-elf FEATURES="seed3"   (back again, then ask RTT-only)
+    make elf-check FEATURES="seed3 log-defmt" NO_DEFAULT=1   -> rc=2, same shape naming both sets
+
+Same invocation, opposite verdicts, distinguished by the blob and reported by name. The two pre-.01
+digests quoted in the parent ticket are obsolete exactly as AC #2 predicted.
+
+### AC #4: the printed remedy, followed verbatim
+
+Extracted from the failing `make elf-check` output and eval'd as-is:
+
+    touch src/bin/main.rs && make build-elf BINARY=main FEATURES='seed3 log-defmt' NO_DEFAULT=1
+      -> rc=0, wall 2 s
+    make elf-check FEATURES="seed3 log-defmt" NO_DEFAULT=1   -> rc=0
+    the ELF_INPUTS staleness find                                        -> empty afterwards
+
+The mtime rewind that made the old remedy useless is directly observable here: after switching to the
+console build the ELF read mtime 1789309512 with the wall clock at 1789309512; switching to RTT-only
+put it back to 1789309462 while the clock still said 1789309512. Content correct, timestamp rewound -
+cargo #15313 doing precisely what this ticket's plan said it does.
+
+### AC #3 / #5 / #6: derivation and refusal paths
+
+    make build-elf BINARY=rig FEATURES="seed3 stim-ess"
+    elf-provenance.sh show  ... release/rig          -> default=1 features=log_usb,seed3,stim_ess
+    elf-provenance.sh check ... "seed3 stim-ess" ""  -> rc=0
+    elf-provenance.sh check ... "seed3" ""           -> rc=1, naming stim_ess on the ELF side only
+
+    rust-objcopy --remove-section .asp.prov on a copy, then:
+    elf-provenance.sh show  <that copy>              -> rc=2
+    elf-provenance.sh check <that copy> ...          -> rc=2, two lines saying it predates the stamp
+                                                        and how to get one; no silent pass
+
+Reading the blob leaves the artifact alone: three `show` calls moved neither the mtime (1789309462
+before and after) nor the sha256, which is what the trailing /dev/null argument buys.
+
+### One thing 7251cd8's message overclaims
+
+7251cd8's message says the /dev/null guard and the four exit-code paths are "asserted in the script's own
+tests". There is no test file - searching scripts/ for elf-provenance finds the script itself and
+nothing else. The behaviours are real; they are the measurements above. They just live in nobody's
+repo. Filed as a follow-up rather than quietly checked off here.
 <!-- SECTION:NOTES:END -->

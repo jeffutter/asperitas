@@ -29,8 +29,10 @@
 #      and no gate builds firmware after them. Whichever build ran last is what
 #      firmware/target/thumbv7em-none-eabihf/release/main names -- the two images are hardlinks to
 #      different deps/main-<hash> artifacts -- and every `make probe-*` decodes whatever that path
-#      currently holds. TASK-062 owns that cfg-provenance blindness; do not "fix" it here, and do
-#      not collapse the pair.
+#      currently holds. That residue is no longer folklore: `=== firmware ELF cfg provenance ===`
+#      runs after the pair and refuses any ELF that is not the RTT-only image, so swapping the two
+#      builds or adding a gate that compiles firmware after them turns that gate red naming both cfg
+#      sets (TASK-062). Do not "fix" that blindness anywhere else and do not collapse the pair.
 #   2. The two cross-clippy gates come after both cross-builds so clippy reuses their artifacts.
 #      They stay `commit`-tier gates, so in the commit tier they simply run with no build above
 #      them, which is what pre-commit does today.
@@ -228,10 +230,16 @@ gate push "=== cargo doc (workspace) ===" \
 gate push "=== cargo doc (workspace, all features) ===" \
   env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 
+# One spelling of the RTT-only cfg set, shared by the build below and the provenance gate after it.
+# Kept as two literals they are free to drift, and a drifted expectation makes the gate refuse the
+# exact image its own build line just produced.
+RTT_ONLY_FEATURES="seed3 log-defmt"
+
 # Both cross-builds, console first: see ordering rule 1 in the header. Whichever of the two runs
-# last is the ELF the bench then flashes and decodes with, and today that is deliberately the
-# console image in the hook tiers and the RTT image only where CI built it last -- so this pair
-# stays adjacent, in this order, with nothing building firmware after it.
+# last is the ELF the bench then flashes and decodes with, and because both lines are `push`-tier
+# every tier that runs them ends on the RTT-only image -- which is what the provenance gate below
+# asserts rather than what any comment here claims. So this pair stays adjacent, in this order, with
+# nothing building firmware after it.
 gate push "=== firmware cross-compile ===" -C firmware cargo build --release --features seed3
 
 # The RTT-only image is the only build that links build.rs's `-Tdefmt.x` fragment and the
@@ -239,7 +247,27 @@ gate push "=== firmware cross-compile ===" -C firmware cargo build --release --f
 # leaves both uncompiled. DEFMT_LOG is deliberately unset: it selects which frames get compiled in,
 # not whether this compiles.
 gate push "=== firmware cross-compile (RTT-only, log-defmt) ===" -C firmware \
-  cargo build --release --no-default-features --features "seed3 log-defmt"
+  cargo build --release --no-default-features --features "$RTT_ONLY_FEATURES"
+
+# Rule 1's residue, checked rather than promised. `release/main` is one name for two images, so
+# "the pair ran in this order" and "the path holds the RTT-only ELF" are the same claim stated two
+# ways -- and until this gate only the first one was enforced, which meant the symptom of violating
+# it was a bench decoding defmt frames against symbols for a binary that is not on the board. Now a
+# swapped pair or a later firmware build fails here, naming the cfg set found and the one expected.
+#
+# Reads only, on purpose: it shells out to `rust-objcopy` inside scripts/elf-provenance.sh and asks
+# cargo for nothing. `cargo objcopy`, `cargo objdump` and `make build-elf` all rebuild, and a rebuild
+# re-points the very path this gate is auditing -- a cfg switch finishes in 0.07 s by re-uplifting the
+# cached hardlink, no relink -- so the check would grade its own side effect instead of the pair.
+# Asking with NO_DEFAULT=1 also keeps `cargo metadata` out of it entirely: that derivation only runs
+# when defaults are on. Measured warm: 0.08 s inside a `ci` run, 0.09 s inside `push`.
+#
+# `push` tier and placed where it is because it asserts something only the pair above can make true.
+# In the `commit` tier there is no build before it, so the path would hold whatever the last push
+# left, and a check of somebody else's residue is a check that fails for reasons nobody caused.
+gate push "=== firmware ELF cfg provenance ===" \
+  bash scripts/elf-provenance.sh check \
+    firmware/target/thumbv7em-none-eabihf/release/main "$RTT_ONLY_FEATURES" 1
 
 # Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses
 # their artifacts: ~20 s in a fresh target dir, ~2 s directly after a build, 0.25 s when nothing

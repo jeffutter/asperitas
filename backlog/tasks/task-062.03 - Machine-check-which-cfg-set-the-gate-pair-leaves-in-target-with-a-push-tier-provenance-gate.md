@@ -3,11 +3,11 @@ id: TASK-062.03
 title: >-
   Machine-check which cfg set the gate pair leaves in target/ with a push-tier
   provenance gate
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-13 13:02'
-updated_date: '2026-09-13 13:03'
+updated_date: '2026-09-13 14:54'
 labels:
   - task
   - planned
@@ -30,11 +30,11 @@ Depends on TASK-062.02 for scripts/elf-provenance.sh; this ticket adds no parsin
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Exactly one new gate line, tier push, declared after "=== firmware cross-compile (RTT-only, log-defmt) ===" and before the two cross-clippy gates, calling scripts/elf-provenance.sh check on firmware/target/thumbv7em-none-eabihf/release/main with the RTT-only expectation. It shells out to bare rust-objcopy only: no cargo objcopy, no cargo objdump, no make build-elf, because any of those rebuilds and would itself re-point the very path the gate reads.
-- [ ] #2 Red case demonstrated, not asserted: with a console-cfg ELF sitting at that path (either by running the two cross-builds in reverse order or by copying a console ELF over it), scripts/gates.sh push fails naming both feature sets and exits 1; after rebuilding the pair in the documented order the same gate passes. Paste both runs.
-- [ ] #3 The gate builds nothing. Prove it the way TASK-058 did: sha256 over stat -c "%n %Y %s" for everything under firmware/target before and after the gate run, byte-identical, plus the warm wall-clock cost of the new gate (expect well under 0.2 s).
-- [ ] #4 backlog/docs/doc-001 gate matrix regenerated from scripts/gates.sh --list rather than hand-edited, including the counts line and the measured commit/push/ci cost line, and the prose restatement of the two ordering rules updated to say rule 1 is now checked.
-- [ ] #5 gates.sh header rule 1 reworded to name the gate that enforces it instead of describing the blindness as accepted, and a coordination comment left on TASK-059.02 telling it to place its gate after this one - its plan currently says "immediately after the doc-artifact gate (gates.sh:264)", but the doc-artifact gate is at :186, well before both cross-builds, so that coordinate cannot satisfy its own AC #5.
+- [x] #1 Exactly one new gate line, tier push, declared after "=== firmware cross-compile (RTT-only, log-defmt) ===" and before the two cross-clippy gates, calling scripts/elf-provenance.sh check on firmware/target/thumbv7em-none-eabihf/release/main with the RTT-only expectation. It shells out to bare rust-objcopy only: no cargo objcopy, no cargo objdump, no make build-elf, because any of those rebuilds and would itself re-point the very path the gate reads.
+- [x] #2 Red case demonstrated, not asserted: with a console-cfg ELF sitting at that path (either by running the two cross-builds in reverse order or by copying a console ELF over it), scripts/gates.sh push fails naming both feature sets and exits 1; after rebuilding the pair in the documented order the same gate passes. Paste both runs.
+- [x] #3 The gate builds nothing. Prove it the way TASK-058 did: sha256 over stat -c "%n %Y %s" for everything under firmware/target before and after the gate run, byte-identical, plus the warm wall-clock cost of the new gate (expect well under 0.2 s).
+- [x] #4 backlog/docs/doc-001 gate matrix regenerated from scripts/gates.sh --list rather than hand-edited, including the counts line and the measured commit/push/ci cost line, and the prose restatement of the two ordering rules updated to say rule 1 is now checked.
+- [x] #5 gates.sh header rule 1 reworded to name the gate that enforces it instead of describing the blindness as accepted, and a coordination comment left on TASK-059.02 telling it to place its gate after this one - its plan currently says "immediately after the doc-artifact gate (gates.sh:264)", but the doc-artifact gate is at :186, well before both cross-builds, so that coordinate cannot satisfy its own AC #5.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -80,4 +80,67 @@ rust-objcopy --dump-section on a ~9.5 MB ELF plus one string compare. Nothing el
 absent the script exits 2 and the gate fails loudly - a missing artifact means the pair did not run,
 which is itself a rule violation, and silently skipping would recreate the blind spot this ticket
 exists to close.
+
+## Landed 2026-09-13
+
+One gate line, `push` tier, placed after the RTT-only cross-build and before both cross-clippy gates:
+
+    gate push "=== firmware ELF cfg provenance ===" \
+      bash scripts/elf-provenance.sh check \
+        firmware/target/thumbv7em-none-eabihf/release/main "$RTT_ONLY_FEATURES" 1
+
+`RTT_ONLY_FEATURES="seed3 log-defmt"` is now one definition shared by the build line above and this
+check. Two literals would have been free to drift, and a drifted expectation makes the gate refuse the
+image its own neighbour just built - which would have been this ticket shooting itself in the foot.
+
+### AC #2: red, through the real runner, then green again
+
+Red was produced by violating rule 1 for exactly one run: a copy of `scripts/gates.sh` with the two
+cross-build stanzas physically swapped (RTT first, console last), copied over the real file, tier run,
+file restored from a backup taken beforehand.
+
+    === firmware cross-compile (RTT-only, log-defmt) ===   Finished in 0.07s   --- 0.13s
+    === firmware cross-compile ===                         Finished in 0.07s   --- 0.13s
+    === firmware ELF cfg provenance ===
+    firmware/target/thumbv7em-none-eabihf/release/main was linked with default=1 features=log_usb,seed3;
+    you asked for default=0 features=log_defmt,seed3 (FEATURES="seed3 log-defmt", NO_DEFAULT=1)
+
+    *** gate failed: === firmware ELF cfg provenance ===
+    *** tier: push (13 of 14 gates completed before it)
+    push rc=1
+
+Residue afterwards read `default=1 features=log_usb,seed3`, so the failure describes the tree rather
+than the checker. Restoring the file and re-running: `tier push: 17 gates, 73.0s`, rc=0, new gate
+0.09 s. A second clean run measured 74.0 s.
+
+The other half of AC #2's options - copying a console ELF over `release/main` and running the tier -
+does not go red, and the reason is worth recording because it says something about cargo: the RTT-only
+build gate runs before this one, finishes in 0.07 s having relinked nothing, and re-uplifts the cached
+RTT hardlink anyway. The copied bytes are overwritten by the mechanism, so the state cannot survive
+to the check. Ordering violations are the reachable failure.
+
+### AC #3: the gate builds nothing
+
+    $ find firmware/target -exec stat -c '%n %Y %s' {} + | LC_ALL=C sort | sha256sum
+      b68c4a4d80647afadd6196cda91a4533fd3b33089e1602a61aa2ec6f19f09b96
+    $ bash scripts/elf-provenance.sh check firmware/target/.../release/main "seed3 log-defmt" 1   # rc=0
+    $ ... again
+      b68c4a4d80647afadd6196cda91a4533fd3b33089e1602a61aa2ec6f19f09b96      <- identical, sizes and mtimes
+
+Ten warm invocations cost 0.764 s total, so ~0.08 s per gate, matching the 0.08 s / 0.09 s the tier
+runs printed. No cargo process at all: asking with NO_DEFAULT=1 skips the metadata derivation, so the
+only child process is rust-objcopy.
+
+### AC #4 / #5: docs and prose
+
+doc-001's matrix block is now byte-identical to `scripts/gates.sh --list` output (compared
+programmatically, not by eye): counts commit 9, push 17, ci 18. Costs updated to the measured
+commit 2 s, push 73 s (twice: 73.0 s, 74.0 s), ci 140 s, with the two cargo-test gates named as 133
+of the 140. The ordering-rule paragraph gained a paragraph saying rule 1 is checked and how it was
+measured. gates.sh rule 1 names the enforcing gate instead of describing the blindness as accepted,
+and the pair's own comment no longer claims the hook tiers end on the console image - they do not,
+both builds are push-tier, so every tier that runs them ends on the RTT-only one.
+
+TASK-059.02 already carried the coordination note this AC asked for; it cited gates.sh:241-242, which
+this ticket moved. Appended the landed coordinates so it does not chase stale line numbers twice.
 <!-- SECTION:NOTES:END -->
