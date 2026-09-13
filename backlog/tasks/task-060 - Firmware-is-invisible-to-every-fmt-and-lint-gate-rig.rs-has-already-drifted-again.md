@@ -3,11 +3,11 @@ id: TASK-060
 title: >-
   Firmware is invisible to every fmt and lint gate; rig.rs has already drifted
   again
-status: Dev Ready
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-12 21:26'
-updated_date: '2026-09-13 00:24'
+updated_date: '2026-09-13 01:28'
 labels:
   - planned
 dependencies:
@@ -66,10 +66,10 @@ this ticket is about calling it from a gate.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A gate runs `cargo fmt --check` against the firmware workspace and is red on a planted diff today - `firmware/src/bin/rig.rs:21,:28,:445` are already drifted while root `cargo fmt --all --check` exits 0 - and green once they are cleared.
-- [ ] #2 A gate runs cross-target clippy over the firmware bin targets with `-D warnings`, with the measured wall time recorded, and whatever warnings it surfaces are either cleared in the same change or filed as their own ticket rather than silenced.
-- [ ] #3 The decision on lefthook's pre-push gap (no pod-hw clippy/test, no `dump_reassemble --selftest`, no RTT-only cross-compile) is recorded one way or the other in the ticket notes, not left implicit.
-- [ ] #4 Host gates green in `nix develop .#default`, verbatim from ci.yml.
+- [x] #1 A gate runs `cargo fmt --check` against the firmware workspace and is red on a planted diff today - `firmware/src/bin/rig.rs:21,:28,:445` are already drifted while root `cargo fmt --all --check` exits 0 - and green once they are cleared.
+- [x] #2 A gate runs cross-target clippy over the firmware bin targets with `-D warnings`, with the measured wall time recorded, and whatever warnings it surfaces are either cleared in the same change or filed as their own ticket rather than silenced.
+- [x] #3 The decision on lefthook's pre-push gap (no pod-hw clippy/test, no `dump_reassemble --selftest`, no RTT-only cross-compile) is recorded one way or the other in the ticket notes, not left implicit.
+- [x] #4 Host gates green in `nix develop .#default`, verbatim from ci.yml.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -127,6 +127,42 @@ Two more stale coordinates live in **this umbrella's own description**, and an e
 Verified-current coordinates for the executors, checked line by line on 2026-09-12: `lefthook.yml` is 73 lines - pre-commit `:4-29` (five commands), pre-push `:31-73`, with `test` at `:66-68` and `firmware-cross-compile` at `:70-72`. That last job is the live precedent for the `root:` hazard named in .02 and .03: it sets `root: "firmware/"`, which both sets cwd and filters paths, so a push touching no firmware file skips it with exit 0. New lint jobs must not copy that shape. `ci.yml`: triggers `:3-7`, root fmt `:24`, the two feature-set clippies `:29-38`, pod-hw clippy `:40-41`, pod-hw test `:57-58`, `dump_reassemble --selftest` `:63`, the only-make-in-CI claim `:65-67`, RTT-only firmware build `:74-79` inside one single-quoted bash string ending `:80`.
 <!-- SECTION:PLAN:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Integration pass (2026-09-13, @agent)
+
+Leaves: .01 4b4738c, .02 e84282f, .03 413e17a, .04 895dfc7. Each leaf carries its own measurements; this pass checks the four together and does what no leaf could: run the real thing end to end.
+
+### AC #1 - firmware fmt gates, red on a planted diff, green cleared
+
+Root `cargo fmt --all --check` exited 0 while `cd firmware && cargo fmt --check` reported real diffs at rig.rs:21, :28, :445, :554. Cleared by .01 (ELF sha256 identical before/after: 9b60b8ffde4d2270e9a043feb300f50283762cdeee537ca81537f36b937fe80b, so no behaviour moved). Gate installed by .02 in all three places, proven red/green at each site. End-to-end proof against a real `git commit`, not just `lefthook run`: appended `#[allow(dead_code)] fn planted_fmt( ) {  let _x = 1;   }` to firmware/src/bin/podtest.rs -> commit rc 1, `fmt-check-firmware` named as the failing command, `git log -1` still 895dfc7, nothing landed. Reverted, hook green again.
+
+### AC #2 - cross-target clippy with -D warnings, cost recorded, warnings cleared not silenced
+
+.03 put `cargo clippy --release --features seed3 --bins` and the RTT-only equivalent behind both hooks and both CI builds: six bins, both cfg sets. Nothing was currently red, so nothing had to be cleared or filed. Costs (local, warm): ~1.6 s / 1.2 s rechecking one crate, 0.35 s / 0.38 s fully cached, 20.4 s on a fresh target dir, 4.3 s for the whole firmware section of pre-commit. Red proof at hook level: a `.no_effect()` plant -> rc 101 raw, and against a real commit both clippy-firmware and clippy-firmware-rtt fired and the commit died at rc 1. Silencing was explicitly rejected: no allow attributes were added anywhere in firmware/.
+
+### AC #3 - the pre-push decision, recorded
+
+.04 closed the cheap half (dump_reassemble --selftest 0.55 s, clippy-pod-hw 0.22 s, firmware-cross-compile-rtt 0.13 s) and priced the expensive half: `cargo test --workspace --features asperitas-pod/pod-hw` stays CI-only at 67 s local warm, more than every other pre-push command combined. Full-hook measurement either side: 72.6 s before, 72.5 s after. Decision written in lefthook.yml with price, precedent (TASK-018.01, c44b9c1) and reopen condition.
+
+### AC #4 - host gates green verbatim from ci.yml, and what that run found
+
+Ran ci.yml's step body as GitHub runs it, twice: `nix develop .#default --command bash .github/ci-steps.sh` -> **CI_RC=0**, all sixteen steps, 2m22 s. Per-step from a timestamped copy of the same script, warm: cargo test 66 s and cargo test (pod-hw) 67 s are 133 of 140 s; every other step rounds to 0-2 s. That is the strongest possible support for .04's split - the one check kept off the hook is 48% of CI's wall time by itself.
+
+**The run also found a real bug, and it was worse than the ticket assumed.** ci.yml held its whole check list inside an inline `bash -c '...'` string. Single quotes inside that argument terminate it, so any apostrophe in a comment breaks the step - and bash executes a script line by line as it parses it, so every check appears to run and only then does the step die on 'unexpected EOF while looking for matching quote'. Extracting the step body and running `bash -n` on it per revision: fine through c44b9c1 / 5c829e4 / d7918df, broken from 6d7d38a (2026-09-10, 'CI: compile the log-defmt backend in an unattended gate') onward, six comments deep by HEAD - and TASK-060.02 added a seventh. It went unseen because `gh run list` shows the last CI execution as 2026-09-09, success, one day before the first apostrophe landed, and nothing has been pushed since. So the claim 'CI is the authority' was, for those three days, fiction: the authority could not parse.
+
+Fix, in this pass: the list moved to .github/ci-steps.sh (executable, same commands in the same order, same subshell for cwd firmware/), ci.yml reduced to `nix develop .#default --command bash .github/ci-steps.sh`, and `bash -n .github/ci-steps.sh` added as a pre-commit and pre-push command so this class fails locally in ten milliseconds instead of on a runner nobody watches. Red proof: appended `if true; then` to the script -> `bash -n` rc 2, real commit blocked at rc 1 with `ci-steps-parse` named, log unchanged. Green proof: the CI_RC=0 run above. Apostrophes in that file are now harmless, which is the point.
+
+### Tree state after the pass
+
+Working tree clean apart from this pass's own files; firmware/target/thumbv7em-none-eabihf/release/main back at 9b60b8ff... (the console image) - the suite's RTT-only build flips that path to the 9,497,564-byte RTT image and `make elf-check`'s printed remedy does not refresh the mtime it compares. Reproduced twice during this ticket, both recorded on TASK-062, which owns it alongside TASK-056. `make elf-check` is red at HEAD for the unrelated mtime reason .01 left deliberately.
+
+### Left open, as tickets rather than silence
+
+TASK-061: pre-commit and pre-push still hold different lists, and the pod-hw clippy asymmetry is unresolved - now easier, since CI's list is one script instead of YAML prose. TASK-062: one artifact name serves two cfg sets and elf-check's hint misleads. Firmware docs stay ungated (root cargo doc covers crates/* only) and pedantic clippy stays unadopted; both named in doc-001's risk row so the next reader finds them stated.
+<!-- SECTION:NOTES:END -->
+
 ## Comments
 
 <!-- COMMENTS:BEGIN -->
@@ -141,3 +177,9 @@ AC coverage: #1 -> .01+.02, #2 -> .03 (wall time recorded as LOCAL only; ci.yml 
 Filed separately rather than folded in: TASK-061 (define the gate set once so ci.yml and lefthook stop diverging). It reshapes both files and needs its own planning.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All four leaves landed and the whole gate surface was then run as CI runs it, which is what caught the bigger bug: ci.yml kept its check list inside an inline bash -c '...' string, so any apostrophe in a comment closes the quote and the step dies at EOF -- broken since 6d7d38a on 2026-09-10, unnoticed because CI last executed on 2026-09-09. The list now lives in .github/ci-steps.sh, executable, comment-safe, diffable, and checked by 'bash -n' in both hooks; ci.yml is one command line. Firmware fmt is gated in all three places, cross-target clippy covers all six bins in both cfg sets with -D warnings, pre-push gained the three checks that were CI-only (under a second each), and the one remaining divergence -- the 67 s pod-hw test -- is priced in writing where people will read it. Verbatim CI run exits 0 in 2m22s, of which the two cargo test invocations are 133 s. Every gate proven red against a real git commit with a planted fault and green after revert, tree and ELF digest (9b60b8ff) restored.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -10,6 +10,11 @@ pre-commit:
       run: scripts/check-doc-artifact-names.sh
       forward_stderr: true
 
+    # The CI check list is a shell script now (see .github/workflows/ci.yml), and an unparseable one
+    # fails only on GitHub -- where nothing has run since 2026-09-09. Ten ms to learn it here instead.
+    ci-steps-parse:
+      run: bash -n .github/ci-steps.sh
+
     fmt-check:
       run: cargo fmt --all --check
       forward_stderr: true
@@ -69,6 +74,9 @@ pre-push:
     doc-artifact-names:
       run: scripts/check-doc-artifact-names.sh
       forward_stderr: true
+
+    ci-steps-parse:
+      run: bash -n .github/ci-steps.sh
 
     fmt-check:
       run: cargo fmt --all --check
