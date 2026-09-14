@@ -96,9 +96,12 @@ read_blob() {
   #   rust-objcopy --dump-section .asp.prov=out ELF /dev/null -> ELF untouched
   #
   # Content comes out byte-identical either way (same sha256 before and after), which is exactly why
-  # this is easy to miss: the only damage is the timestamp. A reader that refreshes the ELF's mtime
-  # silently neuters firmware/Makefile's staleness test -- elf-check could never go red again -- and
-  # the ELF is the host's only copy of the symbols describing whatever the bench is running.
+  # this is easy to miss: all a reader sees is a timestamp moving. Since TASK-056 that timestamp is no
+  # longer what firmware/Makefile's staleness test reads -- elf-check hashes bytes now, so an inert
+  # rewrite of identical bytes defeats nothing -- but the rule it was written for stands on its own:
+  # don't mutate the artifact you are auditing. The ELF is the host's only copy of the symbols
+  # describing whatever the bench is running, and objcopy rewriting it is not something a read command
+  # gets to do as a side effect.
   if ! rust-objcopy --dump-section ".asp.prov=$tmp" "$elf" /dev/null 2>"$err"; then
     msg=$(sed -n '1p' "$err")
     rm -f "$tmp" "$err"
@@ -656,9 +659,11 @@ case_normalize_features_table() {
 
 # Reading an ELF must not touch it. This is the assertion that makes the trailing /dev/null in
 # read_blob load-bearing rather than decorative: without it rust-objcopy rewrites the image in place,
-# which refreshes the mtime that firmware/Makefile's staleness test reads and can shrink the file, all
-# while the bytes it prints stay correct. Both halves are asserted because each one fires where the
-# other does not: the mtime moves at any size, the size only moves on a multi-megabyte image.
+# which moves the mtime and can shrink the file, all while the bytes it prints stay correct. Both halves
+# are asserted because each one fires where the other does not: the mtime moves at any size, the size
+# only moves on a multi-megabyte image. Neither half is about firmware/Makefile any more -- since
+# TASK-056 elf-check compares content, not timestamps -- so what they guard is the audit's own premise,
+# that reading an artifact leaves it alone.
 case_read_leaves_the_elf_untouched() {
   local f=$FX_DIR/guarded.elf marker=$FX_DIR/marker sha_before sha_after moved
   cp "$FX_CONSOLE" "$f" || fail "could not stage the guarded-read fixture"

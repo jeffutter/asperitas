@@ -268,12 +268,14 @@ call to nothing and a silent channel looks exactly like a dead probe.
 `probe-log` and `probe-rtt-list` compile nothing and *refuse to run* unless the ELF in front of them
 is the one you mean. They ask it which logging path was compiled in, read from a `.asp.prov` note
 section that `firmware/build.rs` stamps into every ELF with the exact feature set behind it, and
-refuse when that is not the set you asked to flash with; then they refuse if any source is newer than
-it. Either way a decoder from the wrong build mislabels live output rather than failing loudly. Both
-messages print the one command that fixes them, which is a forced relink (`touch src/bin/<binary>.rs
-&& make build-elf ...`), and the older advice they replaced does not: deleting the top-level ELF and
-rebuilding makes cargo hardlink the same bytes back up with the same stale timestamp. Flash the
-current build with `make probe-run` when either fires.
+refuse when that is not the set you asked to flash with; then they hash every input that goes into the
+ELF and refuse if those are not the bytes `make build-elf` recorded beside it. Either way a decoder
+from the wrong build mislabels live output rather than failing loudly, and neither test asks a
+timestamp -- a `git checkout` refreshes mtimes over an unchanged tree, which is how the older version
+of that second test spent its credibility. Both messages print the one command that fixes them, which
+is a forced relink (`touch src/bin/<binary>.rs && make build-elf ...`), and the older advice they
+replaced does not: deleting the top-level ELF and rebuilding makes cargo hardlink the same bytes back
+up without linking anything. Flash the current build with `make probe-run` when either fires.
 
 `docs/reference/daisy-seed3.md` has the rest — why the probe path takes the ELF, what RTT does
 when no host is attached versus when the host stalls, and the rule that follows from that:

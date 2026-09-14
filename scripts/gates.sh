@@ -17,7 +17,7 @@
 # artifacts the builds just produced. A sequential script can say both; YAML cannot. It also buys
 # deterministic ordering, per-gate timings, and fail-fast that alphabetical names cannot give.
 # What it gives up: lefthook captures a command's stdout and replays it when the command finishes,
-# so a hook now prints nothing until its tier ends (~3 s commit, ~76 s push). Read the per-gate
+# so a hook now prints nothing until its tier ends (~4 s commit, ~75 s push). Read the per-gate
 # headers and times below as the trade.
 #
 # Tiers are cumulative: `commit` is a subset of `push`, `push` a subset of `ci`. No argument means
@@ -206,12 +206,25 @@ gate commit "=== docs artifact names ===" scripts/check-doc-artifact-names.sh
 # rather than a hook failure.
 gate commit "=== elf-provenance --selftest ===" scripts/elf-provenance.sh --selftest
 
+# The staleness mechanism's own checks (TASK-056): elf-check decides "was this ELF built from these
+# sources?" by hashing the input set against a stamp build-elf wrote, and a check of that kind is only
+# as good as the case that would notice it quietly passing. Ten cases drive the SHIPPED recipe through
+# make's command-line overrides (ELF / ELF_INPUTS / MAIN_SRC / CARGO / PROV), so the thing graded is
+# the file that ships rather than a copy of its logic; one of them is the false positive itself, red
+# against any Makefile that compares mtimes again. Fixtures under `mktemp -d`, no cargo, nothing
+# outside that directory touched -- rules and reasoning in scripts/check-elf-staleness.sh's header.
+# Fourth in the list on the same cheapest-first rule as the gate above: it builds nothing and reads no
+# artifact. Measured 0.9 s warm for ten cases, most of it make parsing the Makefile ten times.
+gate commit "=== elf-staleness --selftest ===" scripts/check-elf-staleness.sh --selftest
+
 gate commit "=== cargo fmt ===" cargo fmt --all --check
 
 # Root Cargo.toml:3 declares exclude = ["firmware"], so the check above never meant all: firmware/
 # is its own workspace and has drifted under this gate twice (TASK-044, TASK-060). `--check` is not
-# optional -- a bare `cargo fmt` would rewrite firmware/src/**/*.rs, which are elf-check inputs
-# (firmware/Makefile:216, 228-230), and close the bench's log decoder until TASK-056 lands.
+# optional, and not because of any expiry date: a bare `cargo fmt` would rewrite firmware/src/**/*.rs,
+# which are ELF inputs (ELF_INPUTS in firmware/Makefile), so a commit would move the very bytes the
+# next `make elf-check` hashes and send the bench red for a change it never made. A commit has no
+# business rewriting the tree it is committing either way.
 gate commit "=== cargo fmt (firmware workspace) ===" \
   cargo fmt --manifest-path firmware/Cargo.toml --all --check
 

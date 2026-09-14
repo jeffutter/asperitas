@@ -413,8 +413,9 @@ you interrupt them. `probe-flash`'s `--verify` is genuine read-back verification
 don't port the `File downloaded successfully` grep from the DFU recipe to this path; that idiom
 exists only because dfu-util reports failure on success. `probe-log` compiles nothing and resets
 nothing — it reads the ELF from the previous build to find the RTT control block — and it
-*refuses to run* rather than warning if any source is newer than that ELF, because a decoder behind
-the sources mislabels live output into something that looks like data. Don't expect `FEATURES` or
+*refuses to run* rather than warning if that ELF was not built from the sources on disk -- it hashes
+every input and compares against the digest `make build-elf` recorded beside the image -- because a
+decoder that is not your sources mislabels live output into something that looks like data. Don't expect `FEATURES` or
 `DEFMT_LOG` on that line to do anything either: the recipe runs no compiler. There is deliberately no
 `runner` in `.cargo/config.toml`, even though upstream daisy-embassy ships one: a runner lets
 `cargo run` in a script, or an editor action, silently reach for the probe.
@@ -563,8 +564,11 @@ carries a non-allocated `.asp.prov` note section stamped by `firmware/build.rs` 
 set it was compiled for, and `scripts/elf-provenance.sh show <ELF>` prints it. One caveat when you
 read that section by hand: pass an explicit output-file argument, as
 `rust-objcopy --dump-section .asp.prov=/dev/stdout <ELF> /dev/null` does. Measured on LLVM 22, the
-same dump *without* that argument rewrites the input ELF in place - identical bytes, fresh mtime -
-which is enough to defeat any check that asks whether the ELF is older than its sources.
+same dump *without* that argument rewrites the input ELF in place - identical bytes, fresh mtime.
+Against the timestamp test this repo used until TASK-056 that was enough to defeat the check outright;
+against a content digest it is inert, because nothing that compares bytes can be fooled by a rewrite
+that changes no bytes. The `/dev/null` guard in `scripts/elf-provenance.sh` stays for the plainer
+reason: a read command does not get to rewrite the artifact it is reading.
 
 One site worth knowing by name: `{"package":"embassy-stm32","tag":"defmt_error","data":"Ringbuffer
 broken invariants detected!",...}` comes from `embassy-stm32-0.6.0/src/sai/mod.rs:33`, inside
@@ -811,25 +815,35 @@ recipes and nowhere else.
 | `probe-rs download … --non-interactive` (what `make probe-flash` runs) | 1 | 2 | `Error: No connected probes were found.` |
 | `probe-rs attach … --non-interactive --list-rtt` (`make probe-rtt-list`) | 1 | 2 | the same string alone. A ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` line one row above it means the release profile has dropped below `debug = 2`, so locations are off: see the third gate under *Flashing and logging over an ST-Link probe*. Measured both ways on 2026-09-12. |
 | `probe-rs list` | 0 | n/a | `No debug probes were found.` |
-| `make probe-log` or `make probe-rtt-list` with an ELF behind the sources | never runs | 2 | `<ELF> is older than <path>`, then two advisory lines (flash the current build; force a real relink with `touch src/bin/<binary>.rs && make build-elf BINARY=<binary> FEATURES='<features>' NO_DEFAULT=1` if only timestamps moved), and no probe-rs output whatsoever |
-| `make probe-log` or `make probe-rtt-list` with an ELF from the other cfg set | never runs | 2 | `that ELF was built for a different cfg set than you are asking to decode with, so its symbols and defmt metadata describe a binary that is not on the board.`, then the same `Force a real relink: …` line. Provenance is asked before timestamps, so this fires even when the ELF is perfectly current with your sources. Measured 2026-09-13 by building console, then RTT-only, then running `make elf-check FEATURES="seed3"` on the result |
+| `make probe-log` or `make probe-rtt-list` with an ELF that is not its sources | never runs | 2 | `<ELF> was not built from the sources on disk`, then the two digests it compared (`stamp <hex>`, `sources <hex>`), then two advisory lines (flash the current build; force a real relink with `touch src/bin/<binary>.rs && make build-elf BINARY=<binary> FEATURES='<features>' NO_DEFAULT=1`), and no probe-rs output whatsoever. Measured 2026-09-14 by appending one line to `src/bin/main.rs` and running the target without rebuilding |
+| `make probe-log` or `make probe-rtt-list` with an ELF that has no input stamp beside it | never runs | 2 | `no stamp at <.../release/<binary>.elf-inputs.sha256>, so nothing here records which sources <ELF> came from`, then the same two advisory lines and the same `Force a real relink: …`. Reached by any ELF linked before TASK-056 landed and by every tree since `cargo clean` - the absence of the record is treated as unknowable, never as fresh. Measured 2026-09-14 by moving the stamp file aside |
+| `make probe-log` or `make probe-rtt-list` with an ELF from the other cfg set | never runs | 2 | `that ELF was built for a different cfg set than you are asking to decode with, so its symbols and defmt metadata describe a binary that is not on the board.`, then the same `Force a real relink: …` line. Provenance is asked before the content test, so this fires even when the ELF is perfectly current with your sources. Measured 2026-09-13 by building console, then RTT-only, then running `make elf-check FEATURES="seed3"` on the result |
 
 | `make probe-log` or `make probe-rtt-list` with no ELF on disk at all | never runs | 2 | `no <ELF> - run 'make build-elf' with the FEATURES and NO_DEFAULT you mean to flash`, plus make's own `*** [Makefile:<line>: elf-check] Error 1` below it. Measured 2026-09-12 by pointing the recipe at a binary that was never built: `make probe-log BINARY=nope-not-built` |
 
 Two layers of exit code, because `make` turns any nonzero recipe status into its own 2. A driver
-that shells out to `make` therefore sees rc=2 for "no probe", for "wrong cfg set", for "stale ELF"
-and for "no ELF": only the stderr separates them, so match on the message rather than the number.
-Calling `probe-rs` directly removes the ambiguity, but not the last case: without an ELF to hand it
-there is nothing to call it on.
+that shells out to `make` therefore sees rc=2 for "no probe", for "wrong cfg set", for "not built from
+these sources", for "no stamp beside the ELF" and for "no ELF": only the stderr separates them, so
+match on the message rather than the number, and expect that list to grow whenever `elf-check` learns
+another question. Calling `probe-rs` directly removes the ambiguity, but not the last case: without an
+ELF to hand it there is nothing to call it on.
 
-The two refusal messages that name a fix both name a *real* relink, because the advice they replaced
-could not deliver one. Deleting the top-level name (`rm -f $(ELF) && make build-elf`) leaves cargo's
-per-cfg artifact in `target/.../release/deps/` in place, so the next build considers the unit fresh
-and hardlinks those same bytes back up: measured 2026-09-13, sha256 unchanged and mtime still six
-minutes behind the wall clock after delete-and-rebuild, which keeps `elf-check` red however many
-times it is retried. Touching a source the binary compiles makes cargo link again, and the bytes it
-produces are identical to the ones already there (sha256 compared), so the remedy costs 0.69 s warm
-and moves nothing but the timestamp.
+Every refusal that names a fix names a relink that really links, and since TASK-056 `build-elf` forces
+one on itself: when the stamp disagrees with the sources it touches its own main source file before
+invoking cargo, because cargo decides whether to link from mtimes and can decline to do anything at
+all. Measured 2026-09-14 on a source whose bytes had changed while its mtime had been set backwards:
+"Finished in 0.29s" and an ELF still holding the old code. The printed remedy leads with its own
+`touch` anyway, as the belt to that pair of braces - it is a command whose effect was measured (0.69 s
+warm, producing bytes identical to the ones already there) rather than an inference from how the
+recipe works inside.
+
+Why none of these remedies is just "delete it and rebuild" is worth keeping, because it survived the
+change of mechanism as a different kind of fact. Deleting the top-level name (`rm -f $(ELF) && make
+build-elf`) leaves cargo's per-cfg artifact in `target/.../release/deps/` in place, so the next build
+considers the unit fresh and hardlinks those same bytes back up: measured 2026-09-13, sha256 unchanged
+after delete-and-rebuild. Against the timestamp test that kept `elf-check` red however many times it
+was retried; against the content digest it goes green again, which is the better result of the two - it
+means the check is asking about the bytes, and a rebuild that produces the same bytes agrees with it.
 
 Two different strings for two different questions, and they are not interchangeable evidence.
 `list` reports what enumeration found and exits 0 whether or not anything answered; `download` and
@@ -844,7 +858,7 @@ on stderr knows what to match.
 
 **Capturing without a TTY.** No new target; it is `probe-log` with flags composed through
 `PROBE_EXTRA`. The ELF has to already exist and match the image on the board, because `probe-log`
-builds nothing and refuses if the ELF is behind the sources.
+builds nothing and refuses if the ELF was not built from the sources on disk.
 
 ```bash
 cd firmware

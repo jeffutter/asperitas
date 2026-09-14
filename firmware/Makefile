@@ -182,9 +182,130 @@ flash-all: build flash
 #   the whole application. Harmless while the app is all there is, but it forecloses
 #   keeping resident data in internal flash beside the firmware.
 
+# --- Is this ELF built from the sources on disk? ------------------------------------
+#
+# Two halves, and they only work as one thing: `build-elf` records a digest of every input's bytes
+# beside the ELF, and `elf-check` recomputes it and compares. No timestamp enters either half, which
+# is the entire point. What it replaces was `find $(ELF_INPUTS) -newer $(ELF)`, so it could not tell
+# "the sources moved on" from "something rewrote the filesystem metadata": TASK-056 measured
+# `make probe-log` going red on a tree `git status` called clean, 2975 s of pure metadata between a
+# freshly linked ELF and files `git checkout` had just refreshed. Bulk metadata churn of exactly that
+# shape is ordinary housekeeping here, and a check that cries wolf on it is a check the loop learns to
+# work around.
+#
+# What it still cannot see, said out loud because the operator's next step is printed advice and not
+# a guess:
+#
+#   * Content equality is not proof the board runs this image. It never was, and hashing does not
+#     change that. Only flashing is proof, which is why `elf-check` stays a check and never a build.
+#   * The stamp describes the last link that went through `build-elf`. Anything that relinks
+#     `release/$(BINARY)` behind its back leaves the stamp talking about an earlier link: the
+#     raw-cargo cross-builds in `scripts/gates.sh`, and `make build` itself, because `cargo objcopy`
+#     compiles before it objcopies. Bounded consequence: edit a source, run the gates without ever
+#     running `make build-elf`, and `elf-check` goes red against an ELF that is in fact current. The
+#     printed remedy fixes that, and the window is narrower than the one removed above -- it needs an
+#     edit, not a checkout. TASK-069 owns the question of whether the record belongs inside the image.
+#   * `firmware/Cargo.lock` is an input and no gate passes `--locked`, while `firmware/Cargo.toml`
+#     pins daisy-embassy to a moving `master` branch. A lock refresh therefore turns this red even
+#     when nothing linked differently. Deliberate conservatism; the remedy is the printed relink.
+#
+# One stamp per binary name, shared by both cfg sets. That is fine because the digest covers sources,
+# not features -- the `.asp.prov` note TASK-062 stamps inside the image is what separates the console
+# and RTT-only builds, and `elf-check` asks it first.
+
+# Inputs whose bytes are what $(ELF) is compiled from. Not `git status`: a dirty tree says nothing
+# about this particular artifact. Registry crates come in through Cargo.lock/Cargo.toml, both listed;
+# `../crates` is pruned at any `target` directory so build products are not mistaken for sources. The
+# PATHS are the contract: adding or renaming a file changes the digest, refreshing every mtime in the
+# tree does not.
+ELF_INPUTS = src build.rs memory.x Cargo.toml Cargo.lock ../crates
+
+# The one source file whose mtime stands in for "relink this binary", used by the forced relink below
+# and printed in its remedy (`$(dir)` on a relative path is empty, so the printed command stays
+# relative to firmware/, where every target here runs). Plain `=` so a test can point it at a fixture
+# instead of a tracked file.
+MAIN_SRC = src/bin/$(BINARY).rs
+
+# The compiler, named once so `make build-elf CARGO=true` can drive the stamping logic with no
+# cross-toolchain present -- which is how scripts/check-elf-staleness.sh asserts it against the
+# recipe that ships rather than a copy of it. A makefile assignment wins over the environment here,
+# so a stray exported CARGO (cargo itself exports one to build scripts) cannot redirect a real build.
+CARGO = cargo
+
+# sha256sum where coreutils provides it, `shasum -a 256` where only perl does -- the same dual
+# spelling scripts/elf-provenance.sh's selftest uses. Both emit byte-identical "<hex>  <path>" lines,
+# including for the names they escape.
+SHA256 = $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo 'shasum -a 256')
+
+CARGO_BUILD = $(CARGO) build --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
+
+# Inside target/, so `cargo clean` deletes it along with everything else and a fresh clone has none.
+# Either way that is the "no stamp" failure below, never a silent pass. Named after the binary rather
+# than the cfg set, because the digest covers sources and not features.
+ELF_STAMP = $(dir $(ELF))$(BINARY).elf-inputs.sha256
+
+# Per-file digests of the input set, sorted by path, hashed together. Names ride along in the hashed
+# stream, so a rename counts as a change; mtimes never enter it. `sha256sum -c` was considered and
+# rejected: mtime-immune and it names the culprit, but it is blind to an input ADDED since the stamp,
+# which is half of what this has to catch.
+#
+# Three details in the body are load-bearing and each was measured rather than assumed:
+#
+#   * The file list goes through a temp file, not a command substitution. The obvious shape, `find
+#     ... | sort -z | xargs shasum`, passes vacuously on an input set that enumerates nothing:
+#     xargs with no arguments hashes its stdin, and the digest of empty input is a well-formed hex
+#     string that no `[ -z ]` test can reject. Reproduced. `-print0` cannot survive substitution at
+#     all (NUL is not expressible in a shell variable), so it has to land in a file before `[ ! -s ]`
+#     can judge it.
+#   * `LC_ALL=C sort -z`, not bare `sort -z`: BSD and GNU collate the same path list differently, and
+#     the digest covers the order.
+#   * Both hash steps spell `$(SHA256)`, so the writer and the reader agree by construction.
+define ELF_INPUTS_SHA256
+	listing=$$(mktemp); \
+	trap 'rm -f "$$listing"' EXIT; \
+	if ! find $(ELF_INPUTS) \( -name target -prune \) -o \( -type f \
+		\( -name '*.rs' -o -name '*.x' -o -name 'Cargo.toml' -o -name 'Cargo.lock' \) \
+		-print0 \) > "$$listing"; then \
+		echo "could not enumerate the ELF inputs" >&2; exit 1; \
+	fi; \
+	if [ ! -s "$$listing" ]; then \
+		echo "no ELF inputs found under: $(ELF_INPUTS)" >&2; exit 1; \
+	fi; \
+	LC_ALL=C sort -z < "$$listing" | xargs -0 $(SHA256) | $(SHA256) | cut -d' ' -f1
+endef
+
+# Compile, then record what was compiled. Used verbatim by `build-elf` and driven directly by
+# scripts/check-elf-staleness.sh.
+#
+# When the stamp already equals the digest of the inputs, the sources are what built this ELF and
+# there is nothing to prove or to write. When it does not, the relink is made certain rather than
+# offered: `$(CARGO) build` decides for itself whether to link, and it decides from mtimes, so a
+# source whose bytes changed while its mtime went backwards -- a restore from a backup or a sync
+# tool, where a checkout does not land -- reports "Finished in 0.29s" and leaves the ELF holding the
+# old code. Measured here 2026-09-14. Stamping over that would certify bytes nobody compiled, which
+# is a silent pass replacing the noisy false alarm this ticket removes, so `$(MAIN_SRC)` is touched
+# first and cargo is left no choice. Cost lands only where a recompile was already owed: a warm
+# forced relink of this crate measures 0.69 s.
+define ELF_BUILD_AND_STAMP
+	want=$$( $(ELF_INPUTS_SHA256) ) || exit 1; \
+	if [ -f $(ELF_STAMP) ]; then have=$$(tr -dc '0-9a-f' < $(ELF_STAMP)); else have=; fi; \
+	if [ "$$have" = "$$want" ]; then \
+		$(CARGO_BUILD) || exit 1; exit 0; \
+	fi; \
+	if [ ! -f $(MAIN_SRC) ]; then \
+		echo "no $(MAIN_SRC), so nothing here can force a relink of $(BINARY)" >&2; exit 1; \
+	fi; \
+	touch $(MAIN_SRC) || exit 1; \
+	$(CARGO_BUILD) || exit 1; \
+	printf '%s\n' "$$want" > $(ELF_STAMP).tmp && mv $(ELF_STAMP).tmp $(ELF_STAMP)
+endef
+
 ## Build the release ELF the probe targets aim at (`build` without the objcopy step)
+##
+## Last thing it does is record the source-content stamp `elf-check` compares against, so the stamp
+## never describes a link that did not happen. See the block above.
 build-elf:
-	cargo build --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
+	@$(ELF_BUILD_AND_STAMP)
 
 ## Program the ELF over the probe, verify read-back, reset, exit.
 ##
@@ -205,12 +326,6 @@ probe-flash: build-elf
 probe-run: build-elf
 	probe-rs run $(ELF) --chip $(CHIP) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
 
-# Inputs whose bytes end up in $(ELF), so a newer one means the ELF on disk is not the one your
-# sources describe. Not `git status`: a dirty tree says nothing about this particular artifact.
-# Registry crates come in through Cargo.lock/Cargo.toml, both listed; `../crates` is pruned at
-# any `target` directory so build products can't trip the check.
-ELF_INPUTS = src build.rs memory.x Cargo.toml Cargo.lock ../crates
-
 # Reading the cfg provenance out of the ELF belongs to scripts/elf-provenance.sh, which is the only
 # thing in the repo that parses the `.asp.prov` note firmware/build.rs stamps in. This is the first
 # time the Makefile reaches up into scripts/; scripts/check-doc-artifact-names.sh already reaches
@@ -224,18 +339,20 @@ PROV = bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-provenance.sh
 # the same reason.
 REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)'$(if $(filter 1,$(NO_DEFAULT)), NO_DEFAULT=1,)
 
-# The remedy for either elf-check failure. `rm -f $(ELF) && make build-elf` does not work: measured
-# again here, cargo re-uplifts the cached deps/main-<hash> hardlink and the file comes back with its
-# ORIGINAL mtime, so the staleness test stays red on a tree whose content equals HEAD (cargo #15313,
-# #8649). Making cargo believe one input changed forces an actual relink, which is what refreshes the
-# timestamp. Measured warm on this tree, console cfg set: touch 0.69 s, deleting
-# target/$(TARGET)/release/.fingerprint/asperitas-firmware-* 1.11 s (works, but reaches into cargo's
-# private layout), and `cargo clean -p asperitas-firmware` 0.23 s while removing nothing at all -
-# "Removed 0 files", no recompile, mtime untouched, so it is not a remedy despite being the public
-# interface one would expect.
-REMEDY = touch src/bin/$(BINARY).rs && make build-elf $(REQUESTED)
+# The remedy for any elf-check failure: a relink that really links, then restamps. `rm -f $(ELF) &&
+# make build-elf` does not qualify -- measured, cargo re-uplifts the cached deps/main-<hash> hardlink
+# and the file comes back byte-identical (cargo #15313, #8649) -- and neither does `cargo clean -p
+# asperitas-firmware`, which reported "Removed 0 files", no recompile, and left the ELF untouched.
+# Under the content check the reason to prefer it over a plain `make build-elf` is sharper than the
+# mtime argument it started with: `build-elf` touches `$(MAIN_SRC)` itself whenever the stamp
+# disagrees, so following this line is what makes cargo prove the link instead of declining to make an
+# offer. Measured warm on this tree, console cfg set: this remedy 0.69 s; deleting
+# target/$(TARGET)/release/.fingerprint/asperitas-firmware-* 1.11 s, which works but reaches into
+# cargo's private layout.
+REMEDY = touch $(MAIN_SRC) && make build-elf $(REQUESTED)
 
-## Fail if any input to $(ELF) is newer than it, or if the ELF is a different cfg set than asked for.
+## Fail if $(ELF) was not built from the sources on disk, or if it is a different cfg set than asked
+## for.
 ##
 ## A check and never a build: whether the ELF matches the sources is knowable here, whether it
 ## matches the image on the board is not, and rebuilding would overwrite the only host copy of
@@ -244,8 +361,8 @@ REMEDY = touch src/bin/$(BINARY).rs && make build-elf $(REQUESTED)
 ## The provenance clause exists because `release/main` is one name for two images -- the console and
 ## RTT-only builds are hardlinks to different artifacts and whichever ran last owns the name -- so an
 ## ELF can be current with your sources and still be the wrong binary. Provenance is checked first:
-## asking whether the timestamps agree about an image built from a different cfg set answers a
-## question nobody asked.
+## asking whether the content agrees about an image built from a different cfg set answers a question
+## nobody asked.
 ##
 ## DEFMT_LOG travels in the blob and `show` prints it, but the check below does not compare it: it
 ## selects which frames got compiled in rather than which cfg set this is, and refusing an ELF that
@@ -261,13 +378,20 @@ elf-check:
 		echo "Force a real relink: $(REMEDY)" >&2; \
 		exit 1; \
 	}
-	@stale=$$(find $(ELF_INPUTS) \( -name target -prune \) -o \
-		\( -type f \( -name '*.rs' -o -name '*.x' -o -name 'Cargo.toml' -o -name 'Cargo.lock' \) \
-		-newer $(ELF) -print -quit \) ); \
-	if [ -n "$$stale" ]; then \
-		echo "$(ELF) is older than $$stale" >&2; \
-		echo "an ELF behind your sources describes neither the board nor your edit, and decoding a live stream with it produces output that looks like data. Flash the current build instead - 'make probe-run' flashes and streams in one step." >&2; \
-		echo "If only timestamps moved, as after a git checkout, force a real relink: $(REMEDY)" >&2; \
+	@if [ -f $(ELF_STAMP) ]; then have=$$(tr -dc '0-9a-f' < $(ELF_STAMP)); else have=; fi; \
+	if [ -z "$$have" ]; then \
+		echo "no stamp at $(ELF_STAMP), so nothing here records which sources $(ELF) came from" >&2; \
+		echo "either that ELF predates this check or 'cargo clean' took the stamp with the rest of target/. An ELF of unknowable provenance decodes a live stream into output that looks like data - flash the current build instead, and 'make probe-run' does that and streams in one step." >&2; \
+		echo "Force a real relink: $(REMEDY)" >&2; \
+		exit 1; \
+	fi; \
+	want=$$( $(ELF_INPUTS_SHA256) ) || exit 1; \
+	if [ "$$want" != "$$have" ]; then \
+		echo "$(ELF) was not built from the sources on disk" >&2; \
+		echo "  stamp   $$have" >&2; \
+		echo "  sources $$want" >&2; \
+		echo "an ELF that is not your sources describes neither the board nor your edit, and decoding a live stream with it produces output that looks like data. Flash the current build instead - 'make probe-run' flashes and streams in one step." >&2; \
+		echo "Force a real relink: $(REMEDY)" >&2; \
 		exit 1; \
 	fi
 

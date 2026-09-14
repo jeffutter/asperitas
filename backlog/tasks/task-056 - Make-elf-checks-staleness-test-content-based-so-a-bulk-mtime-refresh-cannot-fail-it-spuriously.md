@@ -3,11 +3,11 @@ id: TASK-056
 title: >-
   Make elf-check's staleness test content-based, so a bulk mtime refresh cannot
   fail it spuriously
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-12 09:25'
-updated_date: '2026-09-14 05:52'
+updated_date: '2026-09-14 06:54'
 labels:
   - planned
 dependencies:
@@ -43,12 +43,12 @@ construction.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The false positive is reproduced as a script or host check that fails on today's Makefile: after a successful `make build-elf`, touch an input without changing its bytes and `make elf-check` exits 1.
-- [ ] #2 With the new mechanism the same sequence exits 0, and `elf-check` still exits 1 when an input's bytes actually differ from the ones that built the ELF (prove by editing a source and NOT rebuilding).
-- [ ] #3 The whole mechanism lives in one place in `firmware/Makefile`, and its comment says out loud what it cannot see: content equality is not proof the board runs that image.
-- [ ] #4 A missing stamp file fails with an actionable message rather than passing silently.
-- [ ] #5 `make -n build flash flash-all check` stays byte-identical to HEAD, and the host gates in ci.yml are green.
-- [ ] #6 The two prose claims that currently say "newer than that ELF" (`docs/reference/daisy-seed3.md` probe section and `README.md`), plus the stale case row of the exit-code table, are reworded to match the new mechanism.
+- [x] #1 The false positive is reproduced as a script or host check that fails on today's Makefile: after a successful `make build-elf`, touch an input without changing its bytes and `make elf-check` exits 1.
+- [x] #2 With the new mechanism the same sequence exits 0, and `elf-check` still exits 1 when an input's bytes actually differ from the ones that built the ELF (prove by editing a source and NOT rebuilding).
+- [x] #3 The whole mechanism lives in one place in `firmware/Makefile`, and its comment says out loud what it cannot see: content equality is not proof the board runs that image.
+- [x] #4 A missing stamp file fails with an actionable message rather than passing silently.
+- [x] #5 `make -n build flash flash-all check` stays byte-identical to HEAD, and the host gates in ci.yml are green.
+- [x] #6 The two prose claims that currently say "newer than that ELF" (`docs/reference/daisy-seed3.md` probe section and `README.md`), plus the stale case row of the exit-code table, are reworded to match the new mechanism.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -280,6 +280,139 @@ Backlog ticket bodies are historical records; do not rewrite their measurement l
   in lockstep with the shell expression here, and the blob would then be computed before the link
   rather than after it.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+Shipped as planned, with one design change made mid-flight because an experiment refuted a premise the
+plan had taken on trust.
+
+### The plan's step-2 shape was wrong, and the fix is smaller
+
+The plan said: leave `build-elf`'s recipe text untouched, hash the ELF before and after cargo, refuse to
+stamp when nothing linked. Measured against the real toolchain, that condition does not hold:
+`cargo build --release` decides whether to link **from mtimes**, so a source whose bytes changed while
+its mtime went backwards (restore from a backup, a sync tool - the class a `git checkout` does not
+cover) prints "Finished in 0.29s", relinks nothing, and leaves the old code in `release/main`. Hashing
+over that result certifies bytes nobody compiled - the silent pass this ticket must not trade its noisy
+false alarm for. So `build-elf` now touches `$(MAIN_SRC)` itself when the stamp disagrees with the
+sources, which leaves cargo no choice about linking. One line instead of double-hashing a 9 MB ELF, and
+the false-green window closes at the cause rather than being detected downstream. Cost lands only where
+a recompile was already owed; a warm forced relink of this crate measures 0.69 s.
+
+### Two holes closed by enumeration during writing, both now asserted
+
+- **A failed compile left a fresh stamp behind.** `define ... endef` expands into one shell command, so
+  the plan's "separate recipe lines stop make at the first failure" reasoning did not apply. Worse,
+  `want=$$( ... ) || exit 1` sets `$?` to 2, and a bare `$?` guard then stamps the *previous* digest
+  over bytes nobody compiled - red turned into green. Fixed by `|| exit 1` on the compile itself, and
+  asserted by `failed-compile-leaves-no-stamp`, which covers both halves: the compiler failing alone,
+  and the digest computation failing with the compiler succeeding.
+- **An empty input set hashed to the digest of nothing.** Reproduced against the shipped recipe: point
+  `ELF_INPUTS` at a directory holding no matching files and `xargs` hashes its own stdin, producing a
+  well-formed hex string no `[ -z ]` test rejects. Caught by `[ ! -s "$$listing" ]`, asserted by
+  `empty-input-set-fails-loudly`.
+
+### AC #1 - reproduced live on HEAD, clean tree
+
+```
+$ git status --porcelain   # empty
+$ make -C firmware elf-check FEATURES='seed3 log-defmt' NO_DEFAULT=1
+main.elf is older than src/bin/main.rs
+...
+make: *** [Makefile:278: elf-check] Error 1     rc = 2
+```
+
+Plain `make elf-check` on this machine dies at the provenance clause first, because ordering rule 1
+leaves the RTT-only image at `release/main`; the matching cfg set is what exposes the mtime bug.
+
+### AC #2 - green after, red on a real edit, both on the shipped recipe
+
+Against the working Makefile, same command: rc 0. Live end-to-end after that, on the real tree: append
+one line to `src/bin/main.rs`, do not rebuild, `make -C firmware elf-check FEATURES='seed3 log-defmt'
+NO_DEFAULT=1` -> rc 2 naming `was not built from the sources on disk` and printing both digests; restore
+the bytes -> rc 0. `added-input-detected` and `renamed-input-detected` cover the two changes a
+timestamp cannot see at all.
+
+One honest wrinkle recorded while verifying: after the gate tiers had run, the real tree's `elf-check`
+went red against a clean worktree, because the stamp on disk had been written when the input set
+included an experimental file since deleted. That is the check doing its job, not a defect: recomputing
+the digest in a pristine `git archive HEAD` export gives the same value as the worktree
+(`a6cba6dffd1ff...`), and one `make build-elf` brings the stamp back in step with the bytes.
+
+### AC #4 - the two loud failures
+
+```
+no stamp at target/.../release/main.elf-inputs.sha256, so nothing here records which sources <ELF> came from
+Force a real relink: touch src/bin/main.rs && make build-elf BINARY=main FEATURES='<...>' NO_DEFAULT=1
+
+no ELF inputs found under: /tmp/t056-empty
+```
+
+Absence is treated as unknowable, never as fresh. The stamp lives inside `target/`, so `cargo clean`
+deletes it and every fresh clone starts in this state; `check-elf-staleness.sh` carries its own fixture
+and writes its own stamp, so the suite never depends on a cross-toolchain being present.
+
+### AC #5 - dry-runs identical, all three tiers green
+
+`make -n build flash flash-all check` against the working Makefile is byte-identical to the same four
+targets at HEAD (diff of captured output: empty). Tiers, warm, on this machine: commit 11 gates 3-4 s
+(new gate 0.9 s), push 20 gates 75.0 s, ci 21 gates 146.0 s. `release/main` was the console image
+before this work and is the RTT-only image after, which is what the gate pair leaves there by ordering
+rule 1 - not a state this ticket introduced; the stamp matches the sources either way.
+
+### AC #3 and #6 - what the comments and prose now say
+
+Quoted in `firmware/Makefile`: "Content equality is not proof the board runs this image. It never was,
+and hashing does not change that. Only flashing is proof, which is why `elf-check` stays a check and
+never a build." Plus the two other blind spots (raw-cargo relinks by the gates and `make build`'s own
+objcopy-before-compile leaving the stamp talking about an earlier link, owned by TASK-069; and
+`Cargo.lock` moving under a `master`-pinned dependency with no `--locked` anywhere).
+
+Prose: `README.md` "refuse if any source is newer than it" -> hashes inputs against the recorded
+digest; `docs/reference/daisy-seed3.md` probe intro (:416), the exit-code table's stale row rewritten
+as a content mismatch, a new row for the no-stamp case, the rc=2 ambiguity paragraph grown to five
+cases, the remedy paragraph rewritten (including why deleting the top-level ELF and rebuilding leaves
+the same bytes hardlinked back from `target/.../release/deps/` - measured 2026-09-13, sha256 unchanged,
+which under the new test goes green and under the old one could not be fixed by retrying), and
+`check-image-load-addresses.sh`'s "behind the sources" line. `scripts/gates.sh`'s fmt-gate comment
+cross-reference to TASK-056 updated: it names a decision that still stands, for a reason that has
+changed. TASK-062's paragraph at `daisy-seed3.md:~788` is left alone - it describes the skip path it
+removed, not the staleness test.
+
+### One variable removed rather than left to lie
+
+`ELF_INPUTS` already existed further down the file, with a comment saying "so a newer one means the ELF
+on disk is not the one your sources describe". The plan added a second definition in the mechanism
+block and stopped there; two identical plain assignments are harmless to make and fatal to a reader, so
+the older one is gone and the surviving definition carries the input-set contract once. Re-verified
+afterwards: `make -n build flash flash-all check` is still byte-identical to `6dce7d4` (25 lines), and
+all ten cases stay green.
+
+### Test placement, since the plan assumed otherwise
+
+`firmware/tests/` does not exist and `firmware/` is excluded from the workspace (`[workspace]
+members = ["crates/*"]`), so `cargo test` there builds host binaries against `no_std` sources. The
+assertions live in `scripts/check-elf-staleness.sh` beside `check-doc-artifact-names.sh`, driving the
+shipped Makefile through CLI overrides (`ELF=`, `ELF_INPUTS=`, `MAIN_SRC=`, `CARGO=true`, `PROV=true`).
+The last form is load-bearing: make prioritises command-line assignments over file assignments, so
+`make CARGO=true` works while `make --eval` does not - measured, and the reason `CARGO` and `MAIN_SRC`
+are plain `=` in the Makefile. Six mutations were run to confirm each case bites the failure mode named
+for it: drop the touch, revert `|| exit 1` to `$?`, drop the `-s` listing guard, prune too eagerly,
+skip the stamp write, and remove the `-name '*.rs'` term from the find expression (that last one makes
+`renamed-input-detected` go green, which is why the term belongs in the expression rather than in
+`ELF_INPUTS`).
+
+## Final Summary
+
+`elf-check` asks two questions now, in the same order: does the ELF name the cfg set I am about to
+decode with, and are the sources on disk the ones that built it. The second is a sha256 over per-file
+digests of 52 inputs, compared against a stamp `build-elf` writes as the last thing it does. Bulk
+metadata refreshes are inert; content changes are caught without rebuilding; a missing record is a
+failure rather than a pass; and the one case the plan missed - cargo declining to link at all - is
+prevented by forcing the relink instead of detecting it afterwards. Permanent coverage is ten cases in
+`scripts/check-elf-staleness.sh`, wired fourth in the commit tier at 0.9 s. Prose in `README.md`,
+`docs/reference/daisy-seed3.md`, `lefthook.yml`, `scripts/gates.sh`, `scripts/elf-provenance.sh` and
+doc-001's gate matrix moved with the mechanism.
 
 ## Comments
 

@@ -256,6 +256,7 @@ min    | com | psh | ci | gate
 commit | yes | yes | yes | === gate definition parses ===
 commit | yes | yes | yes | === docs artifact names ===
 commit | yes | yes | yes | === elf-provenance --selftest ===
+commit | yes | yes | yes | === elf-staleness --selftest ===
 commit | yes | yes | yes | === cargo fmt ===
 commit | yes | yes | yes | === cargo fmt (firmware workspace) ===
 commit | yes | yes | yes | === cargo clippy ===
@@ -274,20 +275,21 @@ commit | yes | yes | yes | === firmware clippy (all bins, RTT-only, log-defmt) =
 push   | -   | yes | yes | === cargo test ===
 ci     | -   | -   | yes | === cargo test (asperitas-pod pod-hw feature) ===
 
-counts: commit 10, push 19, ci 20
+counts: commit 11, push 20, ci 21
 ```
 
-Costs are local warm figures on aarch64-darwin inside `nix develop .#default`: **commit 3 s**, **push
-76 s**, **ci 141 s**. The two `cargo test` invocations are 133 of
-those 141 s.
+Costs are local warm figures on aarch64-darwin inside `nix develop .#default`: **commit 4 s**, **push
+75 s**, **ci 146 s**. The two `cargo test` invocations are 136 of those 146 s.
 
-The gate that moved all three numbers is `=== elf-provenance --selftest ===`, 0.9 s warm, third in the
-list. It sits there because it compiles nothing and reads no artifact, which is what cheapest-first
-does with a check that has no inputs to wait for; putting it beside the push-tier provenance gate "for
-symmetry" would misrepresent both, since one grades the reader of an ELF's cfg stamp and the other
-grades the stamp itself, and they share no state. Its cases and the cost rules that keep it at 0.9 s
-(five child invocations of the script at most, one `cargo metadata`, never a `cargo build` or a path
-under `firmware/target/`) are stated in `scripts/elf-provenance.sh`'s own header.
+Two gates sit third and fourth, at 0.9 s each: `=== elf-provenance --selftest ===` and
+`=== elf-staleness --selftest ===` (TASK-056). Both sit there because they compile nothing and read no
+artifact, which is what cheapest-first does with a check that has no inputs to wait for; putting either
+beside the push-tier provenance gate "for symmetry" would misrepresent both, since one grades the
+reader of an ELF's cfg stamp and the other grades the stamp itself, and they share no state. Their cases and the cost rules that keep each at
+0.9 s -- for the provenance reader, five child invocations of the script at most, one `cargo metadata`,
+never a `cargo build` or a path under `firmware/target/`; for the staleness checker, one `make` per case
+against a fixture tree, with the compiler and the provenance clause both stubbed -- are stated in
+`scripts/elf-provenance.sh`'s and `scripts/check-elf-staleness.sh`'s own headers.
 
 Order within a tier is whatever the script declares, cheapest-first, with two rules that outrank cost:
 the console cross-build comes immediately before the RTT-only one with nothing building firmware after
@@ -317,7 +319,7 @@ is the blind spot TASK-062 had to remove from `elf-check`. Red was demonstrated 
 the image length it would have produced.
 
 What the one-command shape costs: lefthook buffers a command's stdout and replays it when the command
-finishes, so a hook prints nothing for its first ~3 s (commit) or ~76 s (push). In exchange the log
+finishes, so a hook prints nothing for its first ~4 s (commit) or ~75 s (push). In exchange the log
 carries per-gate headers and wall times it never had, and the run stops at the first failure naming the
 gate that died.
 
