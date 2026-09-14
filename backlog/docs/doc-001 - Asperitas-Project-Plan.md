@@ -268,12 +268,13 @@ push   | -   | yes | yes | === cargo doc (workspace, all features) ===
 push   | -   | yes | yes | === firmware cross-compile ===
 push   | -   | yes | yes | === firmware cross-compile (RTT-only, log-defmt) ===
 push   | -   | yes | yes | === firmware ELF cfg provenance ===
+push   | -   | yes | yes | === image load addresses ===
 commit | yes | yes | yes | === firmware clippy (all bins) ===
 commit | yes | yes | yes | === firmware clippy (all bins, RTT-only, log-defmt) ===
 push   | -   | yes | yes | === cargo test ===
 ci     | -   | -   | yes | === cargo test (asperitas-pod pod-hw feature) ===
 
-counts: commit 10, push 18, ci 19
+counts: commit 10, push 19, ci 20
 ```
 
 Costs are local warm figures on aarch64-darwin inside `nix develop .#default`: **commit 3 s**, **push
@@ -302,6 +303,18 @@ and "that path holds the RTT-only image" are one claim stated twice. `=== firmwa
 swapping the pair or inserting a gate that compiles firmware after it fails the run naming both cfg
 sets; measured by swapping the two lines, running the tier, and restoring them. It costs 0.09 s warm,
 reads only, and asks cargo for nothing - a rebuild there would re-point the very path it audits.
+
+The gate below it grades a different axis of the same six ELFs. `=== image load addresses ===` asserts
+that no file-backed section loads outside the FLASH region in `firmware/memory.x`, that `.sram1_bss`
+stays NOBITS while `memory.x` claims to place it `(NOLOAD)`, and that each plain `-O binary` image is
+exactly as long as the highest flash LMA end implies - the invariant whose absence made `main.bin`
+469,763,536 bytes of mostly zeros with every gate green, because objcopy writes from the lowest to the
+highest *load* address (TASK-059). It reads rather than builds for the same reason the provenance gate
+has, bare `rust-objdump` / `rust-objcopy` only, and costs 0.70 s warm. Its tier is `push` because
+pre-commit builds no firmware, so the ELFs it needs may not exist there; inventing a skip path for that
+is the blind spot TASK-062 had to remove from `elf-check`. Red was demonstrated by disabling the
+`SECTIONS` rule in `firmware/memory.x` and relinking: three findings naming `.sram1_bss`, its LMA, and
+the image length it would have produced.
 
 What the one-command shape costs: lefthook buffers a command's stdout and replays it when the command
 finishes, so a hook prints nothing for its first ~3 s (commit) or ~76 s (push). In exchange the log

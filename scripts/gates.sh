@@ -288,6 +288,19 @@ gate push "=== firmware ELF cfg provenance ===" \
   bash scripts/elf-provenance.sh check \
     firmware/target/thumbv7em-none-eabihf/release/main "$RTT_ONLY_FEATURES" 1
 
+# Where the six images load. Asserts no file-backed section loads outside the FLASH region parsed from
+# firmware/memory.x, that `.sram1_bss` stays NOBITS when present, and that each plain `-O binary`
+# image is exactly as long as the highest flash LMA end implies -- the invariant whose absence made
+# `main.bin` 469,763,536 bytes of mostly zeros with every gate green (TASK-059). Reads the artifacts the
+# pair above just wrote, including whatever cfg set the provenance gate named, and asks cargo for
+# nothing: bare `rust-objdump` / `rust-objcopy` only, for the same reason the gate above has.
+#
+# `push` tier and placed here because pre-commit builds no firmware, so the ELFs it reads may not exist
+# at all -- and inventing a skip path for that is the blind spot TASK-062 had to remove from elf-check.
+# Measured 0.70 s warm on its own, 0.71 s inside a `push` run: twelve child processes, six objdumps
+# (~58 ms each) and six objcopies (~30 ms).
+gate push "=== image load addresses ===" bash scripts/check-image-load-addresses.sh
+
 # Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses
 # their artifacts: ~20 s in a fresh target dir, ~2 s directly after a build, 0.25 s when nothing
 # changed. --bins is the whole package over there (no lib target, six entries under src/bin/), and
