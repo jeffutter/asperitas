@@ -251,30 +251,30 @@ The tiers, as `scripts/gates.sh --list` prints them. This block is generated - r
 that command, do not hand-edit rows:
 
 ```text
-min    | com | psh | ci | gate
--------+-----+-----+----+------------------------------------------------
-commit | yes | yes | yes | === gate definition parses ===
-commit | yes | yes | yes | === docs artifact names ===
-commit | yes | yes | yes | === elf-provenance --selftest ===
-commit | yes | yes | yes | === elf-staleness --selftest ===
-commit | yes | yes | yes | === load-addresses --selftest ===
-commit | yes | yes | yes | === cargo fmt ===
-commit | yes | yes | yes | === cargo fmt (firmware workspace) ===
-commit | yes | yes | yes | === cargo clippy ===
-commit | yes | yes | yes | === cargo clippy (asperitas-logging log-usb) ===
-commit | yes | yes | yes | === cargo clippy (asperitas-logging log-defmt) ===
-push   | -   | yes | yes | === cargo clippy (asperitas-pod pod-hw feature) ===
-push   | -   | yes | yes | === dump_reassemble --selftest ===
-push   | -   | yes | yes | === cargo doc (workspace) ===
-push   | -   | yes | yes | === cargo doc (workspace, all features) ===
-push   | -   | yes | yes | === firmware cross-compile ===
-push   | -   | yes | yes | === firmware cross-compile (RTT-only, log-defmt) ===
-push   | -   | yes | yes | === firmware ELF cfg provenance ===
-push   | -   | yes | yes | === image load addresses ===
-commit | yes | yes | yes | === firmware clippy (all bins) ===
-commit | yes | yes | yes | === firmware clippy (all bins, RTT-only, log-defmt) ===
-push   | -   | yes | yes | === cargo test ===
-ci     | -   | -   | yes | === cargo test (asperitas-pod pod-hw feature) ===
+key                         | min    | com | psh | ci | gate
+----------------------------+--------+-----+-----+----+------------------------------------------------
+gate-definition-parses      | commit | yes | yes | yes | === gate definition parses ===
+docs-artifact-names         | commit | yes | yes | yes | === docs artifact names ===
+elf-provenance-selftest     | commit | yes | yes | yes | === elf-provenance --selftest ===
+elf-staleness-selftest      | commit | yes | yes | yes | === elf-staleness --selftest ===
+load-addresses-selftest     | commit | yes | yes | yes | === load-addresses --selftest ===
+cargo-fmt                   | commit | yes | yes | yes | === cargo fmt ===
+cargo-fmt-firmware          | commit | yes | yes | yes | === cargo fmt (firmware workspace) ===
+cargo-clippy                | commit | yes | yes | yes | === cargo clippy ===
+cargo-clippy-log-usb        | commit | yes | yes | yes | === cargo clippy (asperitas-logging log-usb) ===
+cargo-clippy-log-defmt      | commit | yes | yes | yes | === cargo clippy (asperitas-logging log-defmt) ===
+clippy-pod-hw               | push   | -   | yes | yes | === cargo clippy (asperitas-pod pod-hw feature) ===
+dump-reassemble-selftest    | push   | -   | yes | yes | === dump_reassemble --selftest ===
+cargo-doc                   | push   | -   | yes | yes | === cargo doc (workspace) ===
+cargo-doc-all-features      | push   | -   | yes | yes | === cargo doc (workspace, all features) ===
+firmware-cross-compile      | push   | -   | yes | yes | === firmware cross-compile ===
+firmware-cross-compile-rtt  | push   | -   | yes | yes | === firmware cross-compile (RTT-only, log-defmt) ===
+firmware-elf-provenance     | push   | -   | yes | yes | === firmware ELF cfg provenance ===
+image-load-addresses        | push   | -   | yes | yes | === image load addresses ===
+firmware-clippy             | commit | yes | yes | yes | === firmware clippy (all bins) ===
+firmware-clippy-rtt         | commit | yes | yes | yes | === firmware clippy (all bins, RTT-only, log-defmt) ===
+cargo-test                  | push   | -   | yes | yes | === cargo test ===
+cargo-test-pod-hw           | ci     | -   | -   | yes | === cargo test (asperitas-pod pod-hw feature) ===
 
 counts: commit 12, push 21, ci 22
 ```
