@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-14 03:37'
-updated_date: '2026-09-14 03:37'
+updated_date: '2026-09-14 05:51'
 labels:
   - planned
 dependencies:
@@ -101,3 +101,12 @@ the padded-name case red), and turn the unknown-Type hard error into a silent sk
 unknown-Type case red). Both transcripts into the notes - TASK-067 found five genuine disagreements
 this way and reported that without the mutation step its own suite would have looked green while lying.
 <!-- SECTION:PLAN:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+created: 2026-09-14 05:51
+---
+Coordination note from planning TASK-056 (2026-09-14). TASK-056 plans a new commit-tier gate, scripts/check-elf-staleness.sh --selftest, in the same slot AC #4 of this ticket names: immediately after === elf-provenance --selftest === at scripts/gates.sh:207. Whichever lands second takes the next position; nothing else about either gate changes, and both are sub-1 s warm with runtime-generated fixtures under mktemp -d and no cargo in their path. If TASK-056 lands first, expect its gate line between :207 and your own, and regenerate doc-001's matrix block from scripts/gates.sh --list rather than patching the counts by hand, since its figures already moved once (commit 10 -> 11).
+---
+<!-- COMMENTS:END -->
