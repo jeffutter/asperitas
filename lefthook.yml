@@ -9,7 +9,7 @@
 #
 # What that shape trades away, recorded so nobody "fixes" the silence later: lefthook captures a
 # command's stdout and replays it when the command finishes, so a hook now prints nothing until its
-# tier ends (~2 s commit, ~75 s push). What comes back is per-gate headers and wall times in the log,
+# tier ends (~3 s commit, ~76 s push). What comes back is per-gate headers and wall times in the log,
 # fail-fast naming the gate that died, and an order the script declares rather than one lefthook
 # infers - it sorts a stage's commands by priority, then leading digits, then name ascending, NOT by
 # declaration order, so cheapest-gate-first and cross-build-before-cross-clippy are unexpressible in

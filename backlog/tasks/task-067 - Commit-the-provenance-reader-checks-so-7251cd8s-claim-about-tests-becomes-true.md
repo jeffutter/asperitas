@@ -3,11 +3,11 @@ id: TASK-067
 title: >-
   Commit the provenance-reader checks so 7251cd8's claim about tests becomes
   true
-status: Dev Ready
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-13 14:51'
-updated_date: '2026-09-14 00:24'
+updated_date: '2026-09-13 21:40'
 labels:
   - planned
 dependencies: []
@@ -44,10 +44,10 @@ position to sitting after the pair, like the provenance gate does) or build synt
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `scripts/elf-provenance.sh --selftest` (or an equivalent sibling invoked the same way) prints one prefixed line per case, exits 0 when all pass, 1 on any failure while reporting every failure in one run, and 2 when it cannot run at all. Follow scripts/check-doc-artifact-names.sh's header conventions for that exit-code contract.
-- [ ] #2 Cases asserted rather than printed for a human to read: console agreement; RTT-only agreement; a third cfg set refused while naming both sides; `--no-default-features --features seed3` deriving default=0 features=seed3; a feature outside the default closure (e.g. stim_ess) present in the derived expectation; missing ELF -> 2; ELF with no .asp.prov section -> 2; blob carrying a foreign format tag -> 2; reading a blob leaves the ELF's mtime AND sha256 unchanged, which is what the trailing /dev/null argument buys.
-- [ ] #3 It builds nothing and stays cheap. Choose either reuse of the artifacts the two cross-build gates produce, placed after them, or fixture-based parsing placed anywhere, then record the measured warm cost and the reason for the position. Budget: under 1 s warm, no cargo build invocation, no reaching into target/<triple>/release/.fingerprint.
-- [ ] #4 Registered as exactly one new gate line in scripts/gates.sh; doc-001's matrix block regenerated from `scripts/gates.sh --list` rather than hand-edited, with its counts and measured cost lines updated in the same commit.
+- [x] #1 `scripts/elf-provenance.sh --selftest` (or an equivalent sibling invoked the same way) prints one prefixed line per case, exits 0 when all pass, 1 on any failure while reporting every failure in one run, and 2 when it cannot run at all. Follow scripts/check-doc-artifact-names.sh's header conventions for that exit-code contract.
+- [x] #2 Cases asserted rather than printed for a human to read: console agreement; RTT-only agreement; a third cfg set refused while naming both sides; `--no-default-features --features seed3` deriving default=0 features=seed3; a feature outside the default closure (e.g. stim_ess) present in the derived expectation; missing ELF -> 2; ELF with no .asp.prov section -> 2; blob carrying a foreign format tag -> 2; reading a blob leaves the ELF's mtime AND sha256 unchanged, which is what the trailing /dev/null argument buys.
+- [x] #3 It builds nothing and stays cheap. Choose either reuse of the artifacts the two cross-build gates produce, placed after them, or fixture-based parsing placed anywhere, then record the measured warm cost and the reason for the position. Budget: under 1 s warm, no cargo build invocation, no reaching into target/<triple>/release/.fingerprint.
+- [x] #4 Registered as exactly one new gate line in scripts/gates.sh; doc-001's matrix block regenerated from `scripts/gates.sh --list` rather than hand-edited, with its counts and measured cost lines updated in the same commit.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -255,6 +255,81 @@ make build-elf FEATURES='seed3 log-defmt' NO_DEFAULT=1`.
 
 <!-- SECTION:NOTES:BEGIN -->
 Origin: TASK-062's umbrella run, 2026-09-13. The measurements this ticket turns into code are written out in TASK-062.02's implementation notes; do not rediscover them.
+
+## Shape: fixtures, as planned, and what executing it added
+
+Synthetic ELF images generated inside the script, dispatched as `--selftest` ahead of the `show` /
+`check` arms, registered as one `gate commit` line third in `scripts/gates.sh`. Reuse of the cross-build
+pair stayed closed: ordering rule 1 leaves only the RTT-only image at `release/main`, so console
+agreement would have cost a third firmware build. 19 cases, all green.
+
+Four changes to the production half made the suite possible, each one small and each one load-bearing:
+
+- `compare_request <elf> <blob> <FEATURES> <NO_DEFAULT>` came out of the `check` arm. A case can now
+  grade a comparison without paying an `objcopy` for the privilege, which is where most of the budget
+  goes.
+- `expected_from_metadata()` writes the global `EXPECTED_CLOSURE` instead of printing. Printing looked
+  fine until it was memoized through a command substitution, which cannot work - see C1 in the script.
+- `fail()` EXITS rather than returns. Each case body runs inside `run_case`'s command substitution, so
+  exiting ends exactly one case; returning let the last assertion in the body decide the status. Caught
+  by mutating `normalize_features` to stop dropping the implicit `default` token: five cases genuinely
+  disagreed and the suite still printed nineteen passing. That mutation is now the reason the comment
+  above `fail()` exists.
+- Dead state went with it: `parse_blob` declared `BLOB_TAG=""` and never filled it. The tag is validated
+  and deliberately not returned (one format version says nothing a caller can use), so the variable is
+  gone rather than populated.
+
+## Measured cost, and where the plan's target went
+
+| | warm |
+|---|---|
+| this gate (`--- N.NNs` in the gate banner) | **0.89 s** |
+| commit tier | 3 s (was 2 s) |
+| push tier | 76 s (was 73 s) |
+| ci tier | 141 s (was 140 s) |
+
+All three tiers carry the gate, so all three moved by about its own cost. Inside the budget AC #3 sets
+(under 1 s, no `cargo build`, nothing under `firmware/target/`); the plan's <= 0.5 s target is
+unreachable while seven `rust-objcopy` invocations (~50 ms each) and two `cargo metadata` (~85 ms) stay
+load-bearing - they are the subjects of cases, not scaffolding. Three changes bought the difference from
+a first draft of 1.3 s: deriving the closure once in `run_selftest` instead of lazily per case
+(-0.35 s, the memo cannot survive a case's subshell), assembling each fixture as hex text in one
+variable and converting once instead of 25 command substitutions per image (-0.08 s), and reading blobs
+into files or strings exactly once per process.
+
+Position: third gate, immediately after `=== docs artifact names ===`, because it compiles nothing and
+needs no artifact. Recorded in the comment above the gate line, along with why sitting beside the
+push-tier provenance gate "for symmetry" would misrepresent both - one grades the reader, the other the
+stamp.
+
+## Proof the suite can fail, run before committing
+
+| mutation | result |
+|---|---|
+| trailing `/dev/null` dropped from `read_blob` | `read-leaves-the-elf-untouched` red ("reading the ELF moved its mtime"), rc 1 |
+| `normalize_features` stops dropping `default` | 7 of 19 red |
+| `normalize_features` stops folding `-` to `_` | 9 of 19 red, table case names `[LOG-USB]: want [log_usb], got [log-usb]` |
+
+Every failure is reported in the one run rather than stopping at the first, per AC #1.
+
+## Other verification
+
+- Matrix block regenerated from `scripts/gates.sh --list` and diffed mechanically against the file
+  (clean); counts now commit 10, push 18, ci 19. Cost lines updated in doc-001 and in both places that
+  restate them (`scripts/gates.sh:20`, `lefthook.yml:12`).
+- `scripts/elf-provenance.sh show firmware/target/thumbv7em-none-eabihf/release/main` still prints
+  `default=0 features=log_defmt,seed3 defmt_log=` after a full ci-tier run - the suite never opens that
+  path (rule C4).
+- Passes on bash 5.3.15 (the devShell, where gates.sh runs it) and on bash 3.2.57 (macOS system shell),
+  same toolchain.
+
+## Left open, deliberately
+
+- Nothing checks mechanically that doc-001's matrix matches `--list`; the ticket names that as its own
+  ticket's business. Verified by hand-diff this time, which is exactly the gap that stays.
+- `=== firmware ELF cfg provenance ===` remains the only thing asserting producer fidelity. If build.rs
+  changes the blob encoding, these fixtures keep passing and that gate goes red - by design, stated in
+  the selftest's header so nobody reads the fixtures as end-to-end coverage.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
