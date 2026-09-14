@@ -1,11 +1,11 @@
 ---
 id: TASK-064.01
 title: Add the cargo cache layer to ci.yml for both workspaces
-status: Dev Ready
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-13 05:36'
-updated_date: '2026-09-14 10:33'
+updated_date: '2026-09-14 14:12'
 labels:
   - planned
 dependencies:
@@ -13,6 +13,8 @@ dependencies:
 references:
   - .github/workflows/ci.yml
   - scripts/gates.sh
+modified_files:
+  - .github/workflows/ci.yml
 parent_task_id: TASK-064
 priority: medium
 type: chore
@@ -27,10 +29,10 @@ TASK-064's implementation half. Nothing here needs a board or ears; everything h
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ci.yml gains one cache layer, and its keys cover BOTH target directories - the host workspace's `target` and firmware's own `firmware/target` - because root Cargo.toml excludes firmware/, so a single-workspace key silently caches half the build and reads as green while the cross-builds stay cold.
-- [ ] #2 The key cannot turn a stale artifact into a false pass: it is restored into the same path cargo would use, and a run whose inputs changed must not reuse fingerprints keyed on something narrower than Cargo.lock plus the sources. State in a comment what the key is made of and why, and name the failure mode a wrong key produces - clippy or test saying "finished" having compiled nothing.
-- [ ] #3 Works inside the nix shell the step already enters (`nix develop .#default --command bash scripts/gates.sh ci`), where cargo comes from the flake rather than a setup-rust action, so any toolchain-pinning assumption inherited from upstream examples is checked rather than copied. Record which of Swatinem/rust-cache (multi-workspace support, nix-shell support) or `RUSTC_WRAPPER=sccache` was chosen and why, against the alternative.
-- [ ] #4 Local behaviour is unchanged: `scripts/gates.sh ci` still exits 0 with the same 17 gates, and `--list` is untouched - the cache is a runner concern and must not leak a single gate or env var into the shared definition.
+- [x] #1 ci.yml gains one cache layer, and its keys cover BOTH target directories - the host workspace's `target` and firmware's own `firmware/target` - because root Cargo.toml excludes firmware/, so a single-workspace key silently caches half the build and reads as green while the cross-builds stay cold.
+- [x] #2 The key cannot turn a stale artifact into a false pass: it is restored into the same path cargo would use, and a run whose inputs changed must not reuse fingerprints keyed on something narrower than Cargo.lock plus the sources. State in a comment what the key is made of and why, and name the failure mode a wrong key produces - clippy or test saying "finished" having compiled nothing.
+- [x] #3 Works inside the nix shell the step already enters (`nix develop .#default --command bash scripts/gates.sh ci`), where cargo comes from the flake rather than a setup-rust action, so any toolchain-pinning assumption inherited from upstream examples is checked rather than copied. Record which of Swatinem/rust-cache (multi-workspace support, nix-shell support) or `RUSTC_WRAPPER=sccache` was chosen and why, against the alternative.
+- [x] #4 Local behaviour is unchanged: `scripts/gates.sh ci` still exits 0 with the same 17 gates, and `--list` is untouched - the cache is a runner concern and must not leak a single gate or env var into the shared definition.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -229,3 +231,37 @@ never wired to the toolchain", which look identical from wall time alone.
 - Any new gate, or any change to what `gates.sh` knows about caching. AC #4.
 - Runner-side figures. TASK-064.02, and TASK-052/TASK-063 for the pre-existing gap.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+One file changed: .github/workflows/ci.yml. Gains a toolchain-identity diagnostic step and one Swatinem/rust-cache@6323deb1 (# v2.9.2) step between install-nix-action and the gate step. scripts/gates.sh and lefthook.yml untouched (AC #4), verified by git diff --stat printing nothing.
+
+Evidence per AC, and what each rests on. All source-level claims below were re-read from the pinned commit's actual TypeScript this run (config.ts, cleanup.ts, save.ts, restore.ts, utils.ts, workspace.ts, action.yml fetched at 6323deb1), not from the plan or the README.
+
+AC #1 (both target dirs): workspaces names ". -> target" and "firmware -> target", because root Cargo.toml:3 excludes firmware/. Re-measured locally: target 3.2 GB, firmware/target 3.6 GB, root Cargo.lock 150 packages, firmware/Cargo.lock 147. Restores into the same path cargo uses (config.ts:274-277 pushes each Workspace.target into cachePaths), so no redirection is involved.
+
+AC #2 (no stale false pass): the key covers rustc identity + env-var prefixes + normalized Cargo.toml + external-only Cargo.lock entries + every globbed .cargo/config.toml (config.ts:157-168 does glob ${root}/**/.cargo/config.toml per workspace, so firmware/.cargo/config.toml is in the key even though the README implies only repo-root ones count). Sources are deliberately absent because the save side prunes workspace-member artifacts (cache-workspace-crates defaults false, action.yml:43-46; save.ts:39-54 keeps only packages outside each workspace root). Comment in ci.yml states the composition and names the failure mode a too-narrow key produces: a gate printing Finished having compiled nothing. Cross-checked upstream issue #348, which is that class of failure arriving once cache-workspace-crates is set true.
+
+AC #3 (works inside the nix shell): cmd-format routes the action's rustc -vV, rustup toolchain list and cargo metadata through nix develop .#default --command, so keying uses the same compiler the gates use. Verified getCmdOutput (utils.ts:15-20) splits the formatted string and execs it, so the multi-word wrapper works. Also verified the fallback hazard: config.ts:58-67 replaces a cmd-format without exactly one {0} with plain {0}, hence the belt key: nix-${{ hashFiles('flake.lock') }}. Chose rust-cache over RUSTC_WRAPPER=sccache because sccache skips anything that invokes the linker (all six firmware/src/bin/*.rs bins, plus every host test and example binary) and refuses incremental debug builds, so most of the 133 s of test time stays outside it; over raw actions/cache because hand-rolling rustc identity, lockfile normalization, two-workspace target discovery and dependency pruning is ~120 lines whose only test is a runner nobody can watch. Recorded in the ci.yml comment, not just here.
+
+AC #4 (local behaviour unchanged): bash scripts/gates.sh --list still ends counts: commit 12, push 21, ci 22. bash scripts/gates.sh ci exits 0 and prints tier ci: 22 gates, 145.0s (measured twice, /tmp/gates-ci-06401.log and /tmp/gates-ci-06401b.log; the script runs set -euo pipefail, so reaching the summary line means every gate passed). The ticket text says 17 gates: that figure is stale on main, where --list already said 22 before this change. Asserted the real invariant instead (--list byte-identical, exit 0) rather than renumbering the criterion; TASK-070 owns the figure drift. No gate and no env var was added to the shared definition; CARGO_INCREMENTAL=0 and CACHE_ON_FAILURE come from the action's own restore step (restore.ts:29-30) into the job environment only.
+
+Validation beyond the plan's steps: yq (.jobs.check.steps) parses the workflow (5 steps, order checkout -> nix -> identity -> rust-cache -> gates); the five with: keys were diffed against the action's declared inputs at the pinned SHA and comm -23 printed nothing, so no typo like workspace: can silently cache nothing; the diagnostic's run: block was extracted via yq and passed bash -n, then run locally, printing the nix-store rustc 1.97.1 and rustup none.
+
+Two corrections to the plan, both applied: (a) it asserted refs/tags/v2 points at 49a0bdc7 'which is not v2.9.2'. Measured with git ls-remote including the ^{} deref, 49a0bdc7 is the annotated tag object for v2 and it resolves to 6323deb1, i.e. v2.9.2's commit right now. Pinning is still correct, because the tag moves and there is no dependabot here, but the comment says that rather than repeating the wrong comparison. (b) The plan implied the action hashes the nix shell's environment variables; it hashes its own process.env (config.ts:110-124), which is the runner environment, since the cache step itself does not run inside nix develop. That is why cmd-format and the flake-lock key carry the toolchain, and the comment now says so.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+ci.yml now caches both workspaces through Swatinem/rust-cache pinned to 6323deb1 (v2.9.2), with a preceding step that prints the rustc/cargo/rustup the nix shell resolves. scripts/gates.sh and lefthook.yml are untouched; the cache is entirely a runner concern.
+
+What each AC rests on. AC #1, #2 and #3 rest on source reading of the pinned commit's TypeScript (key composition, workspace/target handling, cmd-format fallback, save-side pruning) plus the local YAML and input-name validation; none of them is observable from this machine beyond that. AC #4 rests on measurement: --list byte-identical at counts: commit 12, push 21, ci 22, and gates.sh ci exiting 0 with tier ci: 22 gates, 145.0s, twice.
+
+Two things stated rather than copied from the plan: refs/tags/v2 currently dereferences to v2.9.2's commit (the plan compared an annotated tag object against a commit), and the action hashes its own runner-side process.env, not the nix shell's, which is why cmd-format plus a flake-lock key carry the toolchain identity.
+
+AC #4's "same 17 gates" is stale on main, where --list said 22 before this change; asserted the real invariant and said so in the commit message instead of renumbering it quietly. TASK-070 owns the figure drift.
+
+Not proven here, by design: whether a warm run actually reuses artifacts. That needs a runner and belongs to TASK-064.02, whose comment already names the three log lines that separate 'the cache missed' from 'the cache was never wired to the toolchain'. The parent TASK-064 stays @human and is not touched.
+<!-- SECTION:FINAL_SUMMARY:END -->

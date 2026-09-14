@@ -14,6 +14,90 @@ jobs:
 
       - uses: cachix/install-nix-action@v31
 
+      # Toolchain identity, printed rather than assumed. The key below is built from `rustc -vV`
+      # run through `cmd-format`, so it names whatever this shell resolves: the nix sysroot built by
+      # rust-overlay (1.97.1 plus the thumbv7em-none-eabihf std, flake.nix:25-35), not the runner
+      # image's preinstalled Rust. The action's other probe, `rustup toolchain list`, is wrapped the
+      # same way, so where the nix shell carries no rustup it exits nonzero, the action warns and
+      # falls back to that one toolchain, and the key names exactly one compiler. If the runner's
+      # own rustup ever answered instead, the key would contain a toolchain nobody installed here.
+      # This step records which of the two happened. Expect the devShell's shellHook (`lefthook
+      # install`) to print a "sync hooks" line around every nix-wrapped command, including the
+      # action's probes. Diagnostic only, deliberately not a gate: AC #4 of TASK-064.01 keeps the
+      # shared gate definition clean of runner concerns.
+      - name: Toolchain identity the cache key is built from
+        run: |
+          nix develop .#default --command bash -c 'printf "rustc  %s\n" "$(command -v rustc)"; printf "cargo  %s\n" "$(command -v cargo)"; printf "rustup %s\n" "$(command -v rustup || echo none)"'
+
+      # Cargo cache. Two workspaces are named because root Cargo.toml:3 declares
+      # exclude = ["firmware"]: firmware/ is a separate workspace with its own Cargo.lock and its
+      # own firmware/target. Naming only "." would cache the host build, leave every firmware
+      # cross-build and cross-clippy invocation cold, and still report green.
+      #
+      # What the key is made of, read from v2.9.2 src/config.ts rather than its README: "v0-rust",
+      # then the `key:` input, then the job id (add-job-id-key defaults true), then runner OS and
+      # arch, then sha1 of the `rustc -vV` output for every toolchain the action can name plus every
+      # environment variable whose name starts with CARGO, CC, CFLAGS, CXX, CMAKE or RUST, then
+      # sha1 of each workspace member's Cargo.toml with versions and path-dependency details
+      # normalized away, each Cargo.lock reduced to the packages that have a `source` or a
+      # `checksum` (the external ones), and every .cargo/config.toml or rust-toolchain file globbed
+      # under either workspace root. Note the env vars hashed are those of the action step's own
+      # process, i.e. the runner environment, not the nix shell's - which is why `cmd-format` and
+      # `key:` carry the toolchain instead. Nothing here sets RUSTFLAGS: firmware's
+      # `-C link-arg=-Tlink.x` lives in firmware/.cargo/config.toml, and that glob does reach it,
+      # contrary to what the README implies about config files counting only at the repo root.
+      #
+      # Sources are NOT in the key. That is not a hole, and it is the part that must not be
+      # "simplified" later: the action does not save workspace-member artifacts at all
+      # (`cache-workspace-crates` defaults false; src/save.ts + src/cleanup.ts keep only build/,
+      # .fingerprint/ and deps/ entries belonging to dependencies), so nothing stale survives for a
+      # gate to mistake for a pass. Cargo decides freshness for the crates we do rebuild, from
+      # their own fingerprints and mtimes, and a restored archive carries artifact mtimes older than
+      # a fresh checkout's sources, which errs toward compiling again rather than skipping it. The
+      # failure mode a too-narrow key produces is a gate printing "Finished" having compiled
+      # nothing - clippy reporting no warnings because it never re-ran - and upstream issue #348 is
+      # that class of failure arriving in practice: with `cache-workspace-crates: true`, an exact hit
+      # restores stale workspace artifacts and cargo sees no reason to redo them. So do not set
+      # it, and do not add git-restore-mtime-action to make unchanged sources look old: that is the
+      # mtime-trusting bug TASK-056 removed from elf-check, and docs/reference/daisy-seed3.md
+      # already records cargo declining to link on mtimes alone.
+      #
+      # Why Swatinem/rust-cache over `RUSTC_WRAPPER=sccache`: sccache never caches a crate whose
+      # compilation invokes the linker, which is all six firmware/src/bin/*.rs binaries plus every
+      # host test and example binary, and it refuses incremental debug builds, so the host
+      # `cargo test --workspace` pair - 133 s of the 144 s local `ci` tier - is outside it too. It
+      # would also need pkgs.sccache in flake.nix and RUSTC_WRAPPER exported into the step, leaking
+      # a runner concern toward the shared gate definition. Over raw `actions/cache`: hand-rolling
+      # the key means hand-rolling rustc identity, lockfile normalization, target-dir discovery for
+      # two workspaces and dependency pruning, roughly 120 lines of YAML and shell whose only test
+      # is a runner nobody can watch.
+      #
+      # Pinned to the commit, not `@v2`: measured with `git ls-remote`, the moving `refs/tags/v2`
+      # annotation (49a0bdc7) happens to dereference to v2.9.2's commit today, but nothing keeps
+      # that true and this repo runs no dependabot, while the whole plan above was written against
+      # one specific source tree. The `key: nix-${{ hashFiles('flake.lock') }}` line below is the
+      # belt on `cmd-format`: a cmd-format string without exactly one "{0}" silently falls back to
+      # "{0}" (config.ts:58-67), and flake.lock is what actually pins the toolchain, since it pins
+      # nixpkgs and rust-overlay and rust-overlay builds the sysroot. With the belt, a silent
+      # fallback degrades to a cold cache, which is visible, instead of to a key that stops noticing
+      # toolchain changes, which is not.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            . -> target
+            firmware -> target
+          cmd-format: nix develop .#default --command {0}
+          key: nix-${{ hashFiles('flake.lock') }}
+          # Pull requests still READ main's cache - GitHub serves base-branch caches to PRs - but do
+          # not add their own, so a branch that is never merged cannot churn the 10 GB budget with a
+          # key nothing will ever hit again.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          # Without this the post step is skipped on a failed job (action.yml `post-if`), so the
+          # first red lint throws away every dependency artifact that run already built and the next
+          # run pays full price. Correctness is unaffected: the saved content is pruned to
+          # dependencies, and cargo re-fingerprints everything above them regardless.
+          cache-on-failure: true
+
       # No check list lives here, and none belongs here. scripts/gates.sh defines every gate once;
       # this step asks for the whole thing. The same script backs lefthook's pre-commit (`commit`
       # tier) and pre-push (`push`), which is the point: before it, CI and both hook stages each
