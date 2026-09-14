@@ -34,7 +34,9 @@
 # objdump or a real build; each runs one `make` against a parsed Makefile (~40 ms warm). Nothing here
 # writes a tracked file -- which matters more than usual, because writing a firmware source would bump
 # the mtime of an ELF input and send the bench's own `elf-check` red, the exact failure this script is
-# about. Measured 0.4 s warm for ten cases.
+# about. Measured 0.85 s warm for ten cases inside a `commit` tier run (scripts/gates.sh reports 0.84
+# and 0.85 s across three runs; the 0.4 s this line claimed before TASK-068 was a standalone figure that
+# never included the ~40 ms `make` per case being paid against a cold Makefile parse).
 #
 # Exit codes: 0 every case passed, 1 at least one case failed (all failures reported in one run), 2
 # the suite could not run at all -- no make, no sha256 tool, or a fixture that could not be staged.

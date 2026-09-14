@@ -17,7 +17,7 @@
 # artifacts the builds just produced. A sequential script can say both; YAML cannot. It also buys
 # deterministic ordering, per-gate timings, and fail-fast that alphabetical names cannot give.
 # What it gives up: lefthook captures a command's stdout and replays it when the command finishes,
-# so a hook now prints nothing until its tier ends (~4 s commit, ~75 s push). Read the per-gate
+# so a hook now prints nothing until its tier ends (~4 s commit, ~77 s push). Read the per-gate
 # headers and times below as the trade.
 #
 # Tiers are cumulative: `commit` is a subset of `push`, `push` a subset of `ci`. No argument means
@@ -217,6 +217,34 @@ gate commit "=== elf-provenance --selftest ===" scripts/elf-provenance.sh --self
 # artifact. Measured 0.9 s warm for ten cases, most of it make parsing the Makefile ten times.
 gate commit "=== elf-staleness --selftest ===" scripts/check-elf-staleness.sh --selftest
 
+# The load-address checker's own checks (TASK-068). The push-tier `=== image load addresses ===` gate far
+# below reads one column of `rust-objdump -h --show-lma` by POSITION, and a parser that stops matching
+# does not turn that gate red: an empty section table satisfies all three rules by having nothing to fail,
+# so it turns it green for the wrong reason. Four traps of that kind were measured while planning this
+# ticket, and none of them had a case until now. Bash matches leftmost-longest, so dropping the trim
+# leaves objdump's column padding on every captured name and R2 answers `.sram1_bss=absent` for all six
+# binaries -- `main` and `rig` included, exit still 0. defmt names sections after JSON records full of
+# spaces, braces and commas, which no left-to-right field split survives. The Type column is composed
+# flags joined by `, `, and prints nothing at all for an unallocated row, where "not loaded" and "a word
+# nobody recognizes" must not be read the same way. And `.gnu.sgstubs` is zero-size ALLOC sitting ABOVE
+# the real flash high-water mark, so counting it breaks R3's length equality by 8 bytes on a build that
+# is correct.
+#
+# Hand-emitted ELF fixtures plus literal objdump row text, everything in a `mktemp -d`: seventeen cases,
+# five of them real child processes, because the exit code that reaches this file is part of what is being
+# asserted. Rules and reasoning in scripts/check-image-load-addresses.sh's selftest header. What they
+# cannot prove is the limit every fixture has -- that the linker emits anything like these files -- and
+# the push-tier gate over six linked ELFs stays the backstop for that, which is why both exist rather
+# than one. Fifth here on the same cheapest-first rule as the two above: compiles nothing, reads no
+# artifact, writes nothing under firmware/target/. Measured 0.6 s warm, all of it in the five children and
+# their objdumps (~58 ms each). Eight deliberate mutations each turned at least one case red and left the
+# rest green: trim dropped, zero-size counted, empty Type read as loaded, unknown Type word downgraded to
+# a warning, VMA column read instead of LMA, refusal removed before measuring, `.sram1_bss` matched as a
+# substring, and no-rows-parsed downgraded to a warning. Two of them needed a case of their own that no
+# real binary could have provoked -- the substring match and the VMA swap, the latter visible only through
+# a fixture whose `.data` runs from RAM and loads from flash.
+gate commit "=== load-addresses --selftest ===" scripts/check-image-load-addresses.sh --selftest
+
 gate commit "=== cargo fmt ===" cargo fmt --all --check
 
 # Root Cargo.toml:3 declares exclude = ["firmware"], so the check above never meant all: firmware/
@@ -311,7 +339,10 @@ gate push "=== firmware ELF cfg provenance ===" \
 # `push` tier and placed here because pre-commit builds no firmware, so the ELFs it reads may not exist
 # at all -- and inventing a skip path for that is the blind spot TASK-062 had to remove from elf-check.
 # Measured 0.70 s warm on its own, 0.71 s inside a `push` run: twelve child processes, six objdumps
-# (~58 ms each) and six objcopies (~30 ms).
+# (~58 ms each) and six objcopies (~30 ms). Its parser's own assertions are a separate commit-tier gate,
+# `=== load-addresses --selftest ===`, placed with the other selftests ahead of every cargo invocation --
+# which is where a check with no inputs to wait for belongs; this one stays the only place that grades the
+# six linked images.
 gate push "=== image load addresses ===" bash scripts/check-image-load-addresses.sh
 
 # Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses

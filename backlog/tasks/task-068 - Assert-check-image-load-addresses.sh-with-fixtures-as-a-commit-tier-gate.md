@@ -1,11 +1,11 @@
 ---
 id: TASK-068
 title: 'Assert check-image-load-addresses.sh with fixtures, as a commit-tier gate'
-status: Dev Ready
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-14 03:37'
-updated_date: '2026-09-14 08:09'
+updated_date: '2026-09-14 09:42'
 labels:
   - planned
 dependencies:
@@ -53,12 +53,12 @@ at all.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 scripts/check-image-load-addresses.sh grows a --selftest that follows elf-provenance.sh's shape: run_case plus spawn_script so each case re-executes the script as a child and the real exit code is graded, one prefixed "selftest <name> ok" line per case on stderr, a passed(N cases) summary, and exit codes 0 pass / 1 a case failed / 2 the suite could not run.
-- [ ] #2 Cases cover all four parser traps named in the description, plus both halves of the Type classification: a padded name still equals .sram1_bss; a defmt-style name containing spaces and braces parses with its type intact; a composed two-word type is refused by naming the section rather than skipped; a zero-size ALLOC+PROGBITS section above the high-water mark does not move the expected image length; an empty Type classifies as not-loaded; an unknown Type word is a hard error naming the section and the raw row.
-- [ ] #3 At least one case drives the real rust-objdump over a hand-emitted ELF32 little-endian ARM image whose PT_LOAD has p_paddr different from p_vaddr, so the LMA column this script parses positionally is asserted rather than assumed. Fixtures generated at runtime, never committed as blobs - elf-provenance.sh:220-247 gives the reasoning. Also assert the two guards: a file format other than elf32-littlearm is exit 2, and a missing ELF is exit 2 naming the command that would produce it.
-- [ ] #4 Registered as a commit-tier gate immediately after the "=== elf-provenance --selftest ===" gate (scripts/gates.sh:207), priced under 1 s warm in the gate banner, with the cost figure, the regenerated doc-001 matrix, the new counts and doc-001's restated tier costs all landing in the same commit.
-- [ ] #5 Demonstrated failing, not merely written: mutate one rule in the production half, first dropping the padding trim and then making an unknown Type word a silent skip, show the suite goes red naming the case, restore and confirm green. Record both transcripts in the notes.
-- [ ] #6 (corrects only the position clause of #4, which TASK-056 took when it landed first in 7e9eda0) the gate registers as the fifth commit-tier gate, declared immediately after `gate commit "=== elf-staleness --selftest ==="` at scripts/gates.sh:218 and before `cargo fmt`, with doc-001's counts moving 11/20/21 -> 12/21/22.
+- [x] #1 scripts/check-image-load-addresses.sh grows a --selftest that follows elf-provenance.sh's shape: run_case plus spawn_script so each case re-executes the script as a child and the real exit code is graded, one prefixed "selftest <name> ok" line per case on stderr, a passed(N cases) summary, and exit codes 0 pass / 1 a case failed / 2 the suite could not run.
+- [x] #2 Cases cover all four parser traps named in the description, plus both halves of the Type classification: a padded name still equals .sram1_bss; a defmt-style name containing spaces and braces parses with its type intact; a composed two-word type is refused by naming the section rather than skipped; a zero-size ALLOC+PROGBITS section above the high-water mark does not move the expected image length; an empty Type classifies as not-loaded; an unknown Type word is a hard error naming the section and the raw row.
+- [x] #3 At least one case drives the real rust-objdump over a hand-emitted ELF32 little-endian ARM image whose PT_LOAD has p_paddr different from p_vaddr, so the LMA column this script parses positionally is asserted rather than assumed. Fixtures generated at runtime, never committed as blobs - elf-provenance.sh:220-247 gives the reasoning. Also assert the two guards: a file format other than elf32-littlearm is exit 2, and a missing ELF is exit 2 naming the command that would produce it.
+- [x] #4 Registered as a commit-tier gate immediately after the "=== elf-provenance --selftest ===" gate (scripts/gates.sh:207), priced under 1 s warm in the gate banner, with the cost figure, the regenerated doc-001 matrix, the new counts and doc-001's restated tier costs all landing in the same commit.
+- [x] #5 Demonstrated failing, not merely written: mutate one rule in the production half, first dropping the padding trim and then making an unknown Type word a silent skip, show the suite goes red naming the case, restore and confirm green. Record both transcripts in the notes.
+- [x] #6 (corrects only the position clause of #4, which TASK-056 took when it landed first in 7e9eda0) the gate registers as the fifth commit-tier gate, declared immediately after `gate commit "=== elf-staleness --selftest ==="` at scripts/gates.sh:218 and before `cargo fmt`, with doc-001's counts moving 11/20/21 -> 12/21/22.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -199,6 +199,112 @@ No bats/ShellSpec/shellcheck/python dependency and no flake input (~16 cases is 
 - **Self-consistency of a hand-emitted fixture.** Image A could in principle satisfy the parser while being something rust-lld would never emit. Mitigated the same way TASK-067 mitigated it: the fixture is read by the real `rust-objdump` and the real `rust-objcopy`, so the tools - not the generator - decide whether it is an ELF, and only the push-tier gate touches linked images.
 <!-- SECTION:PLAN:END -->
 
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Implementation Notes (TASK-068)
+
+### Baseline and equivalence proof
+
+Baseline captured before any edit (`bash scripts/check-image-load-addresses.sh`, six linked ELFs, exit 0):
+`/tmp/load-addrs-base.txt`, ending `main image=47544 ... .sram1_bss=BSS@0x24000ce0(1024)`.
+
+After the Step 1 extraction (read_sections -> parse_section_table / evaluate_sections / decide_image /
+format_summary), the same command reproduces that file **byte for byte**, re-checked after every mutation
+and finally after restore. So the refactor changed how the verdict is computed, not what it is.
+
+### Suite shape, measured
+
+17 cases, all green on both shells this repo runs under: bash 5.3.15 (devShell) and bash 3.2.57 (macOS
+system). All output on stderr, stdout empty (0 lines), so a gate captures the case lines without
+disturbing the per-ELF summary contract. Exit codes graded through real children: 0 (green run), 1 (any
+mutation below), 2 (`env PATH=/usr/bin:/bin` -> "no rust-objdump on PATH", rule C4 refusing before a
+fixture is emitted rather than reporting zero cases as a pass).
+
+Five cases spawn the script; twelve call the extracted functions in-process. One temp dir per run,
+removed on EXIT, never under firmware/target/.
+
+### AC #5 - demonstrated failing, eight mutations
+
+Each applied to the production half only, suite run, then restored (`diff` against a saved copy confirms
+clean). The plan predicted two of these would be invisible to the push-tier gate; both were, which is
+the whole argument for fixtures.
+
+**M1 - drop the padding trim** (`name=$(rtrim "${BASH_REMATCH[1]}")` -> `name="${BASH_REMATCH[1]}"`).
+Exit 1, **8 of 17 red**:
+```
+selftest padded-name-trims-to-exact-match FAILED: no row parsed as exactly .sram1_bss; got
+  [ .text                                    .data                                    ...]
+selftest real-elf-lma-column FAILED: .sram1_bss located: [.sram1_bss=BSS@0x24001020(1024)] not present
+selftest zero-size-alloc-above-highwater-excluded FAILED: named rather than hidden:
+  want [.gnu.sgstubs], got [.gnu.sgstubs                            ]
+```
+The second line is the trap made visible: leftmost-longest keeps objdump's column padding, so R2 answers
+`absent` with exit still 0. Against the six real ELFs the same mutation prints `.sram1_bss=absent` for
+`main` and `rig` - a green run that checked nothing.
+
+**M2 - unknown Type word becomes a silent skip** (`if (( unknown ))` -> `if (( 0 ))`). Exit 1, 1 of 17
+red:
+```
+selftest unknown-type-word-names-section-and-row FAILED: unrecognized Type word: exited 0,
+  wanted 2 (could-not-run), output: []
+```
+Against the six real ELFs: **byte-identical output, exit 0**. The push-tier gate cannot see this
+mutation at all. Same for the warning variant (`die` -> `printf ... >&2`), also 1 of 17 red.
+
+`composed-type-refused-by-name` stayed green under M2, which contradicts the plan's prediction and is
+correct: folding the `, ` delimiter means `DATA, DEBUG` reaches the *allocated-and-debug* branch rather
+than the unknown-word one. Two independent guards refuse a composed Type, and this suite pins that
+neither is reachable by accident.
+
+**M3 - capture VMA instead of LMA** (`BASH_REMATCH[4]` -> `[3]`). Exit 1, 2 of 17 red, both on the real
+fixture: `real-elf-lma-column` fails because `.data` at VMA 0x24001000 lands outside FLASH, reproducing
+the TASK-059 defect from a hand-emitted file. No linked ELF can provoke this, since objdump derives the
+LMA column from PT_LOAD deltas.
+
+**M4 - count the zero-size ALLOC section** (`if (( size == 0 ))` -> `if (( 0 ))`). Exit 1, 3 red:
+`zero-size-alloc-above-highwater-excluded` reports high water 134348792 where it wants 134217824 -
+`.gnu.sgstubs` at 0x0801fff8 dragging R3's expectation off by ~131 KB on a correct build.
+
+**M5 - read an empty Type as loaded** (`FILE_BACKED=0` -> `=1` before the flag loop). Exit 1, 4 red,
+including `empty-type-is-not-loaded` and `defmt-json-name-survives`.
+
+**M6 - remove the refusal before measuring** (`if (( R1_FAILED ))` -> `if (( 0 ))` in decide_image).
+Exit 1, 2 red: `section-outside-flash-violation` gets a real image number where it wants
+`not-written(would-be-...)`, proving objcopy ran on a layout R1 had already refused.
+
+**M7 - match `.sram1_bss` as a substring**. Exit 1, 1 red: `sram1-bss-name-must-match-exactly`, a case
+no linked binary can produce, which is why it exists.
+
+**M8 - downgrade "no rows parsed" to a warning**. Exit 1, 1 red: `no-rows-parsed-is-fatal`. This is the
+vacuous-pass door - an objdump whose columns have moved matches nothing, and an empty table satisfies
+every rule by having nothing to fail. Upstream broke `--show-lma` once already (llvm/llvm-project 66228).
+
+After restore: 17/17 green on both shells, real-ELF output still byte-identical.
+
+### Pricing (measured, three tier runs each, plus four extra commit runs)
+
+New gate 0.60 s inside a tier run (one 0.98 s outlier on the first run after the disk cache was
+displaced; standalone warm is 0.59-0.62 s across eight runs). Tier totals: commit 4 s (gate sum 4.15-
+4.37 s), push 76-77 s, ci 143-144 s, of which the two `cargo test` invocations are ~133 s. Published
+figures updated accordingly in doc-001, scripts/gates.sh:20 and lefthook.yml:12 - the previous push
+figure of 75 s and ci figure of 146 s had both drifted. Also fixed here: check-elf-staleness.sh:37
+claimed 0.4 s for a gate gates.sh priced at 0.9 s; measured 0.84-0.85 s.
+
+Doc matrix regenerated from `gates.sh --list ci` and verified mechanically:
+`diff <(bash scripts/gates.sh --list ci) <(sed -n '254,279p' doc-001)` prints nothing. Counts 11/20/21 ->
+12/21/22. New gate is the fifth commit gate, declared immediately after elf-staleness and before
+`cargo fmt`, as AC #6 corrects AC #4 to say.
+
+### Deliberate limits of this suite
+
+Fixtures cannot prove the linker emits anything like them; the push-tier gate over six linked ELFs stays
+the backstop for that claim, which is why both exist. Whether an *allocated* `.debug_*` section should
+classify as file-backed rather than refuse is left open deliberately - every `.debug_*` in today's
+images is unallocated, so the question is hypothetical, and changing the policy belongs to whoever first
+meets a build that emits one.
+<!-- SECTION:NOTES:END -->
+
 ## Comments
 
 <!-- COMMENTS:BEGIN -->
@@ -220,3 +326,38 @@ New fact that changes AC #2's wording, pinned in llvm-objdump.cpp: the Type colu
 No sub-tickets, and no @human split: everything here is host-side bash plus objdump, judged by exit codes and byte counts, so no criterion needs the board, ears or an owner decision. Baseline for the equivalence proof is scripts/check-image-load-addresses.sh over the six ELFs, 0.90 s warm today.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+check-image-load-addresses.sh grew a --selftest: 17 cases asserting the positional `rust-objdump -h
+--show-lma` parse that the whole push-tier gate rests on, registered as the fifth commit-tier gate at
+0.6 s warm.
+
+To make the parser testable at all, check_one_elf was split along the seams the tests need:
+read_sections keeps the shim call and width guard, parse_section_table takes objdump text nobody linked,
+evaluate_sections fills verdict globals without printing, decide_image owns the two refusals, and
+format_summary returns the line production prints. One production behaviour change: classify_type folds
+the `, ` delimiter llvm-objdump uses between composed flags, which makes the two semantic refusal
+branches reachable from real objdump output instead of dead code reading as load-bearing. Verified
+behaviour-preserving: the six linked ELFs reproduce the pre-edit baseline byte for byte, re-checked
+after every mutation and after restore.
+
+Fixtures are hand-emitted ELF hex generated at runtime into one mktemp -d, driven through the real
+rust-objdump and rust-objcopy; five cases spawn the script as a child because the exit code reaching
+gates.sh is itself under test, and all three codes (0 pass, 1 a case failed, 2 suite could not run) are
+graded through a real child. Green on bash 3.2.57 and 5.3.15.
+
+Eight mutations, each restored, each recorded in the notes with its transcript. Two of them are invisible
+to the push-tier gate and only this suite sees them: dropping the padding trim leaves `.sram1_bss=absent`
+on main and rig with exit 0, and downgrading an unknown Type word to a warning reproduces the real-ELF
+output byte-identically. A third, capturing VMA where the LMA column belongs, is unreachable by any
+linked ELF and reproduces the TASK-059 defect from a fixture. One prediction in the plan was wrong and
+the notes say so: the composed-Type case stays green under the unknown-word mutation because folding the
+delimiter routes it to a different, equally fatal guard.
+
+Docs repriced from measurement rather than inheritance: doc-001's matrix regenerated and diffed against
+`--list ci`, counts 11/20/21 -> 12/21/22, tier totals restated to commit 4 s / push 77 s / ci 144 s
+(the published 75 s and 146 s had drifted), and the stale 0.4 s claim in check-elf-staleness.sh corrected
+to the 0.85 s measured here. lefthook.yml and gates.sh's header figures moved with them.
+<!-- SECTION:FINAL_SUMMARY:END -->

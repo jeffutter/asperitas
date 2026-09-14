@@ -257,6 +257,7 @@ commit | yes | yes | yes | === gate definition parses ===
 commit | yes | yes | yes | === docs artifact names ===
 commit | yes | yes | yes | === elf-provenance --selftest ===
 commit | yes | yes | yes | === elf-staleness --selftest ===
+commit | yes | yes | yes | === load-addresses --selftest ===
 commit | yes | yes | yes | === cargo fmt ===
 commit | yes | yes | yes | === cargo fmt (firmware workspace) ===
 commit | yes | yes | yes | === cargo clippy ===
@@ -275,21 +276,32 @@ commit | yes | yes | yes | === firmware clippy (all bins, RTT-only, log-defmt) =
 push   | -   | yes | yes | === cargo test ===
 ci     | -   | -   | yes | === cargo test (asperitas-pod pod-hw feature) ===
 
-counts: commit 11, push 20, ci 21
+counts: commit 12, push 21, ci 22
 ```
 
 Costs are local warm figures on aarch64-darwin inside `nix develop .#default`: **commit 4 s**, **push
-75 s**, **ci 146 s**. The two `cargo test` invocations are 136 of those 146 s.
+77 s**, **ci 144 s**. The two `cargo test` invocations are 133 of those 144 s.
 
-Two gates sit third and fourth, at 0.9 s each: `=== elf-provenance --selftest ===` and
-`=== elf-staleness --selftest ===` (TASK-056). Both sit there because they compile nothing and read no
-artifact, which is what cheapest-first does with a check that has no inputs to wait for; putting either
-beside the push-tier provenance gate "for symmetry" would misrepresent both, since one grades the
-reader of an ELF's cfg stamp and the other grades the stamp itself, and they share no state. Their cases and the cost rules that keep each at
-0.9 s -- for the provenance reader, five child invocations of the script at most, one `cargo metadata`,
-never a `cargo build` or a path under `firmware/target/`; for the staleness checker, one `make` per case
-against a fixture tree, with the compiler and the provenance clause both stubbed -- are stated in
-`scripts/elf-provenance.sh`'s and `scripts/check-elf-staleness.sh`'s own headers.
+Three gates sit third, fourth and fifth, at 0.9 s, 0.85 s and 0.6 s: `=== elf-provenance --selftest
+===`, `=== elf-staleness --selftest ===` (TASK-056) and `=== load-addresses --selftest ===` (TASK-068).
+All three sit there because they compile nothing and read no artifact, which is what cheapest-first does
+with a check that has no inputs to wait for; putting any of them beside the push-tier gate it shares a
+subject with "for symmetry" would misrepresent both, since each selftest grades the *reading* while the
+push-tier gate grades the *artifact*, and they share no state. Their cases and the cost rules that keep
+each at its figure are stated in the three scripts' own headers:
+
+- the provenance reader, 0.9 s: five child invocations of the script at most, one `cargo metadata`,
+  never a `cargo build` or a path under `firmware/target/`;
+- the staleness checker, 0.85 s: one `make` per case against a fixture tree, with the compiler and the
+  provenance clause both stubbed;
+- the load-address checker, 0.6 s: seventeen cases, of which only five re-execute the script as a child
+  process, because one measured child running the whole script costs 0.15 s against under 1 ms for the
+  subshell a row-level case runs in, and the exit code is the subject of just those five. Its two hand-emitted images are generated once per run, both binutils shims are
+  checked with `command -v` before anything is emitted, and it names no path under `firmware/target/`
+  and calls no `cargo` or `make` at all -- a build there would rebuild, or worse re-point, the artifacts
+  the push-tier gate audits. Standing alone it measures 0.59-0.62 s across eight runs; the one 0.98 s
+  reading came from the first run after the disk cache had been displaced, and this is the first gate in
+  the tier to exec `llvm-objdump`, so it is where that page-in gets paid.
 
 Order within a tier is whatever the script declares, cheapest-first, with two rules that outrank cost:
 the console cross-build comes immediately before the RTT-only one with nothing building firmware after
@@ -312,14 +324,17 @@ stays NOBITS while `memory.x` claims to place it `(NOLOAD)`, and that each plain
 exactly as long as the highest flash LMA end implies - the invariant whose absence made `main.bin`
 469,763,536 bytes of mostly zeros with every gate green, because objcopy writes from the lowest to the
 highest *load* address (TASK-059). It reads rather than builds for the same reason the provenance gate
-has, bare `rust-objdump` / `rust-objcopy` only, and costs 0.70 s warm. Its tier is `push` because
+has, bare `rust-objdump` / `rust-objcopy` only, and costs 0.72 s warm. Its tier is `push` because
 pre-commit builds no firmware, so the ELFs it needs may not exist there; inventing a skip path for that
-is the blind spot TASK-062 had to remove from `elf-check`. Red was demonstrated by disabling the
+is the blind spot TASK-062 had to remove from `elf-check`. The commit-tier `=== load-addresses
+--selftest ===` gate above is not a second copy of this claim and does not make this one redundant: that
+gate reads hand-emitted fixtures to assert the *parser*, and this one reads the six linked images to
+assert the *link*, which no fixture can stand in for. Red was demonstrated by disabling the
 `SECTIONS` rule in `firmware/memory.x` and relinking: three findings naming `.sram1_bss`, its LMA, and
 the image length it would have produced.
 
 What the one-command shape costs: lefthook buffers a command's stdout and replays it when the command
-finishes, so a hook prints nothing for its first ~4 s (commit) or ~75 s (push). In exchange the log
+finishes, so a hook prints nothing for its first ~4 s (commit) or ~77 s (push). In exchange the log
 carries per-gate headers and wall times it never had, and the run stops at the first failure naming the
 gate that died.
 
