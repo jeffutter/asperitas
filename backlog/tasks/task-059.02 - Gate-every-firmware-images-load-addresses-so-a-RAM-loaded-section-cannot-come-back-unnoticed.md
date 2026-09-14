@@ -3,11 +3,11 @@ id: TASK-059.02
 title: >-
   Gate every firmware image's load addresses, so a RAM-loaded section cannot
   come back unnoticed
-status: To Do
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-13 06:56'
-updated_date: '2026-09-13 14:50'
+updated_date: '2026-09-14 03:40'
 labels:
   - planned
 dependencies:
@@ -70,62 +70,253 @@ non-cargo gate in the repo, and the two should look like siblings.
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-**Step 1 - Read the two files you are imitating and obeying.** `scripts/check-doc-artifact-names.sh`
-for shape (usage function, failure counting, header prose), and `scripts/gates.sh:1-45` plus the
-`gate()` helper around `:116-131` for the ordering rules this gate must not violate. Rule 1 says no
-gate may build firmware after the cross-build pair; that constraint is why this script calls the bare
-binutils shims on ELF paths instead of `cargo objdump`.
+## Overview
 
-**Step 2 - Derive the flash region, do not hardcode it.** Parse `FLASH : ORIGIN = ..., LENGTH = ...`
-out of `firmware/memory.x` and fail loudly if that parse fails. This is the same choice
-check-doc-artifact-names.sh makes when it derives legal image names from the Makefile: a rule kept by
-hand is the thing that goes stale, and a move to the 8 MB QSPI region is a live plan in this project.
+One new host-side script, one new gate line. The invariant is *no file-backed section may load
+outside flash*, expressed as three assertions over the release ELFs, checked with the bare
+binutils shims so the gate reads artifacts and builds nothing.
 
-**Step 3 - Get section headers without touching cargo.** `rust-objdump -h <path>` per bin, from
-`target/thumbv7em-none-eabihf/release/{main,rig,blinky,ledtest,podtest,panictest}`. Two traps:
+Everything below was verified on commit `0f672ba` on this tree, including a full red/green run of
+the defect itself (step 7). Numbers quoted here are measurements, not estimates.
 
-- Section names contain spaces. Real example from this tree today:
-  `.defmt.error.{"package":"embassy-stm32","tag":"defmt_error","data":"panicked at 'AHB frequency is too low'",...}`.
-  Field-splitting left to right will shred that. Extract right to left instead: last field is the
-  type word, the two before it are VMA and LMA, everything between the index and the VMA is the name.
-  If you prefer `rust-readelf -W -S` for its explicit `[A]` alloc flag and `PROGBITS`/`NOBITS` types,
-  check whether it survives the same names before committing to it.
-- Decide deliberately what counts as file-backed-and-loaded and refuse to guess about anything else.
-  `llvm-objdump -h` reports a coarse type word (`TEXT`, `DATA`, `BSS`, nothing for non-allocated
-  sections). Any type word the script does not recognise must be a hard error naming the section, not
-  a silent skip - a silent skip is how a future section walks through the gate unnoticed.
+## Where the ticket's wording does not match the tree
 
-**Step 4 - The three assertions.** (1) every loaded file-backed section's LMA lies inside the parsed
-flash range; (2) if `.sram1_bss` exists it is `NOBITS`; (3) build the plain image with
-`rust-objcopy -O binary <elf> "$(mktemp -d)/x.bin"` and require its length to equal
-highest-flash-LMA-end minus flash origin, which is what proves nothing between the extremes was
-dropped and therefore what keeps the keep-list dead. Clean the temp dir on exit. Print the per-binary
-numbers even on success: a pass that prints nothing cannot be distinguished from a pass that checked
-nothing, and this repo's convention is numbers over verdicts.
+Read this before step 1. Each item is verified, and each one is a place where following the words
+literally costs an hour or produces a vacuous pass.
 
-**Step 5 - Say what it does not cover.** In the script header, state that the two cfg sets write the
-same ELF paths, so the gate validates whichever cross-build ran last (the RTT-only image in the push
-and ci tiers), not both at once, and that TASK-062 owns that provenance blindness. An honest
-limitation here beats a false claim of coverage.
+1. **There is no readelf anywhere.** On PATH: `rust-objdump`, `rust-objcopy`, `rust-readobj`,
+   `rust-size` (cargo-binutils 0.4.0) and clang's `objdump`/`objcopy`. No `readelf`, no
+   `llvm-readelf`, no `rust-readelf`. Step 3's "`rust-readelf -W -S` alternative" is dead on arrival -
+   drop it. It was also the wrong tool: `readelf -W -S` has no LMA column at all (its `Address` is
+   the VMA), and ELF section headers carry no load address - LMA lives in `PT_LOAD.p_paddr`, which is
+   why objdump reconstructs the column per section from each segment's `p_paddr - p_vaddr` delta.
+2. **`scripts/elf-provenance.sh` contains no ELF reader to reuse.** Comment #1 (2026-09-13) told this
+   ticket to "call `elf-provenance.sh show` instead of duplicating objcopy plumbing"; that is wrong.
+   `show` prints exactly one line, `default=N features=a,b defmt_log=`, read out of the `.asp.prov`
+   note via `rust-objcopy --dump-section`; it never opens a section header and never calls objdump
+   (zero occurrences in 771 lines). Nothing it prints describes a load address. What does transfer is
+   its *shape*: bare shims behind a `command -v` guard (`:88-89`), `$PROG:`-prefixed `die()`
+   (`:56-59`), hard failure on a missing artifact naming the command that produces it (`:87`),
+   exit codes 0/1/2 with 2 reserved for "the check could not run", and `mktemp -d` plus
+   `trap ... EXIT` (`:446-447`).
+3. **`check-doc-artifact-names.sh` has no `usage()` function** - it takes no arguments. Copy its
+   actual conventions (`set -uo pipefail` at `:47`, ROOT anchor `:49-50`, `die()` `:62-65`,
+   `VIOLATIONS+=()` accumulation with `report()` returning 1 at `:195-210`, failure lines shaped
+   `path:line: thing - reason`, a 45-line header that ends with an explicit exit-code contract) and
+   take `usage()` from `elf-provenance.sh:61-67`. Note AC #1 says "no `set -u`", which contradicts
+   both siblings; the substantive half of that clause is *no `-e`*, so findings accumulate instead of
+   aborting at the first one. Use `set -uo pipefail`.
+4. **`gates.sh` has no local-warm cost table.** Costs are prose above their own gate line (`:202`
+   "Measured 0.89 s warm", `:282` "Measured warm: 0.08 s inside a `ci` run", `:292`, `:307`), the
+   header says those figures are LOCAL warm numbers (`:40-42`), and tier counts are printed by the
+   runtime at `:318`, not written in a comment. AC #5's obligation therefore resolves to three real
+   edits: a measured figure in the comment above your `gate` line, the regenerated matrix in doc-001
+   (step 6), and the prose figures doc-001 restates. Do not invent a table to satisfy the wording.
+5. **Coordinates have drifted.** Insertion point is after `gates.sh:289` (the provenance gate spans
+   `:287-289`) and before the clippy comment at `:291`; the doc-artifact gate is at `:188`, both
+   cross-builds at `:262` and `:268-269`. Current counts are commit 10 / push 18 / ci 19.
+6. **Do not reach for an `ASSERT()` in `memory.x` as a substitute or a complement.** rust-lld
+   supports it and `cortex-m-rt`'s `link.x.in` uses one, but it cannot name the offending input
+   section and only sees symbols `link.x` already defined. The original defect overflowed no region,
+   which is exactly why no link diagnostic existed - lld only refuses when a region is full
+   (`error: section '.data' will not fit in region 'ram'`).
 
-**Step 6 - Register it.** Add `gate push "=== image load addresses ===" bash scripts/check-image-load-addresses.sh`
-immediately after the doc-artifact gate (`gates.sh:264`), which puts it after both cross-builds.
-Update the header's local-warm cost table and the tier-population comment in the same commit, and
-confirm `bash scripts/gates.sh --list` and `--dry-run` both look right. Keep it out of the `commit`
-tier: pre-commit builds no firmware, so the ELFs may not exist there, and inventing a skip path for
-that would recreate elf-check's blind spot.
+## Step 1 - Write the header first, in the sibling's voice
 
-**Step 7 - Prove it red (AC #4).** Comment out the `SECTIONS` block TASK-059.01 added to
-`firmware/memory.x`, rebuild `main`, run the script, and capture the exit code plus the exact failure
-lines into the ticket notes. Restore and prove green. Do not simulate the failure with a hand-edited
-ELF: the point is that the real defect trips the real check.
+`scripts/check-image-load-addresses.sh`, ~45 lines of header, structured like
+`check-doc-artifact-names.sh:1-45`: one-line purpose, then the rules, then why they are load-bearing,
+then what is out of scope, then the exit-code contract. The war story is real and specific: without
+the placement rule in `firmware/memory.x`, daisy-embassy's `.sram1_bss` statics become an orphan
+output section that rust-lld places with LMA == VMA in AXI SRAM, and `objcopy -O binary` writes a
+memory dump spanning lowest to highest *load* address - 469,763,536 bytes for `main`, measured again
+today (step 7). Arm documents this class as a scatter-file error (KA002145); Zephyr gates it with a
+hand-curated section allowlist (`extra_sections` in `scripts/twister`) and we deliberately do the
+opposite, deriving the rule from an address range plus `firmware/memory.x`, because a hand-kept list
+is precisely the thing that killed the `--only-section` keep-list.
 
-**Step 8 - Price it.** Time the gate alone and the whole push tier before and after, inside
-`nix develop .#default` on a warm tree, and put both figures in the notes and the gates.sh comment.
-It should land near zero because it builds nothing; if it does not, find out why before landing it.
+Say plainly in the header what this does not cover, in one sentence each: it validates one cfg set per
+run, whichever cross-build ran last, which the provenance gate above it names (the RTT-only image in
+every tier that runs the pair) - so no apology about provenance blindness is needed any more, just the
+fact; ELF staleness belongs to `make -C firmware elf-check`; cfg identity belongs to the provenance
+gate; section placement belongs here; and the ban on re-introducing a keep-list is enforced by
+`check-doc-artifact-names.sh`'s pass 2, which greps the expansion of `make -n -C firmware build` for
+`--only-section`.
 
-**Step 9 - Land it.** `bash scripts/gates.sh ci` green from the repo root, one commit adding the
-script and touching only `scripts/gates.sh` besides, with the red-run transcript in the commit body.
+## Step 2 - Derive every input from the build
+
+- **Flash range**: parse `FLASH : ORIGIN = 0x08000000, LENGTH = 128K` out of `firmware/memory.x`,
+  accept a `K`/`M` suffix, and `die` if either field fails to parse. A move to the 8 MB QSPI region is
+  a live plan in this project; a hardcoded `0x08020000` would then be a gate that passes by lying.
+- **Which binaries**: enumerate `firmware/src/bin/*.rs` and map each to
+  `firmware/target/thumbv7em-none-eabihf/release/<stem>` - the same derivation
+  `check-doc-artifact-names.sh:91-131` uses, so a seventh bin joins the gate without anyone editing a
+  list, and "six" never appears as a magic number. Print how many ELFs were checked.
+- **Arguments**: default to the derived set; accept explicit ELF paths as arguments so the script is
+  usable ad hoc against one mutated copy. Unknown flags -> `usage >&2; exit 2`.
+- **Missing ELF is a hard failure**, exit 2, naming the thing that produces it, e.g. `no ELF at
+  firmware/target/thumbv7em-none-eabihf/release/rig - run 'bash scripts/gates.sh push', or
+  'make -C firmware build-elf BINARY=rig FEATURES="seed3 log-defmt" NO_DEFAULT=1'`. Never
+  `test -f ... || true`: a skip path is how elf-check's hint became useless (TASK-062).
+- Guard both shims with `command -v` and exit 2 naming `nix develop .#default`, per
+  `elf-provenance.sh:88-89`. Call the bare shims, never `cargo objdump`/`cargo objcopy`: the cargo
+  forms rebuild, and a rebuild after the cross-build pair silently re-points `release/main` at a
+  different cfg set (ordering rule 1, `gates.sh:26-38`).
+
+## Step 3 - Parse `rust-objdump -h --show-lma` correctly
+
+Pass `--show-lma` explicitly. llvm-objdump turns the LMA column on by default only "unless any section
+has different VMA and LMAs", so a positional parser otherwise depends on a column that can vanish.
+
+Measurements from all six current ELFs, which are the reason for each rule below:
+
+- **Right-anchored regex, then trim.** Row fields are `Idx Name Size VMA LMA Type` with Size/VMA/LMA
+  always eight hex digits in an elf32 image. Anchor on the three hex triples and let the name be
+  whatever precedes them:
+  `^[[:space:]]*[0-9]+[[:space:]]+(.*)[[:space:]]+([0-9a-fA-F]{8})[[:space:]]+([0-9a-fA-F]{8})[[:space:]]+([0-9a-fA-F]{8})[[:space:]]*(.*)$`
+  Names legitimately contain spaces - a defmt interned-string section is named
+  `.defmt.error.{"package":"...","tag":"a b",...}` - so left-to-right splitting shreds them. Verified
+  identical behaviour on bash 5.3.15 and 3.2.57 (both must keep working, as in elf-provenance).
+- **The name capture keeps the column padding.** Bash matches leftmost-longest, so `(.*)` swallows the
+  padding: on `  7 .sram1_bss      00000400 ...` it captures `.sram1_bss     `, five trailing spaces.
+  Trim it (`name=${name%"${name##*[![:space:]]}"}`, verified on both bashes) before comparing. This is
+  not cosmetic: untrimmed, `[ "$name" = ".sram1_bss" ]` never fires, assertion #2 reports `absent` for
+  every binary, and the gate passes vacuously - the exact failure AC #3 exists to prevent. A prototype
+  of this script hit precisely that bug during planning.
+- **Guard the format.** Require `file format elf32-littlearm` from the same output and exit 2 otherwise:
+  the eight-hex-digit assumption comes from it, and thumbv7em is the only thing this repo links.
+- **Classify by a closed set, and treat empty as normal.** The Type column is composed flags, not one
+  token: llvm-objdump concatenates `TEXT`/`DATA`/`BSS` (+ `DEBUG`), so `DATA BSS` is legal, and
+  non-allocated rows print *nothing*. Present today: `TEXT`, `DATA`, `BSS`, `DEBUG`, and empty on
+  `.comment`, `.ARM.attributes`, `.asp.prov`, `.symtab`, `.strtab`, `.shstrtab`, `.defmt` and index 0.
+  So: `TEXT`/`DATA` -> loaded and file-backed; `BSS` -> loaded, no file content; empty or `DEBUG` ->
+  not loaded; anything else, including a multi-word combination this script has not been told about ->
+  hard error naming the section and the raw row. Empty must NOT be an error, or every ELF fails.
+- **Exclude zero-size sections from the high-water mark.** `.gnu.sgstubs` is `ALLOC`+`PROGBITS` with
+  size 0 at `0x0800b9c0`, *above* the real flash high-water `0x0800b9b8`, and belongs to no `PT_LOAD`.
+  Counting it breaks rule 3's equality by 8 bytes on a correct build. Report it rather than hiding it
+  (see the summary line below), so the exclusion is visible.
+
+## Step 4 - The three assertions, with numbers on success
+
+Per binary, print one summary line even when everything passes - a silent pass cannot be told apart
+from a pass that checked nothing:
+
+`main         image=47544  low=0x08000000 high=0x0800b9b8 expected=47544  loaded=4 skipped=21  excluded_zero_size=.gnu.sgstubs  .sram1_bss=BSS@0x24000ce0(1024)`
+
+Those are today's real values. Specifically:
+
+1. Every `TEXT`/`DATA` section's LMA end lies inside the parsed flash range. Today only `.bss`,
+   `.sram1_bss` and `.uninit` sit outside it, and all three are `BSS`, so the rule is green now and
+   stays green for the right reason.
+2. If `.sram1_bss` is present it is `NOBITS` (objdump prints `BSS`), reported as present-or-absent
+   rather than implied. Only `main` and `rig` have it today - `blinky`, `ledtest`, `podtest` and
+   `panictest` carry no SAI buffers at all - so a green run proves this assertion on two binaries out
+   of six, and printing it is what stops a reader assuming six.
+3. Build the plain image with `rust-objcopy -O binary <elf> "$TMP/x.bin"` and require its length to
+   equal `highest flash LMA end - FLASH origin`. Measured today, exactly equal for all six: `main
+   47544`, `rig 65696`, `blinky 25176`, `ledtest 19448`, `podtest 31960`, `panictest 25312`. Plain
+   `-O binary` is deliberate - it mirrors `firmware/Makefile:119`, so the gate measures the same image
+   `dfu-util -D` writes to the board. Two details: also require the lowest file-backed LMA to equal
+   `FLASH origin` (it does today, at `.vector_table`; if it ever stopped, the length formula would be
+   silently wrong *and* the image would no longer start where DFU loads it), and skip this objcopy for
+   any binary whose rule 1 already failed, printing `image length not measured: sections already
+   outside flash`. Without that short-circuit a broken tree writes six ~469 MB temp images (peak RSS
+   measured 473 MB for one). Clean the temp dir on `trap ... EXIT`.
+
+Exit 1 with one prefixed line per finding, counting them all in one run, per the sibling's contract.
+
+AC #3 asks for a pass "for both cfg sets", and a single run only ever sees the residue of whichever
+cross-build finished last. Satisfy it as a demonstration, not a claim, and do it without leaving the
+tree in a state that breaks ordering rule 1:
+
+```
+bash scripts/check-image-load-addresses.sh                      # the RTT-only residue, green
+(cd firmware && cargo build --release --features seed3)         # all six console images
+bash scripts/check-image-load-addresses.sh                      # console set, green
+touch firmware/src/bin/main.rs
+make -C firmware build-elf BINARY=main FEATURES='seed3 log-defmt' NO_DEFAULT=1   # put the pair's residue back
+bash scripts/elf-provenance.sh check firmware/target/thumbv7em-none-eabihf/release/main "seed3 log-defmt" 1
+```
+
+Record both sets' numbers in the notes. The last two lines are not optional: without them `release/main`
+holds a console image, which is precisely the condition the provenance gate above refuses, and the next
+`gates.sh push` would fail for a reason nobody caused.
+
+## Step 5 - Register it in `scripts/gates.sh`
+
+Insert after `:289` (end of the provenance gate) and before the clippy comment at `:291`:
+
+`gate push "=== image load addresses ===" bash scripts/check-image-load-addresses.sh`
+
+That single coordinate satisfies both halves of AC #5: it is after the doc-artifact gate (`:188`) and
+after both cross-builds (`:262`, `:268-269`), it sees their artifacts, and it builds nothing. Above
+the line, write the usual comment: what it asserts, why it sits here rather than in `commit`
+(pre-commit builds no firmware, so the ELFs may not exist, and inventing a skip path for that would
+recreate elf-check's blind spot), and the measured warm figure. Follow the precedent at `:284-286`
+for arguing placement off the artifacts rather than off a claim.
+
+## Step 6 - Regenerate doc-001 and fix the prose figures
+
+AC #5 does not mention this and it is the third file every previous gate commit touched. doc-001
+(`backlog/docs/doc-001 - Asperitas-Project-Plan.md`) embeds the matrix at `:250-276` under "This block
+is generated - regenerate it with...", plus counts at `:276` and cost prose at `:283` and nearby. TASK-067
+(`0f672ba`) is the model: paste fresh `--list` output, move the counts, and correct every restated
+tier cost in the same commit. A push-tier gate here moves the counts from commit 10 / push 18 / ci 19 to
+commit 10 / push 19 / ci 20; if `--list` says otherwise, the gate line is in the wrong tier.
+
+## Step 7 - Prove it red, on the real defect
+
+Not a hand-edited ELF, and not `--orphan-handling=error` (measured: rust-lld accepts it and names only
+`.debug_*`, `.comment`, `.ARM.attributes` - never `.sram1_bss`). Planning-time run of this exact
+recipe, warm, 2.85 s to build the bad image and 1.33 s to come back:
+
+```
+cp firmware/memory.x /tmp/memx.bak
+perl -0pi -e 's{^SECTIONS \{}{/* RED RUN - rule disabled */\n/*\nSECTIONS \{}m; s{^\} INSERT AFTER \.bss;$}{*/}m' firmware/memory.x
+make -C firmware build-elf BINARY=main FEATURES='seed3 log-defmt' NO_DEFAULT=1
+bash scripts/check-image-load-addresses.sh main; echo "exit=$?"
+git checkout -- firmware/memory.x
+touch firmware/src/bin/main.rs
+make -C firmware build-elf BINARY=main FEATURES='seed3 log-defmt' NO_DEFAULT=1
+```
+
+`build.rs:33` emits `rerun-if-changed=memory.x`, so editing the script relinks without the `touch`;
+the `touch` afterwards is `firmware/Makefile:236`'s documented remedy, needed because restoring the
+bytes leaves them older than the ELF you just built. Expect these observations, which the executor
+must reproduce with the finished script and paste into the ticket notes and the commit body:
+
+- the ELF row becomes `  5 .sram1_bss  00000400 240001d0 240001d0 DATA` - `DATA`, i.e. ALLOC +
+  PROGBITS, placed by lld with LMA == VMA right after `.data`, and `.bss` shifts up to `0x240005d0`;
+- rule 1 fails naming `.sram1_bss` at LMA `0x240001d0`, exit 1;
+- plain `-O binary` yields 469,763,536 bytes against an expected 47,544, so rule 3 catches the same
+  defect independently;
+- after restore and rebuild: `47544`, `BSS@0x24000ce0`, exit 0, and
+  `bash scripts/elf-provenance.sh check firmware/target/thumbv7em-none-eabihf/release/main "seed3 log-defmt" 1`
+  still agrees, which confirms the experiment left the residue in the state rule 1 promises.
+
+## Step 8 - Price it
+
+Time the gate alone and all three tiers warm inside `nix develop .#default` on a clean tree. The
+whole-script floor measured with a prototype over all six binaries is 0.678 s wall (6 x objdump at
+~0.058 s, 6 x objcopy at ~0.03 s). Put the banner figure in the gate comment, the tier deltas in
+doc-001, and both in the notes. If it lands far above ~1 s, find out why before landing it.
+
+## Step 9 - Land it
+
+`bash scripts/gates.sh ci` green from the repo root, then one commit adding
+`scripts/check-image-load-addresses.sh` and touching only `scripts/gates.sh`,
+doc-001 and the ticket file, with the red-run transcript in the body. Confirm
+`bash scripts/gates.sh --list` and `--dry-run` both look right before committing.
+
+## Non-goals
+
+- No `--selftest` here. It is queued as its own ticket (TASK-068) rather than folded into this commit,
+  following how `elf-provenance.sh` got its 19-case suite after landing (TASK-067). The parser in step
+  3 is the fragile part and that ticket names the four traps to lock down.
+- No change to `firmware/memory.x`, the Makefile, or any Rust. This ticket gates the fix; it does not
+  move it.
+- No hardware. Nothing here needs a board or ears; TASK-059.03 already owns hearing `main` and `rig`
+  on the device.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -161,5 +352,18 @@ Three things this ticket should then do differently from its current plan.
 3. Your header no longer has to confess provenance blindness as accepted. Once .03 lands, the gate above you names the cfg set of the ELF you are about to read, so say which set that is and drop the apology. What stays true is that you validate one cfg set per run, not both at once.
 
 Your ban on the test -f ... || true else-branch is the same rule .02's AC #5 implements for the provenance path, so the two checks will fail alike on a missing artifact. Good riddance to the skip path either way.
+---
+
+created: 2026-09-14 03:38
+---
+Planning round 2026-09-14 (commit 0f672ba). Plan rewritten against the tree as it stands; three things earlier notes here assert turned out to be false when measured, and the plan's "Where the ticket's wording does not match the tree" section is the authoritative correction. Summary for whoever reads this before the plan:
+
+1. Comment #1's advice to call `scripts/elf-provenance.sh show` instead of writing ELF plumbing does not apply. `show` prints one line from the `.asp.prov` note (`default=... features=... defmt_log=`); the script never opens a section header and never calls objdump. Only its conventions transfer, and the plan lists which.
+2. The `rust-readelf -W -S` alternative in the old step 3 is unreachable: there is no readelf, llvm-readelf or rust-readelf on PATH here (cargo-binutils ships rust-objdump/rust-objcopy/rust-readobj), and `readelf -W -S` has no LMA column anyway. `rust-objdump -h --show-lma` is the tool, and `--show-lma` must be explicit because llvm-objdump only turns the column on by default when some section already differs.
+3. There is no local-warm cost table in gates.sh, and doc-001 embeds the gate matrix that AC #5 leaves unmentioned. Both have real substitutes, named in the plan.
+
+Everything load-bearing in the new plan was measured rather than reasoned about: rules 1-3 hold exactly on all six current ELFs (image lengths 47544/65696/25176/19448/31960/25312, each equal to highest flash LMA end minus 0x08000000), and the defect itself was reproduced end to end - disable the SECTIONS rule, relink main (2.85 s warm), and `.sram1_bss` comes back as DATA at LMA 0x240001d0 with a 469,763,536-byte image, tripping rules 1 and 3 independently; restore and relink (1.33 s) returns it to BSS at 0x24000ce0 and 47544 bytes. Two parser traps found that way are called out explicitly, because both produce a green run that checked nothing: bash keeps objdump's column padding in the name capture, so an untrimmed comparison reports .sram1_bss absent from every binary; and `.gnu.sgstubs`, zero-size but ALLOC+PROGBITS, sits above the true high-water mark and breaks rule 3 by 8 bytes on a correct build.
+
+No sub-tickets: the script, its registration, the red run and the pricing ship as one commit or not at all. The parser's own fixture suite is deliberately split out to TASK-068 rather than widened into this ticket, following how elf-provenance.sh got its suite after landing. Nothing here needs hands - no board, no ears, no instrument - so nothing is @human; TASK-059.03 already owns hearing main and rig on hardware.
 ---
 <!-- COMMENTS:END -->
