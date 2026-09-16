@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-14 15:17'
-updated_date: '2026-09-14 15:17'
+updated_date: '2026-09-16 09:26'
 labels:
   - planned
 dependencies:
@@ -119,3 +119,9 @@ the final summary what moved when the fresh measurement disagreed with the prose
 something; three tickets have been repricing these by hand and TASK-064.01 already saw the ci tier
 reported as 143-144 s and 145.0 s a day apart.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Review (TASK-070.03 checkpoint, 2026-09-16T09:26Z): the working tree already carries substantial uncommitted work matching this ticket's scope (GATE_COSTS_BOOTSTRAP env var + usage text + cmd_check wiring in scripts/gate-costs.sh, the commit-tier gate line + re-refreshed ledger in scripts/gates.sh, and matching edits to lefthook.yml, .github/workflows/ci.yml, docs/gate-costs.json, firmware/Makefile, scripts/check-elf-staleness.sh, scripts/elf-provenance.sh, backlog/docs/doc-001). None of AC #1-6 are checked and status is still To Do, so this was not done through the normal execute flow and never got committed. Before starting fresh: run 'git status' / 'git diff' and read what is already there -- it may satisfy some ACs already (AC #1's bootstrap seam in particular looks implemented) rather than needing to be redone from scratch.
+<!-- SECTION:NOTES:END -->
