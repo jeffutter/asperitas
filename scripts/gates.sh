@@ -46,7 +46,7 @@
 # start running it and a stable key. Nothing else in the repo names checks.
 #
 # Every gate has a key as well as a banner, and the key -- not the banner -- is its identity. Prose
-# cites a cost from inside a sentence (`the provenance reader, {{gate:elf-provenance-selftest}},
+# cites a cost from inside a sentence (`the provenance reader, 0.89 s {{gate:elf-provenance-selftest}},
 # reads only`), so rewording a banner for readability must not orphan the measurement recorded
 # against it; that is the same argument that put the gate list in a script rather than in YAML names.
 # Keys match ^[a-z0-9][a-z0-9-]{0,39}$ and must be unique; both are enforced where they cost nothing,
