@@ -37,7 +37,8 @@ relitigated.
 State them so they're cheap to overturn:
 
 - **48 kHz, 48-sample blocks, `f32` internally.** Matches libDaisy's Pod default block
-  size and the sample rate PR #80 verified. 1 ms of block latency. The Seed3 codec can
+  size and the sample rate PR #80 verified. 1 ms of block latency. gate-costs:exempt reason="audio block latency from the sample rate, not a gate cost"
+  The Seed3 codec can
   do 192 kHz/32-bit; there is no musical reason to pay for it here, and every reason to
   keep CPU headroom for resonator voices.
 - **Mono in, stereo out.** The instruments are mono sources; a resonator bank wants
@@ -247,42 +248,53 @@ for it, its builder skips such a command before reading any, and the only overri
 An empty commit changes no tree, so the only thing it could gate is HEAD's tree - already paid for by
 the commit that made it.
 
-The tiers, as `scripts/gates.sh --list` prints them. This block is generated - regenerate it with
-that command, do not hand-edit rows:
+The tiers, priced. The block below is generated: `scripts/gate-costs.sh --render` joins
+`scripts/gates.sh --list` against `docs/gate-costs.json` and writes the whole region, cost column
+included, so it cannot drift from either source. Do not hand-edit a row and do not re-copy
+`gates.sh --list` over the block - `scripts/gate-costs.sh --check` compares the rendered bytes with
+what is on disk and fails the commit tier on any difference:
 
+<!-- BEGIN GENERATED: gate-matrix -->
 ```text
-key                         | min    | com | psh | ci | gate
-----------------------------+--------+-----+-----+----+------------------------------------------------
-gate-definition-parses      | commit | yes | yes | yes | === gate definition parses ===
-docs-artifact-names         | commit | yes | yes | yes | === docs artifact names ===
-elf-provenance-selftest     | commit | yes | yes | yes | === elf-provenance --selftest ===
-elf-staleness-selftest      | commit | yes | yes | yes | === elf-staleness --selftest ===
-load-addresses-selftest     | commit | yes | yes | yes | === load-addresses --selftest ===
-cargo-fmt                   | commit | yes | yes | yes | === cargo fmt ===
-cargo-fmt-firmware          | commit | yes | yes | yes | === cargo fmt (firmware workspace) ===
-cargo-clippy                | commit | yes | yes | yes | === cargo clippy ===
-cargo-clippy-log-usb        | commit | yes | yes | yes | === cargo clippy (asperitas-logging log-usb) ===
-cargo-clippy-log-defmt      | commit | yes | yes | yes | === cargo clippy (asperitas-logging log-defmt) ===
-clippy-pod-hw               | push   | -   | yes | yes | === cargo clippy (asperitas-pod pod-hw feature) ===
-dump-reassemble-selftest    | push   | -   | yes | yes | === dump_reassemble --selftest ===
-cargo-doc                   | push   | -   | yes | yes | === cargo doc (workspace) ===
-cargo-doc-all-features      | push   | -   | yes | yes | === cargo doc (workspace, all features) ===
-firmware-cross-compile      | push   | -   | yes | yes | === firmware cross-compile ===
-firmware-cross-compile-rtt  | push   | -   | yes | yes | === firmware cross-compile (RTT-only, log-defmt) ===
-firmware-elf-provenance     | push   | -   | yes | yes | === firmware ELF cfg provenance ===
-image-load-addresses        | push   | -   | yes | yes | === image load addresses ===
-firmware-clippy             | commit | yes | yes | yes | === firmware clippy (all bins) ===
-firmware-clippy-rtt         | commit | yes | yes | yes | === firmware clippy (all bins, RTT-only, log-defmt) ===
-cargo-test                  | push   | -   | yes | yes | === cargo test ===
-cargo-test-pod-hw           | ci     | -   | -   | yes | === cargo test (asperitas-pod pod-hw feature) ===
-
+key                         | min    | com | psh | ci | cost    | gate
+----------------------------+--------+-----+-----+----+---------+---------------------------------------
+gate-definition-parses      | commit | yes | yes | yes | 0.01 s  | === gate definition parses ===
+docs-artifact-names         | commit | yes | yes | yes | 0.16 s  | === docs artifact names ===
+elf-provenance-selftest     | commit | yes | yes | yes | 0.88 s  | === elf-provenance --selftest ===
+elf-staleness-selftest      | commit | yes | yes | yes | 0.84 s  | === elf-staleness --selftest ===
+load-addresses-selftest     | commit | yes | yes | yes | 0.60 s  | === load-addresses --selftest ===
+cargo-fmt                   | commit | yes | yes | yes | 0.25 s  | === cargo fmt ===
+cargo-fmt-firmware          | commit | yes | yes | yes | 0.40 s  | === cargo fmt (firmware workspace) ===
+cargo-clippy                | commit | yes | yes | yes | 0.20 s  | === cargo clippy ===
+cargo-clippy-log-usb        | commit | yes | yes | yes | 0.20 s  | === cargo clippy (asperitas-logging log-usb) ===
+cargo-clippy-log-defmt      | commit | yes | yes | yes | 0.21 s  | === cargo clippy (asperitas-logging log-defmt) ===
+clippy-pod-hw               | push   | -   | yes | yes | 0.21 s  | === cargo clippy (asperitas-pod pod-hw feature) ===
+dump-reassemble-selftest    | push   | -   | yes | yes | 0.68 s  | === dump_reassemble --selftest ===
+cargo-doc                   | push   | -   | yes | yes | ~2 s    | === cargo doc (workspace) ===
+cargo-doc-all-features      | push   | -   | yes | yes | ~2 s    | === cargo doc (workspace, all features) ===
+firmware-cross-compile      | push   | -   | yes | yes | 0.34 s  | === firmware cross-compile ===
+firmware-cross-compile-rtt  | push   | -   | yes | yes | 0.12 s  | === firmware cross-compile (RTT-only, log-defmt) ===
+firmware-elf-provenance     | push   | -   | yes | yes | 0.09 s  | === firmware ELF cfg provenance ===
+image-load-addresses        | push   | -   | yes | yes | 0.73 s  | === image load addresses ===
+firmware-clippy             | commit | yes | yes | yes | 0.23 s  | === firmware clippy (all bins) ===
+firmware-clippy-rtt         | commit | yes | yes | yes | 0.21 s  | === firmware clippy (all bins, RTT-only, log-defmt) ===
+cargo-test                  | push   | -   | yes | yes | ~66 s   | === cargo test ===
+cargo-test-pod-hw           | ci     | -   | -   | yes | ~67 s   | === cargo test (asperitas-pod pod-hw feature) ===
 counts: commit 12, push 21, ci 22
 ```
+<!-- END GENERATED: gate-matrix -->
 
-Costs are local warm figures on aarch64-darwin inside `nix develop .#default`: **commit 4 s**, **push
-77 s**, **ci 144 s**. The two `cargo test` invocations are 133 of those 144 s.
+The approximation policy covers every row above: one warm sample per tier on one machine, measured
+2026-09-16 {{meta:measured}} on aarch64-darwin inside `nix develop .#default`. The last digit is noise, and a cold
+cache or a background Spotlight scan moves any figure here by tens of percent. What the ledger's per-gate
+command digests buy is the claim that each number was taken against the command that runs today, not that
+it repeats to three figures. The tier totals are **commit ~4 s {{tier:commit}}**, **push ~77 s {{tier:push}}**,
+**ci ~144 s {{tier:ci}}**; the two `cargo test` invocations are ~66 s {{gate:cargo-test}} and
+~67 s {{gate:cargo-test-pod-hw}}, which together are most of that `ci` total.
 
-Three gates sit third, fourth and fifth, at 0.9 s, 0.85 s and 0.6 s: `=== elf-provenance --selftest
+Three selftest gates run ahead of every cargo invocation, at 0.88 s {{gate:elf-provenance-selftest}},
+0.84 s {{gate:elf-staleness-selftest}} and 0.60 s {{gate:load-addresses-selftest}}:
+`=== elf-provenance --selftest
 ===`, `=== elf-staleness --selftest ===` (TASK-056) and `=== load-addresses --selftest ===` (TASK-068).
 All three sit there because they compile nothing and read no artifact, which is what cheapest-first does
 with a check that has no inputs to wait for; putting any of them beside the push-tier gate it shares a
@@ -290,17 +302,22 @@ subject with "for symmetry" would misrepresent both, since each selftest grades 
 push-tier gate grades the *artifact*, and they share no state. Their cases and the cost rules that keep
 each at its figure are stated in the three scripts' own headers:
 
-- the provenance reader, 0.9 s: five child invocations of the script at most, one `cargo metadata`,
+- the provenance reader, 0.88 s {{gate:elf-provenance-selftest}}: five child invocations of the script at most,
+  one `cargo metadata`,
   never a `cargo build` or a path under `firmware/target/`;
-- the staleness checker, 0.85 s: one `make` per case against a fixture tree, with the compiler and the
+- the staleness checker, 0.84 s {{gate:elf-staleness-selftest}}: one `make` per case against a fixture tree, with
+  the compiler and the
   provenance clause both stubbed;
-- the load-address checker, 0.6 s: seventeen cases, of which only five re-execute the script as a child
-  process, because one measured child running the whole script costs 0.15 s against under 1 ms for the
-  subshell a row-level case runs in, and the exit code is the subject of just those five. Its two hand-emitted images are generated once per run, both binutils shims are
+- the load-address checker, 0.60 s {{gate:load-addresses-selftest}}: seventeen cases, of which only five
+  re-execute the script as a child
+  process, because even the cheapest such child pays ~70 ms {{component:selftest-child-invocation}} for a fresh
+  interpreter and its objdump, against a subshell that costs nothing measurable, and the exit code is
+  the subject of just those five. Its two hand-emitted images are generated once per run, both binutils shims are
   checked with `command -v` before anything is emitted, and it names no path under `firmware/target/`
   and calls no `cargo` or `make` at all -- a build there would rebuild, or worse re-point, the artifacts
-  the push-tier gate audits. Standing alone it measures 0.59-0.62 s across eight runs; the one 0.98 s
-  reading came from the first run after the disk cache had been displaced, and this is the first gate in
+  the push-tier gate audits. Standing alone it stays within a few hundredths of its published figure
+  across eight runs; the one outlier reading came from the first run after the disk cache had been
+  displaced, and this is the first gate in
   the tier to exec `llvm-objdump`, so it is where that page-in gets paid.
 
 Order within a tier is whatever the script declares, cheapest-first, with two rules that outrank cost:
@@ -315,7 +332,8 @@ whichever ran last owns the path every `make probe-*` decodes with - so "the pai
 and "that path holds the RTT-only image" are one claim stated twice. `=== firmware ELF cfg provenance
 ===` reads the second statement out of the ELF's `.asp.prov` note via `scripts/elf-provenance.sh`, so
 swapping the pair or inserting a gate that compiles firmware after it fails the run naming both cfg
-sets; measured by swapping the two lines, running the tier, and restoring them. It costs 0.09 s warm,
+sets; measured by swapping the two lines, running the tier, and restoring them. It costs
+0.09 s {{gate:firmware-elf-provenance}} warm,
 reads only, and asks cargo for nothing - a rebuild there would re-point the very path it audits.
 
 The gate below it grades a different axis of the same six ELFs. `=== image load addresses ===` asserts
@@ -324,7 +342,7 @@ stays NOBITS while `memory.x` claims to place it `(NOLOAD)`, and that each plain
 exactly as long as the highest flash LMA end implies - the invariant whose absence made `main.bin`
 469,763,536 bytes of mostly zeros with every gate green, because objcopy writes from the lowest to the
 highest *load* address (TASK-059). It reads rather than builds for the same reason the provenance gate
-has, bare `rust-objdump` / `rust-objcopy` only, and costs 0.72 s warm. Its tier is `push` because
+has, bare `rust-objdump` / `rust-objcopy` only, and costs 0.73 s {{gate:image-load-addresses}} warm. Its tier is `push` because
 pre-commit builds no firmware, so the ELFs it needs may not exist there; inventing a skip path for that
 is the blind spot TASK-062 had to remove from `elf-check`. The commit-tier `=== load-addresses
 --selftest ===` gate above is not a second copy of this claim and does not make this one redundant: that
@@ -334,7 +352,8 @@ assert the *link*, which no fixture can stand in for. Red was demonstrated by di
 the image length it would have produced.
 
 What the one-command shape costs: lefthook buffers a command's stdout and replays it when the command
-finishes, so a hook prints nothing for its first ~4 s (commit) or ~77 s (push). In exchange the log
+finishes, so a hook prints nothing until the tier it just ran has finished - for as long as that tier
+costs, which is the ledger's business and the paragraph above owns the figure. In exchange the log
 carries per-gate headers and wall times it never had, and the run stops at the first failure naming the
 gate that died.
 
@@ -349,7 +368,8 @@ names no checks at all; `.github/ci-steps.sh`, the intermediate fix, is gone, an
 file needed is now the first gate in the script.
 
 Exactly one gate lives in the `ci` tier alone: `cargo test --workspace --features
-asperitas-pod/pod-hw`, 67 s local warm - more than every push-tier gate combined - re-running the host
+asperitas-pod/pod-hw`, ~67 s {{gate:cargo-test-pod-hw}} local warm - more than every push-tier gate combined
+- re-running the host
 suite under one non-default feature flag whose compile-time half (`clippy --features
 asperitas-pod/pod-hw`) does run on push. Priced and argued at its own gate in `scripts/gates.sh`,
 taking the split TASK-018.01's fixup made deliberately (`c44b9c1`). Reopen it if pushes become routine
@@ -390,7 +410,7 @@ sounds different" — the failure mode property tests structurally cannot see.
 **Corpus policy.** Real instrument recordings are committed to git alongside synthetic
 signals (impulses, sweeps, plucked-string stubs). To keep this from becoming painful:
 
-- keep clips **short (2–5 s)**, mono, 48 kHz
+- keep clips **short (2–5 s)**, mono, 48 kHz gate-costs:exempt reason="audio clip length in the test corpus policy, not a gate cost"
 - goldens are regenerated deliberately via an explicit command, never automatically —
   every regeneration is a reviewable diff
 - a golden diff in a PR means "listen to this before accepting it", not "run the update

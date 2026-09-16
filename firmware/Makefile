@@ -188,8 +188,8 @@ flash-all: build flash
 # beside the ELF, and `elf-check` recomputes it and compares. No timestamp enters either half, which
 # is the entire point. What it replaces was `find $(ELF_INPUTS) -newer $(ELF)`, so it could not tell
 # "the sources moved on" from "something rewrote the filesystem metadata": TASK-056 measured
-# `make probe-log` going red on a tree `git status` called clean, 2975 s of pure metadata between a
-# freshly linked ELF and files `git checkout` had just refreshed. Bulk metadata churn of exactly that
+# `make probe-log` going red on a tree `git status` called clean, 2975 s of pure metadata apart. gate-costs:exempt reason="one historical mtime gap, quoted as evidence for dropping -newer"
+# The churn behind it was files `git checkout` had just refreshed. Bulk metadata churn of exactly that
 # shape is ordinary housekeeping here, and a check that cries wolf on it is a check the loop learns to
 # work around.
 #
@@ -280,12 +280,12 @@ endef
 # When the stamp already equals the digest of the inputs, the sources are what built this ELF and
 # there is nothing to prove or to write. When it does not, the relink is made certain rather than
 # offered: `$(CARGO) build` decides for itself whether to link, and it decides from mtimes, so a
-# source whose bytes changed while its mtime went backwards -- a restore from a backup or a sync
-# tool, where a checkout does not land -- reports "Finished in 0.29s" and leaves the ELF holding the
-# old code. Measured here 2026-09-14. Stamping over that would certify bytes nobody compiled, which
-# is a silent pass replacing the noisy false alarm this ticket removes, so `$(MAIN_SRC)` is touched
-# first and cargo is left no choice. Cost lands only where a recompile was already owed: a warm
-# forced relink of this crate measures 0.69 s.
+# source whose bytes changed while its mtime went backwards -- a restore from a backup or a sync tool,
+# where a checkout does not land -- reports "Finished in 0.29s" and keeps the old bytes. gate-costs:exempt reason="quoting cargo's own output, not a cost this repo publishes"
+# Measured here 2026-09-14. Stamping over that would certify bytes nobody compiled, which is a silent
+# pass replacing the noisy false alarm this ticket removes, so `$(MAIN_SRC)` is touched first and cargo
+# is left no choice. Cost lands only where a recompile was already owed: a warm forced relink of this
+# crate measures ~0.69 s {{component:firmware-forced-relink}}.
 define ELF_BUILD_AND_STAMP
 	want=$$( $(ELF_INPUTS_SHA256) ) || exit 1; \
 	if [ -f $(ELF_STAMP) ]; then have=$$(tr -dc '0-9a-f' < $(ELF_STAMP)); else have=; fi; \
@@ -346,9 +346,9 @@ REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)'$(if $(filter 1,$(NO_DEFAULT)
 # Under the content check the reason to prefer it over a plain `make build-elf` is sharper than the
 # mtime argument it started with: `build-elf` touches `$(MAIN_SRC)` itself whenever the stamp
 # disagrees, so following this line is what makes cargo prove the link instead of declining to make an
-# offer. Measured warm on this tree, console cfg set: this remedy 0.69 s; deleting
-# target/$(TARGET)/release/.fingerprint/asperitas-firmware-* 1.11 s, which works but reaches into
-# cargo's private layout.
+# offer. Measured warm on this tree, console cfg set: this remedy ~0.69 s {{component:firmware-forced-relink}}.
+# Forcing one by deleting target/$(TARGET)/release/.fingerprint/asperitas-firmware-* instead is slower,
+# and it reaches into cargo's private layout.
 REMEDY = touch $(MAIN_SRC) && make build-elf $(REQUESTED)
 
 ## Fail if $(ELF) was not built from the sources on disk, or if it is a different cfg set than asked
@@ -433,9 +433,10 @@ check:
 ## stages and CI execute. Raw cargo rather than `make clippy` on purpose: the gates need --bins, and
 ## the recipe above hard-wires one binary. The only place any tier still reaches make is the
 ## docs-artifact-name lint, and only with `-n` (see its header warning about why that flag is not
-## optional). Cost of those two gates, local warm inside `nix develop .#default`: 0.42 s and 0.22 s
-## when nothing changed, ~2 s straight after a build, ~20 s in a fresh target dir. Landed with
-## TASK-060.03, re-pointed by TASK-061.02 when the hook job names died.
+## optional). Cost of those two gates, local warm inside `nix develop .#default`, as the commit tier
+## that publishes them pays them: 0.23 s {{gate:firmware-clippy}} and 0.21 s {{gate:firmware-clippy-rtt}} when nothing
+## changed, several times that straight after a build, tens of seconds in a fresh target dir. Landed
+## with TASK-060.03, re-pointed by TASK-061.02 when the hook job names died.
 clippy:
 	cargo clippy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- -D warnings
 

@@ -9,9 +9,11 @@
 #
 # What that shape trades away, recorded so nobody "fixes" the silence later: lefthook captures a
 # command's stdout and replays it when the command finishes, so a hook now prints nothing until its
-# tier ends (~4 s commit, ~77 s push). What comes back is per-gate headers and wall times in the log,
-# fail-fast naming the gate that died, and an order the script declares rather than one lefthook
-# infers - it sorts a stage's commands by priority, then leading digits, then name ascending, NOT by
+# tier ends. How long that silence lasts is whatever the tier costs, and this file does not restate it -
+# docs/gate-costs.json holds the figure and `scripts/gate-costs.sh --check` reports anything here that
+# stops agreeing with it. What comes back for the muteness is per-gate headers
+# and wall times in the log, fail-fast naming the gate that died, and an order the script declares rather
+# than one lefthook infers - it sorts a stage's commands by priority, then leading digits, then name ascending, NOT by
 # declaration order, so cheapest-gate-first and cross-build-before-cross-clippy are unexpressible in
 # this file. If the muteness ever becomes unbearable, two keys stream output, and both were measured
 # rather than assumed: `parallel` with `priority` 100000 streams but stops guaranteeing that the
@@ -43,7 +45,7 @@
 # And `parallel` starts every cargo job at once and loses fail-fast.
 #
 # Any check that runs in one tier and not another is an exception written down with its price at the
-# gate itself in scripts/gates.sh - currently one: the `pod-hw` test, ci-only at 67 s warm.
+# gate itself in scripts/gates.sh - currently one: the `pod-hw` test, ci-only.
 #
 # No `forward_stderr:` key here, though every command carried one until TASK-061 asked whether it
 # does anything. It does not: the key exists in no lefthook release - absent from the 2.1.10 this

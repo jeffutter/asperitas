@@ -5,7 +5,7 @@
 #
 # Why a gate and not a transcript: the check this replaced compared mtimes (`find -newer`), so it went
 # red on a tree nobody had edited -- TASK-056 measured `make probe-log` refusing to run with `git
-# status` clean and 2975 s separating a freshly linked ELF from files a checkout had just refreshed.
+# status` clean and 2975 s separating a freshly linked ELF from files a checkout had just refreshed. gate-costs:exempt reason="one historical mtime gap, quoted as evidence"
 # A fix for that is only worth what its assertion is worth, and a hand-run transcript asserts nothing
 # after the next edit to either side. So every case below drives the SHIPPED recipe through make's own
 # command-line overrides, which is also what makes the suite red against the old Makefile and green
@@ -31,12 +31,15 @@
 #
 # Cost rules, obeyed so this stays a commit-tier gate: fixtures are written at runtime under a
 # `mktemp -d` and removed on exit, never under firmware/target/. No case runs cargo, clippy, objcopy,
-# objdump or a real build; each runs one `make` against a parsed Makefile (~40 ms warm). Nothing here
+# objdump or a real build; each runs one `make` against a parsed Makefile, at
+# ~12 ms {{component:make-parse}} a parse. Nothing here
 # writes a tracked file -- which matters more than usual, because writing a firmware source would bump
 # the mtime of an ELF input and send the bench's own `elf-check` red, the exact failure this script is
-# about. Measured 0.85 s warm for ten cases inside a `commit` tier run (scripts/gates.sh reports 0.84
-# and 0.85 s across three runs; the 0.4 s this line claimed before TASK-068 was a standalone figure that
-# never included the ~40 ms `make` per case being paid against a cold Makefile parse).
+# about. Measured 0.84 s {{gate:elf-staleness-selftest}} warm for ten cases inside a `commit` tier run, and
+# most of that is those ten parses. The smaller figure this line carried before TASK-068 was a
+# standalone reading that never included the per-case parse being paid against a cold Makefile; it
+# survived two tickets because nothing compared this sentence with the tier's own timing of the same
+# gate. Both cite one ledger key now, so they cannot drift apart again.
 #
 # Exit codes: 0 every case passed, 1 at least one case failed (all failures reported in one run), 2
 # the suite could not run at all -- no make, no sha256 tool, or a fixture that could not be staged.

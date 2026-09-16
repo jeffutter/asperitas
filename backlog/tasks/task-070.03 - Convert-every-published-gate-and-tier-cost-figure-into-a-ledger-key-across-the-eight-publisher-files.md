@@ -3,11 +3,11 @@ id: TASK-070.03
 title: >-
   Convert every published gate and tier cost figure into a ledger key across the
   eight publisher files
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-14 15:16'
-updated_date: '2026-09-14 15:16'
+updated_date: '2026-09-16 08:52'
 labels:
   - planned
 dependencies:
@@ -26,12 +26,12 @@ Text surgery that makes scripts/gate-costs.sh --check green for the first time. 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `bash scripts/gate-costs.sh --refresh` followed by `--check` exits 0 on a clean tree, and grep over the eight guarded files finds no wall-clock duration literal outside a generated region other than reasoned, counted exemptions.
-- [ ] #2 Every figure that carried an argument survives as either a key or words: the cheapest-first placement case for the three selftests, the ordering-rule evidence for clippy-after-build, the read-only case for the provenance gate, the cold-page-in explanation for the 0.98 s outlier, and pod-hw's priced CI-only exclusion with its reopen condition (TASK-061 AC #3 asked for priced, not absent).
-- [ ] #3 The live contradictions are gone rather than reconciled by hand: elf-staleness stated once (was 0.9 vs 0.85, plus a sentence asserting what gates.sh prints), image load addresses once (was 0.70/0.71 vs 0.72), the firmware-clippy idle pair once (0.25 vs 0.42/0.22), the cargo-metadata component once (one at ~85 ms vs two, and 82 ms elsewhere), and the per-child cost once (0.15 s vs ~120 ms).
-- [ ] #4 Component micro-costs become dated ledger components stated in one place each, not prose duplicated across files; the single-sample approximation caveat stays visible in rendered prose.
-- [ ] #5 Stale cross-references found while planning get fixed in passing: doc-001:250-251 still tells the reader to regenerate the matrix with gates.sh --list, and gates.sh:87 cites check-doc-artifact-names.sh:37-38 when that code sits at :49-50.
-- [ ] #6 Proving the guard before trusting it: hand-typing a wrong figure into a gates.sh comment and changing one ledger value without re-rendering both turn --check red naming file and line; both mutations reverted afterwards.
+- [x] #1 `bash scripts/gate-costs.sh --refresh` followed by `--check` exits 0 on a clean tree, and grep over the eight guarded files finds no wall-clock duration literal outside a generated region other than reasoned, counted exemptions.
+- [x] #2 Every figure that carried an argument survives as either a key or words: the cheapest-first placement case for the three selftests, the ordering-rule evidence for clippy-after-build, the read-only case for the provenance gate, the cold-page-in explanation for the 0.98 s outlier, and pod-hw's priced CI-only exclusion with its reopen condition (TASK-061 AC #3 asked for priced, not absent).
+- [x] #3 The live contradictions are gone rather than reconciled by hand: elf-staleness stated once (was 0.9 vs 0.85, plus a sentence asserting what gates.sh prints), image load addresses once (was 0.70/0.71 vs 0.72), the firmware-clippy idle pair once (0.25 vs 0.42/0.22), the cargo-metadata component once (one at ~85 ms vs two, and 82 ms elsewhere), and the per-child cost once (0.15 s vs ~120 ms).
+- [x] #4 Component micro-costs become dated ledger components stated in one place each, not prose duplicated across files; the single-sample approximation caveat stays visible in rendered prose.
+- [x] #5 Stale cross-references found while planning get fixed in passing: doc-001:250-251 still tells the reader to regenerate the matrix with gates.sh --list, and gates.sh:87 cites check-doc-artifact-names.sh:37-38 when that code sits at :49-50.
+- [x] #6 Proving the guard before trusting it: hand-typing a wrong figure into a gates.sh comment and changing one ledger value without re-rendering both turn --check red naming file and line; both mutations reverted afterwards.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -114,3 +114,104 @@ in the rendered text via `{{meta:...}}`, not deleted.
 both the ledger-side and prose-side reports. Revert both. Finally `bash scripts/gates.sh commit` green
 end to end.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+### What shipped
+
+One commit, eight guarded files, no wall-clock numeral left outside the ledger. Every published figure
+is now a token the renderer owns: `VALUE {{gate:key}}`, `{{tier:t}}`, `{{component:key}}` or
+`{{meta:measured}}`. 49 tokens across the eight files, over 21 distinct keys, plus doc-001's gate table
+as a generated region between markers. Eight reasoned exemptions remain, one per figure this check
+cannot see because it is not a cost claim (`grep 'gate-costs:exempt'`): cargo's own `Finished in 0.29s`,
+the 2975 s mtime gap that motivated TASK-056, three historical totals quoted as evidence for why
+`SECONDS` left the formatter, the audio block latency that follows from the sample rate, and two quotes
+of figures another ticket shipped. A marker on a line holding no duration is reported as dead, so the
+set cannot quietly rot into decoration.
+
+`lefthook.yml` carries zero tokens by choice. Its paragraph argues that the hook is mute for as long as
+the tier costs; the sentence now says the number lives in the ledger and points there, rather than
+restating one it would have to keep warm.
+
+### Two live defects the conversion exposed, both in code TASK-070.02 shipped
+
+Both were found by reading rendered output rather than by the checker, and both passed `--check` at the
+time. That is worth stating plainly: a check that grades self-consistency grades self-consistency.
+
+1. **`strip_owned()` kept a digit.** Substitution leaves the token standing after the figure it wrote,
+   so rendering a rendered line must reproduce it exactly, which means stripping the old figure first.
+   The trailing-figure regex has an alternative that matches empty at line start; when the figure sat at
+   the head of a line, the strip consumed nothing but the space before the token, and the new figure was
+   appended after the old digit. Hand-typing `0.85 s` at the start of a doc-001 sentence rendered
+   `00.86 s` - and `--check` called it clean, because the file on disk matched what the renderer
+   produced. That doubled figure went out live in the previous commit. Fixed with two guards (an exact
+   match preceded by a digit, comma or dot is refused; a trail whose first character is not a separator
+   means the empty alternative fired, so strip the whole tail), plus case `line_start_figure`, which is
+   red on revert and shows `rendered: 00.89 s`.
+2. **The generated matrix marked tier membership backwards.** `generate_gate_matrix()` printed
+   `(1 <= rank ? "yes" : "-")` where `rank` is the gate's own `min_tier`, so a commit-tier gate read
+   `yes | - | -` and the ci-only `pod-hw` test read `yes | yes | yes`. In the plan that is the claim
+   that `cargo test` runs in pre-commit and that the cheap structural gates do not run in CI - the exact
+   inverse of `gates.sh --list`, and precisely the species of published false statement this ticket
+   exists to retire. `--check` could not see it: it compares rendered bytes against disk, and the
+   generator was consistently wrong. Direction corrected to `rank <= N`, and case `matrix_membership`
+   added, which renders a fixture with one gate per tier and asserts each row's marks equal what its
+   tier implies. Red on revert, naming all four rows.
+
+### Mutation proofs (AC #6), run against the committed tree
+
+Hand-typed figure, `scripts/gates.sh:229` changed from `~11 ms` to `~40 ms`:
+
+```
+scripts/gates.sh:229: renders differently from the file on disk.
+  on disk:    # ~40 ms {{component:gates-sh-per-gate-spawn}} per gate, ...
+  rendered:   # ~11 ms {{component:gates-sh-per-gate-spawn}} per gate, ...
+```
+
+Ledger moved without re-rendering, `elf-provenance-selftest` commit cost set to `0.55`: three findings
+in one run - `scripts/gates.sh:54`, `scripts/elf-provenance.sh:266`, and
+`backlog/docs/doc-001…:263` - which is the point of the whole design. One measurement backs citations
+in three places, so one stale measurement produces three named findings rather than one plausible-
+looking document. Both mutations reverted; `--check` green afterwards.
+
+### Measurement numbers (AC #1)
+
+`bash scripts/gate-costs.sh --refresh` inside `nix develop .#default` on a clean tree, then `--check`:
+exit 0, "8 guarded files render byte-identical to docs/gate-costs.json, which prices all 22 live gates".
+`measured_utc` 2026-09-16T08:48:27Z. commit 4.311 s, push 77.229 s, ci 143.696 s. Selftests 0.884,
+0.845, 0.601 s; the two `cargo test` invocations 66.44 and 66.507 s, which is why `ci` is where it is.
+`--selftest` 58 cases, 0 failures.
+
+### Held back for TASK-070.04 deliberately
+
+The `gate commit gate-costs-current` line in `scripts/gates.sh`, the sentence in `lefthook.yml` that
+says the commit tier fails on a stale figure, and doc-001's "Who owns each number" subsection. Wiring
+belongs to .04, and a commit that claims the check runs as a gate before it does would be the same kind
+of false publication this ticket is fixing. This commit ships the check green and un-wired.
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Every published gate and tier cost figure in this repo is now a key into `docs/gate-costs.json`. The
+eight guarded files hold 49 tokens over 21 keys, doc-001's gate table is a generated region, and eight
+figures that are not cost claims stay literals with a reason the checker can check. `--refresh` followed
+by `--check` exits 0 on a clean tree: no wall-clock numeral outside the ledger, outside a generated
+region, or outside an exemption.
+
+Converting the text was the small half. The value came from reading what the renderer actually produced,
+which turned up two live defects in code that had already shipped and passed its own check: the
+line-start strip that rendered `0.85 s` as `00.86 s` and called it clean (the doubled figure went out in
+the previous commit), and a tier-membership comparison written backwards, which published "cargo test
+runs in pre-commit" in the project plan while `gates.sh --list` said the opposite. Both fixed, each with
+a case that goes red on revert.
+
+Proof the guard bites before trusting it: a hand-typed `~40 ms` in a `gates.sh` comment reports file,
+line, disk bytes and rendered bytes; moving one ledger value without re-rendering names all three sites
+that cite it in a single run. Both reverted, green after.
+
+Numbers from the real command on a clean tree: measured 2026-09-16T08:48:27Z, commit 4.311 s, push
+77.229 s, ci 143.696 s, 22 gates priced per paying tier, selftests 0.884 / 0.845 / 0.601 s, the two
+`cargo test` runs 66.44 and 66.507 s. Selftest 58 cases, 0 failures. Stale cross-references fixed in
+passing. Ships un-wired: registering `--check` as a commit-tier gate, and writing down who owns each
+number, is TASK-070.04.
+<!-- SECTION:FINAL_SUMMARY:END -->

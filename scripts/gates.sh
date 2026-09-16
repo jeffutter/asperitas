@@ -17,8 +17,9 @@
 # artifacts the builds just produced. A sequential script can say both; YAML cannot. It also buys
 # deterministic ordering, per-gate timings, and fail-fast that alphabetical names cannot give.
 # What it gives up: lefthook captures a command's stdout and replays it when the command finishes,
-# so a hook now prints nothing until its tier ends (~4 s commit, ~77 s push). Read the per-gate
-# headers and times below as the trade.
+# so a hook now prints nothing until its tier ends. The silence lasts as long as the tier costs, and
+# the ledger named below is what says how long that is. Read the per-gate headers and times below as
+# the trade.
 #
 # Tiers are cumulative: `commit` is a subset of `push`, `push` a subset of `ci`. No argument means
 # `ci` -- forgetting the argument must never mean "ran less than everything".
@@ -38,15 +39,19 @@
 #      them, which is what pre-commit does today.
 #
 # Cost figures in the comments are LOCAL warm numbers, aarch64-darwin, measured inside
-# `nix develop .#default` on a clean tree. One figure per gate even where two call sites used to
-# quote different ones. Runner-side figures belong to TASK-052 and TASK-063: main sits ~91 commits
-# ahead of origin/main and ci.yml has no workflow_dispatch, so no agent can observe a runner.
+# `nix develop .#default` on a clean tree. None of them is typed here: each is a key into
+# docs/gate-costs.json, which `scripts/gate-costs.sh --refresh` writes by timing the tiers and which
+# `scripts/gate-costs.sh --check` reads back against this file to report any figure that has stopped
+# agreeing with the measurement. One figure per gate even where two call sites used to quote different
+# ones, and it is always the observation from the tier that publishes the gate. Runner-side figures
+# belong to TASK-052 and TASK-063: main sits ~91 commits ahead of origin/main and ci.yml has no
+# workflow_dispatch, so no agent can observe a runner.
 #
 # Adding a check: add one `gate` line in the position you want it to run, with the tier that should
 # start running it and a stable key. Nothing else in the repo names checks.
 #
 # Every gate has a key as well as a banner, and the key -- not the banner -- is its identity. Prose
-# cites a cost from inside a sentence (`the provenance reader, 0.89 s {{gate:elf-provenance-selftest}},
+# cites a cost from inside a sentence (`the provenance reader, 0.88 s {{gate:elf-provenance-selftest}},
 # reads only`), so rewording a banner for readability must not orphan the measurement recorded
 # against it; that is the same argument that put the gate list in a script rather than in YAML names.
 # Keys match ^[a-z0-9][a-z0-9-]{0,39}$ and must be unique; both are enforced where they cost nothing,
@@ -99,7 +104,8 @@ done
 # Anchoring is load-bearing, not hygiene. Run from firmware/ an unanchored list produces
 # wrong-workspace passes that exit 0: `cargo fmt --all --check` checks the firmware workspace
 # instead of the host one, `cargo clippy --workspace` means the firmware crates, and
-# `-p asperitas-logging` errors out. Same shape as scripts/check-doc-artifact-names.sh:37-38.
+# `-p asperitas-logging` errors out. Same shape as the ROOT anchor at the top of
+# scripts/check-doc-artifact-names.sh.
 ROOT=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT" || exit 1
 
@@ -216,10 +222,13 @@ if [[ $MODE == run ]]; then
   printf 'tier: %s\n' "$TIER"
   # Everything from here to the summary line is what the tier total measures. Reading it before the
   # first gate rather than at the top of the file keeps shell startup and the sysroot probe out of it;
-  # what separates the whole from the sum of its gate lines is the banner print and the two awk calls
-  # that format each gate's timing -- one process spawn per gate, so it grows with the gate count. It
-  # is 132 ms over the 12 gates of a `commit` run and 225 ms over the 21 of a `push` run, i.e. about
-  # 11 ms per gate. Anything much past that means something other than printing entered the loop.
+  # what separates the whole from the sum of its gate lines is the banner print and the awk call that
+  # formats each gate's timing -- and while the timing sink below is open, which is how the ledger takes
+  # its measurement, a second awk per gate. Either way it is at least one process spawn per gate, so the
+  # residue grows with the gate count and not with what the gates do. It is
+  # ~11 ms {{component:gates-sh-per-gate-spawn}} per gate, measured as the residue of a whole `commit` run
+  # against the sum of its own gate lines. Anything much past that means something other than printing
+  # entered the loop.
   TIER_START_US=${EPOCHREALTIME/./}
 fi
 
@@ -229,12 +238,17 @@ fi
 # the step dies on "unexpected EOF while looking for matching `''" -- 6d7d38a to 70c6fc6, unseen
 # because nothing had been pushed since the last green run) is worth ten milliseconds to rule out
 # locally. Cheapest gate, so a broken definition is the fastest possible failure.
-gate commit gate-definition-parses "=== gate definition parses ===" bash -n "${BASH_SOURCE[0]}"
+#
+# The path is written relative to the repo root rather than as `${BASH_SOURCE[0]}`, because this file
+# `cd`s there before running anything and the ledger hashes the printed command line: an absolute path
+# here would fold the machine's checkout directory into `command_sha256`, and the same commit would then
+# report its own cost digest as drifted on any clone elsewhere, including every CI runner.
+gate commit gate-definition-parses "=== gate definition parses ===" bash -n scripts/gates.sh
 
 # Docs name firmware image files; legal names come from the build rules themselves via `make -n`,
 # so this is the only place in the gate set that invokes make, and it stays a dry run -- see the
-# load-bearing warning at scripts/check-doc-artifact-names.sh:25-28. Covers names only: it does not
-# read a line of Rust. Landed with TASK-058.
+# "THE -n FLAG ... IS LOAD-BEARING" paragraph near the top of scripts/check-doc-artifact-names.sh.
+# Covers names only: it does not read a line of Rust. Landed with TASK-058.
 gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-artifact-names.sh
 
 # The provenance reader's own checks (TASK-067). TASK-062.02's commit message described these cases as
@@ -245,12 +259,13 @@ gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-
 # `clippy` / `objcopy` / `objdump` / `make`, never a path under firmware/target/) are spelled out in
 # scripts/elf-provenance.sh's own header.
 #
-# Third gate, ahead of every cargo invocation, because it compiles nothing and needs no artifact: the
-# one figure below is what cheapest-first says to do with a check that has no inputs to wait for.
+# Ahead of every cargo invocation, because it compiles nothing and needs no artifact: the one figure
+# below is what cheapest-first says to do with a check that has no inputs to wait for.
 # Placing it beside the push-tier provenance gate "for symmetry" would misrepresent both - they share
 # no state, one grades the reader and the other grades the stamp - and ordering rule 1 is untouched,
-# since no firmware gets built here. Measured 0.89 s warm, which is the price of seven objcopy
-# invocations (~50 ms each) and one `cargo metadata` (~85 ms), every one of them load-bearing.
+# since no firmware gets built here. Measured 0.88 s {{gate:elf-provenance-selftest}} warm, which is the
+# price of seven rust-objcopy invocations at ~31 ms {{component:objcopy-invocation}} each and one memoized
+# `cargo metadata` at ~52 ms {{component:cargo-metadata-invocation}}, every one of them load-bearing.
 # Outside `nix develop .#default` there is no rust-objcopy, but gates.sh already exits 3 before any
 # gate for the missing thumbv7em std, so the script's own exit-2 message is a direct-run affordance
 # rather than a hook failure.
@@ -264,7 +279,8 @@ gate commit elf-provenance-selftest "=== elf-provenance --selftest ===" scripts/
 # against any Makefile that compares mtimes again. Fixtures under `mktemp -d`, no cargo, nothing
 # outside that directory touched -- rules and reasoning in scripts/check-elf-staleness.sh's header.
 # Fourth in the list on the same cheapest-first rule as the gate above: it builds nothing and reads no
-# artifact. Measured 0.9 s warm for ten cases, most of it make parsing the Makefile ten times.
+# artifact. Measured 0.84 s {{gate:elf-staleness-selftest}} warm for ten cases, most of it make parsing the
+# Makefile once per case at ~12 ms {{component:make-parse}} a parse.
 gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/check-elf-staleness.sh --selftest
 
 # The load-address checker's own checks (TASK-068). The push-tier `=== image load addresses ===` gate far
@@ -286,8 +302,9 @@ gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/ch
 # cannot prove is the limit every fixture has -- that the linker emits anything like these files -- and
 # the push-tier gate over six linked ELFs stays the backstop for that, which is why both exist rather
 # than one. Fifth here on the same cheapest-first rule as the two above: compiles nothing, reads no
-# artifact, writes nothing under firmware/target/. Measured 0.6 s warm, all of it in the five children and
-# their objdumps (~58 ms each). Eight deliberate mutations each turned at least one case red and left the
+# artifact, writes nothing under firmware/target/. Measured 0.60 s {{gate:load-addresses-selftest}} warm,
+# nearly all of it in the five child processes and their objdumps at ~29 ms {{component:objdump-invocation}}
+# each. Eight deliberate mutations each turned at least one case red and left the
 # rest green: trim dropped, zero-size counted, empty Type read as loaded, unknown Type word downgraded to
 # a warning, VMA column read instead of LMA, refusal removed before measuring, `.sram1_bss` matched as a
 # substring, and no-rows-parsed downgraded to a warning. Two of them needed a case of their own that no
@@ -367,10 +384,11 @@ gate push firmware-cross-compile-rtt "=== firmware cross-compile (RTT-only, log-
 #
 # Reads only, on purpose: it shells out to `rust-objcopy` inside scripts/elf-provenance.sh and asks
 # cargo for nothing. `cargo objcopy`, `cargo objdump` and `make build-elf` all rebuild, and a rebuild
-# re-points the very path this gate is auditing -- a cfg switch finishes in 0.07 s by re-uplifting the
-# cached hardlink, no relink -- so the check would grade its own side effect instead of the pair.
-# Asking with NO_DEFAULT=1 also keeps `cargo metadata` out of it entirely: that derivation only runs
-# when defaults are on. Measured warm: 0.08 s inside a `ci` run, 0.09 s inside `push`.
+# re-points the very path this gate is auditing -- even the cheap rebuild, a cfg switch that finishes by
+# re-uplifting the cached hardlink instead of relinking -- so the check would grade its own side effect
+# instead of the pair. Asking with NO_DEFAULT=1 also keeps `cargo metadata` out of it entirely: that
+# derivation only runs when defaults are on. Measured 0.09 s {{gate:firmware-elf-provenance}} warm, as the
+# `push` tier pays it.
 #
 # `push` tier and placed where it is because it asserts something only the pair above can make true.
 # In the `commit` tier there is no build before it, so the path would hold whatever the last push
@@ -388,16 +406,18 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 #
 # `push` tier and placed here because pre-commit builds no firmware, so the ELFs it reads may not exist
 # at all -- and inventing a skip path for that is the blind spot TASK-062 had to remove from elf-check.
-# Measured 0.70 s warm on its own, 0.71 s inside a `push` run: twelve child processes, six objdumps
-# (~58 ms each) and six objcopies (~30 ms). Its parser's own assertions are a separate commit-tier gate,
+# Measured 0.73 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
+# processes, six objdumps at ~29 ms {{component:objdump-invocation}} each and six objcopies at
+# ~31 ms {{component:objcopy-invocation}}. Its parser's own assertions are a separate commit-tier gate,
 # `=== load-addresses --selftest ===`, placed with the other selftests ahead of every cargo invocation --
 # which is where a check with no inputs to wait for belongs; this one stays the only place that grades the
 # six linked images.
 gate push image-load-addresses "=== image load addresses ===" bash scripts/check-image-load-addresses.sh
 
 # Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses
-# their artifacts: ~20 s in a fresh target dir, ~2 s directly after a build, 0.25 s when nothing
-# changed. --bins is the whole package over there (no lib target, six entries under src/bin/), and
+# their artifacts: 0.23 s {{gate:firmware-clippy}} and 0.21 s {{gate:firmware-clippy-rtt}} when nothing has changed
+# since the last lint, several times that directly after a build, and tens of seconds in a fresh target
+# dir. --bins is the whole package over there (no lib target, six entries under src/bin/), and
 # --all-targets is unusable on a no_std target with no test harness to link. firmware/ is a second
 # workspace, so every host clippy above says nothing about the six bins that actually run on the
 # board. The RTT-only cfg set is where TASK-036.03's warnings actually surfaced, so linting only the
@@ -411,9 +431,9 @@ gate commit firmware-clippy-rtt "=== firmware clippy (all bins, RTT-only, log-de
 gate push cargo-test "=== cargo test ===" cargo test --workspace
 
 # THE ONE DELIBERATELY CI-ONLY GATE, and it is priced rather than merely absent (TASK-061 AC #3).
-# 67 s local warm -- more than every other push-tier gate combined -- to re-run the whole host suite
-# under one non-default feature flag. Its compile-time half DOES run in the push tier, as the
-# pod-hw clippy above, so what stays remote is runtime coverage of pod-hw code paths. Accepted
+# ~67 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
+# flag -- more than every other push-tier gate combined. Its compile-time half DOES run in the push tier,
+# as the pod-hw clippy above, so what stays remote is runtime coverage of pod-hw code paths. Accepted
 # because CI is the authority for that coverage, TASK-018.01's fixup made the same split on purpose
 # (commit c44b9c1), and the loop that writes most commits here never pushes: pre-commit is where its
 # work gets gated. Reopen condition, stated as a condition: if pushes become routine, or the
@@ -441,9 +461,10 @@ if [[ -n ${GATES_TIMINGS_FILE:-} ]]; then
 fi
 
 # The total used to print bash's `SECONDS` through `%.1f`. `SECONDS` is an integer counter, so that
-# number could only ever come out X.0 while the truth sat anywhere in [X, X+1): measured during
-# TASK-070's planning, a 2437 ms sleep leaves SECONDS=2. It is why TASK-068 published `commit 4 s`
-# against a gate sum of 4.15-4.37 s and why TASK-064.01 saw `145.0s` a day after TASK-068 saw
-# 143-144 s. A total that cannot agree with its own parts is not a total worth publishing.
+# number could only ever come out X.0 while the truth sat anywhere in [X, X+1). Measured during
+# TASK-070's planning: a 2437 ms sleep leaves SECONDS=2. gate-costs:exempt reason="evidence about the old integer formatter"
+# That is why TASK-068 published a `commit` total of 4 s against a gate sum of 4.15-4.37 s. gate-costs:exempt reason="quoting the stale total TASK-068 shipped, as evidence for this paragraph"
+# And why TASK-064.01 saw 145.0s a day after TASK-068 saw 143-144 s. gate-costs:exempt reason="the same stale quote, observed one day later"
+# A total that cannot agree with its own parts is not a total worth publishing.
 printf '\ntier %s: %d gates, %.1fs\n' "$TIER" "$RAN" \
   "$(awk -v us="$TIER_US" 'BEGIN { printf "%.1f", us / 1000000 }')"

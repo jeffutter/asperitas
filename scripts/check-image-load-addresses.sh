@@ -67,8 +67,9 @@
 #
 #   C1  At most five child invocations of the whole script per run - one per exit code a gate can
 #       observe, plus the three read guards. Everything else calls the parsed-section functions
-#       in-process, where a fork costs ~2 ms against the ~120 ms a child pays for a fresh interpreter
-#       and two llvm spawns.
+#       in-process, where a fork is on the order of ~4 ms {{component:bash-subprocess-startup}} against the
+#       ~70 ms {{component:selftest-child-invocation}} even the cheapest child pays for a fresh interpreter and
+#       its objdump.
 #   C2  The fixture images are generated once, before the first case, and no case regenerates one.
 #   C3  No `cargo objdump`, `cargo objcopy`, `cargo build`, `cargo metadata` or `make`, and no case
 #       names a path under firmware/target/: those either rebuild or re-point the artifact the push-tier
@@ -534,8 +535,9 @@ report() {
 # the bytes beside the parser means a layout change moves both together.
 
 # The image is assembled as HEX TEXT in one variable and converted to bytes exactly once, at the end, for
-# the two reasons scripts/elf-provenance.sh:271-290 records: a command substitution per field costs a
-# fork (~40 ms before the first case runs), and bash cannot hold a NUL in a variable, which `.shstrtab`
+# the two reasons scripts/elf-provenance.sh records beside its own generator: a command substitution per
+# field costs a fork, which the first draft paid 25 times per fixture before the first case ran, and
+# bash cannot hold a NUL in a variable, which `.shstrtab`
 # is made of. Hex text never contains a NUL, so only the one printf that writes the file ever produces
 # the byte. `fx_emit`'s byte-count check is not ceremony: the ELF64 fixture below first came out 204
 # bytes against a layout of 208, which is one `sh_entsize` written 4 wide where ELF64 wants 8 -- a bug no

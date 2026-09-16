@@ -395,16 +395,29 @@ CLASSIFY_AWK='
       }
       if (length(t) >= length(v) && substr(t, length(t) - length(v) + 1) == v) {
         p = length(t) - length(v)
-        return substr(seg, 1, p)
+        # The match has to stand for the WHOLE figure, so what stands in front of it may not be part of
+        # a numeral. Without this test "1.5 s" citing a key worth "5 s" matched its suffix, lost "5 s",
+        # and got "5 s" written back after the "1." -- byte-identical to what was there, so --check
+        # called a hand-typed figure clean. Same trap makes "00.86 s" permanent once it exists.
+        if (p == 0 || substr(t, p, 1) !~ /[0-9.,]/) return substr(seg, 1, p)
       }
     }
     if (match(seg, TRAIL)) {
       # The character TRAIL starts on is a separator, an approximation marker, or opening punctuation,
-      # and the three are not treated alike: keep one space so the rewrites do not glue words, drop the
+      # and they are not treated alike: keep one space so the rewrites do not glue words, drop the
       # tilde because it belongs to the figure ("~4 s" is one claim, not a tilde wearing a figure), and
       # keep a bracket because it belongs to the sentence. A dropped "(" or a kept "~" both make the
       # next render disagree with this one, which is drift this script would then report about itself.
+      #
+      # But when the match starts at position 1 on something that is not a separator, HEAD did not match
+      # a character at all -- it matched its empty `^` alternative, and the character here is the first
+      # digit of the figure. Keeping it left "0" standing in front of the fresh figure, so a hand-typed
+      # "0.85 s" at the head of a line rendered to "00.86 s", and because this same function blanks the
+      # owned span for the prose scanner the leftover was invisible to --check too: the file disagreed
+      # with itself and the rule grading it agreed with both. Leftmost-longest means a real leading
+      # separator always wins this race, so anything reaching here is a digit.
       c = substr(seg, RSTART, 1)
+      if (c !~ /[ \t~({[*>]/) return substr(seg, 1, RSTART - 1)
       if (c == "~" || c == "\xe2\x80\x93") return substr(seg, 1, RSTART - 1)
       return substr(seg, 1, RSTART)
     }
@@ -499,9 +512,12 @@ generate_gate_matrix() {
     NR == FNR { if ($4 != "") cost[$1] = $4; next }
     $1 == "counts" { next }
     {
+      # A gate runs in its own min_tier and in every tier above it, so a column is marked when the rank
+      # of the GATE reaches the rank of that TIER, not the other way round. Written backwards it reads
+      # as "cargo-test runs in the commit tier", which is the opposite of what the tiers are for.
       rank = ($2 == "commit" ? 1 : ($2 == "push" ? 2 : 3))
       printf "%-27s | %-6s | %-3s | %-3s | %-2s | %-7s | %s\n", $1, $2, \
-        (1 <= rank ? "yes" : "-"), (2 <= rank ? "yes" : "-"), (3 <= rank ? "yes" : "-"), \
+        (rank <= 1 ? "yes" : "-"), (rank <= 2 ? "yes" : "-"), (rank <= 3 ? "yes" : "-"), \
         ($1 in cost ? fmt(cost[$1]) : "UNPRICED"), $3
     }
   ' "$LEDGER_GATES" "$LIST_TSV" >"$WORK/gen/gate-matrix.rows" || die "gate-matrix generation failed"
@@ -1566,6 +1582,51 @@ case_stale_value() {
   expect "and --render repairs it" 0 "$RC" "gate-costs: clean"
 }
 
+# The same mutation as the case above, one column further left, and it used to behave completely
+# differently. TRAIL's HEAD is `(^|[ \t~({[*>])`, and when the figure sat at the head of a line the empty
+# `^` alternative won, so the character the match started on was the figure's own first digit while the
+# code read it as punctuation standing in front of the figure and kept it. A hand-typed "0.85 s" there
+# rendered to "00.86 s" -- and because strip_owned is also what blanks owned spans for the prose scanner,
+# the leftover digit was invisible to the scanner as well, so the FIRST --render after that made the typo
+# permanent and reported the file clean. The remedy this checker prints by name ("run --render and read
+# the diff") was therefore the thing that corrupted the sentence.
+case_line_start_figure() {
+  local d=$1 doc="$1/backlog/docs/doc-001 - Asperitas-Project-Plan.md" want got
+  # Stage the shape by rendering it: a token alone at the head of a line becomes the ledger's own figure
+  # there, and alpha's carries no "~", so the line really does begin with a bare digit. Choosing a key
+  # whose figure is approximate would put a "~" in front and take the sentence down the other branch.
+  printf '%s\n' '{{gate:alpha}} is what the alpha gate costs standing alone.' >>"$doc"
+  run_case "$d" --render
+  want=$(awk 'index($0, "is what the alpha gate costs") > 0 { print; exit }' "$doc")
+  printf '%s\n' "$want" | grep -qE '^[0-9]' || die 'selftest integrity: staged line does not lead with a figure'
+  awk '{ if (!hit && index($0, "is what the alpha gate costs") > 0) { sub(/^[0-9][0-9,.]*[ \t]*(ms|s)/, "0.31 s"); hit = 1 } print }' \
+    "$doc" >"$doc.tmp" && mv "$doc.tmp" "$doc"
+
+  run_case "$d" --check
+  expect "a hand-typed figure at the head of a line is still a finding" 1 "$RC" \
+    "renders differently from the file on disk"
+  # Assert what the report says the ledger renders, not merely that something was reported: the bug was
+  # in the rendered text itself, so a check that named the file and showed a doubled digit would pass a
+  # code-and-phrase assertion.
+  printf '%s\n' "$OUT" | grep -Fq "rendered: $want" || {
+    printf 'FAIL the rendered form of a line-leading figure is not the ledger figure:\n%s\n' "$OUT" >&2
+    CASES_FAILED=$((CASES_FAILED + 1)); }
+
+  run_case "$d" --render
+  expect "--render repairs a line-leading figure" 0 "$RC" "rewrote"
+  got=$(awk 'index($0, "is what the alpha gate costs") > 0 { print; exit }' "$doc")
+  CASES_RUN=$((CASES_RUN + 1))
+  if [ "$got" != "$want" ]; then
+    printf 'FAIL rendering left more than one figure at the head of the line\n wanted: %s\n     got: %s\n' \
+      "$want" "$got" >&2
+    CASES_FAILED=$((CASES_FAILED + 1))
+  else
+    printf 'ok   and leaves exactly the one figure the ledger holds, not a second copy beside it\n'
+  fi
+  run_case "$d" --check
+  expect "and the repaired line checks clean" 0 "$RC" "gate-costs: clean"
+}
+
 case_unknown_key() {
   local d=$1 doc="$1/backlog/docs/doc-001 - Asperitas-Project-Plan.md"
   printf '%s\n' 'The zeta gate, 1 s {{gate:zeta}}, was never priced.' >>"$doc"
@@ -1690,6 +1751,29 @@ case_matrix_cell_is_not_a_finding() {
   # Every cell of the cost column is a duration. Inside a generated region they must read as owned.
   run_case "$d" --check
   expect "figures inside a generated region are the generator's, not findings" 0 "$RC" "gate-costs: clean"
+}
+
+case_matrix_membership() {
+  local d=$1 doc="$1/backlog/docs/doc-001 - Asperitas-Project-Plan.md" bad
+  run_case "$d" --render
+  # The three tier columns are the published answer to "does this gate run in that tier", so they must
+  # agree with `gates.sh --list`, which is where the tiers are declared. alpha/beta are commit-tier, so
+  # all three; gamma is push-tier, so not the first; delta is ci-only, so only the last. A comparison
+  # written in the wrong direction marks every gate as running in every tier at or BELOW its own, which
+  # reads as "cargo test runs in pre-commit" -- the exact false claim this whole ledger exists to retire.
+  bad=$(awk '/BEGIN GENERATED: gate-matrix/{inb=1; next} /END GENERATED: gate-matrix/{inb=0}
+    inb { gsub(/\|/, " ") }
+    inb && $1 ~ /^(alpha|beta|gamma|delta)$/ {
+      want = ($2 == "commit" ? "yes yes yes" : ($2 == "push" ? "- yes yes" : "- - yes"))
+      if ($3 " " $4 " " $5 != want) printf "%s says %s %s %s, wanted %s\n", $1, $3, $4, $5, want
+    }' "$doc")
+  CASES_RUN=$((CASES_RUN + 1))
+  if [ -n "$bad" ]; then
+    printf 'FAIL the generated matrix disagrees with the tiers about who runs:\n%s\n' "$bad" >&2
+    CASES_FAILED=$((CASES_FAILED + 1))
+  else
+    printf 'ok   each matrix row marks exactly the tiers that run that gate\n'
+  fi
 }
 
 case_idempotent_render() {
@@ -1963,10 +2047,10 @@ cmd_selftest() {
     trap 'if [ -n "${FIX:-}" ]; then rm -rf "$FIX"; fi' EXIT
   fi
 
-  local cases=(clean_baseline stale_value unknown_key suspect_class dead_entry gate_added_unpriced
+  local cases=(clean_baseline stale_value line_start_figure unknown_key suspect_class dead_entry gate_added_unpriced
                gate_removed digest_changed banner_edit_keeps_cost literal_duration exemption
                dead_exemption mismatched_markers unknown_generator generated_region_is_owned
-               matrix_cell_is_not_a_finding idempotent_render check_never_writes
+               matrix_cell_is_not_a_finding matrix_membership idempotent_render check_never_writes
                clean_tree_is_byte_identical foreign_braces_pass_through escaped_token_binds_nothing
                uncited_component tier_count_disagrees retier_disagrees missing_ledger
                malformed_ledger missing_generator list_and_dry_run_disagree record_is_reproducible
