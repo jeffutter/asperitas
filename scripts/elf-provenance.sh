@@ -263,7 +263,7 @@ compare_request() {
 #   C4  No `cargo build`, `cargo clippy`, `cargo objcopy`, `cargo objdump` or `make`, and no path under
 #       firmware/target/: those either rebuild or re-point the artifact the provenance gate audits.
 #
-# Measured against those rules: 0.88 s {{gate:elf-provenance-selftest}} as the commit tier runs it, which holds
+# Measured against those rules: 0.89 s {{gate:elf-provenance-selftest}} as the commit tier runs it, which holds
 # AC #3's sub-second budget but misses the plan's stricter target. The gap is the tools
 # themselves: seven rust-objcopy invocations at ~31 ms {{component:objcopy-invocation}} each and the two
 # memoized `cargo metadata` runs at ~52 ms {{component:cargo-metadata-invocation}}, every

@@ -123,6 +123,17 @@
 # GATE_COSTS_GATES_SH, GATE_COSTS_DEV_SHELL_OK, which stands in for the dev-shell probe so a fixture
 # can exercise --record without a cross-target toolchain, and GATE_COSTS_MEASURED_UTC, which pins the
 # ledger's one clock field. Setting them anywhere else is a way to make a check lie.
+#
+# GATE_COSTS_BOOTSTRAP=1 is the one variable meant for a human rather than a fixture, and it exists
+# because of a hole that only appears when you try to use this tool for real. A new gate can only be
+# priced by a tier run that contains it, and on its first run the gate is red precisely because the
+# ledger has no entry for it yet. `--record` refuses a failing tier, as it must, so there is no run that
+# both prices the gate and passes. The tiers also stop dead at a failed gate, so nothing after it gets
+# timed either. Setting this variable makes --check report every finding it found and then exit 0, loud
+# about having done so, which lets that one bootstrap run through. It downgrades findings and nothing
+# else: a run that COULD NOT FINISH the check still exits 2, because an inability to answer is not
+# something a flag waves away. Use it once, for the gate you are adding, and never from lefthook or
+# gates.sh - the gate registered there runs this script with no such environment.
 
 set -uo pipefail
 
@@ -177,6 +188,10 @@ usage: scripts/gate-costs.sh MODE [--repeat N]
   --selftest  assert this script against fixtures under mktemp -d (exit 0/1/2)
 
   --repeat N  with --record/--refresh: N samples per tier, store the median (default 1)
+
+  Adding a gate needs one tier run that contains it, and on that run the new gate is red for having no
+  entry yet, which --record rightly refuses. GATE_COSTS_BOOTSTRAP=1 makes --check print its findings and
+  exit 0 for exactly that run; it downgrades findings, never an inability to run. See the header.
 USAGE_END
 }
 
@@ -982,6 +997,12 @@ render_all() {
 
 cmd_check() {
   local f diff_msg i=0
+  # Announce the downgrade before anything else, so a bootstrap run cannot be mistaken for a clean one
+  # by whoever reads the log afterwards.
+  if [ "${GATE_COSTS_BOOTSTRAP:-}" = "1" ]; then
+    say "$PROG: GATE_COSTS_BOOTSTRAP=1 - findings will be printed and then forced green. This is for"
+    say "$PROG: pricing a gate that has no ledger entry yet; see the header. Unset it for a normal check."
+  fi
   prepare
   if ! guarded_files_exist; then report; return 2; fi
   if ! render_all; then report; return 2; fi
@@ -998,7 +1019,18 @@ the diff: a figure edited by hand inside a sentence that cites a key is the case
   done
 
   check_structure
-  report
+  local rc=0
+  report || rc=$?
+  # The bootstrap seam, in the narrowest form it can take: there were findings, the check finished,
+  # and a person asked for this because what is red is the missing price of the gate being added.
+  # rc 2 never comes here -- an unfinished check is not something a flag waves away.
+  if [ "$rc" = 1 ] && [ "${GATE_COSTS_BOOTSTRAP:-}" = 1 ] && [ ${#FATALS[@]} -eq 0 ]; then
+    printf '%s\n' "$PROG: BOOTSTRAP - those ${#VIOLATIONS[@]} finding(s) were real. This run exited 0"
+    printf '%s\n' "$PROG: because GATE_COSTS_BOOTSTRAP=1, so that a brand-new gate could be priced. If"
+    printf '%s\n' "$PROG: you did not mean to do that, run --check again with the variable unset." >&2
+    return 0
+  fi
+  return "$rc"
 }
 
 cmd_render() {
@@ -1127,7 +1159,10 @@ run_tier_sample() { # <tier> <sample-index>
     printf '%s\n' "$PROG: \`$(bare "$GATES_SH") $tier\` failed, so there is nothing to record. Its last \
 25 lines:" >&2
     tail -n 25 "$log" >&2
-    die "a ledger of costs for a tier that does not pass would be a ledger of fiction."
+    die "a ledger of costs for a tier that does not pass would be a ledger of fiction. If the gate that
+failed has no entry in $(bare "$LEDGER") yet, that is the chicken-and-egg the flag exists for: re-run
+with GATE_COSTS_BOOTSTRAP=1, which reports the findings and prices them anyway. Any other failure is a
+failure - fix it, do not set the flag."
   fi
   [ -s "$timings" ] || die "\`$(bare "$GATES_SH") $tier\` exited 0 but wrote no timings, so the sink \
 contract TASK-070.01 defines is broken and there is nothing to record."
@@ -1877,6 +1912,47 @@ case_missing_ledger() {
   expect "no ledger means no verdict" 2 "$RC" "no docs/gate-costs.json"
 }
 
+# Same as run_case with one more variable exported, because the bootstrap seam is an environment seam
+# and a case that could not set it could not test it.
+run_case_env() { # <dir> <VAR=value> <args...>
+  local d=$1 extra=$2
+  shift 2
+  OUT=$( cd "$d" && env GATE_COSTS_ROOT="$d" GATE_COSTS_LEDGER="$d/docs/gate-costs.json" \
+      GATE_COSTS_GATES_SH="$d/scripts/gates.sh" GATE_COSTS_DEV_SHELL_OK=1 "$extra" \
+      bash "$SELF" "$@" 2>&1 )
+  RC=$?
+}
+
+case_bootstrap_prices_a_new_gate() {
+  local d=$1 doc="$1/backlog/docs/doc-001 - Asperitas-Project-Plan.md"
+  perl-free_replace '0.89 s {{gate:alpha}}' '0.31 s {{gate:alpha}}' "$doc"
+  run_case_env "$d" GATE_COSTS_BOOTSTRAP=1 --check
+  expect "a bootstrap run goes green on real findings" 0 "$RC" "GATE_COSTS_BOOTSTRAP=1"
+  CASES_RUN=$((CASES_RUN + 1))
+  if printf '%s' "$OUT" | grep -qF 'finding(s) were real'; then
+    printf 'ok   ... and says out loud that the findings were real\n'
+  else
+    printf 'FAIL a green bootstrap run that does not say the findings were real is a check that lies:\n%s\n' \
+      "$OUT" >&2
+    CASES_FAILED=$((CASES_FAILED + 1))
+  fi
+  run_case "$d" --check
+  expect "the same findings are red again once the flag is unset" 1 "$RC" "renders differently"
+}
+
+case_bootstrap_cannot_mask_exit_two() {
+  local d=$1
+  # The narrow form of the seam is the whole point: it covers drift, never an inability to answer. Two
+  # shapes of "could not run", because one of them dies before the finding-reporting code is reached,
+  # and a flag added at the wrong layer would silently cover only the other.
+  rm "$d/docs/gate-costs.json"
+  run_case_env "$d" GATE_COSTS_BOOTSTRAP=1 --check
+  expect "bootstrap cannot invent a verdict out of no ledger" 2 "$RC" "no docs/gate-costs.json"
+  printf '{ "schema": 1, "gates": [\n' >"$d/docs/gate-costs.json"
+  run_case_env "$d" GATE_COSTS_BOOTSTRAP=1 --check
+  expect "bootstrap cannot read a truncated ledger as zero findings" 2 "$RC" "is not a schema-1 cost ledger"
+}
+
 case_malformed_ledger() {
   local d=$1
   printf '{ "schema": 1, "gates": [\n' >"$d/docs/gate-costs.json"
@@ -2054,7 +2130,8 @@ cmd_selftest() {
                clean_tree_is_byte_identical foreign_braces_pass_through escaped_token_binds_nothing
                uncited_component tier_count_disagrees retier_disagrees missing_ledger
                malformed_ledger missing_generator list_and_dry_run_disagree record_is_reproducible
-               ambient_epoch_ignored bad_stamp_shape
+               ambient_epoch_ignored bad_stamp_shape bootstrap_prices_a_new_gate
+               bootstrap_cannot_mask_exit_two
                record_refuses_outside_dev_shell refresh_runs_both repeat_median bad_usage)
   local c n=0
   for c in "${cases[@]}"; do

@@ -40,9 +40,10 @@
 #
 # Cost figures in the comments are LOCAL warm numbers, aarch64-darwin, measured inside
 # `nix develop .#default` on a clean tree. None of them is typed here: each is a key into
-# docs/gate-costs.json, which `scripts/gate-costs.sh --refresh` writes by timing the tiers and which
-# `scripts/gate-costs.sh --check` reads back against this file to report any figure that has stopped
-# agreeing with the measurement. One figure per gate even where two call sites used to quote different
+# docs/gate-costs.json, which `scripts/gate-costs.sh --refresh` writes by timing the tiers and whose
+# citations `--check` verifies from the commit tier, third gate below. Who owns each number and why the
+# rest of this file may not restate one is written once in doc-001, "Who owns each number".
+# One figure per gate even where two call sites used to quote different
 # ones, and it is always the observation from the tier that publishes the gate. Runner-side figures
 # belong to TASK-052 and TASK-063: main sits ~91 commits ahead of origin/main and ci.yml has no
 # workflow_dispatch, so no agent can observe a runner.
@@ -51,7 +52,7 @@
 # start running it and a stable key. Nothing else in the repo names checks.
 #
 # Every gate has a key as well as a banner, and the key -- not the banner -- is its identity. Prose
-# cites a cost from inside a sentence (`the provenance reader, 0.88 s {{gate:elf-provenance-selftest}},
+# cites a cost from inside a sentence (`the provenance reader, 0.89 s {{gate:elf-provenance-selftest}},
 # reads only`), so rewording a banner for readability must not orphan the measurement recorded
 # against it; that is the same argument that put the gate list in a script rather than in YAML names.
 # Keys match ^[a-z0-9][a-z0-9-]{0,39}$ and must be unique; both are enforced where they cost nothing,
@@ -251,6 +252,36 @@ gate commit gate-definition-parses "=== gate definition parses ===" bash -n scri
 # Covers names only: it does not read a line of Rust. Landed with TASK-058.
 gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-artifact-names.sh
 
+# Every cost figure this repo publishes is quoted in prose, in eight files, so a figure that stops
+# agreeing with the measurement is a false statement in eight places at once (TASK-070). This gate is
+# what notices. It renders each guarded file from docs/gate-costs.json into a temp copy and compares
+# bytes against the file on disk, which catches a stale number and a hand-typed one under one rule, and
+# it joins the live gate list against the ledger, which is why adding a `gate` line anywhere in this
+# file goes red on the next commit naming the key no measurement was taken for. It reads `--list`,
+# `--dry-run`, the ledger and the eight guarded files, and it never writes: a hook that rewrote a tracked
+# file would commit the version it was supposed to be checking.
+#
+# Third in the list, beside the other structural checks and ahead of every cargo invocation, because it
+# waits for nothing. Unfiltered by construction - lefthook.yml records that a job behind a path filter
+# exits 0 without running at all once its staged set is empty, and a check of the figures that could be
+# skipped that way is precisely the decoration that would read green while the drift lives.
+#
+# What it adds to the tier, from three consecutive `commit` runs on this tree: 0.464 s / 0.457 s / 0.457 s. gate-costs:exempt reason="the three samples behind one published figure, which is keyed below"
+# About a tenth of what the tier itself costs at ~5 s {{tier:commit}} - a tenth of pre-commit spent to make
+# eight files' worth of cost figures impossible to get wrong, which is what the ledger is for. It publishes
+# 0.48 s {{gate:gate-costs-current}} warm, and that is the figure anything else here quotes.
+#
+# Adding this line invalidated its own measurement set, and not in a way a person could fix by running
+# the recorder. A new gate can only be priced by a tier run that contains it, and on that first run it is
+# red for want of the very entry the run exists to write, which `--record` rightly refuses - and the tiers
+# stop at a failed gate, so nothing behind it gets timed either. So the commit that landed this gate ran
+# `GATE_COSTS_BOOTSTRAP=1 bash scripts/gate-costs.sh --refresh`, which prints those findings and prices
+# them anyway, then ran the same command with the flag unset to prove the tier was actually green.
+# Anyone who reverses that order, or sets the flag for any other reason, gets this gate red naming
+# `gate-costs-current`: the right answer to a tier priced without one of the gates inside it, not a bug to
+# work around.
+gate commit gate-costs-current "=== gate costs current ===" scripts/gate-costs.sh --check
+
 # The provenance reader's own checks (TASK-067). TASK-062.02's commit message described these cases as
 # asserted and named their exit codes; nothing ran them, so the next edit to build.rs's blob encoding
 # or to the feature normalizer had nothing between it and an ELF that reads as the wrong cfg set at the
@@ -263,7 +294,7 @@ gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-
 # below is what cheapest-first says to do with a check that has no inputs to wait for.
 # Placing it beside the push-tier provenance gate "for symmetry" would misrepresent both - they share
 # no state, one grades the reader and the other grades the stamp - and ordering rule 1 is untouched,
-# since no firmware gets built here. Measured 0.88 s {{gate:elf-provenance-selftest}} warm, which is the
+# since no firmware gets built here. Measured 0.89 s {{gate:elf-provenance-selftest}} warm, which is the
 # price of seven rust-objcopy invocations at ~31 ms {{component:objcopy-invocation}} each and one memoized
 # `cargo metadata` at ~52 ms {{component:cargo-metadata-invocation}}, every one of them load-bearing.
 # Outside `nix develop .#default` there is no rust-objcopy, but gates.sh already exits 3 before any
@@ -279,7 +310,7 @@ gate commit elf-provenance-selftest "=== elf-provenance --selftest ===" scripts/
 # against any Makefile that compares mtimes again. Fixtures under `mktemp -d`, no cargo, nothing
 # outside that directory touched -- rules and reasoning in scripts/check-elf-staleness.sh's header.
 # Fourth in the list on the same cheapest-first rule as the gate above: it builds nothing and reads no
-# artifact. Measured 0.84 s {{gate:elf-staleness-selftest}} warm for ten cases, most of it make parsing the
+# artifact. Measured 0.85 s {{gate:elf-staleness-selftest}} warm for ten cases, most of it make parsing the
 # Makefile once per case at ~12 ms {{component:make-parse}} a parse.
 gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/check-elf-staleness.sh --selftest
 
@@ -415,7 +446,7 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 gate push image-load-addresses "=== image load addresses ===" bash scripts/check-image-load-addresses.sh
 
 # Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses
-# their artifacts: 0.23 s {{gate:firmware-clippy}} and 0.21 s {{gate:firmware-clippy-rtt}} when nothing has changed
+# their artifacts: 0.24 s {{gate:firmware-clippy}} and 0.21 s {{gate:firmware-clippy-rtt}} when nothing has changed
 # since the last lint, several times that directly after a build, and tens of seconds in a fresh target
 # dir. --bins is the whole package over there (no lib target, six entries under src/bin/), and
 # --all-targets is unusable on a no_std target with no test harness to link. firmware/ is a second
@@ -431,7 +462,7 @@ gate commit firmware-clippy-rtt "=== firmware clippy (all bins, RTT-only, log-de
 gate push cargo-test "=== cargo test ===" cargo test --workspace
 
 # THE ONE DELIBERATELY CI-ONLY GATE, and it is priced rather than merely absent (TASK-061 AC #3).
-# ~67 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
+# ~66 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
 # flag -- more than every other push-tier gate combined. Its compile-time half DOES run in the push tier,
 # as the pod-hw clippy above, so what stays remote is runtime coverage of pod-hw code paths. Accepted
 # because CI is the authority for that coverage, TASK-018.01's fixup made the same split on purpose

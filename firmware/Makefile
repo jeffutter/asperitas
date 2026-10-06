@@ -441,7 +441,7 @@ check:
 ## the recipe above hard-wires one binary. The only place any tier still reaches make is the
 ## docs-artifact-name lint, and only with `-n` (see its header warning about why that flag is not
 ## optional). Cost of those two gates, local warm inside `nix develop .#default`, as the commit tier
-## that publishes them pays them: 0.23 s {{gate:firmware-clippy}} and 0.21 s {{gate:firmware-clippy-rtt}} when nothing
+## that publishes them pays them: 0.24 s {{gate:firmware-clippy}} and 0.21 s {{gate:firmware-clippy-rtt}} when nothing
 ## changed, several times that straight after a build, tens of seconds in a fresh target dir. Landed
 ## with TASK-060.03, re-pointed by TASK-061.02 when the hook job names died.
 clippy:

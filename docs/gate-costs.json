@@ -67,20 +67,31 @@
       "banner": "=== docs artifact names ===",
       "command_sha256": "2ad89d57ceabc4312a25168adee2563d93a79fdf888e8a6e7893e3951ba0d5b4",
       "cost": {
-        "ci": 0.156,
-        "commit": 0.161,
-        "push": 0.155
+        "ci": 0.159,
+        "commit": 0.158,
+        "push": 0.159
       },
       "key": "docs-artifact-names",
+      "min_tier": "commit"
+    },
+    {
+      "banner": "=== gate costs current ===",
+      "command_sha256": "4ed9286da71cf1f5234d7a916a88ed50929038eea00adb9b1942a17c2d43d0ec",
+      "cost": {
+        "ci": 0.469,
+        "commit": 0.476,
+        "push": 0.470
+      },
+      "key": "gate-costs-current",
       "min_tier": "commit"
     },
     {
       "banner": "=== elf-provenance --selftest ===",
       "command_sha256": "8d18def1f3b2fd17436277bcfaba81c5d1500c64371fe0fd9b0928a816c36536",
       "cost": {
-        "ci": 0.878,
-        "commit": 0.884,
-        "push": 0.883
+        "ci": 0.882,
+        "commit": 0.894,
+        "push": 0.885
       },
       "key": "elf-provenance-selftest",
       "min_tier": "commit"
@@ -89,9 +100,9 @@
       "banner": "=== elf-staleness --selftest ===",
       "command_sha256": "bfdb7914214ef029e8c1b4fda5ea343a1593da39e78027199f71ef79d31d5eb8",
       "cost": {
-        "ci": 0.841,
-        "commit": 0.845,
-        "push": 0.852
+        "ci": 0.840,
+        "commit": 0.850,
+        "push": 0.847
       },
       "key": "elf-staleness-selftest",
       "min_tier": "commit"
@@ -100,9 +111,9 @@
       "banner": "=== load-addresses --selftest ===",
       "command_sha256": "4e019f9a1ff8bbe621446b3db845030c369331141e469eb28bf514872f501f0c",
       "cost": {
-        "ci": 0.596,
+        "ci": 0.601,
         "commit": 0.601,
-        "push": 0.598
+        "push": 0.606
       },
       "key": "load-addresses-selftest",
       "min_tier": "commit"
@@ -111,8 +122,8 @@
       "banner": "=== cargo fmt ===",
       "command_sha256": "2d009b4c2fff7c140a0e853344ad59d7dd2bd2a362627a962da72a2e39704a8f",
       "cost": {
-        "ci": 0.247,
-        "commit": 0.246,
+        "ci": 0.246,
+        "commit": 0.248,
         "push": 0.245
       },
       "key": "cargo-fmt",
@@ -122,9 +133,9 @@
       "banner": "=== cargo fmt (firmware workspace) ===",
       "command_sha256": "109f66a3c9ac5d72c567c7a0d7f90180a728fef6d1d9451fd734c2a004ac945e",
       "cost": {
-        "ci": 0.392,
-        "commit": 0.397,
-        "push": 0.394
+        "ci": 0.390,
+        "commit": 0.396,
+        "push": 0.395
       },
       "key": "cargo-fmt-firmware",
       "min_tier": "commit"
@@ -133,9 +144,9 @@
       "banner": "=== cargo clippy ===",
       "command_sha256": "196d9a67d5f68bf4c7de40ebb3c510406e3b856cbbb539e5eae8a61a39b39e28",
       "cost": {
-        "ci": 0.337,
-        "commit": 0.195,
-        "push": 0.194
+        "ci": 0.339,
+        "commit": 0.207,
+        "push": 0.195
       },
       "key": "cargo-clippy",
       "min_tier": "commit"
@@ -144,9 +155,9 @@
       "banner": "=== cargo clippy (asperitas-logging log-usb) ===",
       "command_sha256": "74606cfeaca453e4b96a6a82d3003116251482db7269aed91a1e641922f01a04",
       "cost": {
-        "ci": 0.204,
-        "commit": 0.202,
-        "push": 0.209
+        "ci": 0.203,
+        "commit": 0.213,
+        "push": 0.205
       },
       "key": "cargo-clippy-log-usb",
       "min_tier": "commit"
@@ -155,9 +166,9 @@
       "banner": "=== cargo clippy (asperitas-logging log-defmt) ===",
       "command_sha256": "38f1d98d3757fdba6787fb125b1b09aff9dd5ea977495f9f22a2b41a08171c70",
       "cost": {
-        "ci": 0.198,
-        "commit": 0.208,
-        "push": 0.202
+        "ci": 0.197,
+        "commit": 0.211,
+        "push": 0.197
       },
       "key": "cargo-clippy-log-defmt",
       "min_tier": "commit"
@@ -166,8 +177,8 @@
       "banner": "=== cargo clippy (asperitas-pod pod-hw feature) ===",
       "command_sha256": "864f77b997123b5b0f52d1a9df37ac2ac96e722ddde3bcf531956e32f6674370",
       "cost": {
-        "ci": 0.209,
-        "push": 0.213
+        "ci": 0.208,
+        "push": 0.215
       },
       "key": "clippy-pod-hw",
       "min_tier": "push"
@@ -176,8 +187,8 @@
       "banner": "=== dump_reassemble --selftest ===",
       "command_sha256": "c759e45d9eeef6c1de398b8f67723844afbdba6cd22287c994098d2324911e77",
       "cost": {
-        "ci": 0.556,
-        "push": 0.677
+        "ci": 0.564,
+        "push": 0.712
       },
       "key": "dump-reassemble-selftest",
       "min_tier": "push"
@@ -186,8 +197,8 @@
       "banner": "=== cargo doc (workspace) ===",
       "command_sha256": "cba4c91cb4517ceeb3905f90ea120e9b1b733e7abea22db075f6dfec3e4e62d0",
       "cost": {
-        "ci": 1.848,
-        "push": 1.857
+        "ci": 1.900,
+        "push": 2.132
       },
       "key": "cargo-doc",
       "min_tier": "push"
@@ -196,8 +207,8 @@
       "banner": "=== cargo doc (workspace, all features) ===",
       "command_sha256": "76ae458d3dfa69ebd6254fb7e3d10b0cefcbf2b1647a97530dbf79556399465f",
       "cost": {
-        "ci": 2.097,
-        "push": 2.141
+        "ci": 2.131,
+        "push": 2.139
       },
       "key": "cargo-doc-all-features",
       "min_tier": "push"
@@ -206,8 +217,8 @@
       "banner": "=== firmware cross-compile ===",
       "command_sha256": "9b44c1cd587174231473fbbdb2dc11d02865e519bddebd551896119b82d657e0",
       "cost": {
-        "ci": 0.330,
-        "push": 0.341
+        "ci": 0.329,
+        "push": 0.345
       },
       "key": "firmware-cross-compile",
       "min_tier": "push"
@@ -216,8 +227,8 @@
       "banner": "=== firmware cross-compile (RTT-only, log-defmt) ===",
       "command_sha256": "e194f117889ca8d47358c6fcd5298b78b0c911bf4852e9058c537e1b7757e28f",
       "cost": {
-        "ci": 0.124,
-        "push": 0.124
+        "ci": 0.126,
+        "push": 0.127
       },
       "key": "firmware-cross-compile-rtt",
       "min_tier": "push"
@@ -226,8 +237,8 @@
       "banner": "=== firmware ELF cfg provenance ===",
       "command_sha256": "c2e58ac0993bfc8107ad978627f683925d9ead153aac8473401b7aabaccdad3d",
       "cost": {
-        "ci": 0.087,
-        "push": 0.086
+        "ci": 0.090,
+        "push": 0.087
       },
       "key": "firmware-elf-provenance",
       "min_tier": "push"
@@ -236,8 +247,8 @@
       "banner": "=== image load addresses ===",
       "command_sha256": "25589c56f89bdc6d115915e9a3066889b6cf8fbd1017ae7f6a5089caecc5dee1",
       "cost": {
-        "ci": 0.717,
-        "push": 0.727
+        "ci": 0.711,
+        "push": 0.735
       },
       "key": "image-load-addresses",
       "min_tier": "push"
@@ -246,9 +257,9 @@
       "banner": "=== firmware clippy (all bins) ===",
       "command_sha256": "94816a7954adc61234d861c567b5261b2a94d8dfa787f2ed40e9f77bb577d6b9",
       "cost": {
-        "ci": 0.422,
-        "commit": 0.228,
-        "push": 0.431
+        "ci": 0.420,
+        "commit": 0.243,
+        "push": 0.421
       },
       "key": "firmware-clippy",
       "min_tier": "commit"
@@ -257,9 +268,9 @@
       "banner": "=== firmware clippy (all bins, RTT-only, log-defmt) ===",
       "command_sha256": "2e24726e667e3ab67976b630c905ca2e1d090b10cc59d68867d8bc8eb56a1aac",
       "cost": {
-        "ci": 0.210,
-        "commit": 0.212,
-        "push": 0.219
+        "ci": 0.211,
+        "commit": 0.214,
+        "push": 0.211
       },
       "key": "firmware-clippy-rtt",
       "min_tier": "commit"
@@ -268,8 +279,8 @@
       "banner": "=== cargo test ===",
       "command_sha256": "ec4556a178527361344d876629bb9533c63fc8fcd216f423dd8bce76787fce86",
       "cost": {
-        "ci": 66.503,
-        "push": 66.440
+        "ci": 66.349,
+        "push": 66.365
       },
       "key": "cargo-test",
       "min_tier": "push"
@@ -278,7 +289,7 @@
       "banner": "=== cargo test (asperitas-pod pod-hw feature) ===",
       "command_sha256": "d87a07e68672d678e501877f326c29c2c0cdbe5aae4152a6c7791610d1be8168",
       "cost": {
-        "ci": 66.507
+        "ci": 66.375
       },
       "key": "cargo-test-pod-hw",
       "min_tier": "ci"
@@ -291,21 +302,21 @@
     "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
     "system": "Darwin 25.6.0 arm64"
   },
-  "measured_utc": "2026-09-16T08:48:27Z",
+  "measured_utc": "2026-09-16T09:14:14Z",
   "samples_per_tier": 1,
   "schema": 1,
   "tiers": {
     "ci": {
-      "gates": 22,
-      "seconds": 143.696
+      "gates": 23,
+      "seconds": 143.982
     },
     "commit": {
-      "gates": 12,
-      "seconds": 4.311
+      "gates": 13,
+      "seconds": 4.854
     },
     "push": {
-      "gates": 21,
-      "seconds": 77.229
+      "gates": 22,
+      "seconds": 77.936
     }
   }
 }

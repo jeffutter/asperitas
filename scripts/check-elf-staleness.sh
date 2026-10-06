@@ -35,7 +35,7 @@
 # ~12 ms {{component:make-parse}} a parse. Nothing here
 # writes a tracked file -- which matters more than usual, because writing a firmware source would bump
 # the mtime of an ELF input and send the bench's own `elf-check` red, the exact failure this script is
-# about. Measured 0.84 s {{gate:elf-staleness-selftest}} warm for ten cases inside a `commit` tier run, and
+# about. Measured 0.85 s {{gate:elf-staleness-selftest}} warm for ten cases inside a `commit` tier run, and
 # most of that is those ten parses. The smaller figure this line carried before TASK-068 was a
 # standalone reading that never included the per-case parse being paid against a cold Makefile; it
 # survived two tickets because nothing compared this sentence with the tier's own timing of the same

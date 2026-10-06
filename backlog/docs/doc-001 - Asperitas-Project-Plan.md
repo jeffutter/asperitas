@@ -260,40 +260,77 @@ key                         | min    | com | psh | ci | cost    | gate
 ----------------------------+--------+-----+-----+----+---------+---------------------------------------
 gate-definition-parses      | commit | yes | yes | yes | 0.01 s  | === gate definition parses ===
 docs-artifact-names         | commit | yes | yes | yes | 0.16 s  | === docs artifact names ===
-elf-provenance-selftest     | commit | yes | yes | yes | 0.88 s  | === elf-provenance --selftest ===
-elf-staleness-selftest      | commit | yes | yes | yes | 0.84 s  | === elf-staleness --selftest ===
+gate-costs-current          | commit | yes | yes | yes | 0.48 s  | === gate costs current ===
+elf-provenance-selftest     | commit | yes | yes | yes | 0.89 s  | === elf-provenance --selftest ===
+elf-staleness-selftest      | commit | yes | yes | yes | 0.85 s  | === elf-staleness --selftest ===
 load-addresses-selftest     | commit | yes | yes | yes | 0.60 s  | === load-addresses --selftest ===
 cargo-fmt                   | commit | yes | yes | yes | 0.25 s  | === cargo fmt ===
 cargo-fmt-firmware          | commit | yes | yes | yes | 0.40 s  | === cargo fmt (firmware workspace) ===
-cargo-clippy                | commit | yes | yes | yes | 0.20 s  | === cargo clippy ===
-cargo-clippy-log-usb        | commit | yes | yes | yes | 0.20 s  | === cargo clippy (asperitas-logging log-usb) ===
+cargo-clippy                | commit | yes | yes | yes | 0.21 s  | === cargo clippy ===
+cargo-clippy-log-usb        | commit | yes | yes | yes | 0.21 s  | === cargo clippy (asperitas-logging log-usb) ===
 cargo-clippy-log-defmt      | commit | yes | yes | yes | 0.21 s  | === cargo clippy (asperitas-logging log-defmt) ===
 clippy-pod-hw               | push   | -   | yes | yes | 0.21 s  | === cargo clippy (asperitas-pod pod-hw feature) ===
-dump-reassemble-selftest    | push   | -   | yes | yes | 0.68 s  | === dump_reassemble --selftest ===
+dump-reassemble-selftest    | push   | -   | yes | yes | 0.71 s  | === dump_reassemble --selftest ===
 cargo-doc                   | push   | -   | yes | yes | ~2 s    | === cargo doc (workspace) ===
 cargo-doc-all-features      | push   | -   | yes | yes | ~2 s    | === cargo doc (workspace, all features) ===
 firmware-cross-compile      | push   | -   | yes | yes | 0.34 s  | === firmware cross-compile ===
-firmware-cross-compile-rtt  | push   | -   | yes | yes | 0.12 s  | === firmware cross-compile (RTT-only, log-defmt) ===
+firmware-cross-compile-rtt  | push   | -   | yes | yes | 0.13 s  | === firmware cross-compile (RTT-only, log-defmt) ===
 firmware-elf-provenance     | push   | -   | yes | yes | 0.09 s  | === firmware ELF cfg provenance ===
 image-load-addresses        | push   | -   | yes | yes | 0.73 s  | === image load addresses ===
-firmware-clippy             | commit | yes | yes | yes | 0.23 s  | === firmware clippy (all bins) ===
+firmware-clippy             | commit | yes | yes | yes | 0.24 s  | === firmware clippy (all bins) ===
 firmware-clippy-rtt         | commit | yes | yes | yes | 0.21 s  | === firmware clippy (all bins, RTT-only, log-defmt) ===
 cargo-test                  | push   | -   | yes | yes | ~66 s   | === cargo test ===
-cargo-test-pod-hw           | ci     | -   | -   | yes | ~67 s   | === cargo test (asperitas-pod pod-hw feature) ===
-counts: commit 12, push 21, ci 22
+cargo-test-pod-hw           | ci     | -   | -   | yes | ~66 s   | === cargo test (asperitas-pod pod-hw feature) ===
+counts: commit 13, push 22, ci 23
 ```
 <!-- END GENERATED: gate-matrix -->
 
-The approximation policy covers every row above: one warm sample per tier on one machine, measured
-2026-09-16 {{meta:measured}} on aarch64-darwin inside `nix develop .#default`. The last digit is noise, and a cold
-cache or a background Spotlight scan moves any figure here by tens of percent. What the ledger's per-gate
-command digests buy is the claim that each number was taken against the command that runs today, not that
-it repeats to three figures. The tier totals are **commit ~4 s {{tier:commit}}**, **push ~77 s {{tier:push}}**,
-**ci ~144 s {{tier:ci}}**; the two `cargo test` invocations are ~66 s {{gate:cargo-test}} and
-~67 s {{gate:cargo-test-pod-hw}}, which together are most of that `ci` total.
+#### Who owns each number
 
-Three selftest gates run ahead of every cargo invocation, at 0.88 s {{gate:elf-provenance-selftest}},
-0.84 s {{gate:elf-staleness-selftest}} and 0.60 s {{gate:load-addresses-selftest}}:
+Every figure in that block, and every figure quoted anywhere else in this repo, has exactly one owner:
+
+- **`docs/gate-costs.json` owns every measured number**, together with the date, host, environment,
+  sample count and approximation caveat that make any of them mean anything. It is the only tracked file
+  here that holds a wall-clock numeral.
+- **`bash scripts/gate-costs.sh --refresh` is the one command that reproduces them all.** It runs each of
+  the three tiers once, reads the seconds out of `GATES_TIMINGS_FILE` rather than off stdout, rewrites the
+  ledger canonically, and renders the prose from it. Roughly four minutes of cargo and clippy, which is why
+  it is a command a person runs and never a gate: four minutes does not belong in pre-commit, and that is
+  TASK-068's non-goal kept rather than ignored. It refuses to record a tier that failed, because costs
+  measured from a tier that does not pass are fiction. The one exception is pricing a brand-new gate,
+  which can only be measured by a run in which that gate is red for want of its own entry, and it needs
+  `GATE_COSTS_BOOTSTRAP=1` said out loud - see the header of the script.
+- **Everything else cites keys.** Prose in `scripts/gates.sh`, `lefthook.yml`, `.github/workflows/ci.yml`,
+  `firmware/Makefile` and the three checker headers carries a `gate`, `tier`, `component` or `meta` key
+  inside its sentences, and this plan's matrix and cost column are a generated region. `--render` puts the
+  figure where the key sits, so a priced argument keeps its number while the numeral itself stays in one
+  file.
+- **`scripts/gate-costs.sh --check` is what keeps the citations true.** It runs as the third gate of the
+  commit tier, ahead of every cargo invocation, at 0.48 s {{gate:gate-costs-current}} warm. It renders each
+  guarded file into a temp copy and compares bytes against the file on disk, so a stale figure and a
+  hand-typed one are one finding rather than two rules, and it fails when a gate has no ledger entry, when
+  an entry names no live gate, or when a gate's command digest stopped matching the command that runs. It
+  never writes: a hook that rewrote a tracked file would commit the stale version it was meant to grade.
+- **A stored figure is meaningless without the tier that paid it.** The two firmware-clippy gates cost tens
+  of seconds in a fresh target directory, seconds straight after a build, and a few tenths when nothing has
+  changed, because ordering rule 2 makes their price a function of adjacency. So the ledger prices every
+  gate per paying tier, and the published figure for a gate is the observation from the tier whose
+  `min_tier` runs it. Adding those numbers across tiers is invalid even though the tiers are cumulative as
+  sets: each tier is its own process and its clock starts over.
+- **Runner-side figures stay owed to TASK-052 and TASK-063.** `ci.yml` has no `workflow_dispatch`, no
+  artifact upload and no `permissions:` block, so nobody can start that workflow deliberately or write a
+  measurement back from it. Every number in this plan is a local one.
+
+The approximation policy is stated once because it covers every row above: one warm sample per tier on one
+machine, measured 2026-09-16 {{meta:measured}} on aarch64-darwin inside `nix develop .#default`. The last digit is
+noise, and a cold cache or a background Spotlight scan moves any figure here by tens of percent. What the
+ledger's per-gate command digests buy is the claim that each number was taken against the command that runs
+today, not that it repeats to three figures. The tier totals are **commit ~5 s {{tier:commit}}**, **push
+~78 s {{tier:push}}**, **ci ~144 s {{tier:ci}}**; the two `cargo test` invocations are ~66 s {{gate:cargo-test}} and
+~66 s {{gate:cargo-test-pod-hw}}, which together are most of that `ci` total.
+
+Three selftest gates run ahead of every cargo invocation, at 0.89 s {{gate:elf-provenance-selftest}},
+0.85 s {{gate:elf-staleness-selftest}} and 0.60 s {{gate:load-addresses-selftest}}:
 `=== elf-provenance --selftest
 ===`, `=== elf-staleness --selftest ===` (TASK-056) and `=== load-addresses --selftest ===` (TASK-068).
 All three sit there because they compile nothing and read no artifact, which is what cheapest-first does
@@ -302,10 +339,10 @@ subject with "for symmetry" would misrepresent both, since each selftest grades 
 push-tier gate grades the *artifact*, and they share no state. Their cases and the cost rules that keep
 each at its figure are stated in the three scripts' own headers:
 
-- the provenance reader, 0.88 s {{gate:elf-provenance-selftest}}: five child invocations of the script at most,
+- the provenance reader, 0.89 s {{gate:elf-provenance-selftest}}: five child invocations of the script at most,
   one `cargo metadata`,
   never a `cargo build` or a path under `firmware/target/`;
-- the staleness checker, 0.84 s {{gate:elf-staleness-selftest}}: one `make` per case against a fixture tree, with
+- the staleness checker, 0.85 s {{gate:elf-staleness-selftest}}: one `make` per case against a fixture tree, with
   the compiler and the
   provenance clause both stubbed;
 - the load-address checker, 0.60 s {{gate:load-addresses-selftest}}: seventeen cases, of which only five
@@ -368,7 +405,7 @@ names no checks at all; `.github/ci-steps.sh`, the intermediate fix, is gone, an
 file needed is now the first gate in the script.
 
 Exactly one gate lives in the `ci` tier alone: `cargo test --workspace --features
-asperitas-pod/pod-hw`, ~67 s {{gate:cargo-test-pod-hw}} local warm - more than every push-tier gate combined
+asperitas-pod/pod-hw`, ~66 s {{gate:cargo-test-pod-hw}} local warm - more than every push-tier gate combined
 - re-running the host
 suite under one non-default feature flag whose compile-time half (`clippy --features
 asperitas-pod/pod-hw`) does run on push. Priced and argued at its own gate in `scripts/gates.sh`,
