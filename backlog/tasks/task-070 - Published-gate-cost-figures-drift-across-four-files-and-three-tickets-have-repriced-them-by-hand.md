@@ -3,11 +3,11 @@ id: TASK-070
 title: >-
   Published gate cost figures drift across four files, and three tickets have
   repriced them by hand
-status: In Progress
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-14 09:44'
-updated_date: '2026-09-14 15:23'
+updated_date: '2026-10-06 05:31'
 labels:
   - planned
 dependencies:
@@ -28,9 +28,9 @@ Gate and tier cost figures are stated as fact in eight tracked files with no gen
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Every published gate or tier cost figure is either generated from a measurement or explicitly marked approximate with the date, host and method that measured it; grep over the guarded files finds no wall-clock duration literal outside a generated region other than reasoned, counted exemptions.
-- [ ] #2 One command reproduces every figure the docs publish (scripts/gate-costs.sh --refresh), and adding a gate turns the commit tier red naming that gate, with no person having to notice the prose disagreed first.
-- [ ] #3 The eight files that publish costs today - doc-001, scripts/gates.sh, lefthook.yml, .github/workflows/ci.yml, firmware/Makefile and the headers of elf-provenance.sh, check-elf-staleness.sh and check-image-load-addresses.sh - no longer restate any number independently, and doc-001 names which file owns each figure and how the others refer to it.
+- [x] #1 Every published gate or tier cost figure is either generated from a measurement or explicitly marked approximate with the date, host and method that measured it; grep over the guarded files finds no wall-clock duration literal outside a generated region other than reasoned, counted exemptions.
+- [x] #2 One command reproduces every figure the docs publish (scripts/gate-costs.sh --refresh), and adding a gate turns the commit tier red naming that gate, with no person having to notice the prose disagreed first.
+- [x] #3 The eight files that publish costs today - doc-001, scripts/gates.sh, lefthook.yml, .github/workflows/ci.yml, firmware/Makefile and the headers of elf-provenance.sh, check-elf-staleness.sh and check-image-load-addresses.sh - no longer restate any number independently, and doc-001 names which file owns each figure and how the others refer to it.
 <!-- AC:END -->
 
 ## Implementation Plan
