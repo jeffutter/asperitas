@@ -382,6 +382,67 @@ in the Pod is unmeasured; TASK-037 records the attachment method actually used.
 The probe for this bench is an ST-Link V3 MINIE. As of 2026-09-10 no probe has been attached to
 this board at all, which is what TASK-037 exists to change.
 
+**Pad layout and cable orientation.** The 14 pads are two rows of seven, and a straight-through
+1:1 14-pin ribbon (STDC14 on the probe end) is correct: pin n on the probe goes to pad n on the
+Seed. The outer pair at each end is unconnected, and the centre 10 (pins 3 to 12) carry the same
+signals in the same order as the old 10-pin Cortex Debug header (pin 10 nRESET). Nothing on the
+board marks pin 1, so it is found by continuity. With the **USB-C port at the top** and the pad
+side facing you:
+
+```
+              USB-C (top)
+
+ left                                         right
+ 13     11     9      7      5      3      1      top row (odd pins)
+ NC     GNDdet NC     GND    GND    3V3    NC
+ 14     12     10     8      6      4      2      bottom row (even pins)
+ NC     nRESET TDI    SWO    SWCLK  SWDIO  NC
+```
+
+The red-stripe wire (cable pin 1) lands on the **right end of the top row**. The ground
+pattern is asymmetric, which is what makes the orientation unambiguous: on the top row,
+continuity to ground reads `x beep x beep beep x x` left to right (measured on this board,
+USB up). A cable rotated 180 degrees puts the probe's NRST on the 3V3 pad and its target-voltage
+sense on nRESET. nRESET has a 10 K pull-up to 3V3, so that wrong orientation still reads about
+3.3 V on the probe's voltage sense. A healthy `VAPP` therefore does not prove the orientation;
+the continuity pattern does.
+
+The STDC14 signal assignment above is from memory of ST's UM2910, not re-checked against the
+manual. The Seed-side facts (pin 10 is nRESET, the ground pattern) are the measured ones.
+
+**Setting `DBGMCU_CR.TRACECLKEN` kills the debug port on this board; any `--chip STM32H7...`
+connect does it.** Measured on this board with an ST-Link V3 (`V3J15M7`), probe-rs 0.32.0 and
+OpenOCD 0.12.0. The generic attach `probe-rs info --protocol swd` (no `--chip`; `info` ignores it)
+works every time on a freshly power-cycled board: DPv2, STMicroelectronics, part 0x4500, the
+core ROM table at `0xe000e000` readable. Any attach that names the chip fails with `SwdDpError`,
+after which **even the generic attach fails until the Seed's USB-C is unplugged and replugged**;
+RESET, `--connect-under-reset`, and replugging the probe all leave it stuck.
+
+The cause, found by tracing OpenOCD's `examine-end` hook at `-d3` (it writes `DBGMCU_CR` at
+`0xE00E1004` through AP2): the hook's writes of the D1/D3 debug clocks (`0x00600000`) and the
+sleep/stop/standby debug bits (`0x3F`) succeed, and so do the watchdog freeze registers. The write
+that adds **bit 20, `TRACECLKEN`** (`0x0070003F`) returns `STLINK_SWD_DP_ERROR` and the DP is dead.
+Writing `0x00100000` alone to `0x5C001004` on a fresh board reproduces it; writing
+`0x00200000` or `0x00400000` alone does not. probe-rs's STM32H7 `debug_device_unlock`
+(`probe-rs/src/vendor/st/sequences/stm32h7.rs`) sets all of those bits in one write on connect,
+and it is selected purely by `chip.name.starts_with("STM32H7")`. Why the trace clock faults here
+is unknown. Neither the cable (a RAM write and flash read at 1 MHz are clean), the probe, the
+nRESET path (continuity-checked), nor the firmware image (the system bootloader fails the same
+way) is the cause. The remedy that is known to work is to not write `TRACECLKEN`: OpenOCD with
+its `examine-end` hook cleared reads and writes memory reliably. `defmt` over RTT does not need
+the trace clock. For probe-rs, `firmware/asperitas-h750.yaml` is the stock `STM32H750IB` entry
+(internal-flash algorithm only) renamed `ASPERITAS_H750IB`, which falls outside the
+`STM32H7` prefix match and so gets the default ARM sequence. The `probe-*` Makefile targets use it
+through `--chip-description-path`, so the `--chip STM32H750IBKx` strings elsewhere in this document
+now read `--chip ASPERITAS_H750IB`. Measured: `probe-rs read b32 0x08000000 4 --chip
+ASPERITAS_H750IB --chip-description-path firmware/asperitas-h750.yaml --protocol swd` returns the
+vector table on a freshly power-cycled board without wedging the port. Not yet measured: flashing
+with it, `--connect-under-reset`, and RTT. Because that sequence never sets `DBGMCU_CR`, firmware
+that sleeps in WFI must set the debug-in-sleep bits itself. `Failed to read component information at 0xe000e000` while attached means the core
+was not accessible (held in reset or a stuck debug port), not a wiring fault.
+
+The probe does not power the board: with the Seed unpowered, `VAPP` read 0.58 V and attach failed.
+
 **What is and isn't established here.** The commands below are copied from `make -n` output in
 `firmware/`, the flag semantics from `probe-rs` 0.32.0's own `--help`, the target behaviour
 from `defmt-rtt` 1.3.0 source, and the chip entry from `probe-rs chip info` — all of which are

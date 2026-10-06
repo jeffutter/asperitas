@@ -50,7 +50,14 @@ TARGET   = thumbv7em-none-eabihf
 #
 # Plain `=` throughout, like the vars above, so `make VAR=x` still overrides from
 # the command line.
-CHIP        = STM32H750IBKx
+# Not `STM32H750IBKx`: probe-rs picks its STM32H7 debug sequence by chip-name prefix, and that
+# sequence sets DBGMCU_CR.TRACECLKEN on connect, which kills the debug port on this board until a
+# power cycle (docs/reference/daisy-seed3.md, "Setting DBGMCU_CR.TRACECLKEN..."). `ASPERITAS_H750IB`
+# is the stock STM32H750IB entry renamed in `asperitas-h750.yaml`, so probe-rs uses its default ARM
+# sequence. Because that sequence never writes DBGMCU_CR, nothing enables debug-in-sleep for us:
+# see the WFI note above `probe-log`.
+CHIP        = ASPERITAS_H750IB
+CHIP_DESC   = asperitas-h750.yaml
 ELF         = target/$(TARGET)/release/$(BINARY)
 
 # `FEATURES` adds to the crate's default features; it can never take one away. Dropping the
@@ -319,12 +326,12 @@ build-elf:
 ## sidesteps the question by attaching to an already-flashed board with no reset at all.
 ## TASK-037 records which worked.
 probe-flash: build-elf
-	probe-rs download $(ELF) --chip $(CHIP) --non-interactive $(UNDER_RESET_FLAG) --verify --reset $(PROBE_EXTRA)
+	probe-rs download $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) --verify --reset $(PROBE_EXTRA)
 
 ## Flash, then stay attached and stream RTT/defmt. Interactive use — the loop wants
 ## probe-flash, which exits.
 probe-run: build-elf
-	probe-rs run $(ELF) --chip $(CHIP) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
+	probe-rs run $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
 
 # Reading the cfg provenance out of the ELF belongs to scripts/elf-provenance.sh, which is the only
 # thing in the repo that parses the `.asp.prov` note firmware/build.rs stamps in. This is the first
@@ -407,7 +414,7 @@ elf-check:
 ## #350). Nothing sleeps today — the embassy executor busy-loops — so do not add an
 ## idle path without reading that.
 probe-log: elf-check
-	probe-rs attach $(ELF) --chip $(CHIP) --non-interactive $(PROBE_EXTRA)
+	probe-rs attach $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(PROBE_EXTRA)
 
 ## Is RTT discoverable at all? Attach, print the RTT channel table, exit.
 ##
@@ -415,7 +422,7 @@ probe-log: elf-check
 ## the host to keep up with the ring, so it can fail without costing anything. Run it before
 ## anything that takes the board down. Like `probe-log` it builds nothing, for the same reason.
 probe-rtt-list: elf-check
-	probe-rs attach $(ELF) --chip $(CHIP) --non-interactive --list-rtt $(PROBE_EXTRA)
+	probe-rs attach $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive --list-rtt $(PROBE_EXTRA)
 
 ## Check compilation without producing artifacts
 check:
