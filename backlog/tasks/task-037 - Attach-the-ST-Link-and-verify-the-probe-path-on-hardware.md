@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-10-07 22:50'
+updated_date: '2026-10-07 23:38'
 labels: []
 dependencies:
   - TASK-053
@@ -177,6 +177,15 @@ So the working hypothesis: probe-rs leaves the ST-Link in a state where its next
 Under-reset root-cause attempt 2026-10-07 (agent-run). Refuted: the idea that skipping probe-rs's STM32H7 DBGMCU sequence leaves the debug clocks off. DBGMCU_CR (0x5C001004) already read 0x00600007 (D1/D3 debug clocks on); writing 0x0060003F (the safe bits only, no TRACECLKEN) read back 0x0060003f, and --connect-under-reset still failed 3/3.
 Where it stalls, from RUST_LOG=probe_rs=debug on a failing `probe-rs read ... --connect-under-reset`: 'Using sequence Arm(DefaultArmSequence)'; 'Custom reset sequences are not supported on ST-Link V3. Falling back to standard probe reset.'; 'Asserting target reset'; 'Target voltage (VAPP): 3.25 V'; 'Successfully initialized SWD.'; then 'ERROR probe_rs::session: Unable to wait for 0 halted: An ARM specific error occurred.' and 'Timeout while attaching to target under reset'. So SWD comes up with nRESET held and the failure is halting core 0 afterwards, not connecting. The probe also reports 'Current device mode: MassStorage' at the start of every session and 'Jtag' at the end. Not established why only the first probe-rs operation after an OpenOCD session gets past the halt.
 asperitas-h750.yaml is a chip description (the stock STM32H750IB entry renamed), not a patched probe-rs; reset sequences are compiled Rust in probe-rs, so no YAML change can alter this. Options if it matters: keep UNDER_RESET=0 as the working default (verified: always attaches), or investigate/patch the Rust ARM sequence for the halt-under-reset step upstream. Not done.
+
+Under-reset ROOT CAUSE FOUND and FIXED 2026-10-07 (agent-run; commit 'flake: patch probe-rs so --connect-under-reset halts the core'). This supersedes the 'probe-rs leaves the ST-Link in a bad state' hypothesis above, which was wrong. Since probe-rs #3485, the under-reset path arms DEMCR.VC_CORERESET, releases nRESET, and only then sets DHCSR.C_DEBUGEN; vector catch needs C_DEBUGEN already set, so the core ran past it. C_DEBUGEN survives nRESET (only power-on clears it): OpenOCD leaves it set (hence the one-shot passes), and DefaultArmSequence's session teardown writes DHCSR=0 (hence every later failure with our renamed chip). Controlled test: OpenOCD leaving DHCSR C_DEBUGEN=0 vs 1 before a stock probe-rs under-reset read gave 0/3 vs 3/3. Fix: nix/probe-rs-cortex-m-reset-catch.patch, applied to probe-rs-tools in flake.nix. Write-up: docs/upstream/probe-rs-connect-under-reset.md.
+
+AC re-check after the fix (2026-10-07, agent-run, no ticks; every AC is HUMAN):
+- AC #1: facts already recorded above (soldered header on the 14-pad footprint, Seed seats in the Pod with it fitted). Nothing new; ready for the owner to close.
+- AC #2: with the patched probe-rs from `nix develop`, `probe-rs read --connect-under-reset` passed 5/5, and `make probe-flash FEATURES='seed3 log-defmt' NO_DEFAULT=1` (default --connect-under-reset --verify --reset) passed 3/3, the last 'Finished in 3.68s' with make rc 0. Before that, the scratch-built patched binary passed 8/8 reads and 2/2 downloads (3.55 s each), against 0/4 stock runs interleaved. No BOOT or RESET press at any point. Each run started with C_DEBUGEN cleared by the previous session's teardown, so this is not OpenOCD priming. Not tested: the first attempt straight after a USB-C power cycle (power-on clears C_DEBUGEN; the patch sets it regardless, so this is expected to pass, but it is unmeasured).
+- AC #3: unchanged, see the backtrace note above.
+- AC #4: NOT TESTED. Prepared, not flashed: a throwaway image built in the agent scratchpad (not in the repo) whose reset handler turns PA13/PA14 (SWDIO/SWCLK) into GPIO outputs and spins, so USB never comes up and a plain attach should fail. The plan was: flash it under reset, show that a plain attach fails, show that an under-reset attach succeeds, then reflash main under reset. The agent's permission policy blocked flashing it; it is the owner's call. Fallback if recovery failed: BOOT+RESET DFU.
+- AC #5: unchanged except flash times under reset are now 3.55-3.68 s. Attach time and log throughput still unmeasured (an attach-timing run was also blocked by the permission policy). Firmware V3J15M7 vs probe-rs's minimum is still not compared.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
