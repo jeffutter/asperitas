@@ -243,7 +243,7 @@ records timings. Treat these commands as ready, not proven.
 cd firmware
 DEFMT_LOG=info make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1  # build, program, verify read-back, reset, exit
 make probe-log        # attach and stream RTT; no reflash, no reset
-make probe-rtt-list   # attach, print the RTT channel table, exit; the cheapest bench question
+make probe-rtt-list   # read the RTT control block, print the channel table, exit; the cheapest bench question
 ```
 
 All three drive the release **ELF**, never the DFU `.bin`: `probe-rs` decodes `defmt` frames from the

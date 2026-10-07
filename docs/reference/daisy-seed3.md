@@ -467,7 +467,7 @@ probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx -
 ```
 
 There are two more targets. `probe-run` flashes and then stays attached to stream; `probe-rtt-list`
-attaches, prints the RTT channel table and exits. The names don't
+reads the RTT control block, prints the channel table and exits. The names don't
 show the difference that matters, so: **`probe-flash` exits when it's done**, which is what an
 unattended loop wants, while `probe-run` and `probe-log` hold the attachment and stream until
 you interrupt them. `probe-flash`'s `--verify` is genuine read-back verification by probe-rs —
@@ -874,7 +874,8 @@ recipes and nowhere else.
 | Command | probe-rs rc | `make` rc | stderr |
 |---|---|---|---|
 | `probe-rs download … --non-interactive` (what `make probe-flash` runs) | 1 | 2 | `Error: No connected probes were found.` |
-| `probe-rs attach … --non-interactive --list-rtt` (`make probe-rtt-list`) | 1 | 2 | the same string alone. A ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` line one row above it means the release profile has dropped below `debug = 2`, so locations are off: see the third gate under *Flashing and logging over an ST-Link probe*. Measured both ways on 2026-09-12. |
+| `probe-rs attach … --non-interactive --list-rtt` (the boardless DWARF check; `make probe-rtt-list` no longer runs this) | 1 | 2 | the same string alone. A ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` line one row above it means the release profile has dropped below `debug = 2`, so locations are off: see the third gate under *Flashing and logging over an ST-Link probe*. Measured both ways on 2026-09-12. |
+| `make probe-rtt-list` (`scripts/probe-rtt-list.sh`, two `probe-rs read`s) | 1 | 2 | `probe-rtt-list: probe-rs could not read 0x<addr>; see its error above.` after probe-rs's own error. Measured only with an unreadable chip description (exit 1), not with no probe attached; with a board it prints the control block and exits 0 in about a quarter of a second. |
 | `probe-rs list` | 0 | n/a | `No debug probes were found.` |
 | `make probe-log` or `make probe-rtt-list` with an ELF that is not its sources | never runs | 2 | `<ELF> was not built from the sources on disk`, then the two digests it compared (`stamp <hex>`, `sources <hex>`), then two advisory lines (flash the current build; force a real relink with `touch src/bin/<binary>.rs && make build-elf BINARY=<binary> FEATURES='<features>' NO_DEFAULT=1`), and no probe-rs output whatsoever. Measured 2026-09-14 by appending one line to `src/bin/main.rs` and running the target without rebuilding |
 | `make probe-log` or `make probe-rtt-list` with an ELF that has no input stamp beside it | never runs | 2 | `no stamp at <.../release/<binary>.elf-inputs.sha256>, so nothing here records which sources <ELF> came from`, then the same two advisory lines and the same `Force a real relink: …`. Reached by any ELF linked before TASK-056 landed and by every tree since `cargo clean` - the absence of the record is treated as unknowable, never as fresh. Measured 2026-09-14 by moving the stamp file aside |
@@ -992,7 +993,7 @@ specified command line arguments take overwrite presets, but presets take preced
 variables." CLI beats preset beats env, so an environment variable cannot override a preset, only a
 command-line flag can.
 
-**First thing to run at a bench: `make probe-rtt-list`.** It attaches, prints the RTT channel table,
+**First thing to run at a bench: `make probe-rtt-list`.** It reads the RTT control block, prints the channel table,
 and exits. It doesn't reflash, so it can't erase the single 128 KB sector, and it doesn't sit there
 streaming, so it is as close to a read-only look as SWD allows. When RTT shows nothing for one of the
 several reasons it goes quiet (core asleep, D-cache over the control block, wrong ELF, no `.defmt`

@@ -416,13 +416,17 @@ elf-check:
 probe-log: elf-check
 	probe-rs attach $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(PROBE_EXTRA)
 
-## Is RTT discoverable at all? Attach, print the RTT channel table, exit.
+## Is RTT discoverable at all? Read the control block, print the channel table, exit.
 ##
 ## The cheapest bench question there is: it neither erases the single 128 KB sector nor requires
 ## the host to keep up with the ring, so it can fail without costing anything. Run it before
 ## anything that takes the board down. Like `probe-log` it builds nothing, for the same reason.
+##
+## It reads memory with `probe-rs read` rather than running `probe-rs attach --list-rtt`, which on
+## probe-rs 0.32.0 against a live target attaches and then streams forever without printing a table
+## (TASK-037). See the header of scripts/probe-rtt-list.sh.
 probe-rtt-list: elf-check
-	probe-rs attach $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive --list-rtt $(PROBE_EXTRA)
+	bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/probe-rtt-list.sh $(ELF) $(CHIP) $(CHIP_DESC) $(PROBE_EXTRA)
 
 ## Check compilation without producing artifacts
 check:
