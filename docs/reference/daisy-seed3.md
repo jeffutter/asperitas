@@ -180,8 +180,10 @@ the core is running and the fault is downstream.
   in every binary, presenting as a board that simply never booted.
 - **A fault before `main` is invisible to both software channels.** Nothing has initialised
   USB or the LED state machine yet, so the board just sits there. The probe is the way to see
-  it: attaching under reset halts the core wherever it faulted and the fault status registers
-  say why (*Flashing and logging over an ST-Link probe*). On a bench with no probe, the first four
+  it: a plain attach (no reset) halts the core wherever it faulted and the fault status registers
+  say why (*Flashing and logging over an ST-Link probe*). Attaching under reset does not show the
+  fault - the reset clears those registers and the core stops at the reset vector - but it is how
+  you regain control to reflash. On a bench with no probe, the first four
   bytes of the image you flashed, `main.bin` or whichever `$(BINARY).bin` it was, hold the
   little-endian initial stack pointer. Read that, and treat it as a clue rather than a diagnosis.
 
@@ -436,8 +438,9 @@ the trace clock. For probe-rs, `firmware/asperitas-h750.yaml` is the stock `STM3
 through `--chip-description-path`, so the `--chip STM32H750IBKx` strings elsewhere in this document
 now read `--chip ASPERITAS_H750IB`. Measured: `probe-rs read b32 0x08000000 4 --chip
 ASPERITAS_H750IB --chip-description-path firmware/asperitas-h750.yaml --protocol swd` returns the
-vector table on a freshly power-cycled board without wedging the port. Not yet measured: flashing
-with it, `--connect-under-reset`, and RTT. Because that sequence never sets `DBGMCU_CR`, firmware
+vector table on a freshly power-cycled board without wedging the port. Since measured
+(TASK-037): flashing with it, RTT, and `--connect-under-reset`, the last only with the patched
+probe-rs described under *Under reset* below. Because that sequence never sets `DBGMCU_CR`, firmware
 that sleeps in WFI must set the debug-in-sleep bits itself. `Failed to read component information at 0xe000e000` while attached means the core
 was not accessible (held in reset or a stuck debug port), not a wiring fault.
 
@@ -447,9 +450,10 @@ The probe does not power the board: with the Seed unpowered, `VAPP` read 0.58 V 
 `firmware/`, the flag semantics from `probe-rs` 0.32.0's own `--help`, the target behaviour
 from `defmt-rtt` 1.3.0 source, and the chip entry from `probe-rs chip info` — all of which are
 host-side facts, checkable without a board. What has *not* been established is anything about
-this board: attach time, flash time, log throughput, whether `--connect-under-reset` works
-reliably with an ST-Link V3 MINIE, whether a real panic decodes to a backtrace. Those are
-TASK-037's measurements and this document leaves them blank rather than estimating.
+this board: attach time, flash time, log throughput, whether a real panic decodes to a
+backtrace. Those are TASK-037's measurements and live in its notes. The one board fact that
+changed the tooling, why `--connect-under-reset` failed and how the flake fixes it, is under
+*Under reset* below.
 
 ```bash
 cd firmware
@@ -742,6 +746,23 @@ region over the SDRAM window; nothing here calls it, and an MPU region is not th
 that leaves RTT alone. Whoever enables caching for DSP headroom is the one who breaks RTT silently,
 and will not suspect the cache. TASK-038.03 reached the same caches-off finding independently, from
 the SDRAM-coherence side.
+
+**Under reset only works with the flake's patched probe-rs.** Measured 2026-10-07: stock probe-rs
+0.32.0 fails every `--connect-under-reset` attach on this board with `Unable to wait for 0 halted` /
+`Timeout while attaching to target under reset`, while a plain attach always works. The cause is
+probe-rs, not the reset net or the probe. Since probe-rs #3485 it arms reset vector catch
+(`DEMCR.VC_CORERESET`), releases nRESET, and only then sets `DHCSR.C_DEBUGEN`. Vector catch fires
+only if C_DEBUGEN is already set as the core leaves reset, so the core runs past it. C_DEBUGEN
+survives nRESET and is cleared only by power-on, which is why an OpenOCD session (which leaves it
+set) let exactly one probe-rs attach through. The stock ST sequences leave it set after a failed
+attach, so stock chip names fail only once after power-up (probe-rs #4113). Our renamed chip gets
+`DefaultArmSequence`, whose session teardown writes `DHCSR = 0`, so it failed every time.
+`nix/probe-rs-cortex-m-reset-catch.patch`, applied to `probe-rs-tools` in `flake.nix`, sets
+C_DEBUGEN while reset is still held. With it, 5 of 5 reads and 3 of 3 `make probe-flash` runs passed
+under reset, against 0 of 4 stock runs interleaved with them. Full trace and the controlled test:
+[docs/upstream/probe-rs-connect-under-reset.md](../upstream/probe-rs-connect-under-reset.md). Drop
+the patch when upstream ships a fix. The #3516 discussion below still describes the probe class in
+general, but it was not what failed here.
 
 **Under reset, an ST-Link gets a plain reset, not a chip-specific one.** `probe-flash` passes
 `--connect-under-reset`, which holds nRESET low across attach and is what takes the BOOT/RESET

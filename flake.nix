@@ -45,7 +45,12 @@
               # targets in firmware/Makefile. Lock pins probe-rs-tools 0.32.0.
               # No udev rules here: this flake ships devShells only, and Darwin
               # needs no rule for an ST-Link (the Linux caveat lives in README).
-              pkgs.probe-rs-tools
+              # Patched so --connect-under-reset halts the core: stock 0.32.0
+              # arms vector catch without C_DEBUGEN and the core runs past it.
+              # See the patch header; drop it once upstream ships a fix.
+              (pkgs.probe-rs-tools.overrideAttrs (old: {
+                patches = (old.patches or [ ]) ++ [ ./nix/probe-rs-cortex-m-reset-catch.patch ];
+              }))
               pkgs.cargo-binutils        # objcopy to produce raw .bin for DFU
 
               pkgs.pkg-config

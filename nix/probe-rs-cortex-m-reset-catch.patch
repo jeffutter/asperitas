@@ -1,0 +1,38 @@
+probe-rs: enable C_DEBUGEN before releasing reset on Cortex-M
+
+Since probe-rs PR #3485 (2025-09-10) the connect-under-reset path runs
+ResetCatchSet, releases nRESET, and only then DebugCoreStart. Reset vector
+catch fires only when DHCSR.C_DEBUGEN is already set as the core leaves reset,
+so on a Cortex-M with C_DEBUGEN clear the core runs past the catch and the
+attach fails with "Timeout while attaching to target under reset".
+C_DEBUGEN is cleared only by power-on reset, and DefaultArmSequence's
+debug_core_stop clears it on every session drop, so with our renamed chip
+(firmware/asperitas-h750.yaml) under-reset failed every time. Same mechanism
+is the likely cause of upstream issue #4113.
+
+Measured 2026-10-07 on the Seed3 + ST-Link V3: stock 0/4, patched 8/8 reads
+and 2/2 flashes under reset. Full write-up:
+docs/upstream/probe-rs-connect-under-reset.md
+
+Drop this patch once upstream ships a fix.
+
+--- a/probe-rs/src/architecture/arm/sequences.rs
++++ b/probe-rs/src/architecture/arm/sequences.rs
+@@ -369,6 +369,17 @@
+ fn cortex_m_reset_catch_set(core: &mut dyn ArmMemoryInterface) -> Result<(), ArmError> {
+     use crate::architecture::arm::core::armv7m::{Demcr, Dhcsr};
+ 
++    // Vector catch only fires when halting debug is enabled. DebugCoreStart now
++    // runs after reset is released, so enable C_DEBUGEN here (SCS is reachable
++    // under reset on Cortex-M) or the core runs straight past the catch.
++    let dhcsr = Dhcsr(core.read_word_32(Dhcsr::get_mmio_address())?);
++    if !dhcsr.c_debugen() {
++        let mut dhcsr = Dhcsr(0);
++        dhcsr.set_c_debugen(true);
++        dhcsr.enable_write();
++        core.write_word_32(Dhcsr::get_mmio_address(), dhcsr.into())?;
++    }
++
+     // Request halt after reset
+     let mut demcr = Demcr(core.read_word_32(Demcr::get_mmio_address())?);
+     demcr.set_vc_corereset(true);

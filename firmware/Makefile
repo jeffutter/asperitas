@@ -317,14 +317,15 @@ build-elf:
 ## Program the ELF over the probe, verify read-back, reset, exit.
 ##
 ## No BOOT/RESET handshake: --connect-under-reset drives nRESET low while attaching,
-## which is the mechanism that takes the hand out of the loop. Reliability reports
-## against the ST-Link V3 MINIE are open (probe-rs #3516), and on any native ST-Link
-## probe-rs skips its custom reset sequence there rather than playing one — see
+## which is the mechanism that takes the hand out of the loop. On any native ST-Link
+## probe-rs skips its custom reset sequence and only drives the pin - see
 ## "Flashing and logging over an ST-Link probe" in docs/reference/daisy-seed3.md.
-## The flag stays the default until measured otherwise. The two knobs are `PROBE_EXTRA="--speed 1000"` and
-## `UNDER_RESET=0`, which drops the flag from this recipe and from `probe-run`; `make probe-log`
-## sidesteps the question by attaching to an already-flashed board with no reset at all.
-## TASK-037 records which worked.
+## Stock probe-rs 0.32.0 never halts this core under reset (it arms vector catch before
+## enabling halting debug), so this depends on the patched probe-rs the flake builds:
+## nix/probe-rs-cortex-m-reset-catch.patch. With it, under-reset flashes reliably here.
+## The two knobs are `PROBE_EXTRA="--speed 1000"` and `UNDER_RESET=0`, which drops the
+## flag from this recipe and from `probe-run`; `make probe-log` attaches to an
+## already-flashed board with no reset at all.
 probe-flash: build-elf
 	probe-rs download $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) --verify --reset $(PROBE_EXTRA)
 
