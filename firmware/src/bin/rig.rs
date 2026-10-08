@@ -224,9 +224,11 @@ static AUDIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
 /// Hand-written, and that is the only form available. `bind_interrupts!` and `#[interrupt]` may
 /// not both name a vector - the macro expands to `#[export_name = "SAI1"] fn __SAI1() {}`, so
 /// binding SAI1 anywhere *and* defining this function is a duplicate-symbol link error. Nothing
-/// binds SAI1 today: daisy-embassy's `AudioIrqs` binds the SAI DMA stream vectors, which are
-/// separate interrupts, so the vector is free and this definition is legal. Do not "tidy" it
-/// into a `bind_interrupts!` block.
+/// binds SAI1 today: daisy-embassy's `AudioIrqs` binds only `DMA1_STREAM0`/`STREAM1` for
+/// `DMA1_CH0`/`CH1` (`src/audio.rs:26-29`), and embassy-stm32's SAI driver binds only DMA lines,
+/// so the vector is free and this definition is legal. Do not "tidy" it into a
+/// `bind_interrupts!` block. The shape is upstream's: `examples/looper.rs:27-31` (this static and
+/// vector) and `:132-134` (priority, `start`, spawn), daisy-embassy at the pinned `ca9bcc9`.
 #[interrupt]
 unsafe fn SAI1() {
     // Safety: called from the SAI1 handler and nowhere else, and only after `start()` has
@@ -380,6 +382,25 @@ const _: () = assert!(
 const _: () = assert!(
     CALLBACK_BUDGET_US <= PERIOD_US,
     "a callback budget past one period admits underruns"
+);
+
+/// How often `report_capstat` emits, gated below against the dump it shares the pipe with.
+const CAPSTAT_PERIOD_MS: usize = 1_000;
+
+/// Milliseconds one ring block takes to fill: 341.
+const BLOCK_FILL_MS: usize = capture::callbacks_per_block() * capture::FRAMES_PER_CALLBACK * 1_000
+    / capture::SAMPLE_RATE_HZ as usize;
+
+/// Most `CAPSTAT` records that can land while one block fills, plus one for phase slip: 2.
+const CAPSTAT_MAX_PER_BLOCK: usize = BLOCK_FILL_MS / CAPSTAT_PERIOD_MS + 2;
+
+// Status traffic cannot dominate the dump: worst-case CAPSTAT bytes per block stay under one
+// percent of the wire bytes that block costs to dump (2 x 200 x 100 < 57 788). Relative on
+// purpose, because the link ceiling is unmeasured; both sides are constants the crate that renders
+// them owns and host-tests, not numbers typed here.
+const _: () = assert!(
+    CAPSTAT_MAX_PER_BLOCK * console::CAPSTAT_MAX_BODY * 100 < capture::wire_bytes_per_block(),
+    "CAPSTAT traffic would exceed one percent of the dump's own record traffic"
 );
 
 /// Delay from the first audio callback to arming.
@@ -619,12 +640,33 @@ fn capture_status(time_base: TimeBase) -> console::CaptureStatus {
 /// reserve leaves. If this cadence ever crowds the dump, `DUMPEND`'s `dropped_full` and `refused`
 /// climb, and the period here is the first knob to turn.
 async fn report_capstat(time_base: TimeBase) {
-    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_secs(1));
+    let mut ticker = embassy_time::Ticker::every(embassy_time::Duration::from_millis(
+        CAPSTAT_PERIOD_MS as u64,
+    ));
+    #[cfg(feature = "log-usb")]
     let mut body = [0u8; console::BODY_WINDOW];
     loop {
         ticker.next().await;
-        let n = console::capstat_body(&capture_status(time_base), &mut body);
-        emit_console(&body[..n]);
+        let st = capture_status(time_base);
+        #[cfg(feature = "log-usb")]
+        {
+            let n = console::capstat_body(&st, &mut body);
+            emit_console(&body[..n]);
+        }
+        // No console means no CAPSTAT record, but the starvation signals are still worth a probe
+        // reader's time, so the same facts go out as an ordinary log line.
+        #[cfg(not(feature = "log-usb"))]
+        info!(
+            "rig: capstat delivered={} expected={} overrun={} max_block_us={} worst_gap_us={} audio_exit={} dumped={} dropped_full={}",
+            st.delivered,
+            st.expected,
+            st.overrun,
+            st.max_block_us,
+            st.worst_gap_us,
+            st.audio_exit,
+            st.dumped,
+            st.dropped_full,
+        );
     }
 }
 
@@ -1237,8 +1279,11 @@ async fn main(_spawner: Spawner) {
     //
     // P6 sits below the SAI DMA streams and the embassy-time driver (TIM5), which is the whole
     // argument that the callback can run without a critical section: the transfers it depends on
-    // finish ahead of it rather than underneath it. The numbers are logged below as a reading of
-    // the NVIC, not as a restatement of this comment.
+    // finish ahead of it rather than underneath it. The DMA side is P0 because `Config::default()`
+    // ships `dma_interrupt_priority: Priority::P0` (embassy-stm32 0.6.0 `src/lib.rs:362`), and the
+    // direction is required, not incidental: the DMA ISR is what pends SAI1, so it must outrank
+    // the executor it wakes. The numbers are logged below as a reading of the NVIC, not as a
+    // restatement of this comment.
     if let Some(interface) = interface {
         interrupt::SAI1.set_priority(Priority::P6);
         let audio_spawner = AUDIO_EXECUTOR.start(interrupt::SAI1);
