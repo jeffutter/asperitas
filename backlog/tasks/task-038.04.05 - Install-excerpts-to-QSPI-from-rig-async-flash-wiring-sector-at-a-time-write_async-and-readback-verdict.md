@@ -3,17 +3,18 @@ id: TASK-038.04.05
 title: >-
   Install excerpts to QSPI from rig: async flash wiring, sector-at-a-time
   write_async and readback verdict
-status: Dev Ready
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-10-08 15:29'
-updated_date: '2026-10-08 16:24'
+updated_date: '2026-10-08 16:39'
 labels:
   - task
   - planned
 dependencies:
-  - TASK-038.04.04
   - TASK-038.04.02
+  - TASK-038.04.04
+  - TASK-038.04.07
 parent_task_id: TASK-038.04
 priority: high
 ordinal: 135800
@@ -56,3 +57,13 @@ Verify: cargo build --release for the firmware workspace on thumbv7em-none-eabih
 
 Risks: write_async panics on a stuck chip; 4096-byte stack buffers plus the Installer's own sector buffer on a thread-mode stack (check stack headroom; make them statics); MDMA ISR priority versus audio; the Flash mutex must not be held across an await by anyone but the owner - document the rule for the replay ticket.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Blocked 2026-10-08 on TASK-038.04.07 (internal flash budget). The implementation is written and parked on branch wip/TASK-038.04.05-excerpt-install, commit 762392c (one commit on top of 1ef8714; its commit-tier gates passed, 15 gates). It covers every AC in code: build_async(MDMA_CH0, RigFlashIrqs) into static FLASH: Mutex<ThreadModeRawMutex, Option<Flash<Async>>>; QUADSPI and MDMA set to P7 (below SAI1's P6) and read back in the nvic info line; run_install consumes usb::enable_inbound(), drives excerpt::Installer, one guarded rewrite_sector call site (sector-aligned, inside the EXCSTART slot, [u8; 4096] by type) for write_async/erase_async; Verify reads back in 4096-byte read_async chunks, CRC-16, Installer::verdict, header sector written last on Ok, EXCOK/EXCFAIL via emit_console; CAPTURE_ACTIVE (arm..DUMPEND) refuses an EXCSTART and aborts an open install with EXCFAIL why=busy (new Why::Busy + Installer::abort in asperitas-logging, with host tests); firmware/build.rs rig_flash_ban fails the build on blocking .read(/.write(/.erase(/.read_uuid(/.build() in rig.rs (verified: a comment passes, a real call fails). Clippy -D warnings is clean in both the console and RTT-only configs.
+
+What blocks it: rig does not link. Internal flash is 131,072 B; the patched images are 143,312 (seed3), 145,104 (stim-ess), 143,536 (stim-pulse); baseline seed3 at 1ef8714 is 125,016. Measured by linking against a 256K FLASH region in a scratch memory.x. The ~6 KB free at baseline cannot hold even a minimal install path (~10 KB irreducible: parse_record, base64 decode, Installer, QSPI/MDMA driver, header encode, CRC table), so room has to be made elsewhere, and the options (opt-level, splitting rig into its own package, libm sin) touch the audio callback codegen TASK-038.05 measured - a decision for its own ticket, not a side effect of this one.
+
+Next step: once TASK-038.04.07 lands, rebase wip/TASK-038.04.05-excerpt-install onto main, confirm all three rig builds link under budget, run the push tier, then tick the ACs here. The main checkout was left clean (the work was reverse-applied after the branch commit).
+<!-- SECTION:NOTES:END -->
