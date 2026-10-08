@@ -1,11 +1,11 @@
 ---
 id: TASK-037
 title: Attach the ST-Link and verify the probe path on hardware
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-10-08 00:25'
+updated_date: '2026-10-08 00:28'
 labels: []
 dependencies:
   - TASK-053
@@ -27,11 +27,11 @@ This is also the only mechanism that recovers a board whose firmware hangs befor
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: whether the SWD pads are reachable with the Seed3 seated in the Pod is determined and recorded, together with the attachment method actually used — soldered hairlines, pogo pins, or running the Seed outside the Pod. Attachment uses the 10-pin Cortex Debug footprint, since the Seed3's extra V3MINIE-style pads are documented as unwired.
-- [ ] #2 HUMAN: probe-rs attaches under reset and flashes the application with no interaction with BOOT or RESET.
-- [ ] #3 HUMAN: the defmt/RTT log stream is observed live while the application runs, and a forced panic arrives with a decoded backtrace.
-- [ ] #4 HUMAN: a deliberately faulted or hung binary is recovered by re-attaching under reset, demonstrating recovery when USB is dead — the case the software restart command cannot serve.
-- [ ] #5 HUMAN: probe firmware version is recorded, since probe-rs requires ST-Link V3 firmware 3.2 or newer, along with measured attach time, flash time, log throughput, and anything flaky observed.
+- [x] #1 HUMAN: whether the SWD pads are reachable with the Seed3 seated in the Pod is determined and recorded, together with the attachment method actually used — soldered hairlines, pogo pins, or running the Seed outside the Pod. Attachment uses the 10-pin Cortex Debug footprint, since the Seed3's extra V3MINIE-style pads are documented as unwired.
+- [x] #2 HUMAN: probe-rs attaches under reset and flashes the application with no interaction with BOOT or RESET.
+- [x] #3 HUMAN: the defmt/RTT log stream is observed live while the application runs, and a forced panic arrives with a decoded backtrace.
+- [x] #4 HUMAN: a deliberately faulted or hung binary is recovered by re-attaching under reset, demonstrating recovery when USB is dead — the case the software restart command cannot serve.
+- [x] #5 HUMAN: probe firmware version is recorded, since probe-rs requires ST-Link V3 firmware 3.2 or newer, along with measured attach time, flash time, log throughput, and anything flaky observed.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -204,6 +204,8 @@ AC #5 log throughput MEASURED (agent-run 2026-10-07; throwaway firmware, deleted
 - Steady state: every full second of run 1 fell between 2782 and 3200 records.
 So roughly 3000 records/s, about 65 KiB/s of encoded defmt (estimated from the 22 B/record payload, not counting framing). It is lossless, because probe-rs puts the channel in blocking mode while attached and the firmware waits on the host. This is the host-side drain ceiling for this probe at the default SWD speed. A firmware that logs faster than this stalls inside defmt while attached (see comment #1's audio-deadline warning). Not measured: the effect of `--speed`, or of decoding with locations instead of '{s}'.
 AC #5 is now fully evidenced: probe firmware V3J15M7 (clears probe-rs's V3 floor of JTAG version 3), attach 0.085 s plain and 0.21 s under reset, flash 3.55-3.68 s under reset, log throughput ~3000 records/s lossless. Flaky items observed: the under-reset bug (root-caused and patched), and the one transient `probe-rs info` auto-detect failure noted earlier. Board left running main (flash 3.59 s, vector table 24080000 08000299 08006ca5 08009891). No tick; HUMAN.
+
+Closed 2026-10-07 by an agent ON THE OWNER'S EXPLICIT INSTRUCTION ('You can close out that ticket'), after the owner reviewed the evidence above. This is an exception to the rule that agents never mark @human tickets Done. The ACs were ticked on the owner's say-so, against the bench evidence recorded in these notes.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -249,3 +251,28 @@ created: 2026-09-12 21:34
 Bench ask from TASK-057's planning pass (2026-09-12): when you have the probe on and the board in reach, also run `make flash-all BINARY=blinky` exactly as the corrected quickstart in docs/reference/daisy-seed3.md now spells it, and confirm steady green LED 1. That recipe was rewritten because the old one flashed main.bin while claiming to flash blinky; nothing in TASK-057 could verify the new wording beyond its `make -n` expansion, so this is the human half of closing it. Cheap to fold into the same session - it costs one BOOT+RESET tap.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The probe path is verified on hardware: Daisy Seed3 in the Pod, ST-Link V3 (firmware V3J15M7), probe-rs 0.32.0.
+
+- AC #1: a pin header is soldered onto the Seed3's 14-pad debug footprint (centre 10 pins active), and the Seed seats in the Pod with it fitted, so probe work and Pod control-surface work can happen together.
+- AC #2: under-reset flashing works with no BOOT or RESET press, but only with a patched probe-rs. Stock 0.32.0 arms reset vector catch before enabling halting debug (DHCSR.C_DEBUGEN), so the core ran past the catch. Fix: nix/probe-rs-cortex-m-reset-catch.patch, applied in flake.nix. Results: 5/5 reads and every `make probe-flash` under reset passed, against 0/4 stock runs.
+- AC #3: live defmt over RTT with file:line locations. A forced panic gives a 17-frame decoded backtrace when the probe-rs session is stopped with Ctrl+C and `--always-print-stacktrace`.
+- AC #4: an image that turns SWDIO/SWCLK into GPIO outputs (USB dead, plain attach fails) was recovered by `make probe-flash` under reset. Vector catch halts the core before the bad code runs.
+- AC #5: firmware clears probe-rs's V3 floor; attach 0.085 s plain and 0.21 s under reset; flash 3.55-3.68 s; RTT throughput about 3000 records/s (~65 KiB/s), lossless.
+
+Other changes:
+- Separately, setting DBGMCU_CR.TRACECLKEN wedges the debug port on this board. The renamed chip entry firmware/asperitas-h750.yaml works around it.
+- docs/upstream/probe-rs-connect-under-reset.md is the write-up for reporting upstream (#3485, #4113). Reporting it is still to do.
+- Corrected the docs that called under-reset flaky or unmeasured.
+
+Risks and follow-ups:
+- The probe-rs patch must be dropped or re-checked when probe-rs is bumped.
+- The TRACECLKEN cause is unknown.
+- `probe-rs read --connect-under-reset` resumes the core on exit, so recovery has to use `probe-flash`.
+- Untested: under-reset straight after a power cycle, and how `--speed` affects throughput.
+
+Closed by an agent on the owner's explicit instruction.
+<!-- SECTION:FINAL_SUMMARY:END -->
