@@ -1,5 +1,11 @@
 [target.thumbv7em-none-eabihf]
-rustflags = ["-C", "link-arg=-Tlink.x"]
+# `target-cpu=cortex-m7` turns on the H750's double-precision FPU. The bare target only assumes a
+# single-precision FPU, so every f64 op became a soft-float call (`__aeabi_dmul`, `__aeabi_ddiv`).
+# asperitas-dsp's stimulus generators compute in f64 through libm, and with soft float rig's sine
+# callback took 794 us against a 666 us period: the SAI RX ring overran on the first read and
+# audio stopped (`audio_exit=2`). With this flag the same callback measured 64-70 us on hardware
+# (2026-10-07). `+fp64` reaches the same codegen but rustc warns it is an unstable feature name.
+rustflags = ["-C", "link-arg=-Tlink.x", "-C", "target-cpu=cortex-m7"]
 
 [build]
 target = "thumbv7em-none-eabihf"
