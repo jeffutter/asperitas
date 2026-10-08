@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-10-07 23:38'
+updated_date: '2026-10-08 00:03'
 labels: []
 dependencies:
   - TASK-053
@@ -186,6 +186,15 @@ AC re-check after the fix (2026-10-07, agent-run, no ticks; every AC is HUMAN):
 - AC #3: unchanged, see the backtrace note above.
 - AC #4: NOT TESTED. Prepared, not flashed: a throwaway image built in the agent scratchpad (not in the repo) whose reset handler turns PA13/PA14 (SWDIO/SWCLK) into GPIO outputs and spins, so USB never comes up and a plain attach should fail. The plan was: flash it under reset, show that a plain attach fails, show that an under-reset attach succeeds, then reflash main under reset. The agent's permission policy blocked flashing it; it is the owner's call. Fallback if recovery failed: BOOT+RESET DFU.
 - AC #5: unchanged except flash times under reset are now 3.55-3.68 s. Attach time and log throughput still unmeasured (an attach-timing run was also blocked by the permission policy). Firmware V3J15M7 vs probe-rs's minimum is still not compared.
+
+AC #4 evidence (agent-run 2026-10-07, patched probe-rs from `nix develop`; no tick, the AC is HUMAN). Faulted image: a throwaway bare-metal ELF (agent scratchpad, not in the repo; vector table SP 0x24080000, reset 0x08000009) whose reset handler enables GPIOA and sets PA13/PA14 (SWDIO/SWCLK) to GPIO output mode, then spins. It never starts USB.
+1. `probe-rs download <swdkill.elf> ... --connect-under-reset --verify --reset` programmed it, then ended with 'Command failed with status SwdDpError': once --reset let the image run, it took the SWD pins away from the session.
+2. Plain attach (`probe-rs read b32 0x08000000 4`, no reset) FAILED with 'JtagGetIdcodeError', so the board was unreachable without reset and USB was dead.
+3. Under-reset attach SUCCEEDED in getting control: the debug log shows SWD up with nRESET held, 'DFSR ... vcatch: true, halted: true' (stopped on reset vector catch before the bad code ran), and the read returned the faulted image's vector table '24080000 08000009 466fb580 40e0f244'. The command still exited non-zero, because `probe-rs read` resumes the core on exit; the image then takes the pins again and session teardown gets SwdDpError. So a read under reset proves access, but recovery needs a command that reprograms while the core is halted.
+4. Recovery: `make -C firmware probe-flash FEATURES='seed3 log-defmt' NO_DEFAULT=1` (default --connect-under-reset --verify --reset): make rc 0, 'Finished in 3.61s'. Afterwards a plain attach read main's vector table '24080000 08000299 08006ca5 08009891'. No BOOT or RESET press and no power cycle at any step. Board left running main.
+Practical rule: to recover a board whose firmware kills SWD or never brings USB up, run `make probe-flash` (under reset is the default). Don't expect a `probe-rs read --connect-under-reset` to leave the board halted.
+
+AC #5 attach times (agent-run 2026-10-07, patched probe-rs binary called by its store path to keep `nix develop` startup, measured at ~0.44-0.50 s, out of the number): `probe-rs read b32 0x08000000 4`, process start to exit, 5 runs each. Plain attach 0.084-0.088 s, under reset 0.208-0.213 s. Every run returned the vector table. The ~0.12 s difference is mostly probe-rs's fixed 100 ms sleep after releasing nRESET (DefaultArmSequence reset_hardware_deassert, since an ST-Link cannot read the pin back). Flash times under reset: 3.55-3.68 s. Still open for AC #5: log throughput, and comparing V3J15M7 against probe-rs's firmware minimum.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
