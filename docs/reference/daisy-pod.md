@@ -171,3 +171,26 @@ This matters more than it sounds: the symptom is thin, noisy, low-level audio, a
 natural instinct is to blame the DSP. Feed the Pod from a DI box, a preamp, or an audio
 interface's line output during development, and keep gain staging in mind when
 comparing device output against desktop CLI output on the same source material.
+
+## Self-loopback channel mapping (measured)
+
+Measured 2026-10-08 with a stereo 3.5 mm cable from the Pod's output jack to its input jack and
+`rig`'s 1 kHz sine at -20 dBFS (TASK-038.05 AC #8). In the codec's interleaved SAI words, word 0 is
+what `rig` and `main.rs` call **Left** (`console::MonoLane::Left`) and word 1 is **Right**. Each run
+drove one output word and recorded one input word, 10 s each, with every block proved by
+`dump_reassemble`:
+
+| Output driven | Lane recorded | Peak | RMS |
+|---|---|---:|---:|
+| Left only | Left | -20.42 dBFS | -23.43 dBFS |
+| Left only | Right | -84.29 dBFS (2 LSB) | -93.31 dBFS |
+| Right only | Right | -20.40 dBFS | -23.42 dBFS |
+
+So the loop is straight. Output Left returns on input Left and Right on Right, both paths have the
+same gain (-0.41 dB end to end at -20 dBFS; the 300 s run in TASK-038.05 repeats it), and Left-to-Right
+crosstalk is below the 16-bit capture floor, more than 64 dB down. `rig` records Left by default, and
+that lane carries the stimulus.
+
+The loopback proves both jacks use the same contact for word 0. It does not prove that contact is
+the tip, which is the left channel by the usual TRS convention. One listen settles it: play a
+left-only tone into headphones and hear which ear it is in.

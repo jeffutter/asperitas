@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 13:58'
+updated_date: '2026-10-08 14:00'
 labels:
   - planned
 dependencies:
@@ -122,4 +122,8 @@ rig cannot fill the ring as built: the window is const-gated below RING_BLOCKS. 
 ### AC #6 evidence, 2026-10-08 (probe reads off the running board)
 
 SCB_CCR=0x00040200 (DC=0, IC=0); FMC_BCR1=0x800030db (BMAP=00); FMC_SDCR1=0x19e9 (bank 1 at 0xC000_0000, 64 MiB); FMC_SDCR2/SDTR2 at reset values (bank 2 unconfigured); MPU_CTRL=5; the only MPU region is 0xD000_0000, RASR=0x03030033 (64 MiB write-back cacheable). Probe patterns read back at 0xC000_0000, 0xC1FF_FFF0 and 0xC3FF_FFF0, with no aliasing at 32 MiB; 0xD000_0000 returns an AP bus error. Resolved in writing in docs/reference/daisy-seed3.md, 'External SDRAM: address, MPU and caches (measured)': the SDRAM is at 0xC000_0000, the MPU region is inert, and the window is default-map Device memory, so it stays uncached even if the D-cache is enabled. Correction to the earlier rule: what changes coherence is an MPU region over 0xC000_0000, not CCR.DC. rig.rs's comment is updated to match. Not ticked: awaiting the owner's sign-off.
+
+### AC #8 evidence, 2026-10-08 (three-run lane experiment, uncommitted rig edits, reverted)
+
+Stereo cable from OUT to IN, 1 kHz -20 dBFS, 10 s windows, all 30 blocks proved by dump_reassemble on every run. Output L only, recorded Left: peak -20.42 dBFS, RMS -23.43. Output L only, recorded Right: peak 2 LSB (-84.29), RMS -93.31. Output R only, recorded Right: peak -20.40, RMS -23.42. The loop is straight (word 0 to word 0, word 1 to word 1), both paths have equal gain, and there is no crosstalk above the 16-bit floor. Written into docs/reference/daisy-pod.md, 'Self-loopback channel mapping (measured)'. The archived 300 s capture's lane (Left) carries the stimulus at -20.41 dBFS. Open: whether word 0 is the TRS tip on the jack; one headphone listen settles it. Not ticked: awaiting the owner's sign-off.
 <!-- SECTION:NOTES:END -->
