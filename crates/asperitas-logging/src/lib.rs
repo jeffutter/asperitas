@@ -216,6 +216,8 @@ pub mod capture;
 
 pub mod excerpt;
 
+pub mod replay;
+
 pub mod inbound;
 
 // ---------------------------------------------------------------------------
