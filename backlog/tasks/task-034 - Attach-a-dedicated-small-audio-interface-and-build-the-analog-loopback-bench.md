@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 01:26'
-updated_date: '2026-09-09 02:09'
+updated_date: '2026-10-08 03:09'
 labels: []
 dependencies: []
 documentation:
@@ -44,4 +44,17 @@ Revised 2026-09-09: the original version of this ticket assumed a permanently-at
 Consequence: the drift criterion that was here (fix 48 kHz on host and device, record clock slip over 60 s) is deleted deliberately, not deferred. With one codec there is nothing to drift. TASK-035's alignment requirement changed from 'tolerate drift' to 'verify the offset is fixed', which is a stronger assertion.
 
 Real playing material still works without a host analog path: excerpts from audio/instruments/ are stored in QSPI and replayed as stimulus by TASK-038.
+
+## First loopback measurement, 2026-10-07 (device-side only; the independent-observer check, AC #2, is still open)
+
+Setup: owner fitted a 3.5 mm cable from Pod OUT to Pod IN. rig at eed633b, sine stimulus (-20 dBFS, 1 kHz default), ASP_RIG_CAPTURE_SECONDS=30, booted with the RESET button (not a probe flash, which zeroes the DWT timing).
+
+Run: delivered 88 == expected 88, overrun 0, max_block_us 73, worst_gap_us 695, DUMPEND elapsed_ms=6983 dropped_full=0. dump_reassemble exit 0: 22440 chunks stored, 0 duplicate/conflict/late, 0 bad frames, 2883584 PCM bytes.
+
+Captured mono lane (MonoLane::Left), 30.037 s:
+- Tone: 1000 upward zero crossings per second, so 1 kHz as built.
+- Level: peak 3126 LSB = -20.41 dBFS; fitted sine amplitude 3124.5 = -20.41 dBFS; RMS 2209.4 (-23.42 dBFS). **Loop gain at -20 dBFS: -0.41 dB.** No clipping.
+- Stability: per-second RMS 2209.4 in every second (min = max to 0.1 LSB).
+- Hum/DC (AC #4): DC offset -0.50 LSB. Residual after removing the fitted 1 kHz sine is 0.35 LSB RMS, about the 16-bit quantisation floor (0.29 LSB), so SNR+D is about 75.9 dB, limited by the 16-bit capture format. No hum was visible at this resolution; a spectrum is still needed to put a number on it.
+- Lane: the loop drives the lane rig records as Left (TASK-038.05 AC #8 wants this written into daisy-pod.md once a person has confirmed which jack the cable is in).
 <!-- SECTION:NOTES:END -->
