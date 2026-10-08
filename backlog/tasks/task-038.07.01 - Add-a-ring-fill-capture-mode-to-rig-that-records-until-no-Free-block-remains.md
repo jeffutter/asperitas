@@ -5,6 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-08 13:56'
+updated_date: '2026-10-08 14:31'
 labels:
   - planned
   - ready-for-agent
@@ -35,3 +36,9 @@ Bench findings from 2026-10-07 that apply: a full-ring dump is about 59 MB on th
 - [ ] #3 The default (300 s) build keeps its gates and its timeline unchanged, and a host-checkable test or const assert covers the parser's new arm
 - [ ] #4 scripts/gates.sh gains a push-tier build of the ring-mode variant, and `scripts/gates.sh push` passes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Also discharges the 'or until the ring reports full' clause of TASK-038.03 #10 and TASK-038.03.02 #9, which were closed on 2026-10-08 with that clause moved here.
+<!-- SECTION:NOTES:END -->

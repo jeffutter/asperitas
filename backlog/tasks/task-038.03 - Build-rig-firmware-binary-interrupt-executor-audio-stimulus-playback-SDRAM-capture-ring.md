@@ -3,11 +3,11 @@ id: TASK-038.03
 title: >-
   Build rig firmware binary: interrupt-executor audio, stimulus playback, SDRAM
   capture ring
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:37'
-updated_date: '2026-09-11 13:39'
+updated_date: '2026-10-08 14:31'
 labels:
   - planned
 dependencies:
@@ -47,93 +47,23 @@ Stimulus type and level are compile-time selections (cargo features, sine at −
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `firmware/src/bin/rig.rs` exists, builds under CI's `cargo build --release --features seed3`, and `firmware/src/bin/main.rs` and `podtest.rs` are untouched, so the human-verified podtest output contract from TASK-018.04 cannot regress.
-- [ ] #2 Audio runs on a dedicated `InterruptExecutor` bound to `SAI1` with embassy-executor's `executor-interrupt` feature enabled, while the USB drain, LED task, and dump writer stay on the thread executor; the interrupt priority assignment is stated in code and the rationale cites the upstream `looper.rs` precedent, so dump work is preempted by audio structurally rather than by convention.
-- [ ] #3 Stimulus type and level are compile-time selections (a cargo feature per stimulus kind, sine at −20 dBFS when no feature is set), every non-default combination is built by CI so it cannot rot, and the device emits exactly one `RIGCFG` record whose payload is the stimulus module's own `describe()` string plus sample rate, capture format, and block size, so no second description grammar exists.
-- [ ] #4 Input capture stores the loop channel as 16-bit mono into a fixed 32 MiB SDRAM ring of 1,024 blocks of 32 KiB at 96,000 bytes/s, publishing each block through `filling -> full -> dumping -> free` with atomic indices and release-before-publish ordering; the producer writes only blocks it found `free`, and when none are free it stops capturing and increments a visible overrun counter instead of overwriting a block being dumped.
-- [ ] #5 Per-callback work is bounded to one contiguous copy plus lane truncation, and DWT cycle-counter instrumentation reports worst-case callback duration and longest inter-callback gap; a periodic `CAPSTAT` record carries delivered block count, expected block count, `max_block_us`, `worst_gap_us`, capture overruns, dump progress, and the transport's `dropped_full`, giving hardware verification two independent starvation signals rather than one.
-- [ ] #6 The device reports `CAPMAX total_bytes ring_bytes seconds_max unused_headroom_bytes` computed at runtime from `sdram::SDRAM_SIZE` and the published ring geometry, so maximum capturable duration is measured from the driver constant rather than guessed by the caller, and the headroom statement makes clear that live audio DMA buffers remain in internal RAM.
-- [ ] #7 A host unit test derives ring geometry and wrap arithmetic from the same public constants the firmware uses — 512 callbacks per block, 219 chunks per block, 1,024 blocks, 349.5 s ring capacity — so an off-by-one in geometry fails CI with no board attached.
-- [ ] #8 The dump writer obtains permission to enqueue from TASK-038.02's capacity policy function and never bypasses it, which is what keeps ordinary log and status traffic lossless during a dump.
-- [ ] #9 The SDRAM memory model is recorded where a future reader will hit it: `init()` returns 0xC000_0000 while the driver programs its cacheable MPU region at 0xD000_0000, caches are enabled nowhere in the stack so accesses are uncached and coherent today, nothing here enables caches or changes the MPU base, and the open question is handed to TASK-038.05 with the SDRAM and QSPI budgets written into `docs/reference/daisy-seed3.md`.
-- [ ] #10 Capture start and end are decided by the device, not by a host command channel this ticket does not have: it captures for a build-time-configured window or until the ring reports full, then begins the dump on its own, because runtime control over the console link belongs to TASK-032 and waiting for it would stall the measurement chain for an unrelated reason.
-- [ ] #11 When a dump finishes the device emits one summary record naming blocks, chunks, bytes, elapsed milliseconds, and the transport loss counters at that moment, so a caller times and validates a transfer from the captured stream alone; that verb joins the record grammars TASK-038.06 documents.
+- [x] #1 `firmware/src/bin/rig.rs` exists, builds under CI's `cargo build --release --features seed3`, and `firmware/src/bin/main.rs` and `podtest.rs` are untouched, so the human-verified podtest output contract from TASK-018.04 cannot regress.
+- [x] #2 Audio runs on a dedicated `InterruptExecutor` bound to `SAI1` with embassy-executor's `executor-interrupt` feature enabled, while the USB drain, LED task, and dump writer stay on the thread executor; the interrupt priority assignment is stated in code and the rationale cites the upstream `looper.rs` precedent, so dump work is preempted by audio structurally rather than by convention.
+- [x] #3 Stimulus type and level are compile-time selections (a cargo feature per stimulus kind, sine at −20 dBFS when no feature is set), every non-default combination is built by CI so it cannot rot, and the device emits exactly one `RIGCFG` record whose payload is the stimulus module's own `describe()` string plus sample rate, capture format, and block size, so no second description grammar exists.
+- [x] #4 Input capture stores the loop channel as 16-bit mono into a fixed 32 MiB SDRAM ring of 1,024 blocks of 32 KiB at 96,000 bytes/s, publishing each block through `filling -> full -> dumping -> free` with atomic indices and release-before-publish ordering; the producer writes only blocks it found `free`, and when none are free it stops capturing and increments a visible overrun counter instead of overwriting a block being dumped.
+- [x] #5 Per-callback work is bounded to one contiguous copy plus lane truncation, and DWT cycle-counter instrumentation reports worst-case callback duration and longest inter-callback gap; a periodic `CAPSTAT` record carries delivered block count, expected block count, `max_block_us`, `worst_gap_us`, capture overruns, dump progress, and the transport's `dropped_full`, giving hardware verification two independent starvation signals rather than one.
+- [x] #6 The device reports `CAPMAX total_bytes ring_bytes seconds_max unused_headroom_bytes` computed at runtime from `sdram::SDRAM_SIZE` and the published ring geometry, so maximum capturable duration is measured from the driver constant rather than guessed by the caller, and the headroom statement makes clear that live audio DMA buffers remain in internal RAM.
+- [x] #7 A host unit test derives ring geometry and wrap arithmetic from the same public constants the firmware uses — 512 callbacks per block, 219 chunks per block, 1,024 blocks, 349.5 s ring capacity — so an off-by-one in geometry fails CI with no board attached.
+- [x] #8 The dump writer obtains permission to enqueue from TASK-038.02's capacity policy function and never bypasses it, which is what keeps ordinary log and status traffic lossless during a dump.
+- [x] #9 The SDRAM memory model is recorded where a future reader will hit it: `init()` returns 0xC000_0000 while the driver programs its cacheable MPU region at 0xD000_0000, caches are enabled nowhere in the stack so accesses are uncached and coherent today, nothing here enables caches or changes the MPU base, and the open question is handed to TASK-038.05 with the SDRAM and QSPI budgets written into `docs/reference/daisy-seed3.md`.
+- [x] #10 Capture start and end are decided by the device, not by a host command channel this ticket does not have: it captures for a build-time-configured window or until the ring reports full, then begins the dump on its own, because runtime control over the console link belongs to TASK-032 and waiting for it would stall the measurement chain for an unrelated reason.
+- [x] #11 When a dump finishes the device emits one summary record naming blocks, chunks, bytes, elapsed milliseconds, and the transport loss counters at that moment, so a caller times and validates a transfer from the captured stream alone; that verb joins the record grammars TASK-038.06 documents.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-## What this ticket actually is now
-
-Two leaves carry the implementation; this umbrella carries the corrections, the integration check, and the mapping from its eleven acceptance criteria onto work that someone else did.
-
-- **TASK-038.03.01** — Done (commit `dad6915`). `asperitas_logging::capture`: the ring geometry as constants derived from the dump grammar, the block-state contract, and the host test that fails CI when the two disagree. No firmware, no hardware.
-- **TASK-038.03.02** — `rig.rs` plus the record verbs and the Cargo/CI wiring. Everything that touches a peripheral. After two execute attempts died at the phase deadline with nothing committed, this leaf became an **umbrella over two sub-leaves**: `.03.02.01` (console verbs, their host tests, one whole-record emit path, incremental CRC — crate-side, board-free) then `.03.02.02` (`rig.rs`, features, CI, memory-model note). See its own plan for the AC mapping.
-
-Order is strictly `.01` then `.02`: the binary imports the geometry module and const-asserts against it, so `.02` cannot compile without `.01` landed. Within `.02` the same order holds again, crate-side verbs before the binary that calls them.
-
-### Why two leaves and not four
-
-The obvious further split — executor skeleton, capture producer, dump writer, CI matrix — was considered and rejected. Those pieces share one file and one set of atomics, and every intermediate state still has to compile under `cargo build --release --features seed3`; a "captures but never dumps" rig.rs ships nothing anyone can use. The skill's own rule applies: do not split changes that must ship together. `.01` is the only genuinely independent increment here, because it is a library module with its own test target, and it is also the one place where an error is catchable with no board attached.
-
-That rejection still governs *inside* `rig.rs`, which remains one increment in `.03.02.02`. What `.02` later split along was a different seam — host crate versus bare-metal binary, the one boundary where a change needs no cross-build to check. The reason was measured, not theoretical: 40-minute execute budget, two attempts cut with zero commits, the second dead eight minutes short of creating `rig.rs` while spending 25 of its minutes repairing syntax damage the first had left uncommitted.
-
-## Corrections this planning run makes to the ticket text
-
-Three figures in the Implementation Notes above predate TASK-038.02 landing and are wrong. Do not carry them forward into code or docs.
-
-1. **Chunks per block is 255, not 219.** At `dump::CHUNK_RAW = 129`, a 32,768-byte block is 254 full chunks plus a 2-byte tail. Records per block including `AUDEND`: **256**, not 220.
-2. **Wire cost is ~750 records/s and ~169 kB/s at 0.567 efficiency**, not "640 records/s at roughly 146 kB/s on 150-of-228". The 150-raw-bytes-per-record figure was proven arithmetically impossible by TASK-038.02. Pinned by `published_efficiency_matches_the_encoder` (`tests/console_dump.rs:946`). Worst-case budget per block: **57,788 bytes**.
-3. **AC #7's literal "219 chunks per block" is stale and must not be asserted.** Its surviving intent — derive chunks-per-block from `dump::CHUNK_RAW` and const-assert `ring_block_bytes <= dump::MAX_BLOCK_BYTES` — is what TASK-038.03.01 implements. Left the criterion text unedited rather than rewrite eleven criteria over one number; this note and the leaf plan govern.
-
-And one correction nobody had flagged:
-
-1. **`sdram::SDRAM_SIZE` is 64 MiB, not 32 MiB.** Verified at the pinned commit (`sdram.rs:9`) and corroborated by `docs/reference/daisy-seed3.md` line 17, which lists Seed3's SDRAM as 64 MB (`AS4C16M32SB-6BCN`). So AC #4's "fixed 32 MiB SDRAM ring" uses **half the chip**, and AC #6's `unused_headroom_bytes` is a real 32 MiB figure rather than zero. Growing the ring later is a one-constant change in `capture.rs` gated by that leaf's asserts. This is worth stating out loud before someone reads AC #6 as claiming the ring fills memory.
-
-Zero margin is deliberate and stays: 32,768 B against `MAX_BLOCK_BYTES` 32,895 means exactly 255 chunks. That is safe *only* because `.01` puts the comparison in a `const` assert. Without it, exceeding the ceiling surfaces as a runtime `BlockTooLarge` refusal mid-dump at the bench.
-
-## Integration path
-
-When both leaves are Done, this umbrella verifies rather than builds:
-
-1. `cargo fmt --all --check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, and all four stimulus cross-builds green in one tree.
-2. `git diff --name-only` proves `main.rs` and `podtest.rs` untouched — AC #1, and the reason the human-verified TASK-018.04 contract cannot regress.
-3. Read `rig.rs` end to end against AC #2/#4/#5 and confirm three specific things the leaves could each see only half of: the audio callback contains **no** logging call (it runs above the thread executor, and `RECORD_BUFS` is PRIMASK-based, so logging there deadlocks with interrupts masked); the publish ordering really is fence-then-store rather than store-then-fence; and the dump writer admits every chunk through `try_emit_dump` with a `Timer` backoff rather than a spin.
-4. Confirm the copied driver constant is checked where both sides are visible: `capture::FRAMES_PER_CALLBACK == daisy_embassy::audio::BLOCK_LENGTH`, compared in samples. Not `CALLBACK_BYTES == HALF_DMA_BUFFER_LENGTH * 2`, which was written here earlier and cannot hold — that side works out to 128 while a mono 16-bit callback contributes 64 bytes.
-5. Record the release size and `.bss` delta against the **measured** baseline in the finalization notes — `main`: text 88181 / data 1428 / bss 8224, i.e. 1.57 % of the 512 KiB AXI SRAM. The "86.13 % `.bss`" figure named here earlier has no recorded provenance and contradicts `size -B` on the checked-in release ELFs; see `.03.02`'s plan §5 and §11.
-
-## AC-to-leaf map for whoever closes this
-
-| AC | Proven by |
-| --- | --- |
-| #1 binary exists, CI builds it, main/podtest untouched | .02 |
-| #2 InterruptExecutor on SAI1, priority stated, rationale cited | .02 |
-| #3 compile-time stimulus selection, RIGCFG from `describe()` | .02 |
-| #4 mono-16 ring, state machine, overrun-not-overwrite | geometry .01, producer .02 |
-| #5 bounded callback, DWT stats, CAPSTAT | .02, using .01's numbers |
-| #6 CAPMAX from `SDRAM_SIZE` | .02 |
-| #7 geometry derived, no literal, fails CI with no board | **.01** |
-| #8 dump admits only through the capacity policy | .02 |
-| #9 SDRAM memory model recorded, MPU base untouched | .02 |
-| #10 device decides start/end, no host channel | .02 |
-| #11 dump summary record | .02 |
-
-Since the split below, "`.02`" in this table means its sub-leaves: the `RIGCFG`/`CAPSTAT`/`CAPMAX`/`DUMPEND` builders, `CAPSTAT_MAX_BODY` and the incremental CRC live in **TASK-038.03.02.01**; `rig.rs`, its features, CI coverage and the SDRAM note live in **TASK-038.03.02.02**.
-
-## Boundaries with siblings, so nobody duplicates work
-
-- **TASK-038.04** owns QSPI excerpt playback and will want the same `SAI1` vector and the remaining internal RAM. Note for it: SDRAM consumes PF8-PF15 and QSPI claims PF6-PF10, and both drivers take pins by `Peri::steal()`, so the type system will not catch a double claim. Neither peripheral is initialised today, so nothing conflicts yet — but if 038.04 initialises QSPI while a rig capture is live, that overlap needs a decision, not a surprise.
-- **TASK-038.05** (`@human`) owns every measurement claim: achieved dump throughput, whether SDRAM works at all on this board, whether the MPU base discrepancy matters, whether `max_block_us` clears the 667 µs deadline. Nothing in this ticket may be closed on the strength of a green build.
-- **TASK-038.06** owns the prose budgets and workflow documentation. `.02` writes only the short SDRAM memory-model note into `daisy-seed3.md` §4, because that is where a future reader hits the trap.
-- **TASK-032** owns runtime host control. AC #10 exists precisely so this ticket does not queue behind it.
-
-## Open risks carried into execution
-
-1. **Priority inversion, unresolved by reading.** Whether embassy-stm32 gives `DMA1_CH0/CH1` higher urgency than the `P6` the upstream example uses determines whether the DMA completion ISR can still wake the audio task promptly. `.02` checks the vendored source and records the answer either way.
-2. **Task-pool sizing.** The audio task's future owns the `Interface`, the `SdRam` and the ring cursor; `spawn` may return `TaskPoolOverflow` under embassy-executor 0.10's default pool features. Fix is a feature bump, at a known RAM cost.
-3. **Dump wall-time.** A full 349.5 s capture emits roughly 59 MB of wire traffic. At 169 kB/s that is exactly as long as the capture took; at a best-case bulk rate near 900 KiB/s it is around a minute. The link ceiling is unmeasured in this repo — drain pulls 256 bytes per wakeup — so treat both figures as predictions until TASK-038.05 measures them.
-4. **Internal RAM.** About 69 KB free at 86.13% `.bss`. New cost is ~1 KiB of block-state array plus two caller buffers. Comfortable, but measured rather than assumed.
-5. **No SDRAM self-test anywhere.** Neither daisy-embassy nor `stm32-fmc` writes a byte to check the part answered. The first evidence the SDRAM is alive is this ticket's first capture, which is why `CAPMAX` prints before any block is trusted and why TASK-038.05 gets the coherence question.
+SHIPPED via TASK-038.03.01 and TASK-038.03.02 and verified in TASK-038.05. This plan is superseded; the final summary describes what landed.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -184,6 +114,16 @@ This umbrella verifies, it does not build: its own plan says so, and all eleven 
 No follow-up ticket filed: the blocking work already exists as .01 and .02, both @agent and planned. Filing another would duplicate them.
 
 **Next actionable step:** execute TASK-038.03.01 (ready now, `backlog task list --ready`), then TASK-038.03.02 (blocked only by .01). When both are Done, this ticket resumes and runs the five-step integration check in its Implementation Plan — full workspace fmt/test/clippy plus the four stimulus cross-builds, `git diff --name-only` proving main.rs and podtest.rs untouched, a read of rig.rs against AC #2/#4/#5 for the three things each leaf could only see half of (no logging call in the audio callback, fence-then-store publish order, dump admission only via try_emit_dump with a Timer backoff), the CALLBACK_BYTES const-assert, and release-size/.bss deltas against the 86.13% baseline. Dependencies are recorded on this ticket so `backlog task list -s 'Blocked' --ready` will surface it the moment .02 lands.
+
+## Closed 2026-10-08: verified against the tree and on hardware
+
+Children TASK-038.03.01 and TASK-038.03.02 are Done. The criteria are the pre-split versions of 038.03.02's, verified there and on the bench (TASK-038.05).
+
+Dispositions:
+- **#3:** the describe() text travels in its own RIGGEN record beside RIGCFG (038.03.02's refinement), so there is still no second grammar.
+- **#7:** the host test is crates/asperitas-logging/tests/capture_geometry.rs. It pins 512 callbacks per block, 1 024 blocks and 349.5 s (349 525 333 us). Chunks per block are **255** (254 full + tail), not 219; the 219 was stale ticket arithmetic, and the bench's AUDEND n=ff confirms 255.
+- **#9:** the memory model is recorded and corrected from register reads (daisy-seed3.md 'External SDRAM'). The SDRAM/QSPI budget tables belong to TASK-038.06 AC #2.
+- **#10 'or until the ring reports full':** moved to TASK-038.07.01.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -209,3 +149,9 @@ created: 2026-09-11 13:32
 New fact nobody had flagged, and it changes how AC #4/#6 read: daisy_embassy::sdram::SDRAM_SIZE is 64 *1024* 1024 at the commit this build pins (git checkout ca9bcc9, sdram.rs:9), corroborated by docs/reference/daisy-seed3.md line 17 (Seed3 SDRAM = 64 MB, AS4C16M32SB-6BCN). So the fixed 32 MiB ring uses half the chip, unused_headroom_bytes in CAPMAX is 33,554,432, and growing the ring later is a one-constant change gated by the geometry asserts. Also recorded during planning: audio binds DMA1_CH0/CH1 (audio.rs:26-28), which is what makes the SAI1 vector free for the InterruptExecutor that upstream looper.rs pends it on at Priority::P6 (looper.rs:132)
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Umbrella over the rig firmware binary. All children Done; verified against HEAD and on hardware (TASK-038.05). The ring-full end condition moved to TASK-038.07.01; the budget tables are TASK-038.06.
+<!-- SECTION:FINAL_SUMMARY:END -->

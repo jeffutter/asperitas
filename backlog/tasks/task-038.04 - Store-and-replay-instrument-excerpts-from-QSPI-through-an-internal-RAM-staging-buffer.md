@@ -3,10 +3,11 @@ id: TASK-038.04
 title: >-
   Store and replay instrument excerpts from QSPI through an internal-RAM staging
   buffer
-status: To Do
+status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:40'
+updated_date: '2026-10-08 14:31'
 labels: []
 dependencies:
   - TASK-038.02
@@ -83,4 +84,10 @@ Do not add a serial-port dependency to the workspace for this. Framing belongs t
 `audio/instruments/` holds eight **mono 48 kHz 16-bit PCM** WAVs, 186–281 kB each (~2–3 s): `mandolin_{single_note_soft,single_note_hard,fast_run,chord}` and the same four under `octave_`. Levels were scaled once globally with the loudest peak at −3 dBFS and must not be normalized individually — the soft/hard contrast is the signal. Goldens in `audio/goldens/` are always stereo 16-bit 48 kHz, regenerated with `UPDATE_GOLDENS=1 cargo test -p asperitas-cli`, tolerance 1e-4. Storing the clip's PCM verbatim means the excerpt the device replays is bit-for-bit the file already in the repo, which is what makes the CRC comparison meaningful.
 
 `audio/tools/prepare_corpus.py` is the precedent for asset tooling (python3 + numpy + stdlib `wave`, argparse, every transform justified in the module docstring, explicitly not part of the build). The installer is different in kind — it emits wire records, so it lives with the codec in Rust rather than beside the Python asset script.
+
+2026-10-08: unblocked. TASK-038.03 and TASK-038.03.02 are Done. Its bench check moved out to TASK-038.09 (@human, depends on this), so this ticket stays @agent. Queued for planning. Findings for the planner:
+- **QSPI driver exists:** daisy-embassy ca9bcc9 src/flash.rs has read/write/erase and async read_async/write_async/erase_async, so storage is wiring, not driver work. Check its MDMA use against AC #4 before assuming.
+- **No inbound console path exists:** the CDC OUT endpoint is allocated (usb.rs ep_out_buffer) but never read on device; frame::Decoder runs only in host tests. Install over CDC OUT is the first host-to-device path, overlapping TASK-032 (host control). Decide whether this ticket builds a general inbound path TASK-032 then reuses, or a narrow install-only one.
+- **Likely leaves:** slot layout and host tooling (WAV parsing, excerpt_stream); the inbound console path; install with readback EXCOK/EXCFAIL; replay through an internal-RAM ping-pong with DAC-path CRC; docs (shared with TASK-038.06). rig needed two splits after two deadline failures, so size the leaves accordingly.
+- **Bench facts to plan around (TASK-038.05):** f64 now runs on the FPU (eed633b); callback headroom is about 590 us of 666; the loop is straight at -0.41 dB; the SDRAM window is Device memory (no unaligned access). A replay path that reads QSPI inside the callback would fight the 666 us budget, which is AC #4's point.
 <!-- SECTION:NOTES:END -->
