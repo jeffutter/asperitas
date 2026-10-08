@@ -4,6 +4,7 @@
 audio/
 ├── instruments/   recorded test corpus — the reference material for golden tests and ear checks
 ├── goldens/       frozen processor output, regenerated only on purpose
+├── captures/      on-device loopback captures from rig, kept as evidence
 └── tools/         one-off asset preparation
 ```
 
@@ -72,6 +73,24 @@ Two caveats worth knowing before reading a diff:
 - `FilterParams::default()` is 20 kHz, which at 48 kHz is a mild low-pass rather than a
   true pass-through (α ≈ 0.93), so those goldens do differ audibly little but measurably
   from their input.
+
+## `captures/` - on-device loopback evidence
+
+Raw framed-console captures from `rig` runs through the Pod self-loopback cable, zstd-compressed.
+The console capture is the artifact, not the PCM: it carries the device's own `CAPSTAT`,
+`DUMPEND` and gate lines beside the audio, and the PCM is re-derived from it, refusing any block
+it cannot prove:
+
+```sh
+zstd -dc audio/captures/<name>.console.zst \
+  | cargo run -p asperitas-logging --release --example dump_reassemble -- --out capture.pcm
+```
+
+| File | Run | Result |
+|------|-----|--------|
+| `2026-10-07-rig-sine-300s.console.zst` | rig at `eed633b`, sine -20 dBFS 1 kHz, 300 s, RESET-button boot | 879/879 blocks, max_block_us 72, worst_gap_us 714, dropped_full 0, dump 69.4 s; returned level -20.41 dBFS on the Left lane |
+
+Details and the analysis behind each row live in TASK-038.05's notes.
 
 ## `tools/`
 
