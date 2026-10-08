@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 14:16'
+updated_date: '2026-10-08 14:19'
 labels:
   - planned
 dependencies:
@@ -45,7 +45,7 @@ TASK-034 must have happened first: the cable, the independent observation, and t
 - [x] #4 HUMAN: dump wall-clock time for a known capture length is measured and placed next to the predicted figure from TASK-038.02's arithmetic, together with the achieved bytes-per-second on the link, so the first real full-speed-CDC throughput number in this repo is on record instead of estimated.
 - [ ] #5 HUMAN: one named excerpt from `audio/instruments/` is installed into QSPI with its erase-inclusive wall-clock time recorded, the device reports `EXCOK` with a matching readback CRC, replay drives the DAC without gaps, and a person confirms by ear that the returned audio is recognisably that clip — the digital claim being exactness of the buffer, the analog judgement staying human.
 - [x] #6 HUMAN: the SDRAM memory model is settled with evidence: the observed value of the core cache control register, or a timed pattern write-and-readback through the 0xC000_0000 window, is recorded, and the mismatch between the address `init()` returns and the address the driver's cacheable MPU region covers is resolved in writing in `docs/reference/daisy-seed3.md` rather than left as a comment.
-- [ ] #7 HUMAN: the capture artifacts and metric summaries from this session are committed and referenced from TASK-019.03 and TASK-035, and the README measurement-rig section carries the observed numbers, since those tickets treat a recorded number as the evidence standard.
+- [x] #7 HUMAN: the capture artifacts and metric summaries from this session are committed and referenced from TASK-019.03 and TASK-035, and the README measurement-rig section carries the observed numbers, since those tickets treat a recorded number as the evidence standard.
 - [x] #8 HUMAN: the archived capture artifact is shown to contain the stimulus itself in the mono lane rig recorded — peak or RMS amplitude consistent with the loop gain TASK-034 wrote down, and the named channel (left or right) written into docs/reference/daisy-pod.md — because matching delivered and expected block counts with dropped_full at zero passes just as happily on a lane carrying silence, and only a person with the cable in hand can say which lane the loop actually drives.
 <!-- AC:END -->
 
@@ -150,4 +150,6 @@ Remaining: AC #5 (excerpt replay, blocked on TASK-038.04) and AC #7 (cross-refer
 - Metric summaries: README 'Measurement rig', with a table of the bench readings and their sources.
 - Cross-references: TASK-019.03 and TASK-035 each carry the artifact as a ref, plus a note with the baseline numbers and caveats. TASK-038.06 has a note to extend the README section instead of writing a second one.
 Not ticked: awaiting the owner's sign-off.
+
+AC #7 closed with the owner, 2026-10-08. The owner reviewed the README section and cross-references above and agreed.
 <!-- SECTION:NOTES:END -->
