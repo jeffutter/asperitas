@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 03:02'
+updated_date: '2026-10-08 03:40'
 labels:
   - planned
 dependencies:
@@ -87,4 +87,27 @@ Not criteria evidence: no TASK-034 cable, and 30 s windows (ASP_RIG_CAPTURE_SECO
 - **Captured PCM was silence:** peak 2 LSB (-84.3 dBFS), RMS 0.7, mean -0.5. Expected with no cable. AC #8 still needs the cable.
 - **Bench trap: probe-rs zeroes the DWT.** After 'make probe-flash' (probe-rs download --reset), DEMCR, DWT_CTRL and CYCCNT all read 0 and CAPSTAT reports max_block_us=0 / worst_gap_us=0, which looks like 'within budget'. A RESET-button boot of the same image reported 65-70 / 667. So timing numbers are only valid after a button reset or a power cycle, or under 'probe-rs run', which stays attached. Also, a probe-rs read halts the core long enough to overrun SAI (audio_exit flipped to 2), so never read memory mid-capture.
 - **USB console drops boot records.** RIGCFG, RIGGEN and CAPMAX go out before the host opens the port, so the capture started at seq 0x0b-0x0c. Opening the port before reset does not help, because the device re-enumerates. Run 1 of the plan (quote BOOT/RIGCFG/CAPMAX verbatim) needs a way to get them: RTT, or a host runner (TASK-031).
+
+## 300 s loopback run, 2026-10-07 (owner at the bench, cable fitted, RESET-button boot)
+
+rig at eed633b, default build (seed3, sine -20 dBFS 1 kHz, 300 s window). Host reader: one process holding /dev/cu.usbmodem1101 open, re-running 'stty raw' on each reopen.
+
+**Device (verbatim):**
+- `rig: capture armed for 300 s (879 blocks)`
+- `rig: gate delivered 879 == expected 879: pass`
+- `rig: gate worst_gap_us 714 < 832: pass (0 gaps too wide to measure)`
+- `rig: gate max_block_us 72 < 666: pass`
+- `rig: gate overrun 0 == 0: pass`
+- `DUMPEND proto=1 blocks=879 chunks=224145 bytes=28803072 elapsed_ms=69421 refused=52064 stall_ms=1 sent=225704 dropped_full=0 bytes_dropped=0`
+- dropped_full was 0 in every CAPSTAT and STATUS from boot through DUMPEND.
+
+**Host (dump_reassemble exit 0):** blocks complete=879 failed=0 abandoned=0; chunks stored=224145 duplicate=0 conflict=0 late=0; bad_frames=0 resyncs=0 discarded_bytes=0; 50992365 bytes pushed, all accounted for; 28803072 PCM bytes.
+
+**Throughput (AC #4):** 28 803 072 PCM bytes in 69.421 s = **414.9 kB/s of PCM**, and 879 x 57 788 = 50 795 652 dump wire bytes = **731.7 kB/s on the wire** (0.5649 useful/wire). Against the predictions: TASK-038.03.02.04 predicted at least ~42 s from the USB FS bulk ceiling (1.216 MB/s) and plausibly 60-120 s through CDC; measured 69.4 s, so about 60 % of the theoretical bulk ceiling. This plan's older 146 kB/s figure is 5x pessimistic. refused=52064 with stall_ms=1: the writer retries often but almost never waits a whole millisecond.
+
+**Audio content (AC #8, device side):** 300.032 s, peak 3126 (-20.41 dBFS), DC -0.49 LSB, per-second RMS 2209.38-2209.49 across all 300 s. The 1 kHz phase fitted over the first and last second agrees to 4 decimal places (0.3852 rad), so not one sample was lost, added or reordered across 14.4 M samples. Max |second difference| 56 LSB against 53.5 for an ideal sine (quantisation), so there are no splices. The loop drives the lane rig records as MonoLane::Left; which physical jack that is still needs a person.
+
+**Earlier attempt, discarded as an artifact:** the same run dumped through a bash 'cat' loop lost 19 blocks (0x45-0x57) on the host. The 'cat' stopped reading, macOS buffered about 1 MB, and killing the reader discarded it; the device-side sequence numbers prove the records were sent. That dump's elapsed_ms=538629 includes stall_ms=469245 of waiting on the host, so it is not a throughput figure. Use a single long-lived reader. Python's tty.setraw on this port left reads blocked; 'stty -F <dev> raw' works.
+
+**Not yet done:** the artifact (48.6 MB console capture, 28.8 MB PCM) is in a session scratch dir, not archived (AC #7). Still to do: the ring-full run (AC #3), the ESS and pulse builds (AC #1 needs an outside observer), excerpt replay (blocked on TASK-038.04), and the SDRAM cache evidence (AC #6).
 <!-- SECTION:NOTES:END -->
