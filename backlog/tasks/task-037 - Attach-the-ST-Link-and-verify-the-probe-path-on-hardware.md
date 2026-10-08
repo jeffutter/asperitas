@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 01:28'
-updated_date: '2026-10-08 00:03'
+updated_date: '2026-10-08 00:25'
 labels: []
 dependencies:
   - TASK-053
@@ -195,6 +195,15 @@ AC #4 evidence (agent-run 2026-10-07, patched probe-rs from `nix develop`; no ti
 Practical rule: to recover a board whose firmware kills SWD or never brings USB up, run `make probe-flash` (under reset is the default). Don't expect a `probe-rs read --connect-under-reset` to leave the board halted.
 
 AC #5 attach times (agent-run 2026-10-07, patched probe-rs binary called by its store path to keep `nix develop` startup, measured at ~0.44-0.50 s, out of the number): `probe-rs read b32 0x08000000 4`, process start to exit, 5 runs each. Plain attach 0.084-0.088 s, under reset 0.208-0.213 s. Every run returned the vector table. The ~0.12 s difference is mostly probe-rs's fixed 100 ms sleep after releasing nRESET (DefaultArmSequence reset_hardware_deassert, since an ST-Link cannot read the pin back). Flash times under reset: 3.55-3.68 s. Still open for AC #5: log throughput, and comparing V3J15M7 against probe-rs's firmware minimum.
+
+AC #5 firmware floor SETTLED (agent, 2026-10-07, read from probe-rs 0.32.0 source src/probe/stlink/mod.rs:386-401 and :504-515). For hw_version 3 the only check is jtag_version >= MIN_JTAG_VERSION_V3 = 3 (V3J2M1 is the one excluded, for protocol-switch bugs). This probe is V3J15M7 = hardware 3, JTAG/SWD firmware 15, and probe-rs's own debug log reads 'STLink version: (3, 15)'. So it clears the floor by a wide margin. The 'V3MIN 0x0359 / V3SET 0x0410' figures in the pre-flight notes are not what probe-rs 0.32.0 checks; disregard them. Still open for AC #5: log throughput, which needs firmware that logs continuously. No existing bin does (main has 3 log calls and an empty RTT ring, podtest logs only on control changes, rig streams audio).
+
+AC #5 log throughput MEASURED (agent-run 2026-10-07; throwaway firmware, deleted afterwards per the owner, never committed). The bin was a bare cortex-m-rt loop with defmt-rtt and no embassy executor, USB or clock setup (default HSI). It called `defmt::println!("{=u32} {=[u8; 16]}", seq, PAYLOAD)` as fast as RTT would take it, about 22 bytes per record encoded (2-byte index, 4-byte u32, 16-byte array, no timestamp) plus rzcobs framing. Host: patched probe-rs 0.32.0, `probe-rs run ... --connect-under-reset --log-format '{s}'`, stdout timestamped per line on the host, stopped with SIGINT after 30 s.
+- Run 1: 84347 records over 27.58 s = 3058 records/s, seq 0..84346 with 0 gaps.
+- Run 2: 83170 records over 27.56 s = 3018 records/s, 0 gaps.
+- Steady state: every full second of run 1 fell between 2782 and 3200 records.
+So roughly 3000 records/s, about 65 KiB/s of encoded defmt (estimated from the 22 B/record payload, not counting framing). It is lossless, because probe-rs puts the channel in blocking mode while attached and the firmware waits on the host. This is the host-side drain ceiling for this probe at the default SWD speed. A firmware that logs faster than this stalls inside defmt while attached (see comment #1's audio-deadline warning). Not measured: the effect of `--speed`, or of decoding with locations instead of '{s}'.
+AC #5 is now fully evidenced: probe firmware V3J15M7 (clears probe-rs's V3 floor of JTAG version 3), attach 0.085 s plain and 0.21 s under reset, flash 3.55-3.68 s under reset, log throughput ~3000 records/s lossless. Flaky items observed: the under-reset bug (root-caused and patched), and the one transient `probe-rs info` auto-detect failure noted earlier. Board left running main (flash 3.59 s, vector table 24080000 08000299 08006ca5 08009891). No tick; HUMAN.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
