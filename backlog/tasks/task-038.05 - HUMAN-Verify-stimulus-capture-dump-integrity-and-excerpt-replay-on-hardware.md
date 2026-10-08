@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 03:46'
+updated_date: '2026-10-08 13:56'
 labels:
   - planned
 dependencies:
@@ -41,7 +41,7 @@ TASK-034 must have happened first: the cable, the independent observation, and t
 <!-- AC:BEGIN -->
 - [ ] #1 HUMAN: with the TASK-034 loopback cable attached and `rig` flashed, each stimulus build mode (sine at −20 dBFS, exponential sweep, impulse train) is confirmed audible at the Pod output by something other than the device itself — scope trace, phone recording, or ears — at an amplitude consistent with the loop gain TASK-034 recorded, and the reading is written down even when it agrees.
 - [x] #2 HUMAN: a continuous capture of at least five minutes runs to completion, dumps to the host, and the archived artifact shows the transport's `dropped_full` counter unchanged across the dump **and** delivered block count equal to expected block count with `max_block_us` inside the callback budget, with both numbers quoted rather than summarised as a pass.
-- [ ] #3 HUMAN: maximum capturable duration is checked against reality — capture until the ring reports full, compare the seconds the device claimed with the wall-clock run, and record the difference along with what the producer did when blocks ran out.
+- [x] #3 HUMAN: maximum capturable duration is checked against reality — capture until the ring reports full, compare the seconds the device claimed with the wall-clock run, and record the difference along with what the producer did when blocks ran out.
 - [x] #4 HUMAN: dump wall-clock time for a known capture length is measured and placed next to the predicted figure from TASK-038.02's arithmetic, together with the achieved bytes-per-second on the link, so the first real full-speed-CDC throughput number in this repo is on record instead of estimated.
 - [ ] #5 HUMAN: one named excerpt from `audio/instruments/` is installed into QSPI with its erase-inclusive wall-clock time recorded, the device reports `EXCOK` with a matching readback CRC, replay drives the DAC without gaps, and a person confirms by ear that the returned audio is recognisably that clip — the digital claim being exactness of the buffer, the analog judgement staying human.
 - [ ] #6 HUMAN: the SDRAM memory model is settled with evidence: the observed value of the core cache control register, or a timed pattern write-and-readback through the 0xC000_0000 window, is recorded, and the mismatch between the address `init()` returns and the address the driver's cacheable MPU region covers is resolved in writing in `docs/reference/daisy-seed3.md` rather than left as a comment.
@@ -114,4 +114,8 @@ rig at eed633b, default build (seed3, sine -20 dBFS 1 kHz, 300 s window). Host r
 ### AC #2 and #4 closed with the owner, 2026-10-07
 
 The owner was at the bench for the 300 s run above and agreed on the evidence for each criterion. AC #2: delivered 879 == expected 879, max_block_us 72 < 666 budget, dropped_full 0 across the whole dump, archived as audio/captures/2026-10-07-rig-sine-300s.console.zst (3.7 MB zstd of the 50 992 365-byte console capture; decompresses byte-identical, and dump_reassemble on it reproduces the same 28 803 072-byte PCM with 879/879 blocks). AC #4: 69 421 ms for a 300 s capture, 414.9 kB/s PCM and 731.7 kB/s wire, set beside the 42 s floor and the 60-120 s estimate. AC #7's cross-references from TASK-019.03 / TASK-035 and the README figures are still open.
+
+### AC #3 moved to TASK-038.07, 2026-10-08 (owner's instruction)
+
+rig cannot fill the ring as built: the window is const-gated below RING_BLOCKS. At the owner's instruction, the ring-fill check now lives in TASK-038.07 (firmware mode TASK-038.07.01 @agent, bench run TASK-038.07.02 @human), and AC #3 is ticked here as moved, not as measured. Its evidence will appear on TASK-038.07.02.
 <!-- SECTION:NOTES:END -->
