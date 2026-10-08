@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-09-11 16:51'
+updated_date: '2026-10-08 03:02'
 labels:
   - planned
 dependencies:
@@ -74,3 +74,17 @@ Capture the console to a file rather than watching it: TASK-031's runner does no
 
 Every criterion here is satisfied by a recorded reading plus the artifact that produced it. A summary sentence claiming success is not acceptance, and a threshold quietly widened to make a run pass is a bug to file, not a fix.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Bench session 2026-10-07 (live with the owner, no loopback cable yet)
+
+Not criteria evidence: no TASK-034 cable, and 30 s windows (ASP_RIG_CAPTURE_SECONDS=30), not 300 s. Recorded because they change what the real session will see.
+
+- **rig as shipped could not play audio.** RTT boot log: callback max_block_us=794 against a 666 us period, then 'audio callback stopped with an SAI error' 1.3 ms after entering the loop (RX ring Overrun, the only error read() can return). Cause: the bare thumbv7em-none-eabihf target emits soft-float for f64 (__aeabi_dmul/ddiv/dadd present, zero vmul.f64), and the stimulus generators run f64 libm per sample. Fixed in eed633b (target-cpu=cortex-m7). After: max_block_us 64-70, worst_gap_us 666-667, audio_exit=0.
+- **Capture + dump end to end, USB console build, 30 s window:** delivered 88 == expected 88, overrun 0, DUMPEND blocks=88 chunks=22440 bytes=2883584 elapsed_ms=7502 refused=5626 stall_ms=1 dropped_full=0 bytes_dropped=0. dump_reassemble: all 88 blocks proved, exit 0, 5098472 wire bytes all accounted for, 0.5656 useful/wire. That is about 384 kB/s PCM and 680 kB/s on the wire, a first data point for AC #4 (a 300 s run is still needed).
+- **Captured PCM was silence:** peak 2 LSB (-84.3 dBFS), RMS 0.7, mean -0.5. Expected with no cable. AC #8 still needs the cable.
+- **Bench trap: probe-rs zeroes the DWT.** After 'make probe-flash' (probe-rs download --reset), DEMCR, DWT_CTRL and CYCCNT all read 0 and CAPSTAT reports max_block_us=0 / worst_gap_us=0, which looks like 'within budget'. A RESET-button boot of the same image reported 65-70 / 667. So timing numbers are only valid after a button reset or a power cycle, or under 'probe-rs run', which stays attached. Also, a probe-rs read halts the core long enough to overrun SAI (audio_exit flipped to 2), so never read memory mid-capture.
+- **USB console drops boot records.** RIGCFG, RIGGEN and CAPMAX go out before the host opens the port, so the capture started at seq 0x0b-0x0c. Opening the port before reset does not help, because the device re-enumerates. Run 1 of the plan (quote BOOT/RIGCFG/CAPMAX verbatim) needs a way to get them: RTT, or a host runner (TASK-031).
+<!-- SECTION:NOTES:END -->
