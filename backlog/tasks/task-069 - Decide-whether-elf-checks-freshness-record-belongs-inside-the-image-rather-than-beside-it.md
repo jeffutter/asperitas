@@ -3,11 +3,11 @@ id: TASK-069
 title: >-
   Decide whether elf-check's freshness record belongs inside the image rather
   than beside it
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-14 05:50'
-updated_date: '2026-10-08 01:01'
+updated_date: '2026-10-08 01:49'
 labels: []
 dependencies:
   - TASK-056
@@ -28,13 +28,37 @@ This is an owner call, not an agent call: it contradicts an acceptance criterion
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: Choose one, and record it as a comment here: keep the sidecar stamp as elf-check's freshness record, or move the digest into .asp.prov so a raw-cargo rebuild carries it too.
-- [ ] #2 HUMAN: If the choice is to move it, say whether covering make build's objcopy route is part of the requirement, since that question is what forces production into build.rs rather than into any recipe.
-- [ ] #3 HUMAN: If the choice is to keep the sidecar, say explicitly that the narrow false red is accepted (source edited, gates run, no make build-elf in between), so the next reader does not file it again as a bug.
+- [x] #1 HUMAN: Choose one, and record it as a comment here: keep the sidecar stamp as elf-check's freshness record, or move the digest into .asp.prov so a raw-cargo rebuild carries it too.
+- [x] #2 HUMAN: If the choice is to move it, say whether covering make build's objcopy route is part of the requirement, since that question is what forces production into build.rs rather than into any recipe.
+- [x] #3 HUMAN: If the choice is to keep the sidecar, say explicitly that the narrow false red is accepted (source edited, gates run, no make build-elf in between), so the next reader does not file it again as a bug.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-07: Blocked -> To Do at the owner's request. Its only dependency, TASK-056, is Done. What remains is the owner's decision (AC #1-#3), not another ticket. Still @human.
+
+Closed 2026-10-07 in a live session with the owner, under the CLAUDE.md rule that an agent may close an @human ticket once the owner has walked through its criteria. The owner chose the in-image digest (comment #1). AC #3 is ticked as not applicable, since it only applied if the sidecar were kept. The implementation is TASK-071 (@agent).
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @human (recorded by agent)
+created: 2026-10-08 01:49
+---
+Owner decision, 2026-10-07 (live session): MOVE the digest into .asp.prov, so a raw-cargo rebuild carries it too.
+
+- AC #1: chose the in-image record over the sidecar stamp. Reason: elf-check should be right by construction on every build path, not only after `make build-elf`. That's the same argument TASK-062.01 used for the cfg set. This reverses TASK-056 AC #3 ('mechanism in firmware/Makefile and nothing in build.rs'), with the owner's approval.
+- AC #2: YES, covering `make build`'s objcopy route is part of the requirement. With the digest produced in build.rs that comes for free, since build.rs runs on every cargo link.
+- AC #3: not applicable; the sidecar is not being kept.
+
+Constraint the owner accepted along with the choice: the set of input files must be defined in ONE place that both build.rs and elf-check use. The ticket's main cost argument against this route was two hand-kept lists (Rust and shell) drifting apart; a single shared definition removes it.
+---
+<!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Decision: elf-check's freshness record moves from the sidecar stamp beside the ELF into the `.asp.prov` note inside it. Covering `make build` is required. The input set must be defined once, shared by build.rs and elf-check. This reverses TASK-056 AC #3 with the owner's approval. The implementation is filed as TASK-071 (@agent). Closed with the owner in a live session.
+<!-- SECTION:FINAL_SUMMARY:END -->
