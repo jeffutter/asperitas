@@ -3,10 +3,11 @@ id: TASK-069
 title: >-
   Decide whether elf-check's freshness record belongs inside the image rather
   than beside it
-status: Blocked
+status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-14 05:50'
+updated_date: '2026-10-08 01:01'
 labels: []
 dependencies:
   - TASK-056
@@ -31,3 +32,9 @@ This is an owner call, not an agent call: it contradicts an acceptance criterion
 - [ ] #2 HUMAN: If the choice is to move it, say whether covering make build's objcopy route is part of the requirement, since that question is what forces production into build.rs rather than into any recipe.
 - [ ] #3 HUMAN: If the choice is to keep the sidecar, say explicitly that the narrow false red is accepted (source edited, gates run, no make build-elf in between), so the next reader does not file it again as a bug.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-07: Blocked -> To Do at the owner's request. Its only dependency, TASK-056, is Done. What remains is the owner's decision (AC #1-#3), not another ticket. Still @human.
+<!-- SECTION:NOTES:END -->
