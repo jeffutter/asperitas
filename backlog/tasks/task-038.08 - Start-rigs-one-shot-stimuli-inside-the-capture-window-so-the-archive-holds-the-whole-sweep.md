@@ -3,10 +3,11 @@ id: TASK-038.08
 title: >-
   Start rig's one-shot stimuli inside the capture window so the archive holds
   the whole sweep
-status: To Do
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-10-08 14:03'
+updated_date: '2026-10-08 15:55'
 labels:
   - planned
   - ready-for-agent

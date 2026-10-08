@@ -3,15 +3,15 @@ id: TASK-038.04
 title: >-
   Store and replay instrument excerpts from QSPI through an internal-RAM staging
   buffer
-status: Needs Plan
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:40'
-updated_date: '2026-10-08 14:31'
-labels: []
+updated_date: '2026-10-08 15:54'
+labels:
+  - planned
 dependencies:
-  - TASK-038.02
-  - TASK-038.03
+  - TASK-038.04.06
 documentation:
   - docs/reference/daisy-seed3.md
 modified_files:
@@ -50,6 +50,28 @@ Bit-exactness has to be scoped honestly. What this ticket can prove is that the 
 - [ ] #6 Storage and timing costs are documented with predicted and observed columns: 96,000 bytes per second for mono 16-bit, install wall-clock including per-sector erases, and replay margin, alongside the rule that the blocking flash API may not be used anywhere in this binary because its status wait is an unbounded busy loop.
 - [ ] #7 Host tests cover slot address arithmetic, slot header validation, the install state machine, and WAV header rejection from synthetic inputs with no board attached, and `examples/excerpt_stream.rs` output is checked against pinned golden frames so the wire format cannot drift.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against 6a99698
+
+Approach: keep every byte-level decision host-testable in asperitas-logging, and keep rig.rs a thin consumer. The device has no inbound console path today (EP OUT is allocated in usb.rs but never read), so the install path is built as a narrow reader that feeds the existing frame::Decoder into a bounded channel; TASK-032 can reuse it later.
+
+Sub-tickets and order:
+1. .01 excerpt module (layout constants, slot header, WAV parser, grammar) - no deps.
+2. .02 inbound CDC OUT reader - no deps, parallel with .01.
+3. .04 install state machine + excerpt_stream example with goldens - after .01.
+4. .05 rig flash install (async-only QSPI over MDMA, sector-aligned write_async, readback EXCOK/EXCFAIL) - after .02 and .04.
+5. .03 replay via RAM ping-pong, DAC-path CRC - after .05.
+6. .06 docs with predicted/observed columns, TASK-019.03 XIP correction - last.
+
+Integration: host tests for .01/.04 prove the wire format and verdict logic; .02/.05/.03 are proven by firmware builds, CI and host-testable accounting only. Bench verification (install a real WAV, observed timings, replay CRC match) is TASK-038.09 (@human) and stays out of scope here; the observed columns in docs remain pending until then.
+
+Final testing: cargo test for asperitas-logging, firmware build of rig and the other log-usb binaries, CI green. Parent ACs map: #1 .01+.06, #2 .04+.05, #3 .04+.05, #4 .03, #5 .03, #6 .06, #7 .01+.04+.03 host tests.
+
+Remaining work not in a sub-ticket: none. Risks: QSPI kernel clock unstated (estimate only); async flash timeouts panic; Device-memory SDRAM forbids unaligned access; callback headroom ~590/666 us.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

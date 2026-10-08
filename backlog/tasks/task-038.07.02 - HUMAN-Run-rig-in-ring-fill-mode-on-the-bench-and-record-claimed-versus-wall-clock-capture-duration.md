@@ -3,10 +3,11 @@ id: TASK-038.07.02
 title: >-
   HUMAN: Run rig in ring-fill mode on the bench and record claimed versus
   wall-clock capture duration
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-10-08 13:56'
+updated_date: '2026-10-08 15:55'
 labels:
   - planned
 dependencies:

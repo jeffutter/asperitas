@@ -1,11 +1,11 @@
 ---
 id: TASK-038.07.01
 title: Add a ring-fill capture mode to rig that records until no Free block remains
-status: To Do
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-10-08 13:56'
-updated_date: '2026-10-08 14:31'
+updated_date: '2026-10-08 15:55'
 labels:
   - planned
   - ready-for-agent

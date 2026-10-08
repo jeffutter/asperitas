@@ -3,10 +3,11 @@ id: TASK-038.07
 title: >-
   HUMAN: Capture until the SDRAM ring is full and check the claimed duration
   against the wall clock
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-10-08 13:55'
+updated_date: '2026-10-08 15:55'
 labels:
   - planned
 dependencies: []

@@ -1,10 +1,11 @@
 ---
 id: TASK-038.09
 title: 'HUMAN: Install an instrument excerpt into QSPI and verify replay on hardware'
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-10-08 14:27'
+updated_date: '2026-10-08 15:55'
 labels:
   - planned
 dependencies:
