@@ -3,11 +3,11 @@ id: TASK-038.03.02.04
 title: >-
   Add rig.rs capture producer, SDRAM dump writer, host-computable rate gates and
   CI coverage
-status: Blocked
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-12 12:00'
-updated_date: '2026-09-13 04:16'
+updated_date: '2026-10-08 01:00'
 labels:
   - planned
 dependencies:
@@ -137,6 +137,8 @@ Depends on TASK-038.03.02.03 for: `rig.rs` existing and linking, `Peripherals::t
 - Real-time capture needs 96 000 B/s raw, about 169 kB/s of wire; full-ring dump volume is `wire_bytes_per_block() × RING_BLOCKS`, roughly 59 MB, and those USB FS bulk ceilings are theory, not measurement - `DUMPEND.elapsed_ms` is the field that replaces them (TASK-038.05 AC #4).
 - Audio period is 20 833 µs for 32 frames at 48 kHz; the gap gate is 21 000 µs.
 - Warm incremental firmware rebuild is ~0.13 s, so iterate with `touch` rather than cleaning.
+
+2026-10-07: moved Blocked -> Dev Ready, as the note above instructs. Its only dependency, TASK-038.03.02.03, is Done, and `git stash list` is empty (AC #13's precondition). Done in a live session at the owner's request.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
