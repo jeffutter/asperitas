@@ -3,11 +3,11 @@ id: TASK-038.04.04
 title: >-
   Add the install state machine and examples/excerpt_stream.rs with pinned
   golden frames
-status: Blocked
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-10-08 15:29'
-updated_date: '2026-10-08 15:54'
+updated_date: '2026-10-08 16:07'
 labels:
   - task
   - planned
