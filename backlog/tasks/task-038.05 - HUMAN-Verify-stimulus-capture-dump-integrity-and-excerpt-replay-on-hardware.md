@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 14:28'
+updated_date: '2026-10-08 14:33'
 labels:
   - planned
 dependencies:
@@ -50,7 +50,29 @@ TASK-034 must have happened first: the cable, the independent observation, and t
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-SHIPPED by the bench session commits eed633b..HEAD (eed633b fix, 4c95d04 archive, 89b5871 SDRAM, dddd11e lanes, 358853d README). This plan is superseded; the ticket's final summary describes what actually landed.
+**Closed 2026-10-08; the run order below is kept as the record of how the bench session was planned. The notes and final summary describe what was actually measured.**
+
+## Prerequisites
+
+TASK-034 done (cable permanently attached and labelled, independent observation recorded, loop gain noted at a fixed digital level), plus TASK-038.01 through .04 merged. If TASK-034 has not run, stop here: amplitudes measured without its loop gain have nothing to be compared against, and the criterion becomes a number nobody can interpret.
+
+Board in a Daisy Pod, loopback cable in place, USB-C to the host. Flashing is over DFU (`dfu-util`, no probe): `cd firmware && make flash BINARY=rig FEATURES="seed3"` — the Makefile greps dfu-util output for `File downloaded successfully` rather than trusting exit code 74, so read its message, not its status.
+
+Capture the console to a file rather than watching it: TASK-031's runner does not exist yet, so this session uses raw device-node redirection (`screen /dev/cu.usbmodem… 115200` with logging, or `cat /dev/cu.usbmodem… > capture.txt &`). Records are framed lines beginning `~`; `cargo run -p asperitas-logging --example console_decode -- capture.txt` validates them and prints the loss counters.
+
+## Run order
+
+1. **Boot sanity and self-description.** Flash default mode, capture the first seconds, confirm `BOOT proto=1 … maxbody=200`, one `RIGCFG` record whose payload matches the stimulus parameters you built, and `CAPMAX total_bytes ring_bytes seconds_max unused_headroom_bytes`. Quote all three verbatim into the ticket.
+2. **Independent amplitude check** (criterion 1). For each of the three stimulus modes, put a scope or a phone recording on the Pod output and compare the observed level with the loop gain from TASK-034. Record the outside reading even when it matches the device's own — that agreement is the point of the criterion.
+3. **Five-minute run** (criteria 2 and 3). Start a capture, let it run past five minutes without touching anything, then dump. Pipe the dump through `examples/dump_reassemble.rs` and require: every block complete, block CRCs matching, `dropped_full` unchanged across the whole dump, delivered blocks equal to expected blocks, and `max_block_us` inside budget. Write the actual integers down. Then repeat until the ring reports full and compare claimed versus wall-clock seconds.
+4. **Dump throughput measurement** (criterion 4). Time the dump of a known capture length, compute bytes-per-second on the link, and put it beside the prediction from TASK-038.02's arithmetic (mono 16-bit at 96 kB/s of capture implies roughly 146 kB/s on the wire at 150-of-228 efficiency). This is the repo's first real full-speed-CDC number; if it lands far below prediction, open a bug ticket naming the drain path (`usb::run`, `DRAIN_BUF_SIZE = 256`) rather than adjusting the prediction silently.
+5. **Excerpt install and replay** (criterion 5). Generate the install stream (`cargo run -p asperitas-logging --release --example excerpt_stream -- audio/instruments/<clip>.wav > /tmp/exc.bin`), redirect it to the device node, time it including erase pauses, wait for `EXCOK` or `EXCFAIL`, then switch to excerpt replay mode and listen. The clip must be recognisable, and the device's reported DAC-path CRC must equal the host-computed one.
+6. **SDRAM evidence** (criterion 6). Read the core cache control register value by whatever route exists at that moment (debug record, or ST-Link via TASK-037 if it has landed) and run a timed pattern write-and-readback through the 0xC000_0000 window. Record what you saw and settle the MPU-region mismatch in `docs/reference/daisy-seed3.md`.
+7. **Archive** (criterion 7). Commit the capture artifacts, reference them from TASK-019.03 and TASK-035, and put the observed numbers into the README section written by the parent ticket.
+
+## What counts as finishing
+
+Every criterion here is satisfied by a recorded reading plus the artifact that produced it. A summary sentence claiming success is not acceptance, and a threshold quietly widened to make a run pass is a bug to file, not a fix.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
