@@ -35,7 +35,7 @@ Scope: new host-testable no_std module in crates/asperitas-logging (no feature g
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-SHIPPED by 81f8db2. This plan is superseded; the ticket's final summary describes what actually landed.
+SHIPPED by fa49366. This plan is superseded; the ticket's final summary describes what actually landed.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
