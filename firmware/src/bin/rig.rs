@@ -284,11 +284,13 @@ fn emit_console(_body: &[u8]) {}
 // `main.rs`'s `UnsafeCell` + `interrupt::free` idiom: a critical section is right for one slow knob
 // writer and wrong for handing buffer ownership across an interrupt boundary 1 500 times a second.
 //
-// Caches are off in this whole stack (RIGCFG reports both bits), so every SDRAM access is uncached
-// and the ordering above is all the coherence there is to argue about. Enabling the D-cache is a
-// change to this hand-off, not a tuning knob: daisy-embassy's MPU region sits at 0xD000_0000 while
-// `Sdram::init` hands back bank 5 at 0xC000_0000, so whoever turns caches on owns the coherence
-// argument for the FMC window and revisits these orderings in the same change.
+// The ring is uncached by memory type, not by luck: no MPU region covers 0xC000_0000 (daisy-embassy
+// puts its cacheable region at 0xD000_0000, an unconfigured FMC bank), so the default map makes the
+// window Device memory, and enabling the D-cache does not touch it. That was measured off the
+// running board on 2026-10-08 (docs/reference/daisy-seed3.md, "External SDRAM"). What would change
+// this hand-off is an MPU region over 0xC000_0000: whoever adds one owns the coherence argument for
+// the FMC window and revisits these orderings in the same change. Device memory also takes no
+// unaligned accesses, so the ring is only ever touched through aligned copies.
 
 /// Which input lane the ring keeps.
 ///

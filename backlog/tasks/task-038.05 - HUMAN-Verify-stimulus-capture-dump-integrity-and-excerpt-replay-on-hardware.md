@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 13:56'
+updated_date: '2026-10-08 13:58'
 labels:
   - planned
 dependencies:
@@ -118,4 +118,8 @@ The owner was at the bench for the 300 s run above and agreed on the evidence fo
 ### AC #3 moved to TASK-038.07, 2026-10-08 (owner's instruction)
 
 rig cannot fill the ring as built: the window is const-gated below RING_BLOCKS. At the owner's instruction, the ring-fill check now lives in TASK-038.07 (firmware mode TASK-038.07.01 @agent, bench run TASK-038.07.02 @human), and AC #3 is ticked here as moved, not as measured. Its evidence will appear on TASK-038.07.02.
+
+### AC #6 evidence, 2026-10-08 (probe reads off the running board)
+
+SCB_CCR=0x00040200 (DC=0, IC=0); FMC_BCR1=0x800030db (BMAP=00); FMC_SDCR1=0x19e9 (bank 1 at 0xC000_0000, 64 MiB); FMC_SDCR2/SDTR2 at reset values (bank 2 unconfigured); MPU_CTRL=5; the only MPU region is 0xD000_0000, RASR=0x03030033 (64 MiB write-back cacheable). Probe patterns read back at 0xC000_0000, 0xC1FF_FFF0 and 0xC3FF_FFF0, with no aliasing at 32 MiB; 0xD000_0000 returns an AP bus error. Resolved in writing in docs/reference/daisy-seed3.md, 'External SDRAM: address, MPU and caches (measured)': the SDRAM is at 0xC000_0000, the MPU region is inert, and the window is default-map Device memory, so it stays uncached even if the D-cache is enabled. Correction to the earlier rule: what changes coherence is an MPU region over 0xC000_0000, not CCR.DC. rig.rs's comment is updated to match. Not ticked: awaiting the owner's sign-off.
 <!-- SECTION:NOTES:END -->

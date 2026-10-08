@@ -742,8 +742,9 @@ Latent, not present: nothing enables I- or D-cache anywhere in this stack. Verif
 cache or MPU call in embassy-stm32 0.6.0's `src/`, none in daisy-embassy `ca9bcc9`'s boot path, none
 in cortex-m-rt's startup, and no cache-related symbol in the linked image. The near miss worth
 naming is daisy-embassy's SDRAM builder (`sdram.rs:16`), which switches on the MPU with a cacheable
-region over the SDRAM window; nothing here calls it, and an MPU region is not the D-cache, so even
-that leaves RTT alone. Whoever enables caching for DSP headroom is the one who breaks RTT silently,
+region at 0xD000_0000. `rig` calls it, but an MPU region is not the D-cache, and that region does not
+even cover the SDRAM (see [*External SDRAM*](#external-sdram-address-mpu-and-caches-measured)), so
+it leaves RTT alone. Whoever enables caching for DSP headroom is the one who breaks RTT silently,
 and will not suspect the cache. TASK-038.03 reached the same caches-off finding independently, from
 the SDRAM-coherence side.
 
@@ -1039,6 +1040,55 @@ evidence that the host kept up, not evidence that the firmware's diagnostics wer
 and a loss count quoted from the console does not describe an RTT capture, or vice versa. When a
 number has to be trustworthy, take it from the console's counters and say which channel it came
 from.
+
+### A probe detach stops the cycle counter
+
+Measured 2026-10-07: after `make probe-flash` (`probe-rs download --reset`), `DEMCR`, `DWT_CTRL` and
+`CYCCNT` all read 0, and `rig`'s `CAPSTAT` reports `max_block_us=0 worst_gap_us=0`. That looks like a
+pass, but nothing was measured. A RESET-button boot of the same image reported 65-70 / 667, and so
+did a run under `probe-rs run`, which stays attached. So cycle-counter figures are only valid after a
+button reset or a power cycle, or with the probe still attached. A probe memory read also halts the
+core long enough to overrun the SAI ring (`audio_exit` went to 2), so never read memory during a
+capture.
+
+## External SDRAM: address, MPU and caches (measured)
+
+Read off the running board through the probe on 2026-10-08, after `rig` had brought the SDRAM up with
+daisy-embassy `ca9bcc9`'s `SdRamBuilder::build` + `init`:
+
+| Register | Value | Meaning |
+|---|---|---|
+| `SCB_CCR` | `0x00040200` | DC (bit 16) = 0, IC (bit 17) = 0: **both caches off** |
+| `FMC_BCR1` | `0x800030db` | FMC enabled, BMAP = 00: SDRAM bank 1 at 0xC000_0000, bank 2 at 0xD000_0000 |
+| `FMC_SDCR1` | `0x000019e9` | bank 1 configured: 9 col, 13 row, 32-bit, 4 internal banks, CAS 3, SDCLK = HCLK/2, read burst: 64 MiB |
+| `FMC_SDCR2` / `SDTR2` | `0x000002d0` / `0x0fffffff` | reset values: **bank 2 is not configured** |
+| `MPU_CTRL` | `0x00000005` | MPU on, PRIVDEFENA on |
+| region 0 `RBAR` / `RASR` | `0xd0000000` / `0x03030033` | 64 MiB, full access, C=1 B=1 (write-back cacheable), enabled |
+| regions 1-7 | `RASR = 0` | unused |
+
+Probe pattern writes read back intact at 0xC000_0000, 0xC1FF_FFF0 and 0xC3FF_FFF0. Distinct values at
+0xC000_0000 and 0xC200_0000 stayed distinct, so there is no aliasing below 64 MiB. A read at
+0xD000_0000 fails with an AP bus error, so nothing answers there. On the device side, the 300 s
+capture of 2026-10-07 (TASK-038.05) wrote 28.8 MB through this window and read it back with every
+block CRC matching.
+
+What that settles:
+
+- **The memory is at 0xC000_0000.** `Sdram::init` returns the right address. The MPU region at
+  0xD000_0000 covers an unconfigured FMC bank and is inert.
+- **0xC000_0000 is Device memory.** No MPU region covers it, so with PRIVDEFENA the ARMv7-M default
+  map applies, and 0xA000_0000-0xDFFF_FFFF is "external device": Device type, execute-never,
+  uncacheable. The capture ring is therefore uncached **whatever `CCR.DC` says**. Enabling the D-cache
+  does not change the ring's coherence; adding or moving an MPU region onto 0xC000_0000 does. Whoever
+  does that owns the coherence argument for the FMC window and must revisit `rig`'s capture hand-off
+  ordering in the same change.
+- **Device memory does not take unaligned accesses.** ARMv7-M supports unaligned loads and stores
+  only to Normal memory, so a misaligned access here is architecturally unsupported. Expect a fault,
+  not merely a slow access; this has not been tried on this board. Today's ring code copies whole
+  aligned 64-byte callbacks and passed 879 blocks. New code that reaches SDRAM through a misaligned
+  pointer or `#[repr(packed)]` data is the risk.
+- daisy-embassy's region base looks like a mistaken `0xD000_0000`, perhaps from AN4891's wording for
+  the bank-2 window. It lives in a third-party crate, so it is recorded here rather than patched.
 
 ## libDaisy (C++) has no Seed3 support
 
