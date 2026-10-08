@@ -737,6 +737,13 @@ impl Decoder {
     /// lossless; see [`RECORD_SLOTS`] for what happens when a reader does not.
     pub fn next_record(&mut self) -> Option<Record<'_>> {
         if self.head == self.tail {
+            // A push that filled the queue stops scanning with whole records possibly still
+            // in the window, having already taken every byte it was offered. Resume here, or
+            // those records would wait for bytes that may never come — the last records of a
+            // stream would sit undelivered while the drain loop below reported success.
+            self.scan();
+        }
+        if self.head == self.tail {
             return None;
         }
         let slot = (self.head as usize) % RECORD_SLOTS;
@@ -760,6 +767,11 @@ impl Decoder {
     pub fn finish(&mut self) {
         self.discard_front(self.len);
         self.in_candidate = false;
+    }
+
+    /// Validated records waiting for [`next_record`](Decoder::next_record).
+    pub fn queued(&self) -> usize {
+        (self.tail - self.head) as usize
     }
 
     /// Bytes offered but not yet decided — the window still in play.
@@ -1383,6 +1395,38 @@ mod tests {
             (stats.records, stats.bad_frames, stats.discarded_bytes),
             (200, 0, 0)
         );
+    }
+
+    #[test]
+    fn records_left_in_the_window_by_a_full_queue_drain_without_more_bytes() {
+        // A reader that pushes seven records without draining, then the last two in one
+        // push: both fit the window, so push takes every byte, stops scanning when the
+        // eighth fills the queue, and the ninth sits in the window. The documented drain
+        // loop must still deliver it with no further bytes to come — the end of a stream,
+        // or the last record of an install.
+        let frames: Vec<Vec<u8>> = (0..9u32)
+            .map(|i| {
+                let (bytes, enc) = encoded(Level::Info, i, 0, b"x");
+                bytes[..enc.len].to_vec()
+            })
+            .collect();
+        let mut decoder = Decoder::new();
+        for f in &frames[..7] {
+            assert_eq!(decoder.push(f), f.len());
+        }
+        let tail = [frames[7].as_slice(), frames[8].as_slice()].concat();
+        assert_eq!(decoder.push(&tail), tail.len(), "every byte taken");
+        assert_eq!(decoder.queued(), RECORD_SLOTS);
+        assert!(
+            decoder.buffered() > 0,
+            "the ninth record is still in the window"
+        );
+        let mut seqs = Vec::new();
+        while let Some(r) = decoder.next_record() {
+            seqs.push(r.seq);
+        }
+        assert_eq!(seqs, (0u32..9).collect::<Vec<u32>>());
+        assert_eq!(decoder.buffered(), 0);
     }
 
     #[test]

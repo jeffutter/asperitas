@@ -10,7 +10,14 @@
 //! log::info!("msg") → FacadeLogger → LOG_PIPE (framed records) → run() drain task → CDC-ACM
 //!                                                        ↑ STATUS rides in here too
 //! panic → panic_handler → emit_panic_record → emit_blocking ─────────┘ (ring bypassed)
+//!
+//! host → CDC OUT → run() inbound reader → inbound::InboundFeed → INBOUND_CHANNEL → binary
+//!                  (only after enable_inbound())
 //! ```
+//!
+//! The CDC class is split at [`init`] into its IN half ([`CdcTx`], used by the drain task and
+//! the panic path) and its OUT half ([`CdcRx`], used only by the inbound reader), so the two
+//! concurrent tasks each borrow a distinct object instead of aliasing one `&mut`.
 
 use core::future::Future;
 use core::task::{Context, Waker};
@@ -19,10 +26,13 @@ use embassy_stm32::{
     self as hal,
     usb::{Config as UsbConfig, Driver},
 };
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::{Channel, Receiver};
 use embassy_time::Instant;
-use embassy_usb::class::cdc_acm::{CdcAcmClass, State};
+use embassy_usb::class::cdc_acm::{self, CdcAcmClass, State};
 use static_cell::StaticCell;
 
+use crate::inbound::{InboundFeed, InboundRecord, INBOUND};
 use crate::spin_budget::{cycle_count, SpinBudget};
 use crate::{console, frame};
 
@@ -62,14 +72,26 @@ static EP_OUT_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
 /// Type alias for the USB driver.
 type UsbDrv = Driver<'static, hal::peripherals::USB_OTG_FS>;
 
-/// Storage for the CDC-ACM class. Initialized once by [`init`].
-static CDC_STORAGE: StaticCell<CdcAcmClass<'static, UsbDrv>> = StaticCell::new();
+/// The CDC class's IN half: host-bound bytes.
+type CdcTx = cdc_acm::Sender<'static, UsbDrv>;
+
+/// The CDC class's OUT half: device-bound bytes.
+type CdcRx = cdc_acm::Receiver<'static, UsbDrv>;
+
+/// Storage for the CDC-ACM IN half. Initialized once by [`init`].
+static CDC_TX_STORAGE: StaticCell<CdcTx> = StaticCell::new();
+
+/// Storage for the CDC-ACM OUT half. Initialized once by [`init`].
+static CDC_RX_STORAGE: StaticCell<CdcRx> = StaticCell::new();
 
 /// Storage for the USB device. Initialized once by [`init`].
 static USB_DEV_STORAGE: StaticCell<embassy_usb::UsbDevice<'static, UsbDrv>> = StaticCell::new();
 
-/// Cached pointer to the initialized CDC class. Set during [`init`], read by [`cdc`].
-static mut CDC_REF: *mut CdcAcmClass<'static, UsbDrv> = core::ptr::null_mut();
+/// Cached pointer to the CDC IN half. Set during [`init`], read by [`cdc`].
+static mut CDC_REF: *mut CdcTx = core::ptr::null_mut();
+
+/// Cached pointer to the CDC OUT half. Set during [`init`], read by [`cdc_rx`].
+static mut CDC_RX_REF: *mut CdcRx = core::ptr::null_mut();
 
 /// Cached pointer to the initialized USB device. Set during [`init`], read by [`usb_dev`].
 static mut USB_DEV_REF: *mut embassy_usb::UsbDevice<'static, UsbDrv> = core::ptr::null_mut();
@@ -91,21 +113,28 @@ pub struct UsbLoggerHandle;
 /// Internal flag indicating whether init() has been called.
 static INITIALIZED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// Borrow the CDC class.
+/// Borrow the CDC IN half (host-bound writes).
 ///
 /// Each caller uses what it gets and drops it; nothing here holds one across another
 /// call's borrow.
 ///
 /// # Safety of the pattern
 ///
-/// Points at [`CDC_STORAGE`], which lives for `'static`, on a single core, populated once
+/// Points at [`CDC_TX_STORAGE`], which lives for `'static`, on a single core, populated once
 /// by [`init`] before the executor starts. `addr_of_mut!` + `read_volatile` is how this
 /// reads a `static mut` without creating a reference to it — the form the
 /// `static_mut_refs` lint sanctions, so the crate needs no blanket allow.
-fn cdc() -> &'static mut CdcAcmClass<'static, UsbDrv> {
+fn cdc() -> &'static mut CdcTx {
     // Safety: see above. Null only if `init` never ran; `run` documents the ordering and
     // `emit_blocking` checks `INITIALIZED`.
     unsafe { &mut *core::ptr::read_volatile(core::ptr::addr_of_mut!(CDC_REF)) }
+}
+
+/// Borrow the CDC OUT half. Only [`run`]'s inbound reader calls this, so its borrow never
+/// overlaps another; see [`cdc`] for why the access pattern is sound.
+fn cdc_rx() -> &'static mut CdcRx {
+    // Safety: as [`cdc`].
+    unsafe { &mut *core::ptr::read_volatile(core::ptr::addr_of_mut!(CDC_RX_REF)) }
 }
 
 /// Borrow the USB device. See [`cdc`] for why the access pattern is sound.
@@ -202,16 +231,18 @@ where
         control_buf,
     );
 
-    let cdc = CdcAcmClass::new(&mut builder, cdc_state, MAX_PACKET_SIZE);
+    let (cdc_tx, cdc_rx) = CdcAcmClass::new(&mut builder, cdc_state, MAX_PACKET_SIZE).split();
     let usb_device = builder.build();
 
     // Initialize static storage and cache the pointers.
     // StaticCell::init returns &'static mut T, which we keep as raw pointers for the
     // accessors above. Single-core Cortex-M, set before the executor starts.
-    let cdc_ref = CDC_STORAGE.init(cdc);
+    let cdc_ref = CDC_TX_STORAGE.init(cdc_tx);
+    let cdc_rx_ref = CDC_RX_STORAGE.init(cdc_rx);
     let usb_dev_ref = USB_DEV_STORAGE.init(usb_device);
     unsafe {
         core::ptr::write(core::ptr::addr_of_mut!(CDC_REF), cdc_ref);
+        core::ptr::write(core::ptr::addr_of_mut!(CDC_RX_REF), cdc_rx_ref);
         core::ptr::write(core::ptr::addr_of_mut!(USB_DEV_REF), usb_dev_ref);
     }
 
@@ -326,7 +357,93 @@ pub async fn run() {
         }
     };
 
-    embassy_futures::join::join(usb_fut, drain_fut).await;
+    embassy_futures::join::join3(usb_fut, drain_fut, inbound_reader()).await;
+}
+
+// ---------------------------------------------------------------------------
+// Inbound (host → device) records
+// ---------------------------------------------------------------------------
+
+/// How many validated inbound records may wait for the consumer.
+///
+/// Four is enough for a consumer that takes one record per sector-sized unit of work; more
+/// only buys the host a longer burst before flow control engages, which nothing needs. A
+/// fuller channel costs nothing but latency: see [`inbound_reader`].
+pub const INBOUND_DEPTH: usize = 4;
+
+/// Records from the host, in arrival order, waiting for the binary.
+static INBOUND_CHANNEL: Channel<CriticalSectionRawMutex, InboundRecord, INBOUND_DEPTH> =
+    Channel::new();
+
+/// Whether a binary asked for inbound records. Read once, when [`run`] starts.
+static INBOUND_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// The receiving end of the inbound record channel.
+pub type InboundReceiver = Receiver<'static, CriticalSectionRawMutex, InboundRecord, INBOUND_DEPTH>;
+
+/// Turn on the CDC OUT reader and return the receiver its records arrive on.
+///
+/// Call before [`run`] starts. Only a binary with a consumer should call this: without one
+/// the channel fills after [`INBOUND_DEPTH`] records, the reader stops reading, and the host's
+/// writes stall until the board resets. That is flow control doing its job — nothing is
+/// dropped — but it is not a state a binary should be able to enter by accident, so binaries
+/// that never call this keep today's behaviour exactly: EP OUT is never read and host writes
+/// are NAKed. Calling it twice returns the same channel.
+///
+/// Every record is whole and CRC-checked; rejects and junk are counted in
+/// [`crate::inbound::INBOUND`], never delivered. The body means whatever the consumer
+/// decides; excerpt install parses it with `excerpt::parse_record`.
+pub fn enable_inbound() -> InboundReceiver {
+    INBOUND_ENABLED.store(true, core::sync::atomic::Ordering::Release);
+    INBOUND_CHANNEL.receiver()
+}
+
+/// Read EP OUT, decode, and hand records to [`INBOUND_CHANNEL`]. Never returns while enabled.
+///
+/// Reads are re-armed as soon as a packet's records are in the channel, so the endpoint is
+/// drained promptly and USB flow control, not loss, paces the host. When the channel is full
+/// the reader awaits space *before* reading again: the device then NAKs further OUT packets
+/// and the host's `write()` blocks. Backpressure therefore costs the host time, never bytes.
+///
+/// Fairness with the drain task: both are arms of one `join3` on one executor, each awaits
+/// its own endpoint, and neither busy-loops, so neither can starve the other. Neither
+/// touches the audio executor.
+///
+/// Every connection starts with [`InboundFeed::reset`], which abandons a half record a
+/// dropped link left behind so it cannot splice onto the next session's bytes.
+async fn inbound_reader() {
+    if !INBOUND_ENABLED.load(core::sync::atomic::Ordering::Acquire) {
+        return;
+    }
+    let sender = INBOUND_CHANNEL.sender();
+    let mut feed = InboundFeed::new(&INBOUND);
+    let mut packet = [0u8; MAX_PACKET_SIZE as usize];
+
+    loop {
+        cdc_rx().wait_connection().await;
+        feed.reset();
+
+        loop {
+            let n = match cdc_rx().read_packet(&mut packet).await {
+                Ok(n) => n,
+                Err(_) => {
+                    INBOUND.endpoint_error();
+                    break;
+                }
+            };
+
+            // Drain-then-retry: a refused record is held by the feed, awaited into the
+            // channel, and the untaken remainder offered again. See `inbound`'s module docs.
+            let mut off = 0;
+            loop {
+                off += feed.feed(&packet[off..n], |r| sender.try_send(*r).is_ok());
+                match feed.take_pending() {
+                    Some(r) => sender.send(r).await,
+                    None => break,
+                }
+            }
+        }
+    }
 }
 
 /// Frame a panic message as one v1 record and push it straight to the endpoint.
