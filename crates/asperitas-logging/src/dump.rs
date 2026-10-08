@@ -568,19 +568,19 @@ pub enum BodyError {
 }
 
 /// Append `template` at `at` in `dst`, returning the offset past it.
-fn put(dst: &mut [u8], at: usize, template: &[u8]) -> usize {
+pub(crate) fn put(dst: &mut [u8], at: usize, template: &[u8]) -> usize {
     dst[at..at + template.len()].copy_from_slice(template);
     at + template.len()
 }
 
 /// Append `value` as `digits` lowercase hex digits at `at`, returning the offset past them.
-fn put_hex(dst: &mut [u8], at: usize, value: u32, digits: usize) -> usize {
+pub(crate) fn put_hex(dst: &mut [u8], at: usize, value: u32, digits: usize) -> usize {
     write_hex(value, &mut dst[at..at + digits]);
     at + digits
 }
 
 /// Append `value` as `digits` decimal digits at `at`, returning the offset past them.
-fn put_decimal(dst: &mut [u8], at: usize, value: u32, digits: usize) -> usize {
+pub(crate) fn put_decimal(dst: &mut [u8], at: usize, value: u32, digits: usize) -> usize {
     write_decimal(value, &mut dst[at..at + digits]);
     at + digits
 }
@@ -1082,18 +1082,18 @@ const _: () = assert!(SUMMARY_CRC_AT + CRC_HEX_DIGITS == MAX_AUDEND_BODY_LEN);
 ///
 /// On failure `at` stays where it was, which is what lets [`Action::Malformed`] point at a byte
 /// instead of merely reporting that something was wrong.
-struct BodyReader<'b> {
+pub(crate) struct BodyReader<'b> {
     body: &'b [u8],
-    at: usize,
+    pub(crate) at: usize,
 }
 
 impl<'b> BodyReader<'b> {
-    fn new(body: &'b [u8]) -> Self {
+    pub(crate) fn new(body: &'b [u8]) -> Self {
         Self { body, at: 0 }
     }
 
     /// Consume `template`, or fail without moving.
-    fn literal(&mut self, template: &[u8]) -> Option<()> {
+    pub(crate) fn literal(&mut self, template: &[u8]) -> Option<()> {
         let end = self.at.checked_add(template.len())?;
         if self.body.get(self.at..end) == Some(template) {
             self.at = end;
@@ -1105,14 +1105,14 @@ impl<'b> BodyReader<'b> {
 
     /// Consume exactly `digits` lowercase hex digits. Uppercase is not in the grammar, so the frame
     /// parser's rule is reused rather than restated: two spellings of “valid” is one too many.
-    fn hex(&mut self, digits: usize) -> Option<u32> {
+    pub(crate) fn hex(&mut self, digits: usize) -> Option<u32> {
         let end = self.at.checked_add(digits)?;
         let value = parse_hex(self.body.get(self.at..end)?)?;
         self.at = end;
         Some(value)
     }
 
-    fn decimal(&mut self, digits: usize) -> Option<u32> {
+    pub(crate) fn decimal(&mut self, digits: usize) -> Option<u32> {
         let end = self.at.checked_add(digits)?;
         let value = parse_decimal(self.body.get(self.at..end)?)?;
         self.at = end;
@@ -1121,7 +1121,7 @@ impl<'b> BodyReader<'b> {
 
     /// Everything from here to the end of the body. Reached only after successful steps, so `at` is
     /// inside the body by construction.
-    fn rest(&self) -> &'b [u8] {
+    pub(crate) fn rest(&self) -> &'b [u8] {
         &self.body[self.at..]
     }
 }
