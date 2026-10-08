@@ -4,8 +4,9 @@
 //! Everything here is byte arithmetic with no hardware type in sight, so the decisions that would
 //! otherwise be discovered at the bench - a write that erases its neighbour, a header that reads as
 //! valid on blank flash, a WAV that is stereo or 44.1 kHz, a record body one byte over the frame
-//! budget - are settled on the host. The install state machine (TASK-038.04.04) and the device's
-//! flash task (TASK-038.04.05) consume this module; neither restates a number it owns.
+//! budget - are settled on the host. The install stream and state machine ([`install_frames`],
+//! [`Installer`], in `excerpt/install.rs`) and the device's flash task (TASK-038.04.05) consume
+//! this module; none restates a number it owns.
 //!
 //! # Why this module is not behind `log-usb`
 //!
@@ -80,6 +81,12 @@ use crate::dump::{
     decode, encode, encoded_len, put, put_decimal, put_hex, BodyReader, DecodeError,
 };
 use crate::frame::{check_decimal_fits, check_hex_width, crc16_ccitt, MAX_BODY};
+
+mod install;
+pub use install::{
+    exc_fail_body, exc_ok_body, install_frames, Action, Failure, Installer, Verdict, Why,
+    INSTALL_LEVEL, MAX_FAIL_BODY_LEN, MAX_OK_BODY_LEN,
+};
 
 // ---------------------------------------------------------------------------
 // Layout
