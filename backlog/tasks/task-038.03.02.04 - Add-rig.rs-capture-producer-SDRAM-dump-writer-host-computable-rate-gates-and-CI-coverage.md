@@ -3,11 +3,11 @@ id: TASK-038.03.02.04
 title: >-
   Add rig.rs capture producer, SDRAM dump writer, host-computable rate gates and
   CI coverage
-status: Dev Ready
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-12 12:00'
-updated_date: '2026-10-08 01:00'
+updated_date: '2026-10-08 02:14'
 labels:
   - planned
 dependencies:
@@ -30,98 +30,25 @@ Nothing here is novel API. It is mechanical work that only becomes possible once
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The capture producer runs inside the P6 audio callback and its entire outward surface is SDRAM writes plus atomic stores: no lock, no allocation, no logging call, no `embassy_time` await. Per-callback work is bounded to one contiguous copy plus lane truncation.
-- [ ] #2 Ring geometry comes from `asperitas_logging::capture`, never restated: `RING_BLOCK_BYTES`, `RING_BLOCKS`, `RING_BYTES`, `FRAMES_PER_CALLBACK`, `CALLBACK_BYTES`, `BYTES_PER_SECOND`, `CAPTURE_WINDOW_SECONDS`, `chunks_per_block()`, `expected_blocks()`. The window is overridable through `option_env!("ASP_RIG_CAPTURE_SECONDS")` so bench runs can shorten it without editing source, and the copied-driver-constant loop is closed with a `const assert!` comparing `capture::FRAMES_PER_CALLBACK` to `daisy_embassy::audio::BLOCK_LENGTH` **in samples**, with the comment explaining why `CALLBACK_BYTES` and `HALF_DMA_BUFFER_LENGTH` are not the same quantity.
-- [ ] #3 Block states move only along edges `capture::transition_ok` permits (`Free -> Filling -> Full -> Dumping -> Free`), asserted in a debug build against the table rather than a remembered list, and an overrun leaves the block alone and stops capturing instead of overwriting a block that is being dumped.
-- [ ] #4 Sequence numbers and cursors survive arm/disarm: `PRODUCED` counts blocks since boot, the writer walks `block % RING_BLOCKS` in ring order, and `OVERRUN` counts refusals to fill rather than bytes lost.
-- [ ] #5 `CAPMAX` is emitted once before arming with `total_bytes`, `ring_bytes`, `seconds_max`, `us_max`, `unused_headroom_bytes` all derived from `capture::` arithmetic, and `CAPSTAT` is emitted from the thread executor about once a second carrying `delivered`, `expected`, `overrun`, `max_block_us`, `worst_gap_us`, `audio_exit`, `dumped`, `dropped_full`. Every duration is converted with the `cycles_per_us` that TASK-038.03.02.03 established, and a raw gap delta at or beyond half the 32-bit counter range is treated as invalid rather than trusted.
-- [ ] #6 Capture is armed automatically by rig itself on a documented timeline (a fixed delay after the first audio callback so `BOOT`/`RIGCFG`/`CAPMAX` have flushed), ends at the earlier of the window deadline or a full ring, and dumps on the device's own decision. No inbound console channel is assumed to exist, because none does.
-- [ ] #7 The dump writer obtains permission for every chunk through `asperitas_logging::try_emit_dump`, never bypasses `dump::dump_fits`, retries refusals on a `Timer` backoff instead of busy-waiting, and counts both refusals (`refused`) and the longest stall (`stall_ms`). Ordinary log and `STATUS` traffic stays lossless during a dump - the behaviour `tests/console_dump.rs::log_records_survive_a_saturated_dump` protects.
-- [ ] #8 Each block ends with `AUDEND` whose CRC covers the raw concatenated bytes in chunk order, computed incrementally as chunks are sliced rather than in a second pass, and the dump ends with one `DUMPEND` carrying `blocks`, `chunks`, `bytes`, `elapsed_ms`, `refused`, `stall_ms` plus a `CONSOLE.snapshot()` reading taken at that instant.
-- [ ] #9 Compile-time rate gates, expressed as `const assert!` in `rig.rs` where both driver constants and `capture::` are visible: the intended window provably fits the ring in blocks, `worst_gap_us` must stay below one audio period plus slack (21 000 µs against a 20 833 µs period), `max_block_us` below the callback budget, and delivered blocks must equal expected blocks at the end of the window. A gate that cannot be evaluated at compile time is reported at runtime beside the number it judges, never left as prose.
-- [ ] #10 `.github/workflows/ci.yml` gains three commands inside the existing single-quoted `nix develop --command bash -c '...'` string (no nested single quotes, no new step, no matrix): a firmware lint step `cd firmware && cargo clippy --release --features seed3 -- -D warnings`, which nothing else provides because firmware is excluded from the root workspace and `make clippy` is hard-wired to `--bin main`; then `cargo build --release --features seed3,stim-ess --bin rig` and `cargo build --release --features seed3,stim-pulse --bin rig`. The implicit-sine default needs no new command: neither existing firmware build passes `--bin`, so both already compile `rig` with the default generator.
-- [ ] #11 The timer-slot budget is stated where it is spent and stays within eight: reporting ticker, LED blink, dump retry, capture deadline, boot including the codec's 2 ms startup delay. Overflow evicts the furthest-out timer and wakes it early rather than panicking, so a blown budget shows up as a mistimed `CAPSTAT`, not an error.
-- [ ] #12 Host-side measurements recorded in Finalization Notes: `.text`/`.bss` of `rig` versus `main` under both transports; `wire_bytes_per_block() × RING_BLOCKS` for the full-ring dump volume; the parent's §11 rows that need no board; and the dump-bandwidth prediction labelled as a prediction, naming `DUMPEND.elapsed_ms` as the field that will replace it.
-- [ ] #13 `git stash list` is empty of `wip-038.03.02-uncommitted` after TASK-038.03.02.03 applied its one live hunk, and the parent's notes record the disposition rather than leaving the next reader to diff a stash.
+- [x] #1 The capture producer runs inside the P6 audio callback and its entire outward surface is SDRAM writes plus atomic stores: no lock, no allocation, no logging call, no `embassy_time` await. Per-callback work is bounded to one contiguous copy plus lane truncation.
+- [x] #2 Ring geometry comes from `asperitas_logging::capture`, never restated: `RING_BLOCK_BYTES`, `RING_BLOCKS`, `RING_BYTES`, `FRAMES_PER_CALLBACK`, `CALLBACK_BYTES`, `BYTES_PER_SECOND`, `CAPTURE_WINDOW_SECONDS`, `chunks_per_block()`, `expected_blocks()`. The window is overridable through `option_env!("ASP_RIG_CAPTURE_SECONDS")` so bench runs can shorten it without editing source, and the copied-driver-constant loop is closed with a `const assert!` comparing `capture::FRAMES_PER_CALLBACK` to `daisy_embassy::audio::BLOCK_LENGTH` **in samples**, with the comment explaining why `CALLBACK_BYTES` and `HALF_DMA_BUFFER_LENGTH` are not the same quantity.
+- [x] #3 Block states move only along edges `capture::transition_ok` permits (`Free -> Filling -> Full -> Dumping -> Free`), asserted in a debug build against the table rather than a remembered list, and an overrun leaves the block alone and stops capturing instead of overwriting a block that is being dumped.
+- [x] #4 Sequence numbers and cursors survive arm/disarm: `PRODUCED` counts blocks since boot, the writer walks `block % RING_BLOCKS` in ring order, and `OVERRUN` counts refusals to fill rather than bytes lost.
+- [x] #5 `CAPMAX` is emitted once before arming with `total_bytes`, `ring_bytes`, `seconds_max`, `us_max`, `unused_headroom_bytes` all derived from `capture::` arithmetic, and `CAPSTAT` is emitted from the thread executor about once a second carrying `delivered`, `expected`, `overrun`, `max_block_us`, `worst_gap_us`, `audio_exit`, `dumped`, `dropped_full`. Every duration is converted with the `cycles_per_us` that TASK-038.03.02.03 established, and a raw gap delta at or beyond half the 32-bit counter range is treated as invalid rather than trusted.
+- [x] #6 Capture is armed automatically by rig itself on a documented timeline (a fixed delay after the first audio callback so `BOOT`/`RIGCFG`/`CAPMAX` have flushed), ends at the earlier of the window deadline or a full ring, and dumps on the device's own decision. No inbound console channel is assumed to exist, because none does.
+- [x] #7 The dump writer obtains permission for every chunk through `asperitas_logging::try_emit_dump`, never bypasses `dump::dump_fits`, retries refusals on a `Timer` backoff instead of busy-waiting, and counts both refusals (`refused`) and the longest stall (`stall_ms`). Ordinary log and `STATUS` traffic stays lossless during a dump - the behaviour `tests/console_dump.rs::log_records_survive_a_saturated_dump` protects.
+- [x] #8 Each block ends with `AUDEND` whose CRC covers the raw concatenated bytes in chunk order, computed incrementally as chunks are sliced rather than in a second pass, and the dump ends with one `DUMPEND` carrying `blocks`, `chunks`, `bytes`, `elapsed_ms`, `refused`, `stall_ms` plus a `CONSOLE.snapshot()` reading taken at that instant.
+- [x] #9 Compile-time rate gates, expressed as `const assert!` in `rig.rs` where both driver constants and `capture::` are visible: the intended window provably fits the ring in blocks, `worst_gap_us` must stay below one audio period plus slack (21 000 µs against a 20 833 µs period), `max_block_us` below the callback budget, and delivered blocks must equal expected blocks at the end of the window. A gate that cannot be evaluated at compile time is reported at runtime beside the number it judges, never left as prose.
+- [x] #10 `.github/workflows/ci.yml` gains three commands inside the existing single-quoted `nix develop --command bash -c '...'` string (no nested single quotes, no new step, no matrix): a firmware lint step `cd firmware && cargo clippy --release --features seed3 -- -D warnings`, which nothing else provides because firmware is excluded from the root workspace and `make clippy` is hard-wired to `--bin main`; then `cargo build --release --features seed3,stim-ess --bin rig` and `cargo build --release --features seed3,stim-pulse --bin rig`. The implicit-sine default needs no new command: neither existing firmware build passes `--bin`, so both already compile `rig` with the default generator.
+- [x] #11 The timer-slot budget is stated where it is spent and stays within eight: reporting ticker, LED blink, dump retry, capture deadline, boot including the codec's 2 ms startup delay. Overflow evicts the furthest-out timer and wakes it early rather than panicking, so a blown budget shows up as a mistimed `CAPSTAT`, not an error.
+- [x] #12 Host-side measurements recorded in Finalization Notes: `.text`/`.bss` of `rig` versus `main` under both transports; `wire_bytes_per_block() × RING_BLOCKS` for the full-ring dump volume; the parent's §11 rows that need no board; and the dump-bandwidth prediction labelled as a prediction, naming `DUMPEND.elapsed_ms` as the field that will replace it.
+- [x] #13 `git stash list` is empty of `wip-038.03.02-uncommitted` after TASK-038.03.02.03 applied its one live hunk, and the parent's notes record the disposition rather than leaving the next reader to diff a stash.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-### Planning Decision Summary
-
-**Scope:** everything in TASK-038.03.02 that is not boot bring-up, DWT, the executor split or stimulus selection. Those land first in TASK-038.03.02.03; this ticket extends the `rig.rs` that ticket introduces.
-
-**Technical approach:** SPSC ring between a P6 producer and a thread-mode consumer, published with acquire/release atomics, plus a dump writer that treats USB pipe capacity as the scarce resource and yields on every refusal. Geometry and grammar come from `asperitas_logging::{capture, dump, console}`; rig contributes only policy (when to arm, when to stop) and measurement (cycles to microseconds).
-
-**Key changes:** `firmware/src/bin/rig.rs` (extend), `.github/workflows/ci.yml` (one lint step, three builds).
-
-**Critical verification:** the const gates compile, the three stim builds still link with the capture path present, and the host-computable rows of the parent's §11 ladder are run with their numbers written down.
-
-### Research Findings
-
-**Verified against the shipped code** (`crates/asperitas-logging/src/{capture,dump,console,lib}.rs`, read 2026-09-12):
-
-- `capture.rs` publishes exactly what the plan names: `SAMPLE_RATE_HZ`, `CAPTURE_BYTES_PER_SAMPLE`, `FRAMES_PER_CALLBACK = 32`, `CALLBACK_BYTES`, `RING_BLOCK_BYTES = 32_768`, `RING_BLOCKS = 1_024`, `RING_BYTES`, `BYTES_PER_SECOND = 96_000`, `CAPTURE_WINDOW_SECONDS = 300`, and the functions `callbacks_per_block`, `samples_per_block`, `full_chunks_per_block`, `tail_chunk_bytes`, `chunks_per_block`, `records_per_block`, `tail_frame_bytes`, `audend_frame_bytes`, `wire_bytes_per_block`, `useful_fraction_per_mille`, `ring_seconds_floor`, `ring_duration_micros`, `expected_blocks`, plus `BlockState`, `BlockState::ALL`, `as_u8`, `from_u8`, `transition_ok`. There is **no** `total_capture_bytes`; the caller computes `window_s × BYTES_PER_SECOND` (28.8 MB for 300 s, comfortably `u32`).
-- `emit_record(level, now_ms: u32, body: &[u8]) -> bool` is **`#[cfg(feature = "log-usb")]`** (`lib.rs:429-430`). The `console::` builders are ungated, so rig's call sites need their own cfg shim: one local `fn emit_console(...)` with two definitions, gated on `log-usb` and a no-op otherwise, keeps the `--no-default-features --features "seed3 log-defmt"` build compiling. That config is built by CI already, so getting this wrong fails CI rather than surprising nobody.
-- Callers supply `now_ms` themselves; the house convention is `embassy_time::Instant::now().as_millis() as u32` (`lib.rs:449`, `usb.rs:129-130`). `Instant::now()` reads the driver counter and does not await, so it is legal in the P6 context; awaiting there is not.
-- `dump::CHUNK_RAW`, `dump::audio_body`, `dump::audend_body`, `dump::dump_fits` (`dump.rs:539`) and `try_emit_dump` (`lib.rs:634`) are the writer's whole vocabulary. `console::capstat_body`, `capmax_body`, `dumpend_body` take `&mut [u8; console::BODY_WINDOW]` and return the length; worst-case bodies are 187 (`CAPSTAT`), 133 (`CAPMAX`) and 194 (`DUMPEND`) bytes, all inside `frame::MAX_BODY = 200`, with `DUMPEND` six bytes from the cap - the tightest verb on the wire, which is why adding a field to it is a design change rather than an edit.
-- `console::RingCapacity { total_bytes, ring_bytes, seconds_max, us_max, unused_headroom_bytes }`, `CaptureStatus { delivered, expected, overrun, max_block_us, worst_gap_us, audio_exit, dumped, dropped_full }`, `DumpSummary { blocks, chunks, bytes, elapsed_ms, refused, stall_ms, sent, dropped_full }`. Field order in the struct is the wire order; do not reorder.
-- Timer overflow semantics, measured upstream (`embassy-time-queue-utils-0.3.2/src/queue_generic.rs:55-75`): slots coalesce per waker, and a full queue pops the furthest-out timer so it fires **early**. Eight slots, set by daisy-embassy, not raisable here (two selected `generic-queue-N` features collide on `const QUEUE_SIZE` and fail to compile).
-- The `SdRam` value must be owned by the audio task for the program's lifetime, but **not** for the reason the parent gives: dropping it does **not** release ~55 pins, because `SdRam` has no `Drop` impl (verified in daisy-embassy `ca9bcc9`). Keep it alive because `init(&mut delay)` takes `&mut self` on the value and it owns the FMC instance; say that instead of repeating the false claim.
-- MPU region mismatch is real and inherited: `sdram.init()` returns bank 5's base `0xC000_0000` while `SdRamBuilder` programs a cacheable MPU region at `0xD000_0000`, and `MPU_DEFAULT_MMAP_FOR_PRIVILEGED` is what makes the uncached accesses work anyway. Caches are enabled nowhere in this stack, so today every access is uncached and coherent. Recording this belongs to **TASK-038.06**, which already owns `docs/reference/daisy-seed3.md` and has an AC for fixing stale statements found while writing; rig's job is only to carry the rule in a comment: caches stay off until someone owns the coherence argument for the FMC window, and that person revisits the capture hand-off ordering in the same change.
-
-### Recommended Approach
-
-1. **Producer.** Follow the parent's §6 steps verbatim: check state, `Filling`, truncate the even words (`input[2 * i]`, left lane, matching `main.rs`'s `decode_block`) into the block's byte range at `callback_index_in_block * CALLBACK_BYTES` with `(sample.clamp(-1.0, 1.0) * 32767.0) as i16`, and on the last callback `fence(Release)` then store `Full`. One `const MONO_LANE` carries the lane choice with a comment saying the physical jack is TASK-038.05's observation and flipping that constant is the fix.
-2. **Publish with the classic SPSC discipline**, `core::sync::atomic` only, payload written before the index that publishes it. Do not reuse `main.rs`'s `UnsafeCell` + `interrupt::free` idiom: it is right for one slow knob writer and wrong for handing buffer ownership across an interrupt boundary.
-3. **Arming policy in the thread task, visibility through atomics.** A `ARMED: AtomicBool` plus an `ARM_AT_MS`/`DEADLINE_MS` pair read by the producer. Arm a fixed delay after the first callback so `BOOT`, `RIGCFG` and `CAPMAX` reach the host before the ring starts filling; stop at the earlier of deadline or full ring. Single-shot: after `DUMPEND`, rig logs completion and idles. There is no inbound channel to re-arm through (runtime control is TASK-032), and a bench run is repeated by reset, which `slow-boot` makes safe for DFU. Say all of that in one comment block above the arming code, because it looks like a missing feature otherwise.
-4. **Consumer/writer** exactly as §7: `compare_exchange(Full, Dumping)`, slice chunks, `audio_body(...)`, retry `try_emit_dump` with `Timer::after_millis(1)` between refusals, incremental CRC over the raw bytes as they are sliced, `AUDEND`, `store(Free, Release)`. The yield at the await is load-bearing: the USB drain task is what frees the pipe capacity the writer is waiting for.
-5. **`CAPSTAT` cadence** from the reporting task's ticker, reading atomics only. Keep the record cheap enough that a 1 s cadence cannot itself threaten the pipe headroom that the dump depends on; if it ever does, the symptom is `dropped_full` climbing in `DUMPEND`.
-6. **Rate gates.** Put them adjacent to the capture code with the parent's wording. Where a bound is a runtime fact rather than a constant (`worst_gap_us < 21_000`, `delivered == expected`), enforce it as a check that logs a clear `error!` line naming the threshold and the observed value, and keep the geometric ones (`expected_blocks(300) <= RING_BLOCKS`, i.e. 879 <= 1024) genuinely compile-time.
-7. **CI edits.** Append the three commands inside the existing `bash -c '...'` string, after the two existing firmware builds. Use cargo's comma form (`--features seed3,stim-ess`) so nothing needs quoting inside a single-quoted script. No new steps, no matrix, no `timeout-minutes` (the job has none today either).
-
-### Test Coverage Matrix
-
-| Test | Type | What it verifies | Critical |
-|---|---|---|---|
-| `const_gate_window_fits_ring` | compile-time | `expected_blocks(CAPTURE_WINDOW_SECONDS) <= RING_BLOCKS` | Critical |
-| `const_gate_callback_geometry` | compile-time | frames-per-callback matches `daisy_embassy::audio::BLOCK_LENGTH`; block holds a whole number of callbacks | Critical |
-| `build_seed3_bin_rig_with_capture` | build | capture plus dump path links under `log-usb` | Critical |
-| `build_log_defmt_bin_rig_with_capture` | build | the `cfg` shim keeps the RTT-only image linking with no console emission | Critical |
-| `build_stim_ess_with_capture` / `build_stim_pulse_train_with_capture` | build | non-default generators still compile with the capture path present | Important |
-| `firmware_clippy_clean` | lint | `cargo clippy --release --features seed3 -- -D warnings` in `firmware/` | Important |
-| `window_override_builds` | build | `ASP_RIG_CAPTURE_SECONDS=30 cargo build ...` compiles and the shortened window still passes the ring gate | Important |
-| `state_machine_edges` | unit-in-rig (debug assert) | every observed transition is permitted by `capture::transition_ok` | Important |
-| `size_readings` | measurement | `.text`/`.bss` delta over `main`, both transports; ring lives in SDRAM, not `.bss` | Important |
-| `bench_300s_soak` | bench, deferred | delivered equals expected at 300 s, dump validates offline | Critical (TASK-038.05, `@human`) |
-
-The soak row is hardware work and is already owned by TASK-038.05; it is listed so the hand-off is explicit, and it is not an acceptance criterion here.
-
-### Key Decisions
-
-1. **Automatic arming, single-shot run.** The alternative (wait for a command) requires an inbound channel that does not exist and would make the 300 s soak impossible to run unattended. Cost: rig cannot be re-armed without a reset, which is acceptable for a measurement rig and is what TASK-032 will change.
-2. **Policy in thread mode, mechanism in the producer.** Arming decisions involve clocks and timers; the producer may touch neither. Publishing a flag keeps the callback's surface at SDRAM writes and atomic stores.
-3. **Overrun stops capture.** Continuing after an overrun means overwriting data the writer has not drained, which turns a measurable loss into silent corruption. Stopping converts it into a count plus a frozen tail.
-4. **Incremental CRC.** A second pass over 32 KiB per block inside the writer is easy to write and easy to mistake for free; folding it into the chunk slicing costs nothing extra and removes the temptation to "optimise" it later by skipping verification.
-5. **Whole-package firmware clippy in CI, not `--bin rig`.** Measured clean package-wide at planning time (exit 0), consistent with the host workspace's `-D warnings` across all targets, and it means a future binary cannot quietly skip linting. If an unrelated binary later breaks the step, fix that binary or narrow the step, and say which in the commit message.
-6. **Docs note moves to TASK-038.06.** Parent AC #11 asks for a note in "`docs/reference/daisy-seed3.md` section 4"; that file has no FMC/MPU section (§4 is "Flashing the Seed3"), and TASK-038.06 already lists the file, already carries the SDRAM/QSPI budget ACs, and already instructs itself to fix stale statements in the same change. Two owners for one file is how the WFE correction gets half-applied twice.
-
-### Risks and Mitigations
-
-1. **Pipe headroom starves the dump.** Gate is `dump_fits`; symptom is `refused`/`stall_ms` in `DUMPEND`. The 1 s `CAPSTAT` cadence is the knob to turn first if it shows.
-2. **A 32 MiB ring write pattern exposes the uncached-FMC cost.** Nothing in this repo has measured sustained FMC write throughput. Producer work is one contiguous copy per callback; if the bench sees starvation the candidate causes are the FMC write path and the P6 priority, in that order, and `worst_gap_us` beside `delivered`/`expected` distinguishes them.
-3. **Ring wrap assumptions.** The gate proves 300 s fits (879 < 1024); the modulo stays anyway, and `overrun` counts any case where the writer falls behind the producer.
-4. **Stimulus builds grow past flash.** `stim-ess` adds a scan at boot, not code bulk; sizes are recorded per AC #12 so growth is visible rather than discovered at flash time.
-5. **`option_env!` override silently breaks a gate.** `ASP_RIG_CAPTURE_SECONDS` shorter than the default can only relax the ring gate, never tighten it, so the compile-time assertion still holds in every build.
-
-### Files to Create or Modify
-
-| File | Action | Purpose |
-|---|---|---|
-| `firmware/src/bin/rig.rs` | modify | capture producer, ring atomics, arming policy, CAPMAX/CAPSTAT, dump writer, DUMPEND, const gates |
-| `.github/workflows/ci.yml` | modify | firmware clippy step plus three stim-feature builds, inside the existing `nix develop` bash string |
-| `backlog/tasks/task-038.03.02*.md` | modify | size readings, ladder results, finalization notes |
+SHIPPED by 7552780. This plan is superseded; the ticket's final summary describes what actually landed.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -139,6 +66,59 @@ Depends on TASK-038.03.02.03 for: `rig.rs` existing and linking, `Peripherals::t
 - Warm incremental firmware rebuild is ~0.13 s, so iterate with `touch` rather than cleaning.
 
 2026-10-07: moved Blocked -> Dev Ready, as the note above instructs. Its only dependency, TASK-038.03.02.03, is Done, and `git stash list` is empty (AC #13's precondition). Done in a live session at the owner's request.
+
+### What landed (TASK-038.03.02.04, 2026-10-07)
+
+Nothing of this ticket existed at HEAD 56549e0: `rig.rs` had the boot skeleton from TASK-038.03.02.03 and a no-op `emit_console` shim waiting for these verbs. All of the following is new.
+
+**`firmware/src/bin/rig.rs`**
+- Producer (`Producer::on_callback`), called inside the P6 callback after the render: gap + duration timing in raw DWT cycles (`fetch_max` into atomics), then, if armed, lane truncation of the codec INPUT (`(word >> 16) as i16`, left-justified 32-bit PCM, `MONO_WORD` derived from `const MONO_LANE: console::MonoLane`) into a 64-byte stack copy and one `copy_from_slice` into the block. Outward surface: SDRAM writes and atomics only.
+- Ring: raw `*mut u8` from `Sdram::init`, `[AtomicU8; RING_BLOCKS]` states, every edge through one `advance(index, from, to)` = `compare_exchange(AcqRel/Acquire)` with `debug_assert!(capture::transition_ok(from, to))`. Overrun = claim of a non-Free block: counts 1, disarms, leaves the block alone.
+- `PRODUCED` (blocks since boot, never reset; ring index `seq % RING_BLOCKS`, wire `blk` = seq), `OVERRUN`, `DUMPED`, `ARMED`, `FILLING`, `AUDIO_EXIT`, `MAX_BLOCK_CYCLES`, `WORST_GAP_CYCLES`, `INVALID_GAPS`.
+- `CAPTURE_SECONDS` from `option_env!("ASP_RIG_CAPTURE_SECONDS")` via a const parser that fails the build on junk. RIGCFG `window_s` now reports it (was the default constant).
+- Const gates: `fs_hz(RIG_FS) == capture::SAMPLE_RATE_HZ` (codec rate now named, not `Default`), `capture::FRAMES_PER_CALLBACK == daisy_embassy::audio::BLOCK_LENGTH` (local `BLOCK_LENGTH = 32` copy deleted, comment on why not `CALLBACK_BYTES` vs `HALF_DMA_BUFFER_LENGTH`), window > 0, `expected_blocks(window) < RING_BLOCKS`, `RING_BYTES <= SDRAM_SIZE`, gap limit strictly between one and two periods, budget <= one period.
+- Runtime gates (`judge_capture`, logged at window close beside the numbers): delivered == expected, worst_gap_us < GAP_LIMIT_US, max_block_us < CALLBACK_BUDGET_US, overrun == 0.
+- Timeline (`run_capture`, documented in a comment block): wait for first callback, +2 s arm, window deadline (100 ms poll also catches the producer's own overrun disarm), wait for the in-flight block, judge, dump, idle. Single-shot by design; no inbound channel.
+- `CAPMAX` once at boot after RIGCFG/RIGGEN; `CAPSTAT` every second from a `Ticker` joined into main's select.
+- Dump writer (`dump_ring` / `send_dump_body`), `log-usb` only: Full->Dumping, chunks of `dump::CHUNK_RAW`, CRC folded per chunk as sliced, `audio_body`, `try_emit_dump` retried with `Timer::after_millis(1)`, `refused`/`stall_ms` tallied, `AUDEND`, Dumping->Free, then `DUMPEND` with a `CONSOLE.snapshot()`. RTT-only build gets a second definition that says nothing is dumped instead of faking a DUMPEND.
+- Timer-slot budget rewritten where spent (audio_task doc): five named users of eight, all in main's task, so one slot held in practice; overflow evicts the furthest-out timer early.
+- SDRAM: `board.sdram.build(&mut cp.MPU, &mut cp.SCB)` + `init(&mut Delay)`, kept bound for main's life with the corrected reason (no `Drop` impl; it owns FMC). Cache/MPU-base rule carried in a comment.
+- `audio_exit` made reachable: SAI start failure no longer halts (stores 1, LED Panicked, keeps reporting); SAI callback error stores 2 and RETURNS instead of spinning at P6, which would have starved thread mode so the explaining CAPSTAT could never be sent.
+
+**`crates/asperitas-dsp/src/stimulus.rs`**: `PulseTrain::apply`'s two f64 `clamp(lo, hi)` with runtime upper bounds -> `max(lo).min(hi)`. Hypothesis tested locally: f64::clamp keeps its `min > max` panic, whose `{:?}` message links core's dragon/grisu f64 formatter. Result: rig stim-pulse text 130467 at HEAD (197 B under 128 KiB) -> 119722 with capture added. Without this, AC #10's pulse build overflows FLASH by 12 160 B. No result changes (neither bound can invert). asperitas-dsp tests pass.
+
+**`scripts/gates.sh`** (not ci.yml - see deviations): push-tier `rig-stim-ess-build`, `rig-stim-pulse-build`, `rig-window-override-build` (`ASP_RIG_CAPTURE_SECONDS=30`), placed BEFORE the cross-compile pair per ordering rule 1; commit-tier `rig-stim-ess-clippy`, `rig-stim-pulse-clippy` after the firmware clippy pair (comment #1's follow-on). Ledger re-priced with `GATE_COSTS_BOOTSTRAP=1 scripts/gate-costs.sh --refresh`.
+
+### Deviations from the ticket text, and why
+
+1. **AC #9's numbers were off by a factor of ~31.** "21 000 us against a 20 833 us period" is 1e6/48, i.e. microseconds per 1000 samples; 32 frames at 48 kHz is 666.67 us, which is also what TASK-038.03 and `lib.rs` use. rig derives `PERIOD_US = 666` (floored, it is a deadline), `GAP_LIMIT_US = 832` (one period + a quarter: covers entry jitter, still catches one missed callback - a const assert pins `PERIOD < LIMIT < 2*PERIOD`), `CALLBACK_BUDGET_US = 666`.
+2. **AC #10's ci.yml edit is superseded** (comments #1 and #2): CI runs `scripts/gates.sh ci`; firmware clippy over all bins in both cfg sets already exists. The genuinely new gates went into gates.sh as above.
+3. **`expected` counts down**, as `console::CaptureStatus::expected` defines it ("blocks the window still expects"), so "delivered equals expected at the end of the window" is judged as delivered-this-run == WINDOW_BLOCKS (CAPSTAT `expected` reaches 0).
+4. **The dump runs after the window closes**, not alongside it, so the measured window carries no bulk USB traffic and worst_gap/max_block describe the audio path alone. The ring gate guarantees the window fits, so nothing is lost by waiting.
+5. **Window close is wall-clock, and the producer finishes its in-flight block**, so a healthy run delivers exactly `expected_blocks(window)` (879 at 300 s: 300 s is 878.9 blocks and the 879th completes). A missed-callback run comes up short, which is what makes the delivered==expected gate meaningful.
+6. `unused_headroom_bytes` is block-granular ((1024 - 879) x 32 768 = 4 751 360), because the ring is consumed in whole blocks.
+
+### Finalization: host-side measurements (AC #12), 2026-10-07, `rust-size -A`, release
+
+| image | .text | .rodata | .data | .bss | flash (text+rodata+data) of 131 072 |
+|---|---|---|---|---|---|
+| main, console (`seed3`) | 73 104 | 14 500 | 408 | 8 224 | 88 777 (67.7 %) |
+| rig, console, sine | 99 900 | 18 356 | 408 | 9 256 | 119 426 (91.1 %) |
+| rig, console, stim-ess | - | - | 408 | 9 280 | 123 194 (94.0 %) |
+| rig, console, stim-pulse | - | - | 408 | 9 256 | 120 130 (91.7 %) |
+| main, RTT-only (`seed3 log-defmt`) | 38 400 | 8 016 | 464 | 2 832 (+1 024 .uninit) | 46 880 |
+| rig, RTT-only | 60 164 | 10 868 | 464 | 4 288 (+1 024 .uninit) | 71 496 |
+
+(stim variants from Berkeley `size`: text 122 786 / 119 722, bss 10 304 / 10 280 incl. .uninit-free totals.)
+
+- rig .bss over main, console: +1 032 B - the 1 KiB `BLOCK_STATE` array plus atomics. The ring itself is in SDRAM, not .bss. Internal RAM use stays ~2 % of the 512 KiB AXI SRAM; the "86.13 % .bss, ~69 KB free" premise has no provenance and contradicts measurement, as the parent already noted.
+- Flash is now the tight resource: stim-ess rig leaves 7 878 B. The capture/dump path cost ~12 KB (SDRAM init + FMC clocking, dump encoder and builders, CRC table, the join/select state machines). Before this ticket stim-pulse had 197 B left; the dsp fix above is what makes room.
+- Full-ring dump volume: `wire_bytes_per_block() x RING_BLOCKS` = 57 788 x 1 024 = 59 174 912 B. The default 300 s window dumps 879 blocks = 50 795 652 B on the wire for 28 803 072 B of PCM.
+- Parent §11 rows needing no board, all green in the `GATE_COSTS_BOOTSTRAP=1 scripts/gate-costs.sh --refresh` run (commit, push and ci tiers each passed; --record refuses a failing tier): `cargo fmt --all --check`, `cargo test --workspace`, `cargo clippy --workspace --all-targets -D warnings`, firmware default build, `stim-ess` and `stim-pulse` rig builds, RTT-only build, firmware clippy both cfg sets plus both stim variants, the 30 s override build. Also checked by hand: `ASP_RIG_CAPTURE_SECONDS=400` fails with "the capture window does not fit the ring", `=3x` fails with "must be a whole number of seconds". `git diff --name-only` lists neither main.rs nor podtest.rs.
+- **Dump-bandwidth PREDICTION (not a measurement):** USB FS bulk tops out at 19 x 64 B packets per 1 ms frame = 1.216 MB/s in theory, so the 300 s dump takes at least ~42 s; CDC-ACM through embassy's drain plus the 1 ms retry backoff will be slower, plausibly 60-120 s. `DUMPEND.elapsed_ms` is the field that replaces this guess (TASK-038.05 AC #4), with `refused`/`stall_ms` saying how much of it was waiting on the pipe.
+
+### Hand-off to TASK-038.05 (@human)
+Everything above is compile- and host-verified only. Unverified until a board runs it: SDRAM works at all at 0xC000_0000 with this MPU setup, max_block_us/worst_gap_us against 666/832, delivered==expected over 300 s, the dump's throughput and integrity, and which physical jack `MonoLane::Left` is.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
@@ -156,3 +136,9 @@ Blocking correction from TASK-061.02, filed before anyone executes this ticket a
 Adding a check means adding one `gate <tier> "<banner>" <command...>` line in `scripts/gates.sh`, positioned where it should run, tagged with the cheapest tier that should run it. Two consequences worth knowing. Quoting is normal shell argument passing, so the comma form (`--features seed3,stim-ess`) invented to survive a single-quoted script is no longer needed, though it stays legal. And the firmware clippy coverage AC #10 asks to add already exists - `=== firmware clippy (all bins) ===` and its RTT-only twin lint all six bins in both cfg sets with `-D warnings` in every tier - so re-read AC #10 against the script before adding anything: the genuinely new items are the two extra `rig` feature-set builds.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+rig.rs now captures. A P6 producer truncates the codec's left input lane to i16 and copies it into a 32 MiB SDRAM ring. Every block-state edge goes through one compare_exchange that is debug-checked against capture::transition_ok, and an overrun disarms instead of overwriting. rig arms itself 2 s after the first callback and closes the window on wall-clock time, finishing the block in flight. It then judges the runtime rate gates in the log, dumps every block via try_emit_dump with a 1 ms backoff (CRC folded per chunk, AUDEND per block, one DUMPEND with a CONSOLE snapshot), and idles. CAPMAX goes out once at boot and CAPSTAT once a second. Compile-time gates tie the codec rate and callback size to capture::, keep the window (overridable with ASP_RIG_CAPTURE_SECONDS) inside the ring, and pin the gap and budget thresholds. AC #9's thresholds were corrected from 20 833/21 000 us to the real 666 us period: limit 832, budget 666. audio_exit is now reachable because an SAI failure keeps thread mode reporting instead of spinning at P6. Two changes outside rig.rs. PulseTrain's runtime-bound f64 clamp was linking ~20 KB of float formatting, and with it the stim-pulse rig overflowed flash by 12 KB, so it now uses max/min. scripts/gates.sh gains three rig builds and two rig clippy gates; ci.yml itself was superseded per comments #1/#2. The ledger was re-priced and every tier passed. Sizes and the dump-bandwidth prediction are in the notes. Nothing here has run on a board: TASK-038.05 owns that.
+<!-- SECTION:FINAL_SUMMARY:END -->

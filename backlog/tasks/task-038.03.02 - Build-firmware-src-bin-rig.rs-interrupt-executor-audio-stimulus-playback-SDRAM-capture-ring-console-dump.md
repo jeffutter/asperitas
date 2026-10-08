@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-11 13:28'
-updated_date: '2026-09-13 04:16'
+updated_date: '2026-10-08 02:09'
 labels:
   - task
   - planned
@@ -660,6 +660,8 @@ Every item below was verified against the sources the build actually resolves (d
 ### Why `.02` split again the next day
 
 `.02` arrived as "everything cross-compiled": eleven of its fourteen criteria, one new 1 000-line binary, four novel API surfaces (`InterruptExecutor`, `Peripherals::take`, `SdRam`, DWT bring-up) and a CI edit. That is the same shape that killed the parent twice, and the umbrella had already learned that the seam which matters is *novel-API risk versus mechanical work*, not host versus firmware. So `.02.03` takes boot skeleton, DWT, executor topology and stimulus gates (the parts that can fail to compile or hang at boot), and `.02.04` takes capture producer, dump writer, rate gates and CI (mechanical, and only possible once the first exists). `.02` keeps its acceptance criteria as the definition of done and becomes the integration owner. Children numbered `.03`/`.04` rather than `.02.01`/`.02.02` because `.02.01` already exists and is Done, and a fifth level of ID depth is worse for everyone who has to type it.
+
+Stash disposition (recorded by TASK-038.03.02.04, 2026-10-07): `stash@{0}` `wip-038.03.02-uncommitted` no longer exists - `git stash list` shows no wip-038 entry. Its one live hunk, the `spin_budget.rs` safety comment that wrongly claimed nothing takes `cortex_m::Peripherals`, was applied by 41f9cae (TASK-038.03.02.03) and is at `crates/asperitas-logging/src/spin_budget.rs:81-88`. Every other hunk (`console.rs`, `frame.rs`, `lib.rs`, `tests/commit_path_no_panic.rs`) was superseded by 22714b0, 951b660 and f0b4e18, as TASK-038.03.02.03's notes record hunk by hunk. Nothing from it is outstanding, so nobody needs to diff a stash.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

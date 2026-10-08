@@ -833,13 +833,22 @@ impl PulseTrain {
         self.amplitude = amplitude;
         self.period_samples = params.period_samples.clamp(2, MAX_PERIOD_SAMPLES);
 
+        // `max(lo).min(hi)` rather than `clamp(lo, hi)` for the two f64 bounds below, because both
+        // upper bounds are runtime values. `f64::clamp` then keeps its `min > max` panic, whose
+        // message formats both bounds with `{:?}`, and that one message links core's whole f64
+        // formatter - about 20 KB, which on rig's `stim-pulse` image was the difference between
+        // fitting the 128 KB flash and not. Neither panic is reachable (nyquist >= 1 because the
+        // sample rate is at least 2, and `k_max.max(1.0)` is at least 1), so the order of `max`
+        // then `min` changes no result.
         let nyquist = f64::from(self.sample_rate_hz) / 2.0;
-        let max_hz = guarded(params.max_frequency_hz, 8_000.0).clamp(1.0, nyquist);
+        let max_hz = guarded(params.max_frequency_hz, 8_000.0)
+            .max(1.0)
+            .min(nyquist);
         self.max_frequency_hz = max_hz;
 
         let k = floor(max_hz * f64::from(self.period_samples) / f64::from(self.sample_rate_hz));
         let k_max = f64::from((self.period_samples - 1) / 2);
-        self.harmonic_count = k.clamp(1.0, k_max.max(1.0)) as u32;
+        self.harmonic_count = k.max(1.0).min(k_max.max(1.0)) as u32;
         self.position = 0;
     }
 
