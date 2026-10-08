@@ -3,11 +3,11 @@ id: TASK-038.03.02.02
 title: >-
   Build firmware/src/bin/rig.rs: audio interrupt executor, capture producer,
   dump writer, rate gates and CI coverage
-status: Blocked
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-09-11 15:53'
-updated_date: '2026-09-13 00:11'
+updated_date: '2026-10-08 02:33'
 labels:
   - task
   - planned
@@ -152,6 +152,8 @@ comment that closes AC #14, which belongs to .03. Verbatim replacement text and 
 are recorded in TASK-038.03.02.03's notes so nothing depends on the stash surviving. Left in place
 rather than dropped here because this run made no code changes and a parked umbrella should not be
 the thing that destroys state - .03 drops it once the comment is applied.
+
+2026-10-07: moved Blocked -> Dev Ready at the owner's request. All three dependencies (TASK-038.03.02.01, .03, .04) are Done; .04 already ran the §11 ladder and recorded sizes in its notes, so this umbrella's remaining work is to confirm that against the tree and close.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
