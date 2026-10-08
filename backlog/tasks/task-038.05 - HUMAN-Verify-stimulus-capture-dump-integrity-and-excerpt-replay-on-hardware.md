@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 14:03'
+updated_date: '2026-10-08 14:06'
 labels:
   - planned
 dependencies:
@@ -39,14 +39,14 @@ TASK-034 must have happened first: the cable, the independent observation, and t
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: with the TASK-034 loopback cable attached and `rig` flashed, each stimulus build mode (sine at −20 dBFS, exponential sweep, impulse train) is confirmed audible at the Pod output by something other than the device itself — scope trace, phone recording, or ears — at an amplitude consistent with the loop gain TASK-034 recorded, and the reading is written down even when it agrees.
+- [x] #1 HUMAN: with the TASK-034 loopback cable attached and `rig` flashed, each stimulus build mode (sine at −20 dBFS, exponential sweep, impulse train) is confirmed audible at the Pod output by something other than the device itself — scope trace, phone recording, or ears — at an amplitude consistent with the loop gain TASK-034 recorded, and the reading is written down even when it agrees.
 - [x] #2 HUMAN: a continuous capture of at least five minutes runs to completion, dumps to the host, and the archived artifact shows the transport's `dropped_full` counter unchanged across the dump **and** delivered block count equal to expected block count with `max_block_us` inside the callback budget, with both numbers quoted rather than summarised as a pass.
 - [x] #3 HUMAN: maximum capturable duration is checked against reality — capture until the ring reports full, compare the seconds the device claimed with the wall-clock run, and record the difference along with what the producer did when blocks ran out.
 - [x] #4 HUMAN: dump wall-clock time for a known capture length is measured and placed next to the predicted figure from TASK-038.02's arithmetic, together with the achieved bytes-per-second on the link, so the first real full-speed-CDC throughput number in this repo is on record instead of estimated.
 - [ ] #5 HUMAN: one named excerpt from `audio/instruments/` is installed into QSPI with its erase-inclusive wall-clock time recorded, the device reports `EXCOK` with a matching readback CRC, replay drives the DAC without gaps, and a person confirms by ear that the returned audio is recognisably that clip — the digital claim being exactness of the buffer, the analog judgement staying human.
-- [ ] #6 HUMAN: the SDRAM memory model is settled with evidence: the observed value of the core cache control register, or a timed pattern write-and-readback through the 0xC000_0000 window, is recorded, and the mismatch between the address `init()` returns and the address the driver's cacheable MPU region covers is resolved in writing in `docs/reference/daisy-seed3.md` rather than left as a comment.
+- [x] #6 HUMAN: the SDRAM memory model is settled with evidence: the observed value of the core cache control register, or a timed pattern write-and-readback through the 0xC000_0000 window, is recorded, and the mismatch between the address `init()` returns and the address the driver's cacheable MPU region covers is resolved in writing in `docs/reference/daisy-seed3.md` rather than left as a comment.
 - [ ] #7 HUMAN: the capture artifacts and metric summaries from this session are committed and referenced from TASK-019.03 and TASK-035, and the README measurement-rig section carries the observed numbers, since those tickets treat a recorded number as the evidence standard.
-- [ ] #8 HUMAN: the archived capture artifact is shown to contain the stimulus itself in the mono lane rig recorded — peak or RMS amplitude consistent with the loop gain TASK-034 wrote down, and the named channel (left or right) written into docs/reference/daisy-pod.md — because matching delivered and expected block counts with dropped_full at zero passes just as happily on a lane carrying silence, and only a person with the cable in hand can say which lane the loop actually drives.
+- [x] #8 HUMAN: the archived capture artifact is shown to contain the stimulus itself in the mono lane rig recorded — peak or RMS amplitude consistent with the loop gain TASK-034 wrote down, and the named channel (left or right) written into docs/reference/daisy-pod.md — because matching delivered and expected block counts with dropped_full at zero passes just as happily on a lane carrying silence, and only a person with the cable in hand can say which lane the loop actually drives.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -134,4 +134,13 @@ All three stimulus builds captured through the loop, 30 s windows, 88/88 blocks 
 - stim-ess: peak -20.38 dBFS. The sweep runs 154 Hz at capture start to ~15.6 kHz, then ends about 6 s in. The level is flat to ±0.03 dB (RMS 2200-2215) from 150 Hz to 11 kHz. Finding: the sweep is one-shot and starts at audio start, 2 s before the capture arms, so the archive misses 20-112 Hz. Filed as TASK-038.08.
 - stim-pulse: peak -20.54 dBFS, RMS -42.50, 3004 pulses exactly 480 samples (10.0 ms) apart.
 WAVs were handed to the owner for listening. They are the device's own recordings, so they do not discharge AC #1's 'something other than the device'.
+
+### AC #1, #6 and #8 closed with the owner, 2026-10-08
+
+The owner reviewed the evidence recorded above and the three loopback WAVs (sine, ESS, pulse train) and agreed each criterion is met.
+- AC #1: the owner listened to the captured stimuli and judged them correct. Recorded honestly: the observation was of the device's own loop recordings, not a live outside listen at the Pod output, and the owner accepted that as sufficient. Amplitudes: sine -20.41, ESS -20.38, pulse -20.54 dBFS peak, against a loop gain of -0.41 dB.
+- AC #6: register readings plus the pattern readback, resolved in docs/reference/daisy-seed3.md (89b5871).
+- AC #8: the archived 300 s capture's Left lane carries the stimulus at -20.41 dBFS, and the channel mapping is in docs/reference/daisy-pod.md (dddd11e). Whether word 0 is the TRS tip stays a documented open point, which the owner accepted.
+
+Remaining: AC #5 (excerpt replay, blocked on TASK-038.04) and AC #7 (cross-references from TASK-019.03 / TASK-035 and the README figures).
 <!-- SECTION:NOTES:END -->
