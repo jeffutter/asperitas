@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:44'
-updated_date: '2026-09-10 03:52'
+updated_date: '2026-10-08 14:16'
 labels: []
 dependencies:
   - TASK-038.03
@@ -62,4 +62,6 @@ Verified facts to state, all checked locally on 2026-09-12 against daisy-embassy
 - Caches are enabled nowhere in the stack (no cache or MPU call in embassy-stm32 0.6.0's `src/`, none in daisy-embassy `ca9bcc9`'s boot path, none in cortex-m-rt startup), so every FMC access is uncached and coherent by default rather than by argument.
 - The rule that must be written down, not implied: caches stay off until someone owns the coherence argument for the FMC window, and that person revisits the capture hand-off ordering in the same change.
 - Mark clearly which figures are arithmetic and which are readings. Ring geometry (`RING_BLOCK_BYTES` 32 768, `RING_BLOCKS` 1 024, `RING_BYTES` 33 554 432 = 32 MiB of the 64 MB device, 96 000 B/s raw, 349 s floor) is arithmetic from `asperitas_logging::capture`; wire cost per second is derived; anything about sustained FMC write throughput or USB FS bulk ceiling is an estimate until TASK-038.05 measures it.
+
+2026-10-08: the README 'Measurement rig' section now exists (TASK-038.05 AC #7), placed where this ticket's AC #1 asks, holding the bench measurements and a minimal flash/reassemble recipe. Extend it with the full workflow (stimulus choice, excerpt install) instead of starting a second section. Two of this ticket's open questions are now measured: the full-speed USB dump rate (69.4 s for 300 s = 414.9 kB/s PCM, 731.7 kB/s wire) and the SDRAM memory model (docs/reference/daisy-seed3.md 'External SDRAM: address, MPU and caches (measured)'). AC #4's 'still-unmeasured full-speed USB' should now cite the measurement.
 <!-- SECTION:NOTES:END -->

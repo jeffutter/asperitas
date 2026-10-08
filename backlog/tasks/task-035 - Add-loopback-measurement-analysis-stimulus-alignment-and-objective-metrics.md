@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:26'
-updated_date: '2026-09-09 02:13'
+updated_date: '2026-10-08 14:16'
 labels: []
 dependencies:
   - TASK-031
@@ -13,6 +13,7 @@ dependencies:
   - TASK-038
 references:
   - 'https://github.com/daisy-embassy/daisy-embassy/pull/80'
+  - audio/captures/2026-10-07-rig-sine-300s.console.zst
 documentation:
   - docs/reference/daisy-pod.md
 modified_files:
@@ -43,3 +44,14 @@ The fault this arrangement cannot see is one common to both directions — a sha
 - [ ] #6 Unit tests run on recorded fixtures with no board and no audio hardware attached, so CI stays green without the bench.
 - [ ] #7 Usage is documented alongside the other host tooling.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Loopback evidence from TASK-038.05 (2026-10-07/08), the measured baseline this ticket compares against:
+- Archived capture: audio/captures/2026-10-07-rig-sine-300s.console.zst (rig at eed633b, sine -20 dBFS 1 kHz, 300 s, 879/879 blocks). Re-derive the PCM with: zstd -dc <file> | cargo run -p asperitas-logging --release --example dump_reassemble -- --out capture.pcm
+- Loop gain -0.41 dB at -20 dBFS / 1 kHz; flat to +/-0.03 dB from 150 Hz to 11 kHz (ESS capture); noise + distortion after removing the tone 0.35 LSB RMS (~76 dB, the 16-bit floor); DC -0.49 LSB; channel mapping straight, no crosstalk above the floor.
+- Timing: max_block_us 72 of 666, worst_gap_us 714 of 832; dump 69.4 s for 300 s (414.9 kB/s PCM).
+- Summary table: README 'Measurement rig'. Full analysis: TASK-038.05 notes. Setup: docs/reference/daisy-pod.md 'Self-loopback channel mapping (measured)'.
+- Caveats: the ESS build misses its first 2 s (20-112 Hz) until TASK-038.08 lands. Timing figures are only valid after a RESET-button boot, not straight after a probe flash.
+<!-- SECTION:NOTES:END -->

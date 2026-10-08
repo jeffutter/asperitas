@@ -292,6 +292,48 @@ services.udev.packages = [ pkgs.probe-rs-tools ];
 
 Any other Linux, install that file the way your distro does. macOS needs nothing.
 
+## Measurement rig
+
+`rig` plays a stimulus out of the Pod, records what comes back through a cable from the Pod's
+output jack to its input jack into external SDRAM, then dumps the recording over the framed USB
+console. It decides start and end itself: 2 s after audio starts it arms, captures for the build's
+window (300 s by default), dumps, and idles until RESET.
+
+```bash
+cd firmware
+make probe-flash BINARY=rig FEATURES=seed3                    # sine, -20 dBFS, 1 kHz
+make probe-flash BINARY=rig FEATURES="seed3 stim-ess"         # exponential sweep (see TASK-038.08)
+ASP_RIG_CAPTURE_SECONDS=30 make probe-flash BINARY=rig FEATURES=seed3   # shorter window
+# then tap RESET: a probe flash stops the cycle counter, and timing would read 0
+```
+
+Hold the console open with **one** reader for the whole run. A reader restarted mid-dump loses
+whatever macOS had buffered, which was 19 blocks once. Then turn the capture back into PCM. The
+reassembler exits non-zero if any block is incomplete:
+
+```bash
+cargo run -p asperitas-logging --release --example dump_reassemble -- capture.bin --out capture.pcm
+```
+
+### Observed on the bench (2026-10-07/08)
+
+| Quantity | Reading | Source |
+|---|---|---|
+| Callback cost, worst | 72 us of a 666 us period | 300 s run, `max_block_us` |
+| Callback spacing, worst | 714 us (limit 832) | 300 s run, `worst_gap_us` |
+| Blocks delivered / expected | 879 / 879, 0 overruns | 300 s run |
+| Dump of 300 s of audio | 69.4 s; 414.9 kB/s PCM, 731.7 kB/s on the wire | `DUMPEND elapsed_ms=69421` |
+| Log loss during capture and dump | 0 | `dropped_full=0` throughout |
+| Loop gain at -20 dBFS, 1 kHz | -0.41 dB | returned peak -20.41 dBFS |
+| Loop flatness, 150 Hz-11 kHz | +/-0.03 dB | ESS capture RMS envelope |
+| Noise + distortion after removing the tone | 0.35 LSB RMS (~76 dB SNR, at the 16-bit floor) | 30 s sine |
+| Channel mapping | straight (L to L, R to R), no crosstalk above the floor | three one-channel runs |
+
+The 300 s capture is archived as `audio/captures/2026-10-07-rig-sine-300s.console.zst`. The
+analysis behind every row is in TASK-038.05's notes, and the loopback setup is in
+`docs/reference/daisy-pod.md`. Not yet measured: a run that fills the whole ring (TASK-038.07),
+a sweep captured from its first sample (TASK-038.08), and excerpt replay (TASK-038.04).
+
 ## Important Hardware Gotchas
 
 ### Pod audio is line level

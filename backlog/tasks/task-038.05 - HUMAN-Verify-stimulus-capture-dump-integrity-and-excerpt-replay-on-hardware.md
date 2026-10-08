@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 14:06'
+updated_date: '2026-10-08 14:16'
 labels:
   - planned
 dependencies:
@@ -143,4 +143,11 @@ The owner reviewed the evidence recorded above and the three loopback WAVs (sine
 - AC #8: the archived 300 s capture's Left lane carries the stimulus at -20.41 dBFS, and the channel mapping is in docs/reference/daisy-pod.md (dddd11e). Whether word 0 is the TRS tip stays a documented open point, which the owner accepted.
 
 Remaining: AC #5 (excerpt replay, blocked on TASK-038.04) and AC #7 (cross-references from TASK-019.03 / TASK-035 and the README figures).
+
+### AC #7 work, 2026-10-08
+
+- Capture artifact: audio/captures/2026-10-07-rig-sine-300s.console.zst (committed in 4c95d04).
+- Metric summaries: README 'Measurement rig', with a table of the bench readings and their sources.
+- Cross-references: TASK-019.03 and TASK-035 each carry the artifact as a ref, plus a note with the baseline numbers and caveats. TASK-038.06 has a note to extend the README section instead of writing a second one.
+Not ticked: awaiting the owner's sign-off.
 <!-- SECTION:NOTES:END -->
