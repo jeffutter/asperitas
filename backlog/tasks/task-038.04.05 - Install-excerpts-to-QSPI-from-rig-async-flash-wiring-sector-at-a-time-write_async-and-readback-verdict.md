@@ -3,11 +3,11 @@ id: TASK-038.04.05
 title: >-
   Install excerpts to QSPI from rig: async flash wiring, sector-at-a-time
   write_async and readback verdict
-status: Blocked
+status: Dev Ready
 assignee:
   - '@agent'
 created_date: '2026-10-08 15:29'
-updated_date: '2026-10-08 15:54'
+updated_date: '2026-10-08 16:24'
 labels:
   - task
   - planned
