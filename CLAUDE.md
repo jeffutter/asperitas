@@ -36,9 +36,12 @@ needs a board plugged in, ears, instruments, or a decision that is the owner's t
 **Every ticket carries an `assignee` of `@agent` or `@human`.**
 
 - **`@agent`** — an agent may pick this up and carry it to Done unattended.
-- **`@human`** — an agent must **not** pick this up, and must **never** mark it Done.
-  Its acceptance criteria are prefixed `HUMAN:` and cannot be satisfied by reading code
-  or watching a build succeed.
+- **`@human`** — an agent must **not** pick this up on its own, and an unattended run must
+  **never** mark it Done. Its acceptance criteria are prefixed `HUMAN:` and cannot be
+  satisfied by reading code or watching a build succeed. An agent working with the owner
+  in a live session may tick the criteria and close the ticket, but only after the owner
+  has walked through every criterion with it and agreed each one is met. Record that the
+  close was done with the owner, so the history shows a person signed off.
 
 Work that is part agent and part human is **split into subtasks** (`TASK-005.01`,
 `TASK-005.02`, …) rather than assigned to one or the other. A parent ticket is an
@@ -60,7 +63,8 @@ tasks. Delete throwaways outright.
 
 The failure mode this exists to prevent: an agent marking "audio passthrough works"
 complete because it compiled, having never heard a sound. **Compiling is not evidence.**
-If a criterion says `HUMAN:`, no amount of agent work satisfies it.
+If a criterion says `HUMAN:`, no amount of agent work alone satisfies it; the owner's
+sign-off does.
 
 When creating new tickets, apply the same rule. Anything requiring the device, ears,
 instruments, or an outward-facing action (creating a repo, posting upstream) is `@human`
