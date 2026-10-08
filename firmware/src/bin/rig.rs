@@ -262,8 +262,7 @@ fn encode_block(input: &[Frame; BLOCK_LENGTH], output: &mut [u32]) {
 /// pretending a measurement record went somewhere.
 #[cfg(feature = "log-usb")]
 fn emit_console(body: &[u8]) {
-    let now_ms = embassy_time::Instant::now().as_millis() as u32;
-    if !asperitas_logging::emit_record(asperitas_logging::Level::Info, now_ms, body) {
+    if !asperitas_logging::emit_record(asperitas_logging::Level::Info, now_ms(), body) {
         error!("rig: console refused a record (log pipe full)");
     }
 }
@@ -306,41 +305,94 @@ const MONO_WORD: usize = match MONO_LANE {
     console::MonoLane::Right => 1,
 };
 
-/// Seconds of capture this build records, from `ASP_RIG_CAPTURE_SECONDS` when set.
+/// What closes a capture window.
+#[derive(Clone, Copy)]
+enum Window {
+    /// A deadline this many seconds after arming.
+    Seconds(usize),
+    /// No deadline of its own: the window runs until the producer finds no `Free` block and
+    /// disarms itself, so it holds exactly the whole ring. This is the run that checks `CAPMAX`'s
+    /// `seconds_max` against the wall clock (TASK-038.07).
+    RingFill,
+}
+
+/// The window this build records, from `ASP_RIG_CAPTURE_SECONDS` when set.
 ///
-/// The override exists so a bench run can be shortened without editing source
-/// (`ASP_RIG_CAPTURE_SECONDS=30 cargo build ...`); rustc tracks the variable, so changing it
-/// rebuilds. Whatever it says is held to the ring gate below, so an override can shorten the window
-/// freely and lengthen it only as far as the ring allows.
-const CAPTURE_SECONDS: usize = match option_env!("ASP_RIG_CAPTURE_SECONDS") {
-    Some(text) => parse_seconds(text),
-    None => capture::CAPTURE_WINDOW_SECONDS,
+/// The override exists so a bench run can change its window without editing source
+/// (`ASP_RIG_CAPTURE_SECONDS=30 cargo build ...`, or `=ring` to fill the ring); rustc tracks the
+/// variable, so changing it rebuilds. A number of seconds is held to the ring gate below, so it can
+/// shorten the window freely and lengthen it only as far as the ring allows.
+const WINDOW: Window = match option_env!("ASP_RIG_CAPTURE_SECONDS") {
+    Some(text) => parse_window(text),
+    None => Window::Seconds(capture::CAPTURE_WINDOW_SECONDS),
 };
 
-/// Parse a whole number of seconds at compile time. A malformed value fails the build, naming the
-/// variable, instead of falling back to a default nobody asked for.
-const fn parse_seconds(text: &str) -> usize {
+/// Parse the window at compile time: a whole number of seconds, or the word `ring`. Anything else
+/// fails the build, naming the variable, instead of falling back to a default nobody asked for.
+const fn parse_window(text: &str) -> Window {
     let bytes = text.as_bytes();
     assert!(
         !bytes.is_empty(),
         "ASP_RIG_CAPTURE_SECONDS is set but empty"
     );
+    if let [b'r', b'i', b'n', b'g'] = bytes {
+        return Window::RingFill;
+    }
     let mut seconds = 0usize;
     let mut i = 0;
     while i < bytes.len() {
         assert!(
             bytes[i].is_ascii_digit(),
-            "ASP_RIG_CAPTURE_SECONDS must be a whole number of seconds"
+            "ASP_RIG_CAPTURE_SECONDS must be a whole number of seconds, or `ring`"
         );
         seconds = seconds * 10 + (bytes[i] - b'0') as usize;
         i += 1;
     }
-    seconds
+    Window::Seconds(seconds)
 }
 
+// The parser's arms, checked where they are compiled. A value that fails to parse cannot be tested
+// this way - it fails the build, which is the behaviour - so these pin the arms that must succeed.
+const _: () = assert!(matches!(parse_window("ring"), Window::RingFill));
+const _: () = assert!(matches!(parse_window("300"), Window::Seconds(300)));
+const _: () = assert!(matches!(parse_window("0"), Window::Seconds(0)));
+
+/// Whether this build fills the ring rather than closing on a deadline.
+const RING_FILL: bool = matches!(WINDOW, Window::RingFill);
+
+/// Seconds of capture this build records: the window's own figure, or for a ring fill the ring's
+/// floored capacity (`CAPMAX`'s `seconds_max`, 349), which is what `RIGCFG`'s `window_s` reports.
+const CAPTURE_SECONDS: usize = match WINDOW {
+    Window::Seconds(seconds) => seconds,
+    Window::RingFill => capture::ring_seconds_floor() as usize,
+};
+
 /// Ring blocks the window consumes: 879 at the default 300 s. Rounded up by `expected_blocks`,
-/// because the producer always finishes the block it is in when the window closes.
-const WINDOW_BLOCKS: usize = capture::expected_blocks(CAPTURE_SECONDS);
+/// because the producer always finishes the block it is in when the window closes. A ring fill
+/// consumes every block.
+const WINDOW_BLOCKS: usize = match WINDOW {
+    Window::Seconds(seconds) => capture::expected_blocks(seconds),
+    Window::RingFill => capture::RING_BLOCKS,
+};
+
+/// Bytes the window needs, as `CAPMAX`'s `total_bytes` reports them.
+const WINDOW_BYTES: usize = match WINDOW {
+    Window::Seconds(seconds) => seconds * capture::BYTES_PER_SECOND,
+    Window::RingFill => capture::RING_BYTES,
+};
+
+/// Backstop past a ring fill's expected end, in seconds. The producer's disarm is what closes a
+/// ring fill; this deadline only fires if it never comes (audio stopped mid-window), so the run still
+/// judges and dumps what it holds instead of waiting forever, and the judge reports the shortfall.
+const RING_FILL_BACKSTOP_SECONDS: usize = 10;
+
+/// Seconds after arming at which the timeline closes the window if nothing closed it sooner.
+const DEADLINE_SECONDS: usize = if RING_FILL {
+    // Floored capacity plus the backstop: past the 349.5 s the ring actually takes to fill.
+    CAPTURE_SECONDS + RING_FILL_BACKSTOP_SECONDS
+} else {
+    CAPTURE_SECONDS
+};
 
 /// One audio period in whole microseconds, floored: 666 (32 frames at 48 kHz is 666.67 us).
 ///
@@ -369,9 +421,15 @@ const _: () = assert!(
     CAPTURE_SECONDS > 0,
     "a zero-second capture window records nothing"
 );
+// A window of seconds must fit the ring, because its deadline is what ends it. A ring fill is ended
+// by the ring itself, so it is exempt, and its backstop must not close it before the ring is full.
 const _: () = assert!(
-    WINDOW_BLOCKS < capture::RING_BLOCKS,
+    RING_FILL || WINDOW_BLOCKS < capture::RING_BLOCKS,
     "the capture window does not fit the ring; shorten ASP_RIG_CAPTURE_SECONDS"
+);
+const _: () = assert!(
+    !RING_FILL || DEADLINE_SECONDS as u64 * 1_000_000 > capture::ring_duration_micros(),
+    "a ring fill's backstop deadline would close the window before the ring is full"
 );
 const _: () = assert!(
     capture::RING_BYTES <= daisy_embassy::sdram::SDRAM_SIZE,
@@ -501,6 +559,13 @@ static MAX_BLOCK_CYCLES: AtomicU32 = AtomicU32::new(0);
 static WORST_GAP_CYCLES: AtomicU32 = AtomicU32::new(0);
 /// Gaps whose raw cycle delta was too wide to trust (see [`Producer::on_callback`]).
 static INVALID_GAPS: AtomicU32 = AtomicU32::new(0);
+/// Ring-fill builds only: `embassy_time` milliseconds at the first armed callback and at the
+/// producer's disarm, which bracket the device's own measure of how long the ring took to fill.
+/// Zero means "not yet", which no real stamp can be: arming waits [`ARM_DELAY_MS`] past the first
+/// callback. Milliseconds in a `u32` wrap after 49 days, and the single shot is over within
+/// minutes of boot. DWT cannot time this: CYCCNT wraps every 8.9 s and the fill takes 349.5 s.
+static FILL_STARTED_MS: AtomicU32 = AtomicU32::new(0);
+static FILL_ENDED_MS: AtomicU32 = AtomicU32::new(0);
 
 /// The audio callback's half of the capture: timing and the copy into the ring.
 ///
@@ -575,15 +640,26 @@ impl Producer {
     /// An overrun - the next block is not `Free` - leaves that block exactly as it is and disarms.
     /// Overwriting a block the writer has not shipped would turn a counted loss into silent
     /// corruption; stopping turns it into `overrun` plus a frozen tail the dump still delivers.
+    ///
+    /// In a ring-fill build that overrun is the window's planned end, and the two ends of the fill
+    /// are stamped here, in the callbacks that start and stop it, rather than by the timeline's
+    /// 100 ms poll. Reading `embassy_time` is a timer-register read and an atomic load, no lock.
     fn claim(&mut self) -> bool {
         if !ARMED.load(Ordering::Acquire) {
             return false;
         }
         let index = PRODUCED.load(Ordering::Relaxed) as usize % capture::RING_BLOCKS;
         if !advance(index, BlockState::Free, BlockState::Filling) {
+            if RING_FILL {
+                // Before the disarm's release, so the timeline that sees ARMED clear sees this too.
+                FILL_ENDED_MS.store(now_ms(), Ordering::Relaxed);
+            }
             OVERRUN.fetch_add(1, Ordering::Relaxed);
             ARMED.store(false, Ordering::Release);
             return false;
+        }
+        if RING_FILL && FILL_STARTED_MS.load(Ordering::Relaxed) == 0 {
+            FILL_STARTED_MS.store(now_ms(), Ordering::Relaxed);
         }
         FILLING.store(true, Ordering::Release);
         true
@@ -596,6 +672,11 @@ impl Producer {
     }
 }
 
+/// The `embassy_time` clock in whole milliseconds, truncated to the width the fill stamps keep.
+fn now_ms() -> u32 {
+    embassy_time::Instant::now().as_millis() as u32
+}
+
 /// Raw cycles to whole microseconds, with the time base boot settled on.
 fn cycles_to_us(cycles: u32, time_base: TimeBase) -> u32 {
     cycles / time_base.cycles_per_us
@@ -603,9 +684,8 @@ fn cycles_to_us(cycles: u32, time_base: TimeBase) -> u32 {
 
 /// The one `CAPMAX` record: what this build's ring could hold, all from `capture::` arithmetic.
 fn emit_capmax() {
-    let window_bytes = CAPTURE_SECONDS * capture::BYTES_PER_SECOND;
     let cap = console::RingCapacity {
-        total_bytes: window_bytes as u32,
+        total_bytes: WINDOW_BYTES as u32,
         ring_bytes: capture::RING_BYTES as u32,
         seconds_max: capture::ring_seconds_floor(),
         us_max: capture::ring_duration_micros() as u32,
@@ -693,11 +773,35 @@ fn judge_capture(time_base: TimeBase, first_block: u32) {
         st.max_block_us,
         verdict(st.max_block_us < CALLBACK_BUDGET_US)
     );
-    info!(
-        "rig: gate overrun {} == 0: {}",
-        st.overrun,
-        verdict(st.overrun == 0)
-    );
+    if RING_FILL {
+        // The one overrun is the full ring refusing the next claim: the window's terminator, not a
+        // loss. Zero means the backstop deadline closed the window instead, and the ring never filled.
+        info!(
+            "rig: gate overrun {} == 1 (the full ring ending the window, expected): {}",
+            st.overrun,
+            verdict(st.overrun == 1)
+        );
+        let started = FILL_STARTED_MS.load(Ordering::Relaxed);
+        let ended = FILL_ENDED_MS.load(Ordering::Relaxed);
+        if started != 0 && ended != 0 {
+            info!(
+                "rig: ring filled in {} ms, first armed callback to disarm (CAPMAX seconds_max {}, us_max {})",
+                ended.wrapping_sub(started),
+                capture::ring_seconds_floor(),
+                capture::ring_duration_micros(),
+            );
+        } else {
+            error!(
+                "rig: ring fill not timed (started_ms={started}, ended_ms={ended}); the ring never filled: FAIL"
+            );
+        }
+    } else {
+        info!(
+            "rig: gate overrun {} == 0: {}",
+            st.overrun,
+            verdict(st.overrun == 0)
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -712,12 +816,16 @@ fn judge_capture(time_base: TimeBase, first_block: u32) {
 //   +2 s      after the first callback: arm (ARM_DELAY_MS)
 //   +window   disarm; the producer finishes the block it is in, so exactly WINDOW_BLOCKS land
 //             - or earlier, if the ring fills and the producer disarms itself on overrun
+//             A ring-fill build (`ASP_RIG_CAPTURE_SECONDS=ring`) has no window of seconds: that
+//             overrun is how it ends, after exactly RING_BLOCKS, ~349.5 s. Its deadline is only a
+//             backstop (RING_FILL_BACKSTOP_SECONDS past the ring's capacity) for audio that stops.
 //   then      judge the window, dump every captured block in ring order, emit DUMPEND
 //   after     idle; CAPSTAT keeps reporting once a second
 //
 // The dump waits for the window to close rather than draining alongside it so the measured window
 // carries no bulk USB traffic: worst_gap_us and max_block_us then describe the audio path alone. The
-// gates guarantee the window fits the ring, so nothing is lost by waiting.
+// gates guarantee the window fits the ring, and a ring fill stops rather than overwrite, so nothing is
+// lost by waiting.
 //
 // Single-shot looks like a missing feature. It is the absence of an inbound channel, stated here so
 // nobody adds a re-arm path that nothing can trigger.
@@ -734,11 +842,15 @@ async fn run_capture(ring: Ring, time_base: TimeBase) {
     embassy_time::Timer::after_millis(ARM_DELAY_MS).await;
 
     let first_block = PRODUCED.load(Ordering::Acquire);
-    info!("rig: capture armed for {CAPTURE_SECONDS} s ({WINDOW_BLOCKS} blocks)");
+    if RING_FILL {
+        info!("rig: capture armed until the ring is full ({WINDOW_BLOCKS} blocks)");
+    } else {
+        info!("rig: capture armed for {CAPTURE_SECONDS} s ({WINDOW_BLOCKS} blocks)");
+    }
     ARMED.store(true, Ordering::Release);
 
     let deadline =
-        embassy_time::Instant::now() + embassy_time::Duration::from_secs(CAPTURE_SECONDS as u64);
+        embassy_time::Instant::now() + embassy_time::Duration::from_secs(DEADLINE_SECONDS as u64);
     while ARMED.load(Ordering::Acquire) && embassy_time::Instant::now() < deadline {
         embassy_time::Timer::after_millis(CONTROL_POLL_MS).await;
     }

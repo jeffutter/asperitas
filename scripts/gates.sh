@@ -52,7 +52,7 @@
 # start running it and a stable key. Nothing else in the repo names checks.
 #
 # Every gate has a key as well as a banner, and the key -- not the banner -- is its identity. Prose
-# cites a cost from inside a sentence (`the provenance reader, ~1 s {{gate:elf-provenance-selftest}},
+# cites a cost from inside a sentence (`the provenance reader, 0.98 s {{gate:elf-provenance-selftest}},
 # reads only`), so rewording a banner for readability must not orphan the measurement recorded
 # against it; that is the same argument that put the gate list in a script rather than in YAML names.
 # Keys match ^[a-z0-9][a-z0-9-]{0,39}$ and must be unique; both are enforced where they cost nothing,
@@ -267,9 +267,9 @@ gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-
 # skipped that way is precisely the decoration that would read green while the drift lives.
 #
 # What it adds to the tier, from three consecutive `commit` runs on this tree: 0.464 s / 0.457 s / 0.457 s. gate-costs:exempt reason="the three samples behind one published figure, which is keyed below"
-# About a tenth of what the tier itself costs at ~8 s {{tier:commit}} - a tenth of pre-commit spent to make
+# About a tenth of what the tier itself costs at ~6 s {{tier:commit}} - a tenth of pre-commit spent to make
 # eight files' worth of cost figures impossible to get wrong, which is what the ledger is for. It publishes
-# 0.75 s {{gate:gate-costs-current}} warm, and that is the figure anything else here quotes.
+# 0.52 s {{gate:gate-costs-current}} warm, and that is the figure anything else here quotes.
 #
 # Adding this line invalidated its own measurement set, and not in a way a person could fix by running
 # the recorder. A new gate can only be priced by a tier run that contains it, and on that first run it is
@@ -294,7 +294,7 @@ gate commit gate-costs-current "=== gate costs current ===" scripts/gate-costs.s
 # below is what cheapest-first says to do with a check that has no inputs to wait for.
 # Placing it beside the push-tier provenance gate "for symmetry" would misrepresent both - they share
 # no state, one grades the reader and the other grades the stamp - and ordering rule 1 is untouched,
-# since no firmware gets built here. Measured ~1 s {{gate:elf-provenance-selftest}} warm, which is the
+# since no firmware gets built here. Measured 0.98 s {{gate:elf-provenance-selftest}} warm, which is the
 # price of seven rust-objcopy invocations at ~31 ms {{component:objcopy-invocation}} each and one memoized
 # `cargo metadata` at ~52 ms {{component:cargo-metadata-invocation}}, every one of them load-bearing.
 # Outside `nix develop .#default` there is no rust-objcopy, but gates.sh already exits 3 before any
@@ -310,7 +310,7 @@ gate commit elf-provenance-selftest "=== elf-provenance --selftest ===" scripts/
 # against any Makefile that compares mtimes again. Fixtures under `mktemp -d`, no cargo, nothing
 # outside that directory touched -- rules and reasoning in scripts/check-elf-staleness.sh's header.
 # Fourth in the list on the same cheapest-first rule as the gate above: it builds nothing and reads no
-# artifact. Measured ~2 s {{gate:elf-staleness-selftest}} warm for ten cases, most of it make parsing the
+# artifact. Measured ~1 s {{gate:elf-staleness-selftest}} warm for ten cases, most of it make parsing the
 # Makefile once per case at ~12 ms {{component:make-parse}} a parse.
 gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/check-elf-staleness.sh --selftest
 
@@ -333,7 +333,7 @@ gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/ch
 # cannot prove is the limit every fixture has -- that the linker emits anything like these files -- and
 # the push-tier gate over six linked ELFs stays the backstop for that, which is why both exist rather
 # than one. Fifth here on the same cheapest-first rule as the two above: compiles nothing, reads no
-# artifact, writes nothing under firmware/target/. Measured 0.95 s {{gate:load-addresses-selftest}} warm,
+# artifact, writes nothing under firmware/target/. Measured 0.69 s {{gate:load-addresses-selftest}} warm,
 # nearly all of it in the five child processes and their objdumps at ~29 ms {{component:objdump-invocation}}
 # each. Eight deliberate mutations each turned at least one case red and left the
 # rest green: trim dropped, zero-size counted, empty Type read as loaded, unknown Type word downgraded to
@@ -390,9 +390,10 @@ gate push cargo-doc-all-features "=== cargo doc (workspace, all features) ===" \
 
 # rig's non-default stimulus generators and its shortened capture window. Exactly one generator links
 # per image (rig.rs rejects two at compile time), so the sweep and the pulse train are code no other
-# build compiles: the pair below links rig with the implicit sine only. These three are the only builds
+# build compiles: the pair below links rig with the implicit sine only. These four are the only builds
 # that prove the capture path, its rate gates and its flash footprint still hold with the other
-# generators in, and that `ASP_RIG_CAPTURE_SECONDS` still passes the ring gate when shortened. The pulse
+# generators in, that `ASP_RIG_CAPTURE_SECONDS` still passes the ring gate when shortened, and that its
+# `ring` arm (TASK-038.07.01: capture until no Free block remains) still compiles and links. The pulse
 # train sat 197 bytes under the 128 KB flash until TASK-038.03.02.04, so its build is a size gate as much
 # as a compile gate. They run BEFORE the pair, not after, because of ordering rule 1: these re-point
 # release/rig, and the pair then leaves every image, rig included, in its default-feature state.
@@ -404,6 +405,9 @@ gate push rig-stim-pulse-build "=== firmware rig build (stim-pulse) ===" -C firm
 
 gate push rig-window-override-build "=== firmware rig build (shortened capture window) ===" -C firmware \
   env ASP_RIG_CAPTURE_SECONDS=30 cargo build --release --features seed3 --bin rig
+
+gate push rig-ring-fill-build "=== firmware rig build (ring-fill capture window) ===" -C firmware \
+  env ASP_RIG_CAPTURE_SECONDS=ring cargo build --release --features seed3 --bin rig
 
 # One spelling of the RTT-only cfg set, shared by the build below and the provenance gate after it.
 # Kept as two literals they are free to drift, and a drifted expectation makes the gate refuse the
@@ -435,7 +439,7 @@ gate push firmware-cross-compile-rtt "=== firmware cross-compile (RTT-only, log-
 # re-points the very path this gate is auditing -- even the cheap rebuild, a cfg switch that finishes by
 # re-uplifting the cached hardlink instead of relinking -- so the check would grade its own side effect
 # instead of the pair. Asking with NO_DEFAULT=1 also keeps `cargo metadata` out of it entirely: that
-# derivation only runs when defaults are on. Measured 0.13 s {{gate:firmware-elf-provenance}} warm, as the
+# derivation only runs when defaults are on. Measured 0.10 s {{gate:firmware-elf-provenance}} warm, as the
 # `push` tier pays it.
 #
 # `push` tier and placed where it is because it asserts something only the pair above can make true.
@@ -454,7 +458,7 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 #
 # `push` tier and placed here because pre-commit builds no firmware, so the ELFs it reads may not exist
 # at all -- and inventing a skip path for that is the blind spot TASK-062 had to remove from elf-check.
-# Measured ~1 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
+# Measured 0.84 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
 # processes, six objdumps at ~29 ms {{component:objdump-invocation}} each and six objcopies at
 # ~31 ms {{component:objcopy-invocation}}. Its parser's own assertions are a separate commit-tier gate,
 # `=== load-addresses --selftest ===`, placed with the other selftests ahead of every cargo invocation --
@@ -463,7 +467,7 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 gate push image-load-addresses "=== image load addresses ===" bash scripts/check-image-load-addresses.sh
 
 # Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses
-# their artifacts: 0.57 s {{gate:firmware-clippy}} and 0.28 s {{gate:firmware-clippy-rtt}} when nothing has changed
+# their artifacts: 0.23 s {{gate:firmware-clippy}} and 0.22 s {{gate:firmware-clippy-rtt}} when nothing has changed
 # since the last lint, several times that directly after a build, and tens of seconds in a fresh target
 # dir. --bins is the whole package over there (no lib target, six entries under src/bin/), and
 # --all-targets is unusable on a no_std target with no test harness to link. firmware/ is a second
@@ -488,7 +492,7 @@ gate commit rig-stim-pulse-clippy "=== firmware clippy (rig, stim-pulse) ===" -C
 gate push cargo-test "=== cargo test ===" cargo test --workspace
 
 # THE ONE DELIBERATELY CI-ONLY GATE, and it is priced rather than merely absent (TASK-061 AC #3).
-# ~81 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
+# ~71 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
 # flag -- more than every other push-tier gate combined. Its compile-time half DOES run in the push tier,
 # as the pod-hw clippy above, so what stays remote is runtime coverage of pod-hw code paths. Accepted
 # because CI is the authority for that coverage, TASK-018.01's fixup made the same split on purpose

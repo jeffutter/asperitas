@@ -259,34 +259,35 @@ what is on disk and fails the commit tier on any difference:
 key                         | min    | com | psh | ci | cost    | gate
 ----------------------------+--------+-----+-----+----+---------+---------------------------------------
 gate-definition-parses      | commit | yes | yes | yes | 0.01 s  | === gate definition parses ===
-docs-artifact-names         | commit | yes | yes | yes | 0.28 s  | === docs artifact names ===
-gate-costs-current          | commit | yes | yes | yes | 0.75 s  | === gate costs current ===
-elf-provenance-selftest     | commit | yes | yes | yes | ~1 s    | === elf-provenance --selftest ===
-elf-staleness-selftest      | commit | yes | yes | yes | ~2 s    | === elf-staleness --selftest ===
-load-addresses-selftest     | commit | yes | yes | yes | 0.95 s  | === load-addresses --selftest ===
-cargo-fmt                   | commit | yes | yes | yes | 0.26 s  | === cargo fmt ===
-cargo-fmt-firmware          | commit | yes | yes | yes | 0.46 s  | === cargo fmt (firmware workspace) ===
-cargo-clippy                | commit | yes | yes | yes | 0.31 s  | === cargo clippy ===
-cargo-clippy-log-usb        | commit | yes | yes | yes | 0.30 s  | === cargo clippy (asperitas-logging log-usb) ===
-cargo-clippy-log-defmt      | commit | yes | yes | yes | 0.25 s  | === cargo clippy (asperitas-logging log-defmt) ===
-clippy-pod-hw               | push   | -   | yes | yes | 0.27 s  | === cargo clippy (asperitas-pod pod-hw feature) ===
-dump-reassemble-selftest    | push   | -   | yes | yes | 0.55 s  | === dump_reassemble --selftest ===
-cargo-doc                   | push   | -   | yes | yes | ~4 s    | === cargo doc (workspace) ===
-cargo-doc-all-features      | push   | -   | yes | yes | ~3 s    | === cargo doc (workspace, all features) ===
-rig-stim-ess-build          | push   | -   | yes | yes | ~2 s    | === firmware rig build (stim-ess) ===
-rig-stim-pulse-build        | push   | -   | yes | yes | 0.86 s  | === firmware rig build (stim-pulse) ===
-rig-window-override-build   | push   | -   | yes | yes | 0.90 s  | === firmware rig build (shortened capture window) ===
-firmware-cross-compile      | push   | -   | yes | yes | ~2 s    | === firmware cross-compile ===
-firmware-cross-compile-rtt  | push   | -   | yes | yes | 0.96 s  | === firmware cross-compile (RTT-only, log-defmt) ===
-firmware-elf-provenance     | push   | -   | yes | yes | 0.13 s  | === firmware ELF cfg provenance ===
-image-load-addresses        | push   | -   | yes | yes | ~1 s    | === image load addresses ===
-firmware-clippy             | commit | yes | yes | yes | 0.57 s  | === firmware clippy (all bins) ===
-firmware-clippy-rtt         | commit | yes | yes | yes | 0.28 s  | === firmware clippy (all bins, RTT-only, log-defmt) ===
-rig-stim-ess-clippy         | commit | yes | yes | yes | 0.27 s  | === firmware clippy (rig, stim-ess) ===
-rig-stim-pulse-clippy       | commit | yes | yes | yes | 0.27 s  | === firmware clippy (rig, stim-pulse) ===
-cargo-test                  | push   | -   | yes | yes | ~77 s   | === cargo test ===
-cargo-test-pod-hw           | ci     | -   | -   | yes | ~81 s   | === cargo test (asperitas-pod pod-hw feature) ===
-counts: commit 15, push 27, ci 28
+docs-artifact-names         | commit | yes | yes | yes | 0.19 s  | === docs artifact names ===
+gate-costs-current          | commit | yes | yes | yes | 0.52 s  | === gate costs current ===
+elf-provenance-selftest     | commit | yes | yes | yes | 0.98 s  | === elf-provenance --selftest ===
+elf-staleness-selftest      | commit | yes | yes | yes | ~1 s    | === elf-staleness --selftest ===
+load-addresses-selftest     | commit | yes | yes | yes | 0.69 s  | === load-addresses --selftest ===
+cargo-fmt                   | commit | yes | yes | yes | 0.24 s  | === cargo fmt ===
+cargo-fmt-firmware          | commit | yes | yes | yes | 0.37 s  | === cargo fmt (firmware workspace) ===
+cargo-clippy                | commit | yes | yes | yes | 0.37 s  | === cargo clippy ===
+cargo-clippy-log-usb        | commit | yes | yes | yes | 0.23 s  | === cargo clippy (asperitas-logging log-usb) ===
+cargo-clippy-log-defmt      | commit | yes | yes | yes | 0.21 s  | === cargo clippy (asperitas-logging log-defmt) ===
+clippy-pod-hw               | push   | -   | yes | yes | 0.22 s  | === cargo clippy (asperitas-pod pod-hw feature) ===
+dump-reassemble-selftest    | push   | -   | yes | yes | 0.38 s  | === dump_reassemble --selftest ===
+cargo-doc                   | push   | -   | yes | yes | ~2 s    | === cargo doc (workspace) ===
+cargo-doc-all-features      | push   | -   | yes | yes | ~2 s    | === cargo doc (workspace, all features) ===
+rig-stim-ess-build          | push   | -   | yes | yes | 0.36 s  | === firmware rig build (stim-ess) ===
+rig-stim-pulse-build        | push   | -   | yes | yes | 0.13 s  | === firmware rig build (stim-pulse) ===
+rig-window-override-build   | push   | -   | yes | yes | ~1 s    | === firmware rig build (shortened capture window) ===
+rig-ring-fill-build         | push   | -   | yes | yes | 0.73 s  | === firmware rig build (ring-fill capture window) ===
+firmware-cross-compile      | push   | -   | yes | yes | 0.72 s  | === firmware cross-compile ===
+firmware-cross-compile-rtt  | push   | -   | yes | yes | 0.14 s  | === firmware cross-compile (RTT-only, log-defmt) ===
+firmware-elf-provenance     | push   | -   | yes | yes | 0.10 s  | === firmware ELF cfg provenance ===
+image-load-addresses        | push   | -   | yes | yes | 0.84 s  | === image load addresses ===
+firmware-clippy             | commit | yes | yes | yes | 0.23 s  | === firmware clippy (all bins) ===
+firmware-clippy-rtt         | commit | yes | yes | yes | 0.22 s  | === firmware clippy (all bins, RTT-only, log-defmt) ===
+rig-stim-ess-clippy         | commit | yes | yes | yes | 0.23 s  | === firmware clippy (rig, stim-ess) ===
+rig-stim-pulse-clippy       | commit | yes | yes | yes | 0.22 s  | === firmware clippy (rig, stim-pulse) ===
+cargo-test                  | push   | -   | yes | yes | ~71 s   | === cargo test ===
+cargo-test-pod-hw           | ci     | -   | -   | yes | ~71 s   | === cargo test (asperitas-pod pod-hw feature) ===
+counts: commit 15, push 28, ci 29
 ```
 <!-- END GENERATED: gate-matrix -->
 
@@ -311,7 +312,7 @@ Every figure in that block, and every figure quoted anywhere else in this repo, 
   figure where the key sits, so a priced argument keeps its number while the numeral itself stays in one
   file.
 - **`scripts/gate-costs.sh --check` is what keeps the citations true.** It runs as the third gate of the
-  commit tier, ahead of every cargo invocation, at 0.75 s {{gate:gate-costs-current}} warm. It renders each
+  commit tier, ahead of every cargo invocation, at 0.52 s {{gate:gate-costs-current}} warm. It renders each
   guarded file into a temp copy and compares bytes against the file on disk, so a stale figure and a
   hand-typed one are one finding rather than two rules, and it fails when a gate has no ledger entry, when
   an entry names no live gate, or when a gate's command digest stopped matching the command that runs. It
@@ -330,12 +331,12 @@ The approximation policy is stated once because it covers every row above: one w
 machine, measured 2026-09-16 2026-10-08 {{meta:measured}} on aarch64-darwin inside `nix develop .#default`. The last digit is
 noise, and a cold cache or a background Spotlight scan moves any figure here by tens of percent. What the
 ledger's per-gate command digests buy is the claim that each number was taken against the command that runs
-today, not that it repeats to three figures. The tier totals are **commit ~8 s {{tier:commit}}**, **push
-~101 s {{tier:push}}**, **ci ~179 s {{tier:ci}}**; the two `cargo test` invocations are ~77 s {{gate:cargo-test}} and
-~81 s {{gate:cargo-test-pod-hw}}, which together are most of that `ci` total.
+today, not that it repeats to three figures. The tier totals are **commit ~6 s {{tier:commit}}**, **push
+~87 s {{tier:push}}**, **ci ~157 s {{tier:ci}}**; the two `cargo test` invocations are ~71 s {{gate:cargo-test}} and
+~71 s {{gate:cargo-test-pod-hw}}, which together are most of that `ci` total.
 
-Three selftest gates run ahead of every cargo invocation, at ~1 s {{gate:elf-provenance-selftest}},
-~2 s {{gate:elf-staleness-selftest}} and 0.95 s {{gate:load-addresses-selftest}}:
+Three selftest gates run ahead of every cargo invocation, at 0.98 s {{gate:elf-provenance-selftest}},
+~1 s {{gate:elf-staleness-selftest}} and 0.69 s {{gate:load-addresses-selftest}}:
 `=== elf-provenance --selftest
 ===`, `=== elf-staleness --selftest ===` (TASK-056) and `=== load-addresses --selftest ===` (TASK-068).
 All three sit there because they compile nothing and read no artifact, which is what cheapest-first does
@@ -344,13 +345,13 @@ subject with "for symmetry" would misrepresent both, since each selftest grades 
 push-tier gate grades the *artifact*, and they share no state. Their cases and the cost rules that keep
 each at its figure are stated in the three scripts' own headers:
 
-- the provenance reader, ~1 s {{gate:elf-provenance-selftest}}: five child invocations of the script at most,
+- the provenance reader, 0.98 s {{gate:elf-provenance-selftest}}: five child invocations of the script at most,
   one `cargo metadata`,
   never a `cargo build` or a path under `firmware/target/`;
-- the staleness checker, ~2 s {{gate:elf-staleness-selftest}}: one `make` per case against a fixture tree, with
+- the staleness checker, ~1 s {{gate:elf-staleness-selftest}}: one `make` per case against a fixture tree, with
   the compiler and the
   provenance clause both stubbed;
-- the load-address checker, 0.95 s {{gate:load-addresses-selftest}}: seventeen cases, of which only five
+- the load-address checker, 0.69 s {{gate:load-addresses-selftest}}: seventeen cases, of which only five
   re-execute the script as a child
   process, because even the cheapest such child pays ~70 ms {{component:selftest-child-invocation}} for a fresh
   interpreter and its objdump, against a subshell that costs nothing measurable, and the exit code is
@@ -375,7 +376,7 @@ and "that path holds the RTT-only image" are one claim stated twice. `=== firmwa
 ===` reads the second statement out of the ELF's `.asp.prov` note via `scripts/elf-provenance.sh`, so
 swapping the pair or inserting a gate that compiles firmware after it fails the run naming both cfg
 sets; measured by swapping the two lines, running the tier, and restoring them. It costs
-0.13 s {{gate:firmware-elf-provenance}} warm,
+0.10 s {{gate:firmware-elf-provenance}} warm,
 reads only, and asks cargo for nothing - a rebuild there would re-point the very path it audits.
 
 The gate below it grades a different axis of the same six ELFs. `=== image load addresses ===` asserts
@@ -384,7 +385,7 @@ stays NOBITS while `memory.x` claims to place it `(NOLOAD)`, and that each plain
 exactly as long as the highest flash LMA end implies - the invariant whose absence made `main.bin`
 469,763,536 bytes of mostly zeros with every gate green, because objcopy writes from the lowest to the
 highest *load* address (TASK-059). It reads rather than builds for the same reason the provenance gate
-has, bare `rust-objdump` / `rust-objcopy` only, and costs ~1 s {{gate:image-load-addresses}} warm. Its tier is `push` because
+has, bare `rust-objdump` / `rust-objcopy` only, and costs 0.84 s {{gate:image-load-addresses}} warm. Its tier is `push` because
 pre-commit builds no firmware, so the ELFs it needs may not exist there; inventing a skip path for that
 is the blind spot TASK-062 had to remove from `elf-check`. The commit-tier `=== load-addresses
 --selftest ===` gate above is not a second copy of this claim and does not make this one redundant: that
@@ -410,7 +411,7 @@ names no checks at all; `.github/ci-steps.sh`, the intermediate fix, is gone, an
 file needed is now the first gate in the script.
 
 Exactly one gate lives in the `ci` tier alone: `cargo test --workspace --features
-asperitas-pod/pod-hw`, ~81 s {{gate:cargo-test-pod-hw}} local warm - more than every push-tier gate combined
+asperitas-pod/pod-hw`, ~71 s {{gate:cargo-test-pod-hw}} local warm - more than every push-tier gate combined
 - re-running the host
 suite under one non-default feature flag whose compile-time half (`clippy --features
 asperitas-pod/pod-hw`) does run on push. Priced and argued at its own gate in `scripts/gates.sh`,

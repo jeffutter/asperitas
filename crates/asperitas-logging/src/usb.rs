@@ -15,8 +15,8 @@
 //!                  (only after enable_inbound())
 //! ```
 //!
-//! The CDC class is split at [`init`] into its IN half ([`CdcTx`], used by the drain task and
-//! the panic path) and its OUT half ([`CdcRx`], used only by the inbound reader), so the two
+//! The CDC class is split at [`init`] into its IN half (`CdcTx`, used by the drain task and
+//! the panic path) and its OUT half (`CdcRx`, used only by the inbound reader), so the two
 //! concurrent tasks each borrow a distinct object instead of aliasing one `&mut`.
 
 use core::future::Future;
@@ -368,7 +368,7 @@ pub async fn run() {
 ///
 /// Four is enough for a consumer that takes one record per sector-sized unit of work; more
 /// only buys the host a longer burst before flow control engages, which nothing needs. A
-/// fuller channel costs nothing but latency: see [`inbound_reader`].
+/// fuller channel costs nothing but latency: see `inbound_reader`.
 pub const INBOUND_DEPTH: usize = 4;
 
 /// Records from the host, in arrival order, waiting for the binary.

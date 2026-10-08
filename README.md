@@ -304,6 +304,7 @@ cd firmware
 make probe-flash BINARY=rig FEATURES=seed3                    # sine, -20 dBFS, 1 kHz
 make probe-flash BINARY=rig FEATURES="seed3 stim-ess"         # exponential sweep (see TASK-038.08)
 ASP_RIG_CAPTURE_SECONDS=30 make probe-flash BINARY=rig FEATURES=seed3   # shorter window
+ASP_RIG_CAPTURE_SECONDS=ring make probe-flash BINARY=rig FEATURES=seed3 # until the ring is full, ~349.5 s
 # then tap RESET: a probe flash stops the cycle counter, and timing would read 0
 ```
 
