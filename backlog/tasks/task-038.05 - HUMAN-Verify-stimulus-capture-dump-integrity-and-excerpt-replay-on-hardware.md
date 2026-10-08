@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 14:00'
+updated_date: '2026-10-08 14:03'
 labels:
   - planned
 dependencies:
@@ -126,4 +126,12 @@ SCB_CCR=0x00040200 (DC=0, IC=0); FMC_BCR1=0x800030db (BMAP=00); FMC_SDCR1=0x19e9
 ### AC #8 evidence, 2026-10-08 (three-run lane experiment, uncommitted rig edits, reverted)
 
 Stereo cable from OUT to IN, 1 kHz -20 dBFS, 10 s windows, all 30 blocks proved by dump_reassemble on every run. Output L only, recorded Left: peak -20.42 dBFS, RMS -23.43. Output L only, recorded Right: peak 2 LSB (-84.29), RMS -93.31. Output R only, recorded Right: peak -20.40, RMS -23.42. The loop is straight (word 0 to word 0, word 1 to word 1), both paths have equal gain, and there is no crosstalk above the 16-bit floor. Written into docs/reference/daisy-pod.md, 'Self-loopback channel mapping (measured)'. The archived 300 s capture's lane (Left) carries the stimulus at -20.41 dBFS. Open: whether word 0 is the TRS tip on the jack; one headphone listen settles it. Not ticked: awaiting the owner's sign-off.
+
+### AC #1 material, 2026-10-08 (device captures, not the outside observation AC #1 requires)
+
+All three stimulus builds captured through the loop, 30 s windows, 88/88 blocks proved on each run:
+- sine: peak -20.41 dBFS, 1 kHz, steady (from the 300 s run).
+- stim-ess: peak -20.38 dBFS. The sweep runs 154 Hz at capture start to ~15.6 kHz, then ends about 6 s in. The level is flat to ±0.03 dB (RMS 2200-2215) from 150 Hz to 11 kHz. Finding: the sweep is one-shot and starts at audio start, 2 s before the capture arms, so the archive misses 20-112 Hz. Filed as TASK-038.08.
+- stim-pulse: peak -20.54 dBFS, RMS -42.50, 3004 pulses exactly 480 samples (10.0 ms) apart.
+WAVs were handed to the owner for listening. They are the device's own recordings, so they do not discharge AC #1's 'something other than the device'.
 <!-- SECTION:NOTES:END -->
