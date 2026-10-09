@@ -7,13 +7,14 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-12 21:26'
-updated_date: '2026-09-13 08:08'
+updated_date: '2026-10-09 20:24'
 labels:
   - planned
 dependencies:
   - TASK-059.01
   - TASK-059.02
   - TASK-059.03
+  - TASK-059.04
 references:
   - 'firmware/Makefile:101-109'
   - firmware/memory.x

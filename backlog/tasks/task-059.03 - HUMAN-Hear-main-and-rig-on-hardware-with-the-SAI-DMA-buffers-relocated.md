@@ -5,11 +5,12 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-13 06:57'
-updated_date: '2026-10-09 10:55'
+updated_date: '2026-10-09 20:24'
 labels:
   - planned
 dependencies:
   - TASK-059.01
+  - TASK-059.04
 references:
   - docs/reference/daisy-seed3.md
   - firmware/Makefile
@@ -112,4 +113,6 @@ A runbook, not a design. Take the numbers as you go; the notes are the deliverab
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
+
+2026-10-09: Split. Digital checks (blinky boot, rig stimulus through the loop, counters, repeated resets) moved to TASK-059.04 (@agent), which this ticket now depends on. Remaining here: steady-green LED, hearing main, left/right by ear. Still Blocked while the owner is away from the bench.
 <!-- SECTION:NOTES:END -->
