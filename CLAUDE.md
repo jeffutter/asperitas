@@ -68,6 +68,9 @@ sign-off does.
 
 When creating new tickets, apply the same rule. Anything requiring the device, ears,
 instruments, or an outward-facing action (creating a repo, posting upstream) is `@human`
+(pushing `main` to origin is the exception: the owner allows agents to push it, and CI runs
+are readable with `gh`, so a push-and-check-CI step is `@agent` work. Force-pushes and other
+branches or remotes still need asking)
 or gets split.
 
 <!-- BACKLOG.MD MCP GUIDELINES START -->
