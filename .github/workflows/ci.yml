@@ -83,7 +83,7 @@ jobs:
       # Pinned to the commit, not `@v2`: measured with `git ls-remote`, the moving `refs/tags/v2`
       # annotation (49a0bdc7) happens to dereference to v2.9.2's commit today, but nothing keeps
       # that true and this repo runs no dependabot, while the whole plan above was written against
-      # one specific source tree. The `key: nix-${{ hashFiles('flake.lock') }}-coldprobe072` line below is the
+      # one specific source tree. The `key: nix-${{ hashFiles('flake.lock') }}` line below is the
       # belt on `cmd-format`: a cmd-format string without exactly one "{0}" silently falls back to
       # "{0}" (config.ts:58-67), and flake.lock is what actually pins the toolchain, since it pins
       # nixpkgs and rust-overlay and rust-overlay builds the sysroot. With the belt, a silent
@@ -95,7 +95,7 @@ jobs:
             . -> target
             firmware -> target
           cmd-format: nix develop .#ci --command {0}
-          key: nix-${{ hashFiles('flake.lock') }}-coldprobe072
+          key: nix-${{ hashFiles('flake.lock') }}
           # Pull requests still READ main's cache - GitHub serves base-branch caches to PRs - but do
           # not add their own, so a branch that is never merged cannot churn the 10 GB budget with a
           # key nothing will ever hit again.
