@@ -16,6 +16,7 @@
 # Three modes:
 #
 #   show       <elf>                          print the normalized provenance on stdout, exit 0
+#   digest     <elf>                          print the embedded source digest (exit 2 if the ELF has none)
 #   check      <elf> <FEATURES> <NO_DEFAULT>  exit 0 on a match, quiet
 #   --selftest                                assert this script's own logic, exit 0/1/2
 #
@@ -61,6 +62,7 @@ die() {
 usage() {
   cat <<'EOF'
 usage: scripts/elf-provenance.sh show <elf>
+       scripts/elf-provenance.sh digest <elf>
        scripts/elf-provenance.sh check <elf> <FEATURES> <NO_DEFAULT>
        scripts/elf-provenance.sh --selftest
 EOF
@@ -125,6 +127,7 @@ parse_blob() {
   PROV_DEFAULT=""
   PROV_FEATURES=""
   PROV_DEFMT_LOG=""
+  PROV_SOURCE_DIGEST=""
   local seen_default=0 seen_features=0
 
   while IFS= read -r line || [ -n "$line" ]; do
@@ -140,6 +143,7 @@ parse_blob() {
       default) PROV_DEFAULT=$value; seen_default=1 ;;
       features) PROV_FEATURES=$(printf '%s' "$value" | normalize_features); seen_features=1 ;;
       defmt_log) PROV_DEFMT_LOG=$value ;;
+      source_digest) PROV_SOURCE_DIGEST=$value ;; # optional: absent from an ELF older than TASK-071
       *) : ;; # unknown key: forward-compatible, ignore it rather than refuse a newer stamp
     esac
   done <<<"$blob"
@@ -442,6 +446,8 @@ default=1
 BLOB_NO_DEFAULT='asp-prov1
 features=seed3
 '
+BLOB_WITH_DIGEST=${BLOB_CONSOLE/defmt_log=/source_digest=0123abcd
+defmt_log=}
 BLOB_FUTURE_KEY=${BLOB_CONSOLE/defmt_log=/boot_stage=seven
 }
 BLOB_CONSOLE_WARN=${BLOB_CONSOLE/defmt_log=/defmt_log=warn}
@@ -629,6 +635,14 @@ case_unknown_key_ignored() {
   expect_eq "fields survive an unknown key" log_usb,seed3 "$PROV_FEATURES"
 }
 
+case_source_digest_optional() {
+  parse_blob "$BLOB_WITH_DIGEST" || fail "a stamp carrying source_digest was refused"
+  expect_eq "digest present" 0123abcd "$PROV_SOURCE_DIGEST"
+  expect_eq "other fields unaffected" log_usb,seed3 "$PROV_FEATURES"
+  parse_blob "$BLOB_CONSOLE" || fail "a stamp without source_digest was refused"
+  expect_eq "digest absent is empty" "" "$PROV_SOURCE_DIGEST"
+}
+
 case_no_provenance_section_refused() {
   local out rc
   out=$(read_blob "$FX_NOSTAMP" 2>&1)
@@ -733,6 +747,7 @@ run_selftest() {
   run_case foreign-format-tag-refused case_foreign_format_tag_refused
   run_case missing-keys-refused case_missing_keys_refused
   run_case unknown-key-ignored case_unknown_key_ignored
+  run_case source-digest-optional case_source_digest_optional
   run_case no-provenance-section-refused case_no_provenance_section_refused
   run_case not-an-object-file-refused case_not_an_object_file_refused
   run_case normalize-features-table case_normalize_features_table
@@ -762,7 +777,18 @@ case $mode in
     [ $# -eq 2 ] || { usage >&2; exit 2; }
     blob=$(read_blob "$2") || exit 2
     parse_blob "$blob" || exit 2
-    printf 'default=%s features=%s defmt_log=%s\n' "$PROV_DEFAULT" "$PROV_FEATURES" "$PROV_DEFMT_LOG"
+    printf 'default=%s features=%s defmt_log=%s source_digest=%s\n' "$PROV_DEFAULT" "$PROV_FEATURES" "$PROV_DEFMT_LOG" "$PROV_SOURCE_DIGEST"
+    ;;
+
+  digest)
+    [ $# -eq 2 ] || { usage >&2; exit 2; }
+    blob=$(read_blob "$2") || exit 2
+    parse_blob "$blob" || exit 2
+    if [ -z "$PROV_SOURCE_DIGEST" ]; then
+      printf '%s\n' "$PROG: $2 has no source_digest in its .asp.prov, so it was linked before the digest was embedded - rebuild it: make build-elf FEATURES=\"...\"" >&2
+      exit 2
+    fi
+    printf '%s\n' "$PROV_SOURCE_DIGEST"
     ;;
 
   check)

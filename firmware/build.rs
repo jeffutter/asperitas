@@ -51,6 +51,9 @@ fn main() {
 /// gets flashed and no KEEP fragment is needed for it to survive `-Tlink.x`, our `memory.x`
 /// SECTIONS block and `-Tdefmt.x`.
 ///
+/// The blob also carries `source_digest`, the digest of the inputs listed in `elf-inputs.manifest`
+/// (see `digest_inputs`), so the record of which sources built the image travels with it.
+///
 /// Read by `scripts/elf-provenance.sh`, filed as TASK-062.02, which is the only thing in the repo
 /// that parses this blob.
 fn provenance() {
@@ -85,8 +88,9 @@ fn provenance() {
     // like a tokeniser bug: the wrapper needs REAL newlines to be valid Rust source, while the blob
     // carries escaped `\n` pairs for the assembler to expand, so the generated file keeps its
     // `.asciz` on one line and the bytes in the ELF come out with real newlines.
+    let source_digest = digest_inputs(&["digest"]);
     let body = format!(
-        "{TAG}\\ndefault={default}\\nfeatures={}\\ndefmt_log={defmt_log}\\n",
+        "{TAG}\\ndefault={default}\\nfeatures={}\\ndefmt_log={defmt_log}\\nsource_digest={source_digest}\\n",
         features.join(",")
     );
     let asm = format!(
@@ -100,4 +104,39 @@ fn provenance() {
     // value baked into the blob needs its own trigger or a stale one gets reused. Flipping features
     // needs none: that changes the unit's metadata hash, and cargo reruns the script regardless.
     println!("cargo:rerun-if-env-changed=DEFMT_LOG");
+
+    // The digest is a function of files, so each one needs a trigger, and so does every directory
+    // that contains one: a file that did not exist at the last link is named by no earlier directive,
+    // but adding it moves its directory's mtime. The set is listed by the same script that computed
+    // the digest, from the same manifest, so the triggers and the digest cannot disagree. The script
+    // and manifest are inputs to the answer too.
+    for path in digest_inputs(&["list"]).lines() {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    println!("cargo:rerun-if-changed=elf-inputs.manifest");
+    println!("cargo:rerun-if-changed=../scripts/elf-inputs-digest.sh");
+}
+
+/// Run `scripts/elf-inputs-digest.sh` and return its trimmed stdout. The input set is defined in
+/// `elf-inputs.manifest` and implemented once, in that script, which the Makefile and the elf-check
+/// side also call; re-implementing it here in Rust would be the second hand-kept copy that can drift
+/// from the checker. A failure stops the build: an ELF stamped with a guessed digest is worse than
+/// none.
+fn digest_inputs(args: &[&str]) -> String {
+    let script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
+        .join("../scripts/elf-inputs-digest.sh");
+    let out = std::process::Command::new("bash")
+        .arg(&script)
+        .args(args)
+        .output()
+        .unwrap_or_else(|e| panic!("cannot run {}: {e}", script.display()));
+    if !out.status.success() {
+        panic!(
+            "{} {} failed: {}",
+            script.display(),
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
 }

@@ -225,7 +225,7 @@ flash-all: build flash
 # `../crates` is pruned at any `target` directory so build products are not mistaken for sources. The
 # PATHS are the contract: adding or renaming a file changes the digest, refreshing every mtime in the
 # tree does not.
-ELF_INPUTS = src build.rs memory.x Cargo.toml Cargo.lock ../crates
+ELF_INPUTS = $(shell bash $(ELF_INPUTS_SH) paths)
 
 # The one source file whose mtime stands in for "relink this binary", used by the forced relink below
 # and printed in its remedy (`$(dir)` on a relative path is empty, so the printed command stays
@@ -251,6 +251,11 @@ CARGO_BUILD = $(CARGO) build --release $(CARGO_DEFAULTS) --features "$(FEATURES)
 # than the cfg set, because the digest covers sources and not features.
 ELF_STAMP = $(dir $(ELF))$(BINARY).elf-inputs.sha256
 
+# ELF_INPUTS_SH is the one implementation; the input set itself is firmware/elf-inputs.manifest, shared
+# with build.rs, which embeds the same digest in .asp.prov (TASK-071.01). The notes below describe the
+# algorithm that script implements.
+ELF_INPUTS_SH = $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-inputs-digest.sh
+
 # Per-file digests of the input set, sorted by path, hashed together. Names ride along in the hashed
 # stream, so a rename counts as a change; mtimes never enter it. `sha256sum -c` was considered and
 # rejected: mtime-immune and it names the culprit, but it is blind to an input ADDED since the stamp,
@@ -268,17 +273,7 @@ ELF_STAMP = $(dir $(ELF))$(BINARY).elf-inputs.sha256
 #     the digest covers the order.
 #   * Both hash steps spell `$(SHA256)`, so the writer and the reader agree by construction.
 define ELF_INPUTS_SHA256
-	listing=$$(mktemp); \
-	trap 'rm -f "$$listing"' EXIT; \
-	if ! find $(ELF_INPUTS) \( -name target -prune \) -o \( -type f \
-		\( -name '*.rs' -o -name '*.x' -o -name 'Cargo.toml' -o -name 'Cargo.lock' \) \
-		-print0 \) > "$$listing"; then \
-		echo "could not enumerate the ELF inputs" >&2; exit 1; \
-	fi; \
-	if [ ! -s "$$listing" ]; then \
-		echo "no ELF inputs found under: $(ELF_INPUTS)" >&2; exit 1; \
-	fi; \
-	LC_ALL=C sort -z < "$$listing" | xargs -0 $(SHA256) | $(SHA256) | cut -d' ' -f1
+	bash $(ELF_INPUTS_SH) digest $(ELF_INPUTS)
 endef
 
 # Compile, then record what was compiled. Used verbatim by `build-elf` and driven directly by

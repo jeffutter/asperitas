@@ -1,0 +1,23 @@
+# The set of files whose bytes the firmware ELF is a function of. This is the ONLY definition: it is
+# read by scripts/elf-inputs-digest.sh, which firmware/build.rs runs to embed the digest in .asp.prov
+# and which firmware/Makefile and the elf-check side use to compute it again. Do not restate this
+# list anywhere else.
+#
+# Paths are relative to firmware/. One directive per line: `path <p>` (a file or a directory that is
+# searched), `name <glob>` (which file names inside searched directories count as inputs, applied to
+# every `path`), `prune <dirname>` (a directory name never entered, so build products are not
+# mistaken for sources). The PATHS are part of the digest: adding or renaming a file changes it,
+# refreshing every mtime in the tree does not.
+path src
+path build.rs
+path memory.x
+path Cargo.toml
+path Cargo.lock
+path ../crates
+
+name *.rs
+name *.x
+name Cargo.toml
+name Cargo.lock
+
+prune target
