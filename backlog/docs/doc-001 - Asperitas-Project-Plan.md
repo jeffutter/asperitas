@@ -421,6 +421,16 @@ remains the only place these numbers have ever been observed on a real runner: m
 `origin/main` and the workflow has no `workflow_dispatch`, so runner-side figures stay owed to TASK-052
 and TASK-063.
 
+Runner-side figures, observed 2026-10-09 on GitHub Actions (these are measurements on a real runner,
+not the local warm figures above). The first push (run 37925833149) had no working cache: job 17m10s,
+the two `cargo test` invocations 123.9 s and 131.1 s, `cargo doc` 0.5 s and 2.2 s. The dev shell's gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+stdout then turned out to break rust-cache's `rustc -vV` probe (TASK-064.03). Cold keyed run 37938450034
+("No cache found"): job 14m54s, `gates.sh ci` 298 s. Warm run 37940574487 (cache of ~419 MB restored): gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+job 15m53s, `gates.sh ci` 240 s. The cache works where it can: clippy gates fell from 4-15 s to 0.6-1.9 s and gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+the stim-ess firmware build from 30 s to 2 s. It does not help the two `cargo test` runs (97 s and 103 s gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+cold, 109 s and 107 s warm), and the nix dev shell build (9-11 min) dominates the job and is not cached by gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+rust-cache, so total wall time did not improve.
+
 
 ---
 
