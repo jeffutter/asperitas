@@ -69,7 +69,7 @@
             ];
 
             shellHook = ''
-              lefthook install
+              lefthook install >&2
             '';
           };
         });

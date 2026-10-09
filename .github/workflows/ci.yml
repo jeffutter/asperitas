@@ -14,6 +14,10 @@ jobs:
 
       - uses: cachix/install-nix-action@v31
 
+      # The shellHook must print nothing on stdout: rust-cache parses `nix develop --command rustc -vV`.
+      - name: Dev shell entry is silent on stdout (rust-cache parses it)
+        run: scripts/check-devshell-stdout.sh
+
       # Toolchain identity, printed rather than assumed. The key below is built from `rustc -vV`
       # run through `cmd-format`, so it names whatever this shell resolves: the nix sysroot built by
       # rust-overlay (1.97.1 plus the thumbv7em-none-eabihf std, flake.nix:25-35), not the runner
@@ -21,9 +25,8 @@ jobs:
       # same way, so where the nix shell carries no rustup it exits nonzero, the action warns and
       # falls back to that one toolchain, and the key names exactly one compiler. If the runner's
       # own rustup ever answered instead, the key would contain a toolchain nobody installed here.
-      # This step records which of the two happened. Expect the devShell's shellHook (`lefthook
-      # install`) to print a "sync hooks" line around every nix-wrapped command, including the
-      # action's probes. Diagnostic only, deliberately not a gate: AC #4 of TASK-064.01 keeps the
+      # This step records which of the two happened. The devShell's shellHook sends
+      # `lefthook install` output to stderr (TASK-064.03), so probes see clean stdout. Diagnostic only, deliberately not a gate: AC #4 of TASK-064.01 keeps the
       # shared gate definition clean of runner concerns.
       - name: Toolchain identity the cache key is built from
         run: |
