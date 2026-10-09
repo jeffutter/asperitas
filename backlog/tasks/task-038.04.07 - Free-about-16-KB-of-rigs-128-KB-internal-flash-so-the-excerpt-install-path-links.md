@@ -7,6 +7,7 @@ status: Needs Plan
 assignee:
   - '@agent'
 created_date: '2026-10-08 16:39'
+updated_date: '2026-10-09 02:09'
 labels:
   - task
 dependencies: []
@@ -33,3 +34,18 @@ Trade-off the plan must weigh: any opt-level change alters the codegen of the au
 - [ ] #2 The chosen route and the rejected ones are written down with measured sizes; if callback codegen changes, the notes say the TASK-038.05 timings predate it and a @human re-measure subtask exists
 - [ ] #3 All gates tiers that build firmware pass; no other binary's behaviour changes except as the chosen route states
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Owner decision, 2026-10-08: take the Daisy bootloader route
+
+The owner chose option 3 of three put to them (see the 2026-10-08 session): move firmware onto the Daisy bootloader, so the app lives in QSPI and runs from internal RAM (about 480 KB), instead of shrinking rig with opt-level s/z or splitting the install path into its own binary. Rationale: the 128 KB wall is structural. main will hit it once real DSP lands, opt-level s only buys 12-16 KB that the replay work (.03.02) would spend, and opt-level changes would invalidate the bench-measured callback timing. No size-optimisation stopgap was requested.
+
+For the planner:
+- **Unproven on Seed3:** libDaisy has no Seed3 support, and the Seed3's USB-C differs from earlier Seeds. Whether the stock DaisyBootloader binary enumerates over USB-C and drives this QSPI part is the first thing to establish, and it needs the board: split a @human bench subtask. Per CLAUDE.md that makes this ticket @human too, and TASK-038.04.05 rightly waits on it.
+- **QSPI layout:** the excerpt slots start at QSPI offset 0x100000 (TASK-038.04.01); the bootloader's app region must fit below that, or the layout moves in the same change.
+- **Flashing changes for every binary:** the make targets, the probe-flash path (the SDRAM/QSPI app is no longer in internal flash), elf-provenance/load-address gates, and the README and daisy-seed3.md flashing sections.
+- **Code placement:** running from AXI SRAM changes where code executes, so rig's callback timing (72 us, TASK-038.05) needs one re-measure once a bootloaded rig runs.
+- **Parked work:** the install path is on branch wip/TASK-038.04.05-excerpt-install (762392c) and needs rebasing once this lands.
+<!-- SECTION:NOTES:END -->
