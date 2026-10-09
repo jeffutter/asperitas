@@ -253,6 +253,27 @@ pub const fn expected_blocks(seconds: usize) -> usize {
     bytes.div_ceil(RING_BLOCK_BYTES as u64) as usize
 }
 
+/// Samples from a capture window's first sample to the first sample of callback `callback` of
+/// block `block`, where `first_block` is the window's first block. Block numbers are the sequence
+/// numbers the dump labels blocks with, so this is a position in the PCM `dump_reassemble` writes.
+///
+/// What `rig`'s `STIMSTART` reports: the callback that rendered a one-shot stimulus's first
+/// sample, as a position in the capture, so the host need not find the start by cross-correlation.
+/// `u32` because a window never outgrows the ring, whose 16.8 million samples fit with room to
+/// spare. `None` for a position before the window or past the ring, which no caller should ever ask
+/// about and which must not wrap into a plausible offset if one does.
+#[must_use]
+pub const fn window_sample_offset(first_block: u32, block: u32, callback: usize) -> Option<u32> {
+    if block < first_block || callback >= callbacks_per_block() {
+        return None;
+    }
+    let blocks_in = (block - first_block) as usize;
+    if blocks_in >= RING_BLOCKS {
+        return None;
+    }
+    Some((blocks_in * samples_per_block() + callback * FRAMES_PER_CALLBACK) as u32)
+}
+
 // ---------------------------------------------------------------------------
 // Compile-time gates — the reason this module exists
 // ---------------------------------------------------------------------------

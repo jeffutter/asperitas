@@ -407,3 +407,54 @@ fn state_round_trips_through_u8_and_refuses_garbage() {
     assert_eq!(BlockState::from_u8(4), None);
     assert_eq!(BlockState::from_u8(u8::MAX), None);
 }
+
+// ---------------------------------------------------------------------------
+// Positions inside a capture window (TASK-038.08)
+// ---------------------------------------------------------------------------
+
+/// `STIMSTART`'s offset is a sample index into the PCM `dump_reassemble` writes, which is the
+/// window's blocks laid end to end in sequence order. Pinned against byte positions in that stream
+/// rather than against the function's own arithmetic: two bytes per sample, `RING_BLOCK_BYTES` per
+/// block, `CALLBACK_BYTES` per callback.
+#[test]
+fn window_offset_is_the_sample_index_in_the_reassembled_pcm() {
+    let first = 4_000;
+    assert_eq!(capture::window_sample_offset(first, first, 0), Some(0));
+    assert_eq!(capture::window_sample_offset(first, first, 1), Some(32));
+    assert_eq!(
+        capture::window_sample_offset(first, first + 1, 0),
+        Some(16_384)
+    );
+
+    for (blocks_in, callback) in [(0u32, 0usize), (0, 511), (3, 17), (878, 511), (1_023, 511)] {
+        let offset = capture::window_sample_offset(first, first + blocks_in, callback)
+            .expect("inside the window");
+        let byte =
+            blocks_in as usize * capture::RING_BLOCK_BYTES + callback * capture::CALLBACK_BYTES;
+        assert_eq!(
+            offset as usize * capture::CAPTURE_BYTES_PER_SAMPLE,
+            byte,
+            "block +{blocks_in}, callback {callback}"
+        );
+    }
+}
+
+/// Positions no window contains come back `None` instead of wrapping into a believable offset.
+#[test]
+fn window_offset_refuses_positions_outside_the_window() {
+    assert_eq!(
+        capture::window_sample_offset(10, 9, 0),
+        None,
+        "before the window"
+    );
+    assert_eq!(
+        capture::window_sample_offset(10, 10, capture::callbacks_per_block()),
+        None,
+        "a callback past the block"
+    );
+    assert_eq!(
+        capture::window_sample_offset(10, 10 + capture::RING_BLOCKS as u32, 0),
+        None,
+        "past what the ring can hold"
+    );
+}

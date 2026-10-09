@@ -403,7 +403,7 @@ fn commit_records(
 /// Commit one already-rendered record body as a whole frame, returning whether it reached the pipe.
 ///
 /// The non-panic way to put bytes on the console that [`log`] cannot express. A caller holding a
-/// wire-contract body (`RIGCFG`, `RIGGEN`, `CAPSTAT`, `CAPMAX`, `DUMPEND` from
+/// wire-contract body (`RIGCFG`, `RIGGEN`, `CAPSTAT`, `CAPMAX`, `STIMSTART`, `DUMPEND` from
 /// [`crate::console`]) needs those bytes to arrive unchanged, and `log::info!("{}", body)` would
 /// hand them to a formatting path this crate does not control.
 ///

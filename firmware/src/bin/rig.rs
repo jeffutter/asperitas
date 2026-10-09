@@ -12,7 +12,9 @@
 //! 2. The audio future runs on an interrupt-mode executor woken by SAI1, not on the thread
 //!    executor's select tree, so its latency has a bound rather than a hope.
 //! 3. The DSP chain is a stimulus generator chosen by cargo feature, and the input frame never
-//!    reaches it: rig measures the box, not the instrument plugged into it.
+//!    reaches it: rig measures the box, not the instrument plugged into it. A generator that plays
+//!    once (the sweep) is held silent until the capture's first callback, so the recording holds it
+//!    whole; a periodic one plays from the first callback, as before.
 //!
 //! What it then does with the input is the measurement. One lane of the codec's input is truncated
 //! to `i16` and copied into a 32 MiB ring in SDRAM, the ring is shipped to the host over the framed
@@ -253,8 +255,8 @@ fn encode_block(input: &[Frame; BLOCK_LENGTH], output: &mut [u32]) {
 /// Emit one wire-contract body to the framed console, stamped with the clock as it is now.
 ///
 /// Two definitions rather than a `cfg` at each call site, because there are many (RIGCFG, RIGGEN,
-/// CAPMAX, CAPSTAT, DUMPEND) and that many copies of `#[cfg(feature = "log-usb")]` is that many
-/// ways to forget one.
+/// CAPMAX, CAPSTAT, STIMSTART, DUMPEND) and that many copies of `#[cfg(feature = "log-usb")]` is
+/// that many ways to forget one.
 ///
 /// Under `log-defmt` without `log-usb` this discards, and that is honest rather than a gap: the
 /// verbs describe the byte stream the framed console carries, and an RTT-only image captures no
@@ -566,6 +568,19 @@ static INVALID_GAPS: AtomicU32 = AtomicU32::new(0);
 /// minutes of boot. DWT cannot time this: CYCCNT wraps every 8.9 s and the fill takes 349.5 s.
 static FILL_STARTED_MS: AtomicU32 = AtomicU32::new(0);
 static FILL_ENDED_MS: AtomicU32 = AtomicU32::new(0);
+/// One-shot builds only: the block and callback whose input was being captured when the callback
+/// rendered the stimulus's first sample. Written once, by that callback, before it sets
+/// `STIM_STARTED` with release, so a reader that sees the flag sees both positions.
+static STIM_STARTED: AtomicBool = AtomicBool::new(false);
+static STIM_BLOCK: AtomicU32 = AtomicU32::new(0);
+static STIM_CALLBACK: AtomicU32 = AtomicU32::new(0);
+
+/// Where one callback's input landed in the ring: block sequence number and callback within it.
+#[derive(Clone, Copy)]
+struct Captured {
+    block: u32,
+    callback: usize,
+}
 
 /// The audio callback's half of the capture: timing and the copy into the ring.
 ///
@@ -581,11 +596,12 @@ struct Producer {
 }
 
 impl Producer {
-    /// Record one callback: its entry time, then, if a capture is running, its input lane.
+    /// Record one callback: its entry time, then, if a capture is running, its input lane. Returns
+    /// where that input landed, or `None` when nothing was captured.
     ///
     /// Called first thing in the callback with the cycle count taken on entry; the matching exit
     /// time goes to [`Producer::finish`].
-    fn on_callback(&mut self, entry: u32, input: &[u32]) {
+    fn on_callback(&mut self, entry: u32, input: &[u32]) -> Option<Captured> {
         AUDIO_STARTED.store(true, Ordering::Relaxed);
 
         // CYCCNT is 32 bits and wraps every 8.9 s at 480 MHz, so a gap wider than half its range
@@ -604,10 +620,14 @@ impl Producer {
         self.last_entry = Some(entry);
 
         if self.callbacks_in_block == 0 && !self.claim() {
-            return;
+            return None;
         }
 
-        let index = PRODUCED.load(Ordering::Relaxed) as usize % capture::RING_BLOCKS;
+        let captured = Captured {
+            block: PRODUCED.load(Ordering::Relaxed),
+            callback: self.callbacks_in_block,
+        };
+        let index = captured.block as usize % capture::RING_BLOCKS;
         let at = self.callbacks_in_block * capture::CALLBACK_BYTES;
         // Lane truncation into a stack copy, then one contiguous copy into SDRAM. The codec delivers
         // 32-bit left-justified PCM, so the top half-word is the `i16` sample: truncation, not
@@ -633,6 +653,7 @@ impl Producer {
             FILLING.store(false, Ordering::Release);
             self.callbacks_in_block = 0;
         }
+        Some(captured)
     }
 
     /// At a block boundary: claim the next block in ring order if a capture is armed.
@@ -804,6 +825,42 @@ fn judge_capture(time_base: TimeBase, first_block: u32) {
     }
 }
 
+/// One-shot builds: check the stimulus played whole inside the window just closed, and emit
+/// `STIMSTART` saying where it began. `samples` is the stimulus's length from `one_shot_samples`.
+///
+/// Says nothing rather than something wrong: no `STIMSTART` when the stimulus never started (the
+/// window captured nothing) or started somewhere the window does not contain, which the start rule
+/// in `audio_task` makes unreachable and this reports rather than trusts.
+fn report_stimulus_start(first_block: u32, end_block: u32, samples: u32) {
+    if !STIM_STARTED.load(Ordering::Acquire) {
+        error!("rig: the one-shot stimulus never started; no STIMSTART");
+        return;
+    }
+    let block = STIM_BLOCK.load(Ordering::Relaxed);
+    let callback = STIM_CALLBACK.load(Ordering::Relaxed) as usize;
+    let Some(offset) = capture::window_sample_offset(first_block, block, callback) else {
+        error!(
+            "rig: stimulus started at block {block} callback {callback}, outside the window from block {first_block}; no STIMSTART"
+        );
+        return;
+    };
+    let captured = u64::from(end_block - first_block) * capture::samples_per_block() as u64;
+    let end = u64::from(offset) + u64::from(samples);
+    let verdict = if end <= captured { "pass" } else { "FAIL" };
+    info!(
+        "rig: gate stimulus samples {offset}..{end} inside the {captured}-sample capture: {verdict}"
+    );
+    let mut body = [0u8; console::BODY_WINDOW];
+    let n = console::stimstart_body(
+        &console::StimulusStart {
+            first_block,
+            offset,
+        },
+        &mut body,
+    );
+    emit_console(&body[..n]);
+}
+
 // ---------------------------------------------------------------------------
 // Capture timeline
 // ---------------------------------------------------------------------------
@@ -812,14 +869,17 @@ fn judge_capture(time_base: TimeBase, first_block: u32) {
 // TASK-032), so the run is a fixed timeline, repeated by resetting the board, which `slow-boot`
 // keeps safe for DFU:
 //
-//   boot      BOOT, RIGCFG, RIGGEN, CAPMAX, then audio starts
-//   +2 s      after the first callback: arm (ARM_DELAY_MS)
+//   boot      BOOT, RIGCFG, RIGGEN, CAPMAX, then audio starts; a periodic stimulus plays from here,
+//             a one-shot one (the sweep) outputs silence until the first captured callback
+//   +2 s      after the first callback: arm (ARM_DELAY_MS); the first captured callback starts a
+//             one-shot stimulus, so the window holds it from its first sample
 //   +window   disarm; the producer finishes the block it is in, so exactly WINDOW_BLOCKS land
 //             - or earlier, if the ring fills and the producer disarms itself on overrun
 //             A ring-fill build (`ASP_RIG_CAPTURE_SECONDS=ring`) has no window of seconds: that
 //             overrun is how it ends, after exactly RING_BLOCKS, ~349.5 s. Its deadline is only a
 //             backstop (RING_FILL_BACKSTOP_SECONDS past the ring's capacity) for audio that stops.
-//   then      judge the window, dump every captured block in ring order, emit DUMPEND
+//   then      judge the window; a one-shot build checks the stimulus fit and emits STIMSTART; dump
+//             every captured block in ring order, emit DUMPEND
 //   after     idle; CAPSTAT keeps reporting once a second
 //
 // The dump waits for the window to close rather than draining alongside it so the measured window
@@ -830,8 +890,8 @@ fn judge_capture(time_base: TimeBase, first_block: u32) {
 // Single-shot looks like a missing feature. It is the absence of an inbound channel, stated here so
 // nobody adds a re-arm path that nothing can trigger.
 
-/// Run the timeline above once, then idle.
-async fn run_capture(ring: Ring, time_base: TimeBase) {
+/// Run the timeline above once, then idle. `one_shot` is the stimulus's `one_shot_samples`.
+async fn run_capture(ring: Ring, time_base: TimeBase, one_shot: Option<u32>) {
     while !AUDIO_STARTED.load(Ordering::Relaxed) {
         if AUDIO_EXIT.load(Ordering::Relaxed) != 0 {
             error!("rig: audio never started; nothing to capture");
@@ -868,6 +928,9 @@ async fn run_capture(ring: Ring, time_base: TimeBase) {
         end_block - first_block
     );
     judge_capture(time_base, first_block);
+    if let Some(samples) = one_shot {
+        report_stimulus_start(first_block, end_block, samples);
+    }
     dump_ring(ring, first_block, end_block).await;
     info!("rig: run complete; reset to capture again");
 }
@@ -1034,7 +1097,12 @@ async fn audio_task(
     // input frame and these sources discard it. The codec's input goes to the capture ring only,
     // never to the generator or the output.
     let frames_in = [Frame::default(); BLOCK_LENGTH];
+    // Silence until the generator plays. A one-shot generator is held back until the capture's
+    // first callback: started at boot, it would be two seconds (ARM_DELAY_MS) through before the
+    // recording began, and the analysis needs it whole. A periodic one plays from the first
+    // callback, because any stretch of it is as good as any other.
     let mut frames_out = [Frame::default(); BLOCK_LENGTH];
+    let mut playing = generator.one_shot_samples().is_none();
     let mut producer = Producer {
         ring,
         callbacks_in_block: 0,
@@ -1047,13 +1115,27 @@ async fn audio_task(
             // does, capture included.
             let entry = DWT::cycle_count();
 
+            // Capture what came back first: the input lane, after the self-loopback cable. Before
+            // the render, because whether this callback was captured is what starts a one-shot
+            // generator. The order costs nothing: the output buffer is not played until the DMA
+            // reaches it next period, whichever half of the callback fills it.
+            let captured = producer.on_callback(entry, input);
+            if let (false, Some(at)) = (playing, captured) {
+                // This callback's output is the stimulus's first sample, and its input is being
+                // captured at `at`. Written before the release that publishes it.
+                generator.reset();
+                STIM_BLOCK.store(at.block, Ordering::Relaxed);
+                STIM_CALLBACK.store(at.callback as u32, Ordering::Relaxed);
+                STIM_STARTED.store(true, Ordering::Release);
+                playing = true;
+            }
+
             // Render site, mirroring `main.rs`: stimulus -> [processor slot] -> encode_block.
             // The processor slot is empty by design and is where a measured effect will hang.
-            generator.process_block(&frames_in, &mut frames_out);
+            if playing {
+                generator.process_block(&frames_in, &mut frames_out);
+            }
             encode_block(&frames_out, output);
-
-            // Capture what came back: the input lane, after the self-loopback cable.
-            producer.on_callback(entry, input);
             producer.finish(entry);
         })
         .await;
@@ -1386,6 +1468,8 @@ async fn main(_spawner: Spawner) {
     // Say what is about to play, and what the ring can hold, once, before anything plays it.
     emit_descriptors(generator, time_base);
     emit_capmax();
+    // Read before the generator moves into the audio task: the timeline needs it to check the fit.
+    let one_shot = generator.one_shot_samples();
 
     // Priority first, then `start`. `InterruptExecutor::start()` documents that the priority must
     // be set before it and MUST NOT be touched after; setting it later is not merely late, it is
@@ -1428,8 +1512,10 @@ async fn main(_spawner: Spawner) {
     let console_fut = core::future::pending::<()>();
     let led_fut = asperitas_logging::led::blink_task();
     // The timeline finishes after its dump; the reporter never does, so the join never completes.
-    let rig_fut =
-        embassy_futures::join::join(report_capstat(time_base), run_capture(ring, time_base));
+    let rig_fut = embassy_futures::join::join(
+        report_capstat(time_base),
+        run_capture(ring, time_base, one_shot),
+    );
 
     // All three loop forever, so reaching past the select means one of them returned: the thread
     // executor parks and the audio interrupt keeps playing, which is a machine still making sound

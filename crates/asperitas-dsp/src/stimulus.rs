@@ -124,6 +124,17 @@ pub trait Stimulus {
     /// (crest phase, harmonic count, scanned peak scale) stay off the wire: host and device link
     /// this crate, so the algorithm is shared code rather than metadata to negotiate.
     fn describe(&self, out: &mut [u8]) -> usize;
+
+    /// Samples the source plays before falling silent for good, or `None` if it repeats forever.
+    ///
+    /// The difference decides when a capture may start. A periodic source looks the same from any
+    /// sample on, so a capture armed late still holds whole periods. A one-shot source does not: a
+    /// capture that starts after it has played loses its beginning, so the player has to start it
+    /// inside the capture and say where (`rig`'s `STIMSTART`). This is how the player tells which
+    /// kind it holds without naming the generator.
+    fn one_shot_samples(&self) -> Option<u32> {
+        None
+    }
 }
 
 /// Scale behind every real-valued `describe()` field: six fractional digits.
@@ -672,6 +683,11 @@ impl Stimulus for ExponentialSweep {
         write_decimal(&mut w, self.f1_hz);
         let _ = w.write_fmt(format_args!(" total_samples={}", self.total_samples));
         w.filled()
+    }
+
+    /// The sweep plays once: [`Self::total_samples`], then silence.
+    fn one_shot_samples(&self) -> Option<u32> {
+        Some(self.total_samples)
     }
 }
 

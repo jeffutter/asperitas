@@ -302,11 +302,17 @@ window (300 s by default), dumps, and idles until RESET.
 ```bash
 cd firmware
 make probe-flash BINARY=rig FEATURES=seed3                    # sine, -20 dBFS, 1 kHz
-make probe-flash BINARY=rig FEATURES="seed3 stim-ess"         # exponential sweep (see TASK-038.08)
+make probe-flash BINARY=rig FEATURES="seed3 stim-ess"         # exponential sweep, starts at arm
 ASP_RIG_CAPTURE_SECONDS=30 make probe-flash BINARY=rig FEATURES=seed3   # shorter window
 ASP_RIG_CAPTURE_SECONDS=ring make probe-flash BINARY=rig FEATURES=seed3 # until the ring is full, ~349.5 s
 # then tap RESET: a probe flash stops the cycle counter, and timing would read 0
 ```
+
+The sine and pulse train play from boot. The sweep plays once, so `rig` holds it silent until the
+first captured callback and starts it there: the capture holds the whole sweep, and a
+`STIMSTART first_block=<n> offset=<samples>` record after the window says where in the reassembled
+PCM playback began (0 by construction; the echo arrives one loop latency later). The gate line
+`rig: gate stimulus samples a..b inside the N-sample capture` says whether the window held all of it.
 
 Hold the console open with **one** reader for the whole run. A reader restarted mid-dump loses
 whatever macOS had buffered, which was 19 blocks once. Then turn the capture back into PCM. The
@@ -333,7 +339,7 @@ cargo run -p asperitas-logging --release --example dump_reassemble -- capture.bi
 The 300 s capture is archived as `audio/captures/2026-10-07-rig-sine-300s.console.zst`. The
 analysis behind every row is in TASK-038.05's notes, and the loopback setup is in
 `docs/reference/daisy-pod.md`. Not yet measured: a run that fills the whole ring (TASK-038.07),
-a sweep captured from its first sample (TASK-038.08), and excerpt replay (TASK-038.04).
+a sweep captured from its first sample (built in TASK-038.08, not yet run on the bench), and excerpt replay (TASK-038.04).
 
 ## Important Hardware Gotchas
 

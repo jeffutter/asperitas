@@ -1,6 +1,6 @@
 //! Device-side console state: sequence numbers, cumulative loss counters, and the record
-//! bodies whose bytes are a wire contract (`BOOT`, `STATUS`, and the five measurement-rig
-//! verbs `RIGCFG`, `RIGGEN`, `CAPSTAT`, `CAPMAX`, `DUMPEND`).
+//! bodies whose bytes are a wire contract (`BOOT`, `STATUS`, and the six measurement-rig
+//! verbs `RIGCFG`, `RIGGEN`, `CAPSTAT`, `CAPMAX`, `STIMSTART`, `DUMPEND`).
 //!
 //! # Why this module is not behind `log-usb`
 //!
@@ -504,6 +504,41 @@ pub fn capmax_body(cap: &RingCapacity, out: &mut [u8; BODY_WINDOW]) -> usize {
     w.filled()
 }
 
+/// Where a one-shot stimulus started inside the capture, as one `STIMSTART` record.
+///
+/// Sent once, after the window closes and before its dump, and only by a build whose stimulus plays
+/// once (an exponential sweep): a periodic one has no start worth locating. `offset` is the position
+/// of the callback that rendered the stimulus's first sample, counted in samples from the first
+/// sample of block `first_block` - the PCM `dump_reassemble` writes, from its first byte. What comes
+/// back through the loop arrives later than that by the loop's own latency, which the capture
+/// measures; the record says where playback began, not where the echo did.
+#[derive(Clone, Copy, Debug)]
+pub struct StimulusStart {
+    /// Sequence number of the window's first block, as the dump's `AUDIO` records carry it.
+    pub first_block: u32,
+    /// Samples from that block's first sample to the stimulus's first rendered sample.
+    pub offset: u32,
+}
+
+/// Field table behind [`stimstart_body`].
+const STIMSTART_FIELDS: [(&str, usize); 2] =
+    [("first_block", U32_MAX_DIGITS), ("offset", U32_MAX_DIGITS)];
+
+/// Worst-case `STIMSTART` body: 59 bytes.
+const STIMSTART_WORST: usize = saturated_len("STIMSTART proto=1", &STIMSTART_FIELDS);
+
+/// Render a `STIMSTART` record body into `out`, returning the bytes written.
+pub fn stimstart_body(st: &StimulusStart, out: &mut [u8; BODY_WINDOW]) -> usize {
+    let mut w = TruncWriter::new(out);
+    let _ = core::write!(
+        w,
+        "STIMSTART proto=1 first_block={} offset={}",
+        st.first_block,
+        st.offset,
+    );
+    w.filled()
+}
+
 /// How one completed dump went, as one `DUMPEND` record.
 ///
 /// The record about a single dump, which is why `refused` and `stall_ms` live here rather than
@@ -567,12 +602,13 @@ pub fn dumpend_body(d: &DumpSummary, out: &mut [u8; BODY_WINDOW]) -> usize {
     w.filled()
 }
 
-// One record each, at their own worst case. These five lines are the half a drifted format
+// One record each, at their own worst case. These six lines are the half a drifted format
 // string breaks and a runtime test would only catch on the night it runs.
 const _: () = assert!(RIGCFG_WORST < crate::frame::MAX_BODY);
 const _: () = assert!(RIGGEN_WORST < crate::frame::MAX_BODY);
 const _: () = assert!(CAPSTAT_WORST < crate::frame::MAX_BODY);
 const _: () = assert!(CAPMAX_WORST < crate::frame::MAX_BODY);
+const _: () = assert!(STIMSTART_WORST < crate::frame::MAX_BODY);
 const _: () = assert!(DUMPEND_WORST < crate::frame::MAX_BODY);
 
 // ---------------------------------------------------------------------------
@@ -714,7 +750,7 @@ mod tests {
     /// record that tripped the encoder's cap or contained something the sanitiser mangled would
     /// report counters while failing its own checksum.
     ///
-    /// All seven builders go through the one loop on purpose. Each verb got its own saturated
+    /// All eight builders go through the one loop on purpose. Each verb got its own saturated
     /// test below because a shared loop reporting "one of these was capped" hides which, but a
     /// shared loop is the right shape for "none of them breaks the codec".
     #[test]
@@ -722,7 +758,7 @@ mod tests {
         use crate::frame::{encode, Decoder, MAX_FRAME};
 
         let maxed = counters(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX);
-        let mut bufs: [[u8; BODY_WINDOW]; 7] = [[0; BODY_WINDOW]; 7];
+        let mut bufs: [[u8; BODY_WINDOW]; 8] = [[0; BODY_WINDOW]; 8];
 
         let lens = [
             boot_body(&mut bufs[0], "0.1.0", 2048, crate::frame::MAX_BODY),
@@ -732,6 +768,7 @@ mod tests {
             capstat_body(&saturated_capture_status(), &mut bufs[4]),
             capmax_body(&saturated_ring_capacity(), &mut bufs[5]),
             dumpend_body(&saturated_dump_summary(), &mut bufs[6]),
+            stimstart_body(&saturated_stimulus_start(), &mut bufs[7]),
         ];
 
         for (window, &len) in bufs.iter().zip(&lens) {
@@ -891,6 +928,13 @@ mod tests {
             seconds_max: u32::MAX,
             us_max: u32::MAX,
             unused_headroom_bytes: u32::MAX,
+        }
+    }
+
+    fn saturated_stimulus_start() -> StimulusStart {
+        StimulusStart {
+            first_block: u32::MAX,
+            offset: u32::MAX,
         }
     }
 
@@ -1081,6 +1125,20 @@ mod tests {
     }
 
     #[test]
+    fn stimstart_body_pins_field_names_and_order() {
+        let mut out = [0u8; BODY_WINDOW];
+        let st = StimulusStart {
+            first_block: 4,
+            offset: 0,
+        };
+        let n = stimstart_body(&st, &mut out);
+        assert_eq!(
+            core::str::from_utf8(&out[..n]).unwrap(),
+            "STIMSTART proto=1 first_block=4 offset=0"
+        );
+    }
+
+    #[test]
     fn dumpend_body_pins_field_names_and_order() {
         let mut out = [0u8; BODY_WINDOW];
         let d = DumpSummary {
@@ -1143,6 +1201,10 @@ mod tests {
         assert_eq!(
             dumpend_body(&saturated_dump_summary(), &mut out),
             DUMPEND_WORST
+        );
+        assert_eq!(
+            stimstart_body(&saturated_stimulus_start(), &mut out),
+            STIMSTART_WORST
         );
     }
 }

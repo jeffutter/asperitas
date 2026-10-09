@@ -824,6 +824,41 @@ fn degenerate_parameters_become_ordinary_output() {
 }
 
 // ---------------------------------------------------------------------------
+// one_shot_samples(): which sources a capture has to start (TASK-038.08)
+// ---------------------------------------------------------------------------
+
+/// `rig` starts a one-shot source inside its capture window and plays a periodic one from boot, so
+/// a source that answered wrongly would either lose the sweep's start again or delay a tone for no
+/// reason. The sweep's answer must also be the exact length it plays before silence, since `rig`
+/// checks that the window held all of it.
+#[test]
+fn only_the_sweep_is_one_shot_and_it_reports_its_exact_length() {
+    assert_eq!(sine(-20.0, 1_000).one_shot_samples(), None);
+    assert_eq!(pulse(PulseTrainParams::default()).one_shot_samples(), None);
+
+    let short = ExponentialSweepParams {
+        total_samples: 4_800,
+        ..ExponentialSweepParams::default()
+    };
+    let mut source = sweep(short);
+    assert_eq!(source.one_shot_samples(), Some(4_800));
+    let samples = emit(&mut source, 4_800 + 1_000);
+    assert!(
+        samples[..4_800].iter().any(|&v| v != 0.0),
+        "the sweep must play inside its reported length"
+    );
+    assert!(
+        samples[4_800..].iter().all(|&v| v == 0.0),
+        "the sweep must be silent past its reported length"
+    );
+
+    assert_eq!(
+        sweep(ExponentialSweepParams::default()).one_shot_samples(),
+        Some(384_000)
+    );
+}
+
+// ---------------------------------------------------------------------------
 // describe(): the machine-readable record of what was played (AC #5)
 // ---------------------------------------------------------------------------
 
