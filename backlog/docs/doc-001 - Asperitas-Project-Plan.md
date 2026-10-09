@@ -428,8 +428,13 @@ stdout then turned out to break rust-cache's `rustc -vV` probe (TASK-064.03). Co
 ("No cache found"): job 14m54s, `gates.sh ci` 298 s. Warm run 37940574487 (cache of ~419 MB restored): gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
 job 15m53s, `gates.sh ci` 240 s. The cache works where it can: clippy gates fell from 4-15 s to 0.6-1.9 s and gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
 the stim-ess firmware build from 30 s to 2 s. It does not help the two `cargo test` runs (97 s and 103 s gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
-cold, 109 s and 107 s warm), and the nix dev shell build (9-11 min) dominates the job and is not cached by gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
-rust-cache, so total wall time did not improve.
+cold, 109 s and 107 s warm), and the nix dev shell build (9-11 min) dominated the job. gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+TASK-072 broke that step down from run 37945671555's `nix develop -L` log: 155 paths substituted from cache.nixos.org in about 40 s, gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+then one local build, the patched `probe-rs-tools` 0.32.0 (`nix/probe-rs-cortex-m-reset-catch.patch`), 9 min 50 s of a 10 min 34 s step. gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+No gate uses probe-rs, so CI now enters `nix develop .#ci`, the same shell minus that package (`flake.nix` `mkDevShell`).
+Same toolchain store path (`rust-default-1.97.1`, `bvlih9g3...`) and same rust-cache key as before. Cold keyed run 37948852414:
+job 6m18s, dev shell step 57 s, `gates.sh ci` 5m02s. Warm run 37949893837: job 5m22s, dev shell step 50 s, `gates.sh ci` 4m06s, gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+against 14m54s and 15m53s before (warm wall time down 10m31s).
 
 
 ---
