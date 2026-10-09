@@ -191,8 +191,8 @@ flash-all: build flash
 
 # --- Is this ELF built from the sources on disk? ------------------------------------
 #
-# Two halves, and they only work as one thing: `build-elf` records a digest of every input's bytes
-# beside the ELF, and `elf-check` recomputes it and compares. No timestamp enters either half, which
+# Two halves, and they only work as one thing: every link embeds a digest of every input's bytes in the
+# ELF's .asp.prov (firmware/build.rs), and `elf-check` recomputes it and compares. No timestamp enters either half, which
 # is the entire point. What it replaces was `find $(ELF_INPUTS) -newer $(ELF)`, so it could not tell
 # "the sources moved on" from "something rewrote the filesystem metadata": TASK-056 measured
 # `make probe-log` going red on a tree `git status` called clean, 2975 s of pure metadata apart. gate-costs:exempt reason="one historical mtime gap, quoted as evidence for dropping -newer"
@@ -205,20 +205,12 @@ flash-all: build flash
 #
 #   * Content equality is not proof the board runs this image. It never was, and hashing does not
 #     change that. Only flashing is proof, which is why `elf-check` stays a check and never a build.
-#   * The stamp describes the last link that went through `build-elf`. Anything that relinks
-#     `release/$(BINARY)` behind its back leaves the stamp talking about an earlier link: the
-#     raw-cargo cross-builds in `scripts/gates.sh`, and `make build` itself, because `cargo objcopy`
-#     compiles before it objcopies. Bounded consequence: edit a source, run the gates without ever
-#     running `make build-elf`, and `elf-check` goes red against an ELF that is in fact current. The
-#     printed remedy fixes that, and the window is narrower than the one removed above -- it needs an
-#     edit, not a checkout. TASK-069 owns the question of whether the record belongs inside the image.
 #   * `firmware/Cargo.lock` is an input and no gate passes `--locked`, while `firmware/Cargo.toml`
 #     pins daisy-embassy to a moving `master` branch. A lock refresh therefore turns this red even
 #     when nothing linked differently. Deliberate conservatism; the remedy is the printed relink.
 #
-# One stamp per binary name, shared by both cfg sets. That is fine because the digest covers sources,
-# not features -- the `.asp.prov` note TASK-062 stamps inside the image is what separates the console
-# and RTT-only builds, and `elf-check` asks it first.
+# The digest covers sources, not features -- the cfg set in the same `.asp.prov` (TASK-062) is what
+# separates the console and RTT-only builds, and `elf-check` asks it first.
 
 # Inputs whose bytes are what $(ELF) is compiled from. Not `git status`: a dirty tree says nothing
 # about this particular artifact. Registry crates come in through Cargo.lock/Cargo.toml, both listed;
@@ -246,11 +238,6 @@ SHA256 = $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo 
 
 CARGO_BUILD = $(CARGO) build --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
 
-# Inside target/, so `cargo clean` deletes it along with everything else and a fresh clone has none.
-# Either way that is the "no stamp" failure below, never a silent pass. Named after the binary rather
-# than the cfg set, because the digest covers sources and not features.
-ELF_STAMP = $(dir $(ELF))$(BINARY).elf-inputs.sha256
-
 # ELF_INPUTS_SH is the one implementation; the input set itself is firmware/elf-inputs.manifest, shared
 # with build.rs, which embeds the same digest in .asp.prov (TASK-071.01). The notes below describe the
 # algorithm that script implements.
@@ -276,21 +263,20 @@ define ELF_INPUTS_SHA256
 	bash $(ELF_INPUTS_SH) digest $(ELF_INPUTS)
 endef
 
-# Compile, then record what was compiled. Used verbatim by `build-elf` and driven directly by
+# Compile, forcing the relink when the embedded digest is not current. Used verbatim by `build-elf` and driven directly by
 # scripts/check-elf-staleness.sh.
 #
-# When the stamp already equals the digest of the inputs, the sources are what built this ELF and
+# When the ELF's embedded digest already equals the digest of the inputs, the sources are what built this ELF and
 # there is nothing to prove or to write. When it does not, the relink is made certain rather than
 # offered: `$(CARGO) build` decides for itself whether to link, and it decides from mtimes, so a
 # source whose bytes changed while its mtime went backwards -- a restore from a backup or a sync tool,
 # where a checkout does not land -- reports "Finished in 0.29s" and keeps the old bytes. gate-costs:exempt reason="quoting cargo's own output, not a cost this repo publishes"
-# Measured here 2026-09-14. Stamping over that would certify bytes nobody compiled, which is a silent
-# pass replacing the noisy false alarm this ticket removes, so `$(MAIN_SRC)` is touched first and cargo
+# Measured here 2026-09-14. Trusting that would certify bytes nobody compiled, a silent pass, so `$(MAIN_SRC)` is touched first and cargo
 # is left no choice. Cost lands only where a recompile was already owed: a warm forced relink of this
 # crate measures ~0.69 s {{component:firmware-forced-relink}}.
 define ELF_BUILD_AND_STAMP
 	want=$$( $(ELF_INPUTS_SHA256) ) || exit 1; \
-	if [ -f $(ELF_STAMP) ]; then have=$$(tr -dc '0-9a-f' < $(ELF_STAMP)); else have=; fi; \
+	have=$$( $(PROV) digest $(ELF) 2>/dev/null ) || have=; \
 	if [ "$$have" = "$$want" ]; then \
 		$(CARGO_BUILD) || exit 1; exit 0; \
 	fi; \
@@ -298,14 +284,13 @@ define ELF_BUILD_AND_STAMP
 		echo "no $(MAIN_SRC), so nothing here can force a relink of $(BINARY)" >&2; exit 1; \
 	fi; \
 	touch $(MAIN_SRC) || exit 1; \
-	$(CARGO_BUILD) || exit 1; \
-	printf '%s\n' "$$want" > $(ELF_STAMP).tmp && mv $(ELF_STAMP).tmp $(ELF_STAMP)
+	$(CARGO_BUILD)
 endef
 
 ## Build the release ELF the probe targets aim at (`build` without the objcopy step)
 ##
-## Last thing it does is record the source-content stamp `elf-check` compares against, so the stamp
-## never describes a link that did not happen. See the block above.
+## build.rs embeds the source digest `elf-check` compares against in the image's .asp.prov on every
+## link, so the record cannot describe a link that did not happen. See the block above.
 build-elf:
 	@$(ELF_BUILD_AND_STAMP)
 
@@ -381,18 +366,18 @@ elf-check:
 		echo "Force a real relink: $(REMEDY)" >&2; \
 		exit 1; \
 	}
-	@if [ -f $(ELF_STAMP) ]; then have=$$(tr -dc '0-9a-f' < $(ELF_STAMP)); else have=; fi; \
+	@have=$$( $(PROV) digest $(ELF) 2>/dev/null ) || have=; \
 	if [ -z "$$have" ]; then \
-		echo "no stamp at $(ELF_STAMP), so nothing here records which sources $(ELF) came from" >&2; \
-		echo "either that ELF predates this check or 'cargo clean' took the stamp with the rest of target/. An ELF of unknowable provenance decodes a live stream into output that looks like data - flash the current build instead, and 'make probe-run' does that and streams in one step." >&2; \
+		echo "$(ELF) has no source_digest field in its .asp.prov, so nothing records which sources it came from" >&2; \
+		echo "it was linked before the digest was embedded (TASK-071), or by something other than this tree's build.rs. An ELF of unknowable provenance decodes a live stream into output that looks like data - flash the current build instead, and 'make probe-run' does that and streams in one step." >&2; \
 		echo "Force a real relink: $(REMEDY)" >&2; \
 		exit 1; \
 	fi; \
 	want=$$( $(ELF_INPUTS_SHA256) ) || exit 1; \
 	if [ "$$want" != "$$have" ]; then \
 		echo "$(ELF) was not built from the sources on disk" >&2; \
-		echo "  stamp   $$have" >&2; \
-		echo "  sources $$want" >&2; \
+		echo "  embedded $$have" >&2; \
+		echo "  sources  $$want" >&2; \
 		echo "an ELF that is not your sources describes neither the board nor your edit, and decoding a live stream with it produces output that looks like data. Flash the current build instead - 'make probe-run' flashes and streams in one step." >&2; \
 		echo "Force a real relink: $(REMEDY)" >&2; \
 		exit 1; \

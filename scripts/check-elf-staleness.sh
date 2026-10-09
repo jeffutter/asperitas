@@ -132,11 +132,8 @@ fx_setup() { # <dir-to-create>
   return 0
 }
 
-# Where the mechanism says the stamp lives, spelled independently of the Makefile: `$(dir $(ELF))` plus
-# `$(BINARY).elf-inputs.sha256`, with ELF pointed at the fixture and BINARY left at its default. Set
-# per case below. If the two spellings ever disagree, the cases stop finding a stamp and say so rather
-# than passing quietly.
-FX=
+# Per-case fixture directory and its ELF stand-in, set per case below.
+export FX=
 FX_MAIN=
 
 fx_touch_everything() {
@@ -154,8 +151,8 @@ run_make() { # <goal> [extra make overrides...]
     "ELF=$FX/main" \
     "ELF_INPUTS=$FX" \
     "MAIN_SRC=$FX/src/bin/main.rs" \
-    "PROV=true" \
-    "CARGO=true" \
+    "PROV=bash $STUB_PROV" \
+    "CARGO=bash $STUB_CARGO" \
     "$@" 2>&1)
   MAKE_RC=$?
 }
@@ -165,7 +162,7 @@ fx_linked_clean() {
   fx_setup "$FX" || fail "could not stage the fixture in $FX"
   run_make build-elf
   expect_zero "staging the stamp"
-  [ -f "$FX_MAIN.elf-inputs.sha256" ] || fail "build-elf wrote no stamp at $FX_MAIN.elf-inputs.sha256"
+  [ -f "$FX.embedded" ] || fail "build-elf wrote no stamp at $FX.embedded"
 }
 
 # --------------------------------------------------------------------------- the cases
@@ -235,9 +232,9 @@ case_target_stays_pruned() {
 # tree that has been `cargo clean`ed, has to be refused by name.
 case_missing_stamp_fails_loudly() {
   fx_linked_clean
-  rm "$FX_MAIN.elf-inputs.sha256"
+  rm "$FX.embedded"
   run_make elf-check
-  expect_refused "a missing stamp" "$FX_MAIN.elf-inputs.sha256"
+  expect_refused "a missing embedded digest" "no source_digest field"
 }
 
 # An empty input set is the vacuous-pass trap: `find ... | xargs shasum` with nothing to hash runs
@@ -249,7 +246,7 @@ case_empty_input_set_fails_loudly() {
   run_make build-elf "ELF_INPUTS=$FX/nothing-here"
   [ "$MAKE_RC" != 0 ] || fail "an empty input set was accepted: $MAKE_OUT"
   expect_has "and said which" "no ELF inputs found under" "$MAKE_OUT"
-  [ ! -f "$FX_MAIN.elf-inputs.sha256" ] || fail "an empty input set still wrote a stamp"
+  [ ! -f "$FX.embedded" ] || fail "an empty input set still wrote a stamp"
 }
 
 # Ordering claim: a failed compile must not leave a fresh stamp behind, or the next `elf-check` blesses
@@ -258,7 +255,7 @@ case_failed_compile_leaves_no_stamp() {
   fx_setup "$FX" || fail "could not stage the fixture in $FX"
   run_make build-elf "CARGO=false"
   [ "$MAKE_RC" != 0 ] || fail "build-elf succeeded with a failing compiler"
-  [ ! -f "$FX_MAIN.elf-inputs.sha256" ] || fail "a failed compile recorded a stamp anyway"
+  [ ! -f "$FX.embedded" ] || fail "a failed compile recorded a stamp anyway"
 }
 
 # The tripwire under the whole ticket: if a timestamp operator ever comes back into this recipe, the
@@ -273,7 +270,7 @@ case_no_mtime_operator_in_elf_check() {
     *-newer*) fail "elf-check compares mtimes again (-newer): restarts the false positive TASK-056 ends" ;;
     *-nt\ *|*'-nt '*) fail "elf-check compares mtimes again (-nt): restarts the false positive TASK-056 ends" ;;
   esac
-  expect_has "elf-check consults the stamp" 'ELF_STAMP' "$recipe"
+  expect_has "elf-check reads the embedded digest" '$(PROV) digest' "$recipe"
   expect_has "and the digest" 'ELF_INPUTS_SHA256' "$recipe"
 }
 
@@ -287,6 +284,19 @@ run_selftest() {
 
   local base
   base=$(mktemp -d) || die "mktemp -d failed, so the selftest has nowhere to write its fixtures"
+  # Stand-ins for the real linker and .asp.prov reader (TASK-071). The "embedded" digest lives beside
+  # the fixture (<fixture>.embedded), outside the hashed input set. Minimal; TASK-071.03 owns the rewrite.
+  STUB_PROV=$base/prov-stub.sh
+  STUB_CARGO=$base/cargo-stub.sh
+  cat >"$STUB_PROV" <<'STUB'
+case $1 in
+  check) exit 0 ;;
+  digest) f="$(dirname "$2").embedded"; [ -s "$f" ] || exit 2; cat "$f" ;;
+esac
+STUB
+  cat >"$STUB_CARGO" <<STUB
+bash "$ROOT/scripts/elf-inputs-digest.sh" digest "\$FX" >"\$FX.embedded"
+STUB
   trap 'if [ -n "${base:-}" ]; then rm -rf "$base"; fi' EXIT
 
   # One fixture dir per case, named after the case: mktemp hands out one path here, and reusing one
