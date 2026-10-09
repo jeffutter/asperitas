@@ -1,11 +1,11 @@
 ---
 id: TASK-018.04
 title: Verify every Pod control on hardware
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
-updated_date: '2026-09-09 01:37'
+updated_date: '2026-10-09 10:55'
 labels: []
 dependencies:
   - TASK-018.01
@@ -92,4 +92,6 @@ Root cause of the 8.8% line corruption found 2026-09-09 while planning the autom
 Together these explain why ~1226 of 13968 lines were unreadable and why the loss was concentrated on the highest-rate records. Fix tracked as TASK-030 (atomic-or-drop plus magic/length/CRC framing), with the host reader in TASK-031 and hardware confirmation in TASK-033.
 
 Consequence for this ticket's own evidence: the capture quoted above is trustworthy for what it does contain, but its counts are lower bounds. A re-capture through the fixed transport is worth doing before treating 13968 lines and zero drop counters as the last word.
+
+2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
 <!-- SECTION:NOTES:END -->

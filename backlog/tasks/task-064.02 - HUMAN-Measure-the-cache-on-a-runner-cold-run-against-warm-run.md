@@ -1,11 +1,11 @@
 ---
 id: TASK-064.02
-title: 'HUMAN: Measure the cache on a runner, cold run against warm run'
+title: 'Measure the cache on a runner, cold run against warm run'
 status: To Do
 assignee:
-  - '@human'
+  - '@agent'
 created_date: '2026-09-13 05:37'
-updated_date: '2026-09-14 10:33'
+updated_date: '2026-10-09 13:13'
 labels: []
 dependencies:
   - TASK-063
@@ -26,11 +26,17 @@ TASK-064's human half. Depends on TASK-063 only because that ticket owns the pen
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: After TASK-064.01 lands, push twice - or once with the cache empty and once warm, which is what a cold key does by itself - and attach both run URLs.
-- [ ] #2 HUMAN: Record the total job wall time for each run, and the per-gate `--- N.NNs` lines `scripts/gates.sh ci` prints, so the question "did the cache work" is answered by gate rather than by one aggregate that could hide a workspace left uncached.
-- [ ] #3 HUMAN: Say plainly whether the second run actually reused artifacts - a warm run that recompiles everything is the failure mode this ticket exists to catch, and it looks exactly like success in a green check mark.
-- [ ] #4 HUMAN: Post the two numbers where the local figures live, doc-001 section 5's CI discussion, labelled as runner-side. Every cost figure in this repo is currently labelled local warm, and TASK-052 has owed these since TASK-049.
+- [ ] #1 Push twice, or once with the cache empty and once warm (a cold key does the first by itself), and record both run URLs. Owner confirmed 2026-10-09 that agents may push main; the pushes carry only the ticket-note commits, nothing that changes the build, and run 37925833149 (the first run after TASK-064.01) may serve as the cold run if its cache was empty
+- [ ] #2 Record the total job wall time for each run, and the per-gate '--- N.NNs' lines scripts/gates.sh ci prints (gh run view --log), so the question 'did the cache work' is answered by gate rather than one aggregate
+- [ ] #3 Say plainly whether the second run actually reused artifacts - a warm run that recompiles everything looks exactly like success in a green check mark. Evidence: the rust-cache step's restore log and the per-gate times
+- [ ] #4 Post the two numbers where the local figures live, doc-001 section 5's CI discussion, labelled as runner-side
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-09: Reassigned @human -> @agent. gh can run, list and read Actions logs, and the owner allows pushing main. TASK-063 is Done.
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 

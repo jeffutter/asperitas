@@ -3,13 +3,17 @@ id: TASK-071
 title: >-
   Carry elf-check's source digest inside the ELF so every build path keeps it
   current
-status: To Do
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-10-08 01:49'
-labels: []
+updated_date: '2026-10-09 11:23'
+labels:
+  - planned
 dependencies:
-  - TASK-069
+  - TASK-071.01
+  - TASK-071.02
+  - TASK-071.03
 references:
   - >-
     backlog/tasks/task-069 -
@@ -50,3 +54,10 @@ Owner constraint: the input set is defined in one place that build.rs and elf-ch
 - [ ] #8 The comment block above elf-check in firmware/Makefile, the `provenance()` doc in firmware/build.rs, and every doc that describes elf-check's freshness record are updated in the same change. The Cargo.lock caveat (no gate passes `--locked`) is kept or explicitly re-justified.
 - [ ] #9 `scripts/gates.sh commit` and `scripts/gates.sh push` pass, and `docs/gate-costs.json` is re-recorded if any gate's cost moves.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against c3cb3d8
+Approach: split along the producer/consumer seam. 071.01 makes build.rs embed a source digest in .asp.prov from a single shared input-set definition, with rerun-if-changed covering inputs and containing directories. 071.02 switches elf-check to the embedded digest, adds the missing-field refusal, and deletes the sidecar stamp. 071.03 rewrites the selftest and docs and runs the gates. Order: 01, 02, 03. Risks: digest must be byte-identical between producer (Rust) and checker, so use one implementation; new-file detection needs directory-level rerun-if-changed; no gate passes --locked so Cargo.lock caveat stays. Integration: raw cargo build then make elf-check passes with no build-elf; edit then check refuses. Final: scripts/gates.sh commit and push. No direct work remains in the parent.
+<!-- SECTION:PLAN:END -->

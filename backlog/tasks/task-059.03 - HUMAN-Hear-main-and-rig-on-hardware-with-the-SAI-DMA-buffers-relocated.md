@@ -1,10 +1,11 @@
 ---
 id: TASK-059.03
 title: 'HUMAN: Hear main and rig on hardware with the SAI DMA buffers relocated'
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-13 06:57'
+updated_date: '2026-10-09 10:55'
 labels:
   - planned
 dependencies:
@@ -106,3 +107,9 @@ A runbook, not a design. Take the numbers as you go; the notes are the deliverab
    file the bug with the recording position and counter readings attached, and note here that the
    parent stays blocked.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
+<!-- SECTION:NOTES:END -->

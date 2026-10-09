@@ -7,11 +7,12 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 03:25'
-updated_date: '2026-09-10 13:34'
+updated_date: '2026-10-09 11:00'
 labels:
   - planned
 dependencies:
   - TASK-030.02
+  - TASK-030.06
 parent_task_id: TASK-030
 priority: high
 type: task
@@ -39,13 +40,10 @@ ticket with the offending timestamps rather than checking a box.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: Flash the build containing TASK-030.02 and attach a plain terminal (screen /dev/cu.usbmodem...). Confirm podtest knob, encoder and button lines are still readable by eye with the new prefix and CRC suffix, and that blinky or panictest boot messages appear normally.
-- [ ] #2 HUMAN: Capture at least 60 seconds of podtest to a raw file while turning the encoder through several detents and pressing and releasing both buttons several times; decoding the file reports zero records failing the integrity check.
-- [ ] #3 HUMAN: Every encoder click, press and release performed during that capture is present in the decoded output - this reproduces the specific loss that ate two button presses in TASK-018.04.
-- [ ] #4 HUMAN: Record the numbers in this ticket notes: decoded record count, achieved records per second, device-reported drop counters from the STATUS records, and host-side integrity failures.
-- [ ] #5 HUMAN: With logging running, confirm audio output through main.rs is free of clicks, dropouts or pitch artefacts attributable to the logging path, or state explicitly that the bench was not rigged for audio at that moment.
-- [ ] #6 HUMAN: If any criterion above fails, file a bug ticket carrying the offending timestamps from the capture rather than checking the box.
-- [ ] #7 HUMAN: Confirm the captured raw file ends on a complete record rather than a truncated tail - the trailing-full-packet case no host test can see - and note the byte length of the last record modulo 64.
+- [ ] #1 HUMAN: Capture at least 60 s of podtest to a raw file while turning the encoder through several detents and pressing and releasing the encoder click and both buttons several times; decoding the file reports zero records failing the integrity check
+- [ ] #2 HUMAN: Every encoder click, press and release performed during that capture is present in the decoded output - this reproduces the specific loss that ate two button presses in TASK-018.04
+- [ ] #3 HUMAN: With logging running, confirm audio output through main.rs is free of clicks, dropouts or pitch artefacts attributable to the logging path, or state explicitly that the bench was not rigged for audio at that moment
+- [ ] #4 HUMAN: Record the decoded record count and integrity failures next to TASK-030.06's idle numbers, and if any criterion fails file a bug ticket carrying the offending timestamps instead of checking the box
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -90,6 +88,12 @@ built on top of it.
 
 <!-- SECTION:NOTES:BEGIN -->
 Bench observation requested from TASK-046 (now done): when you rig the console capture and flash panictest, note (a) whether the PANIC: record still arrives over CDC, and (b) roughly how long the pre-halt pause is before the red LED. That single observation distinguishes the two branches of the new spin budget: ~3 s means DWT CYCCNT counts on real silicon after TRCENA+LAR unlock (cycle bound fired); milliseconds means the DWT stayed locked and the budget reported itself spent immediately. Either way the board halts rather than spinning forever; we just want to know which path ran. Source-level evidence cannot answer this — it needs a probe-free board and a stopwatch.
+
+2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
+
+2026-10-09: Block lifted. A plain probe flash is recoverable with the debugger, provided the project's probe tooling is used (chip description ASPERITAS_H750IB, never a stock --chip STM32H7 attach, which can leave the debug port dead until the USB-C is replugged). Boot-path changes (bootloader install, bootloaded layout) stay Blocked.
+
+2026-10-09: Split. The flash, idle capture, decode, counters and trailing-record criteria moved to TASK-030.06 (@agent), which this ticket now depends on. What remains here needs hands (encoder, buttons) or ears.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

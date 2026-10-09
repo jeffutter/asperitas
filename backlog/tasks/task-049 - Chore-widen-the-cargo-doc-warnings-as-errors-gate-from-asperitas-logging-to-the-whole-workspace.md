@@ -150,7 +150,7 @@ Cost figures measured during planning (`a63ff08`, cargo/rustc 1.97.1, 10-core ma
 
 Alternating the two widened commands costs the same as repeating either (0.75 s / 0.98 s), so there is no feature-fingerprint thrash penalty for keeping both. Total added pre-push cost: about 2 s warm. That is cheaper than the 13 s figure TASK-043 recorded for its device-feature command, because `--no-deps` plus an already-warm dep graph does almost all the work.
 
-Still owed here: CI wall time, which this machine cannot tell us — ci.yml carries no cargo cache, so each run is effectively cold on a smaller runner. Append it when the first widened run finishes.
+SUPERSEDED 2026-10-09 (see the CI note at the end of this ticket): CI wall time, which this machine could not tell us at the time — ci.yml carries no cargo cache, so each run is effectively cold on a smaller runner. Append it when the first widened run finishes.
 
 Executed at 76eee5e on cargo/rustc 1.97.1, 10-core macOS. Files: root Cargo.toml (+[workspace.lints.rustdoc]), four member manifests (+[lints] workspace = true; logging's own [lints.rustdoc] stanza deleted in the same commit), lefthook.yml, .github/workflows/ci.yml. No source touched.
 
@@ -174,3 +174,5 @@ CI wall time is NOT observed and cannot be from here. main is 61 commits ahead o
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Rustdoc's two intra-doc-link lints are now denied declaratively at workspace scope and every member inherits them; pre-push and CI each run cargo doc over --workspace twice (default features, then --all-features) under RUSTDOCFLAGS=-D warnings. A new broken cross-reference anywhere in the four crates fails the push for ~2s warm. Cost confirmed against planning's baseline; CI's own wall time stays owed until the owner pushes (main is 61 ahead, ci.yml has no workflow_dispatch).
 <!-- SECTION:FINAL_SUMMARY:END -->
+
+2026-10-09 CI observation (closes TASK-052): the widened doc steps ran on GitHub Actions in run 37925833149 (push of 04c324d, success). '=== cargo doc (workspace) ===' took 0.51s and '=== cargo doc (workspace, all features) ===' took 2.21s. The whole job took 17m10s, dominated by the nix toolchain step (10m41s) and the two cargo test runs (123.90s and 131.10s). The earlier note that CI wall time was not observed is now answered by this paragraph.

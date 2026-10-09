@@ -7,7 +7,7 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:23'
-updated_date: '2026-09-13 04:16'
+updated_date: '2026-10-09 11:00'
 labels:
   - planned
 dependencies:
@@ -16,6 +16,7 @@ dependencies:
   - TASK-030.03
   - TASK-030.04
   - TASK-030.05
+  - TASK-030.06
 documentation:
   - docs/reference/daisy-seed3.md
   - TASK-018.04

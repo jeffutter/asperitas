@@ -3,11 +3,11 @@ id: TASK-034
 title: >-
   Fit a permanent Pod self-loopback cable and prove the loop with an independent
   observer
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:26'
-updated_date: '2026-10-08 03:09'
+updated_date: '2026-10-09 10:55'
 labels: []
 dependencies: []
 documentation:
@@ -57,4 +57,6 @@ Captured mono lane (MonoLane::Left), 30.037 s:
 - Stability: per-second RMS 2209.4 in every second (min = max to 0.1 LSB).
 - Hum/DC (AC #4): DC offset -0.50 LSB. Residual after removing the fitted 1 kHz sine is 0.35 LSB RMS, about the 16-bit quantisation floor (0.29 LSB), so SNR+D is about 75.9 dB, limited by the 16-bit capture format. No hum was visible at this resolution; a spectrum is still needed to put a number on it.
 - Lane: the loop drives the lane rig records as Left (TASK-038.05 AC #8 wants this written into daisy-pod.md once a person has confirmed which jack the cable is in).
+
+2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
 <!-- SECTION:NOTES:END -->

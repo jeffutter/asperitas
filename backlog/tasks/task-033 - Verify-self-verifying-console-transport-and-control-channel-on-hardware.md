@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 01:25'
-updated_date: '2026-09-09 01:31'
+updated_date: '2026-10-09 10:57'
 labels: []
 dependencies:
   - TASK-030
@@ -34,3 +34,11 @@ This needs one person at the bench once. Flashing still requires holding BOOT an
 - [ ] #4 HUMAN: the before/after corruption rates are recorded as numbers in this ticket's implementation notes, per this project's convention of recording measured values rather than pass/fail.
 - [ ] #5 HUMAN: if any criterion fails, a bug ticket is filed with the offending timestamps from the capture artifact rather than the criteria being checked off.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
+
+2026-10-09: Block lifted. A plain probe flash is recoverable with the debugger, provided the project's probe tooling is used (chip description ASPERITAS_H750IB, never a stock --chip STM32H7 attach, which can leave the debug port dead until the USB-C is replugged). Boot-path changes (bootloader install, bootloaded layout) stay Blocked.
+<!-- SECTION:NOTES:END -->

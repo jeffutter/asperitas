@@ -1,11 +1,11 @@
 ---
 id: TASK-063
 title: 'HUMAN: Push main and watch the first real run of the relocated CI step'
-status: To Do
+status: Done
 assignee:
-  - '@human'
+  - '@agent'
 created_date: '2026-09-13 01:30'
-updated_date: '2026-09-13 05:38'
+updated_date: '2026-10-09 13:12'
 labels: []
 dependencies:
   - TASK-060
@@ -27,15 +27,17 @@ Fixed by moving the list to .github/ci-steps.sh and reducing the workflow to one
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: git push origin main succeeds (main is ~90 commits ahead of origin/main as of 2026-09-13; pushing is an outward action, so no agent does it)
-- [ ] #2 HUMAN: the Actions run for that push goes green, in particular the single 'nix develop .#default --command bash .github/ci-steps.sh' step -- that file has never executed on a runner, only locally on aarch64-darwin
-- [ ] #3 HUMAN: record the observed CI wall time against the job, since every cost figure in lefthook.yml, ci-steps.sh and doc-001 is labelled as a local warm measurement and TASK-052 still owes the runner-side numbers
+- [x] #1 git push origin main succeeds (owner confirmed 2026-10-09 that agents may push main)
+- [x] #2 the Actions run for that push goes green, in particular the single ci-steps.sh step, which had only run locally on aarch64-darwin before
+- [x] #3 the observed CI wall time is recorded against the job in the notes
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 Cheap to check whether it worked: `gh run list --limit 3`. If the step dies, the likely culprits are runner-side nix behaviour (install-nix-action v31 + flake .#default) or a path assumption in ci-steps.sh, which assumes cwd is the repo root and reaches firmware/ via a subshell cd.
+
+2026-10-09: Closed by an agent after the owner reassigned this to @agent. main was pushed by the ralph loop's TASK-071.03 executor. CI run 37925833149 (push of 04c324d, 2026-10-09, https://github.com/jeffutter/asperitas/actions/runs/37925833149), conclusion success. Job 'check' wall time 17m10s (11:46:48 to 12:03:58). Biggest steps: 'Toolchain identity the cache key is built from' (nix develop) 10m41s; the single ci-steps.sh step 'fmt + clippy + doc + test + firmware cross-build' 6m13s. Per-gate from gates.sh ci: cargo doc (workspace) 0.51s, cargo doc (workspace, all features) 2.21s, cargo clippy 10.81s, firmware rig build (stim-ess) 36.51s, cargo test 123.90s, cargo test (asperitas-pod pod-hw) 131.10s. Caveat: Swatinem/rust-cache was present on this run; whether it was a cold or warm cache is TASK-064.02's question, so the doc figures may be cache-assisted.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

@@ -1,11 +1,11 @@
 ---
 id: TASK-019.02
 title: Hear knobs changing the sound on hardware
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
-updated_date: '2026-09-09 01:36'
+updated_date: '2026-10-09 10:55'
 labels: []
 dependencies:
   - TASK-019.01
@@ -50,4 +50,6 @@ Restructured 2026-09-09: three of the original eight criteria were measurements 
 What stays here is what a number would only stand in for: whether the change has the intended musical character, whether the artefacts the detector is tuned against are actually audible, and whether behaviour survives a power cycle. Surviving a software restart moved to TASK-033, since that ticket exercises the host-initiated restart command.
 
 Depends on TASK-019.03 so measurements pass before anyone is asked to listen — there is no point spending ears on a mapping a script can already show is non-monotonic.
+
+2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
 <!-- SECTION:NOTES:END -->

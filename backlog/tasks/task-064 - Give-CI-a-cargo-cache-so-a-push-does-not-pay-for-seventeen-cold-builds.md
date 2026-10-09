@@ -3,8 +3,9 @@ id: TASK-064
 title: 'Give CI a cargo cache, so a push does not pay for seventeen cold builds'
 status: To Do
 assignee:
-  - '@human'
+  - '@agent'
 created_date: '2026-09-13 05:36'
+updated_date: '2026-10-09 13:13'
 labels:
   - planned
 dependencies:
@@ -33,3 +34,9 @@ Split because the win cannot be measured locally: writing the keys is agent work
 <!-- AC:BEGIN -->
 - [ ] #1 Parent umbrella: both subtasks are done.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-09: Reassigned @human -> @agent; both subtasks are now agent work.
+<!-- SECTION:NOTES:END -->

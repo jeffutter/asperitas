@@ -3,14 +3,19 @@ id: TASK-038.04.07
 title: >-
   Free about 16 KB of rig's 128 KB internal flash so the excerpt install path
   links
-status: Needs Plan
+status: Blocked
 assignee:
-  - '@agent'
+  - '@human'
 created_date: '2026-10-08 16:39'
-updated_date: '2026-10-09 02:09'
+updated_date: '2026-10-09 02:25'
 labels:
   - task
-dependencies: []
+  - planned
+dependencies:
+  - TASK-038.04.07.01
+  - TASK-038.04.07.02
+  - TASK-038.04.07.03
+  - TASK-038.04.07.04
 parent_task_id: TASK-038.04
 priority: high
 ordinal: 139800
@@ -34,6 +39,20 @@ Trade-off the plan must weigh: any opt-level change alters the codegen of the au
 - [ ] #2 The chosen route and the rejected ones are written down with measured sizes; if callback codegen changes, the notes say the TASK-038.05 timings predate it and a @human re-measure subtask exists
 - [ ] #3 All gates tiers that build firmware pass; no other binary's behaviour changes except as the chosen route states
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against e6c6557
+
+Approach: owner chose the Daisy bootloader route (app in QSPI/AXI SRAM) over opt-level or binary-split. Because it is unproven on Seed3, the work is gated on a bench proof.
+
+Order: .01 (@human bench proof of bootloader on Seed3) -> .02 (@agent link layout, build targets, gates; rig+762392c sizes with >=2 KB spare) and .03 (@agent flashing paths and docs) -> .04 (@human re-measure callback timing, since codegen placement changes and TASK-038.05 numbers predate it).
+
+If .01 fails, stop and re-decide with the owner; the measured fallback sizes are in the description (opt-level s 116,856 B, z 111,548 B).
+
+Parent is @human (inherits strictest child) and is a pure tracking ticket; AC #1-#3 are satisfied by .02 (sizes), .03 (route write-up) and .04 (timing predates note). After close, rebase wip/TASK-038.04.05-excerpt-install (762392c) and unblock TASK-038.04.05. Note .02's unattended execution must wait for .01 Done via dependency.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
