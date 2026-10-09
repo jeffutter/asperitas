@@ -32,9 +32,13 @@
             targets = [ "thumbv7em-none-eabihf" ];
             extensions = [ "rust-src" "rust-analyzer" "llvm-tools-preview" ];
           };
-        in
-        {
-          default = pkgs.mkShell {
+
+          # `default` is the bench shell. `ci` is the same shell minus the patched probe-rs, which a
+          # runner must build from source (about 9.8 of the 10.6 minutes CI spent entering the
+          # shell, TASK-072) and no CI gate uses. Every other package, the toolchain above and the
+          # shellHook come from this one definition, so `rustc -vV`, the rust-cache key and the
+          # elf-check provenance cannot differ between the two.
+          mkDevShell = { withProbe }: pkgs.mkShell {
             packages = [
               # --- Rust toolchain (rustc, cargo, clippy, rustfmt + the above) ---
               rustToolchain
@@ -48,9 +52,6 @@
               # Patched so --connect-under-reset halts the core: stock 0.32.0
               # arms vector catch without C_DEBUGEN and the core runs past it.
               # See the patch header; drop it once upstream ships a fix.
-              (pkgs.probe-rs-tools.overrideAttrs (old: {
-                patches = (old.patches or [ ]) ++ [ ./nix/probe-rs-cortex-m-reset-catch.patch ];
-              }))
               pkgs.cargo-binutils        # objcopy to produce raw .bin for DFU
 
               pkgs.pkg-config
@@ -59,6 +60,11 @@
               pkgs.lefthook              # git hooks
               pkgs.yq-go                 # mikefarah/yq-go (NOT Python yq)
               pkgs.jq                    # JSON processing for backlog scripts
+            ]
+            ++ pkgs.lib.optionals withProbe [
+              (pkgs.probe-rs-tools.overrideAttrs (old: {
+                patches = (old.patches or [ ]) ++ [ ./nix/probe-rs-cortex-m-reset-catch.patch ];
+              }))
             ]
             # Host audio backend. On Linux cpal talks to ALSA and needs the
             # library + its .pc file at build time. On Darwin it uses the
@@ -72,6 +78,10 @@
               lefthook install >&2
             '';
           };
+        in
+        {
+          default = mkDevShell { withProbe = true; };
+          ci = mkDevShell { withProbe = false; };
         });
     };
 }

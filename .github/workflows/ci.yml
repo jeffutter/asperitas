@@ -14,17 +14,13 @@ jobs:
 
       - uses: cachix/install-nix-action@v31
 
-      # Realise the dev shell first, with build logs, so the log splits substituting from building (TASK-072).
-      - name: Realise dev shell (TASK-072 diagnostic)
-        run: |
-          nix develop .#default -L --command true 2>&1 | tee /tmp/devshell.log
-          echo "copying: $(grep -c 'copying path' /tmp/devshell.log)"
-          grep -E "^these [0-9]+ derivations|^this derivation|will be built|will be fetched" /tmp/devshell.log || true
-          grep -E "^building '" /tmp/devshell.log || true
-
+      # CI enters `.#ci`, not `.#default` (TASK-072). The only difference is the patched probe-rs,
+      # a ~9.8 minute from-source build on a runner that no gate uses; the toolchain, every other
+      # package and the shellHook come from one shared definition in flake.nix, so the `rustc -vV`
+      # the cache key is built from is identical.
       # The shellHook must print nothing on stdout: rust-cache parses `nix develop --command rustc -vV`.
       - name: Dev shell entry is silent on stdout (rust-cache parses it)
-        run: scripts/check-devshell-stdout.sh
+        run: scripts/check-devshell-stdout.sh ci
 
       # Toolchain identity, printed rather than assumed. The key below is built from `rustc -vV`
       # run through `cmd-format`, so it names whatever this shell resolves: the nix sysroot built by
@@ -38,7 +34,7 @@ jobs:
       # shared gate definition clean of runner concerns.
       - name: Toolchain identity the cache key is built from
         run: |
-          nix develop .#default --command bash -c 'printf "rustc  %s\n" "$(command -v rustc)"; printf "cargo  %s\n" "$(command -v cargo)"; printf "rustup %s\n" "$(command -v rustup || echo none)"'
+          nix develop .#ci --command bash -c 'printf "rustc  %s\n" "$(command -v rustc)"; printf "cargo  %s\n" "$(command -v cargo)"; printf "rustup %s\n" "$(command -v rustup || echo none)"; rustc -vV'
 
       # Cargo cache. Two workspaces are named because root Cargo.toml:3 declares
       # exclude = ["firmware"]: firmware/ is a separate workspace with its own Cargo.lock and its
@@ -98,7 +94,7 @@ jobs:
           workspaces: |
             . -> target
             firmware -> target
-          cmd-format: nix develop .#default --command {0}
+          cmd-format: nix develop .#ci --command {0}
           key: nix-${{ hashFiles('flake.lock') }}
           # Pull requests still READ main's cache - GitHub serves base-branch caches to PRs - but do
           # not add their own, so a branch that is never merged cannot churn the 10 GB budget with a
@@ -121,4 +117,4 @@ jobs:
       # all - an inline single-quoted `bash -c '...'` string cannot carry comments - is now the first
       # gate's problem instead, and is explained there.
       - name: fmt + clippy + doc + test + firmware cross-build
-        run: nix develop .#default --command bash scripts/gates.sh ci
+        run: nix develop .#ci --command bash scripts/gates.sh ci
