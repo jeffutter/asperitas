@@ -14,6 +14,14 @@ jobs:
 
       - uses: cachix/install-nix-action@v31
 
+      # Realise the dev shell first, with build logs, so the log splits substituting from building (TASK-072).
+      - name: Realise dev shell (TASK-072 diagnostic)
+        run: |
+          nix develop .#default -L --command true 2>&1 | tee /tmp/devshell.log
+          echo "copying: $(grep -c 'copying path' /tmp/devshell.log)"
+          grep -E "^these [0-9]+ derivations|^this derivation|will be built|will be fetched" /tmp/devshell.log || true
+          grep -E "^building '" /tmp/devshell.log || true
+
       # The shellHook must print nothing on stdout: rust-cache parses `nix develop --command rustc -vV`.
       - name: Dev shell entry is silent on stdout (rust-cache parses it)
         run: scripts/check-devshell-stdout.sh
