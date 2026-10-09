@@ -1,13 +1,13 @@
 ---
 id: TASK-038.07.02
 title: >-
-  HUMAN: Run rig in ring-fill mode on the bench and record claimed versus
-  wall-clock capture duration
+  Run rig in ring-fill mode on the bench and record claimed versus wall-clock
+  capture duration
 status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-08 13:56'
-updated_date: '2026-10-09 20:23'
+updated_date: '2026-10-09 20:26'
 labels:
   - planned
 dependencies:
