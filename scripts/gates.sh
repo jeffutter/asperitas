@@ -293,7 +293,7 @@ gate commit gate-costs-current "=== gate costs current ===" scripts/gate-costs.s
 # Ahead of every cargo invocation, because it compiles nothing and needs no artifact: the one figure
 # below is what cheapest-first says to do with a check that has no inputs to wait for.
 # Placing it beside the push-tier provenance gate "for symmetry" would misrepresent both - they share
-# no state, one grades the reader and the other grades the stamp - and ordering rule 1 is untouched,
+# no state, one grades the reader and the other grades the embedded digest - and ordering rule 1 is untouched,
 # since no firmware gets built here. Measured 0.98 s {{gate:elf-provenance-selftest}} warm, which is the
 # price of seven rust-objcopy invocations at ~31 ms {{component:objcopy-invocation}} each and one memoized
 # `cargo metadata` at ~52 ms {{component:cargo-metadata-invocation}}, every one of them load-bearing.
@@ -303,14 +303,14 @@ gate commit gate-costs-current "=== gate costs current ===" scripts/gate-costs.s
 gate commit elf-provenance-selftest "=== elf-provenance --selftest ===" scripts/elf-provenance.sh --selftest
 
 # The staleness mechanism's own checks (TASK-056): elf-check decides "was this ELF built from these
-# sources?" by hashing the input set against a stamp build-elf wrote, and a check of that kind is only
-# as good as the case that would notice it quietly passing. Ten cases drive the SHIPPED recipe through
+# sources?" by hashing the input set against the digest build.rs embedded in the ELF, and a check of that kind is only
+# as good as the case that would notice it quietly passing. The cases drive the SHIPPED recipe through
 # make's command-line overrides (ELF / ELF_INPUTS / MAIN_SRC / CARGO / PROV), so the thing graded is
 # the file that ships rather than a copy of its logic; one of them is the false positive itself, red
 # against any Makefile that compares mtimes again. Fixtures under `mktemp -d`, no cargo, nothing
 # outside that directory touched -- rules and reasoning in scripts/check-elf-staleness.sh's header.
 # Fourth in the list on the same cheapest-first rule as the gate above: it builds nothing and reads no
-# artifact. Measured ~1 s {{gate:elf-staleness-selftest}} warm for ten cases, most of it make parsing the
+# artifact. Measured ~1 s {{gate:elf-staleness-selftest}} warm for the cases above, most of it make parsing the
 # Makefile once per case at ~12 ms {{component:make-parse}} a parse.
 gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/check-elf-staleness.sh --selftest
 

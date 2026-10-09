@@ -625,7 +625,7 @@ symbols and zero `SEGGER` strings in the console image, 82 and the magic in the 
 scan (`strings -a <ELF> | grep -c SEGGER`), not the symbol count, is what tells the two images apart.
 
 The build now answers that question about itself, so nobody has to scan for magic again: every ELF
-carries a non-allocated `.asp.prov` note section stamped by `firmware/build.rs` naming the exact cfg
+carries a non-allocated `.asp.prov` note section written by `firmware/build.rs` naming the exact cfg
 set it was compiled for, and `scripts/elf-provenance.sh show <ELF>` prints it. One caveat when you
 read that section by hand: pass an explicit output-file argument, as
 `rust-objcopy --dump-section .asp.prov=/dev/stdout <ELF> /dev/null` does. Measured on LLVM 22, the
@@ -899,21 +899,21 @@ recipes and nowhere else.
 | `probe-rs attach … --non-interactive --list-rtt` (the boardless DWARF check; `make probe-rtt-list` no longer runs this) | 1 | 2 | the same string alone. A ` WARN probe_rs::util::rtt::processing: Insufficient DWARF info; compile your program with `debug = 2` to enable location info.` line one row above it means the release profile has dropped below `debug = 2`, so locations are off: see the third gate under *Flashing and logging over an ST-Link probe*. Measured both ways on 2026-09-12. |
 | `make probe-rtt-list` (`scripts/probe-rtt-list.sh`, two `probe-rs read`s) | 1 | 2 | `probe-rtt-list: probe-rs could not read 0x<addr>; see its error above.` after probe-rs's own error. Measured only with an unreadable chip description (exit 1), not with no probe attached; with a board it prints the control block and exits 0 in about a quarter of a second. |
 | `probe-rs list` | 0 | n/a | `No debug probes were found.` |
-| `make probe-log` or `make probe-rtt-list` with an ELF that is not its sources | never runs | 2 | `<ELF> was not built from the sources on disk`, then the two digests it compared (`stamp <hex>`, `sources <hex>`), then two advisory lines (flash the current build; force a real relink with `touch src/bin/<binary>.rs && make build-elf BINARY=<binary> FEATURES='<features>' NO_DEFAULT=1`), and no probe-rs output whatsoever. Measured 2026-09-14 by appending one line to `src/bin/main.rs` and running the target without rebuilding |
-| `make probe-log` or `make probe-rtt-list` with an ELF that has no input stamp beside it | never runs | 2 | `no stamp at <.../release/<binary>.elf-inputs.sha256>, so nothing here records which sources <ELF> came from`, then the same two advisory lines and the same `Force a real relink: …`. Reached by any ELF linked before TASK-056 landed and by every tree since `cargo clean` - the absence of the record is treated as unknowable, never as fresh. Measured 2026-09-14 by moving the stamp file aside |
+| `make probe-log` or `make probe-rtt-list` with an ELF that is not its sources | never runs | 2 | `<ELF> was not built from the sources on disk`, then the two digests it compared (`embedded <hex>`, `sources <hex>`), then two advisory lines (flash the current build; force a real relink with `touch src/bin/<binary>.rs && make build-elf BINARY=<binary> FEATURES='<features>' NO_DEFAULT=1`), and no probe-rs output whatsoever. Measured 2026-09-14 by appending one line to `src/bin/main.rs` and running the target without rebuilding |
+| `make probe-log` or `make probe-rtt-list` with an ELF that carries no source digest | never runs | 2 | `<ELF> has no source_digest field in its .asp.prov, so nothing records which sources it came from`, then the same two advisory lines and the same `Force a real relink: …`. Reached by any ELF linked before TASK-071 embedded the digest - the absence of the record is treated as unknowable, never as fresh. Measured by the elf-staleness selftest's digestless-ELF case |
 | `make probe-log` or `make probe-rtt-list` with an ELF from the other cfg set | never runs | 2 | `that ELF was built for a different cfg set than you are asking to decode with, so its symbols and defmt metadata describe a binary that is not on the board.`, then the same `Force a real relink: …` line. Provenance is asked before the content test, so this fires even when the ELF is perfectly current with your sources. Measured 2026-09-13 by building console, then RTT-only, then running `make elf-check FEATURES="seed3"` on the result |
 
 | `make probe-log` or `make probe-rtt-list` with no ELF on disk at all | never runs | 2 | `no <ELF> - run 'make build-elf' with the FEATURES and NO_DEFAULT you mean to flash`, plus make's own `*** [Makefile:<line>: elf-check] Error 1` below it. Measured 2026-09-12 by pointing the recipe at a binary that was never built: `make probe-log BINARY=nope-not-built` |
 
 Two layers of exit code, because `make` turns any nonzero recipe status into its own 2. A driver
 that shells out to `make` therefore sees rc=2 for "no probe", for "wrong cfg set", for "not built from
-these sources", for "no stamp beside the ELF" and for "no ELF": only the stderr separates them, so
+these sources", for "no digest in the ELF" and for "no ELF": only the stderr separates them, so
 match on the message rather than the number, and expect that list to grow whenever `elf-check` learns
 another question. Calling `probe-rs` directly removes the ambiguity, but not the last case: without an
 ELF to hand it there is nothing to call it on.
 
 Every refusal that names a fix names a relink that really links, and since TASK-056 `build-elf` forces
-one on itself: when the stamp disagrees with the sources it touches its own main source file before
+one on itself: when the embedded digest disagrees with the sources it touches its own main source file before
 invoking cargo, because cargo decides whether to link from mtimes and can decline to do anything at
 all. Measured 2026-09-14 on a source whose bytes had changed while its mtime had been set backwards:
 "Finished in 0.29s" and an ELF still holding the old code. The printed remedy leads with its own

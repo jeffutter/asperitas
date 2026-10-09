@@ -22,12 +22,12 @@
 #                `cargo metadata`. It does hide the order the two clauses run in, which neither this
 #                suite nor elf-provenance's selftest covers; read that ordering in the recipe itself.
 #
-# What `CARGO=true` does and does not prove: `build-elf` forces its own relink by touching MAIN_SRC,
-# so the stamp it writes is earned by that touch rather than by observing a link, and a stub compiler
-# still exercises the whole stamping path -- digest, comparison, temp file, rename, and the refusal to
-# stamp when the compiler fails. Whether cargo really links after that touch is a cargo fact, measured
-# in firmware/Makefile's comment beside the code that relies on it, not something a fake compiler can
-# speak to.
+# What the stubs do and do not prove: the digest lives inside the ELF (.asp.prov, written by
+# firmware/build.rs on every link), so a "link" here is the stub writing the fixture's digest beside
+# the fixture, and the stub reader hands it back. That exercises the comparison and the forced-relink
+# decision in the Makefile. Whether cargo really links after build-elf's touch, and whether build.rs
+# embeds the right bytes, are facts measured elsewhere (firmware/Makefile's comment, TASK-071.01), not
+# something a fake compiler can speak to.
 #
 # Cost rules, obeyed so this stays a commit-tier gate: fixtures are written at runtime under a
 # `mktemp -d` and removed on exit, never under firmware/target/. No case runs cargo, clippy, objcopy,
@@ -35,7 +35,7 @@
 # ~12 ms {{component:make-parse}} a parse. Nothing here
 # writes a tracked file -- which matters more than usual, because writing a firmware source would bump
 # the mtime of an ELF input and send the bench's own `elf-check` red, the exact failure this script is
-# about. Measured ~1 s {{gate:elf-staleness-selftest}} warm for ten cases inside a `commit` tier run, and
+# about. Measured ~1 s {{gate:elf-staleness-selftest}} warm for the cases below inside a `commit` tier run, and
 # most of that is those ten parses. The smaller figure this line carried before TASK-068 was a
 # standalone reading that never included the per-case parse being paid against a cold Makefile; it
 # survived two tickets because nothing compared this sentence with the tier's own timing of the same
@@ -157,15 +157,26 @@ run_make() { # <goal> [extra make overrides...]
   MAKE_RC=$?
 }
 
-# Stage a fixture plus a stamp recorded from it, which is the state every case except two begins from.
+# Stage a fixture whose ELF carries the digest of its own sources, which is the state most cases begin
+# from. Goes through build-elf, so it also proves the forced-relink path ends with a matching digest.
 fx_linked_clean() {
   fx_setup "$FX" || fail "could not stage the fixture in $FX"
   run_make build-elf
-  expect_zero "staging the stamp"
-  [ -f "$FX.embedded" ] || fail "build-elf wrote no stamp at $FX.embedded"
+  expect_zero "staging the embedded digest"
+  [ -f "$FX.embedded" ] || fail "build-elf left no embedded digest at $FX.embedded"
 }
 
 # --------------------------------------------------------------------------- the cases
+
+# The raw-cargo path: someone links with `cargo build` directly, never touching build-elf. The digest
+# is embedded by the link itself, so elf-check must pass with no Makefile involvement in producing it.
+case_raw_cargo_relink_passes() {
+  fx_setup "$FX" || fail "could not stage the fixture in $FX"
+  bash "$ROOT/scripts/elf-inputs-digest.sh" digest "$FX" >"$FX.embedded" \
+    || fail "could not compute the fixture digest"
+  run_make elf-check
+  expect_zero "an ELF linked by raw cargo carrying the right digest"
+}
 
 # AC #1 and #2 in one case, and the one that is red against the pre-TASK-056 Makefile by design:
 # refresh every mtime in the tree without changing a byte and the check must stay out of the way. That
@@ -184,7 +195,7 @@ case_byte_edit_without_rebuild() {
   fx_linked_clean
   printf '\npub fn added()\n{}\n' >>"$FX/crates/foo/src/lib.rs"
   run_make elf-check
-  expect_refused "an input whose bytes differ from the stamp" "was not built from the sources on disk"
+  expect_refused "an input whose bytes differ from the embedded digest" "was not built from the sources on disk"
 }
 
 # Distinguishing "the bytes moved" from "the clock moved" cuts both ways: undo the edit and the same
@@ -199,14 +210,23 @@ case_bytes_restored_is_green() {
 }
 
 # The case that rules out `sha256sum -c` as the mechanism: a checksum-file comparison walks the list it
-# was given, so an input that appeared after the stamp is invisible to it. Enumeration is what catches
+# was given, so an input that appeared after the link is invisible to it. Enumeration is what catches
 # this one.
 case_added_input_detected() {
   fx_linked_clean
   mkdir -p "$FX/crates/bar/src"
   printf 'pub fn new_crate() {}\n' >"$FX/crates/bar/src/lib.rs"
   run_make elf-check
-  expect_refused "an input added since the stamp" "was not built from the sources on disk"
+  expect_refused "an input added since the link" "was not built from the sources on disk"
+}
+
+# The mirror of the added case: a deleted source leaves every remaining file's bytes alone, so only
+# the enumeration notices.
+case_removed_input_detected() {
+  fx_linked_clean
+  rm "$FX/crates/foo/src/lib.rs"
+  run_make elf-check
+  expect_refused "an input removed since the link" "was not built from the sources on disk"
 }
 
 # Names ride in the hashed stream precisely for this: renaming a file changes its digest even though
@@ -215,7 +235,7 @@ case_renamed_input_detected() {
   fx_linked_clean
   mv "$FX/crates/foo/src/lib.rs" "$FX/crates/foo/src/renamed.rs"
   run_make elf-check
-  expect_refused "an input renamed since the stamp" "was not built from the sources on disk"
+  expect_refused "an input renamed since the link" "was not built from the sources on disk"
 }
 
 # Build products must not count as sources. Without the prune this goes red on the first cargo run
@@ -228,9 +248,9 @@ case_target_stays_pruned() {
   expect_zero "after a build product under target/ changed"
 }
 
-# AC #4. The absence of a record is not evidence of freshness: an ELF older than this mechanism, or any
-# tree that has been `cargo clean`ed, has to be refused by name.
-case_missing_stamp_fails_loudly() {
+# The absence of a record is not evidence of freshness: an ELF linked before the digest was embedded,
+# or by something other than this tree's build.rs, has to be refused by name.
+case_digestless_elf_refused() {
   fx_linked_clean
   rm "$FX.embedded"
   run_make elf-check
@@ -239,23 +259,23 @@ case_missing_stamp_fails_loudly() {
 
 # An empty input set is the vacuous-pass trap: `find ... | xargs shasum` with nothing to hash runs
 # shasum on stdin, and the digest of empty input is a well-formed hex string. The writer has to fail
-# rather than record it, or every later check compares against a stamp no sources describe.
+# rather than compare against it, or every check afterwards matches a digest no sources describe.
 case_empty_input_set_fails_loudly() {
   fx_setup "$FX" || fail "could not stage the fixture in $FX"
   mkdir -p "$FX/nothing-here"
   run_make build-elf "ELF_INPUTS=$FX/nothing-here"
   [ "$MAKE_RC" != 0 ] || fail "an empty input set was accepted: $MAKE_OUT"
   expect_has "and said which" "no ELF inputs found under" "$MAKE_OUT"
-  [ ! -f "$FX.embedded" ] || fail "an empty input set still wrote a stamp"
+  [ ! -f "$FX.embedded" ] || fail "an empty input set still produced a digest"
 }
 
-# Ordering claim: a failed compile must not leave a fresh stamp behind, or the next `elf-check` blesses
-# a link that never happened. With the compiler stubbed to fail, the stamp must not move.
-case_failed_compile_leaves_no_stamp() {
+# A failed compile must fail build-elf and leave no embedded digest behind, or the next `elf-check`
+# blesses a link that never happened.
+case_failed_compile_leaves_no_digest() {
   fx_setup "$FX" || fail "could not stage the fixture in $FX"
   run_make build-elf "CARGO=false"
   [ "$MAKE_RC" != 0 ] || fail "build-elf succeeded with a failing compiler"
-  [ ! -f "$FX.embedded" ] || fail "a failed compile recorded a stamp anyway"
+  [ ! -f "$FX.embedded" ] || fail "a failed compile left an embedded digest anyway"
 }
 
 # The tripwire under the whole ticket: if a timestamp operator ever comes back into this recipe, the
@@ -285,7 +305,7 @@ run_selftest() {
   local base
   base=$(mktemp -d) || die "mktemp -d failed, so the selftest has nowhere to write its fixtures"
   # Stand-ins for the real linker and .asp.prov reader (TASK-071). The "embedded" digest lives beside
-  # the fixture (<fixture>.embedded), outside the hashed input set. Minimal; TASK-071.03 owns the rewrite.
+  # the fixture (<fixture>.embedded), outside the hashed input set.
   STUB_PROV=$base/prov-stub.sh
   STUB_CARGO=$base/cargo-stub.sh
   cat >"$STUB_PROV" <<'STUB'
@@ -300,18 +320,20 @@ STUB
   trap 'if [ -n "${base:-}" ]; then rm -rf "$base"; fi' EXIT
 
   # One fixture dir per case, named after the case: mktemp hands out one path here, and reusing one
-  # dir across cases would let a case inherit another's stamp or stray edit.
+  # dir across cases would let a case inherit another's digest or stray edit.
   local i=0
   for spec in \
+    "raw-cargo-relink-passes case_raw_cargo_relink_passes" \
     "bulk-mtime-refresh-is-silent case_bulk_mtime_refresh_is_silent" \
     "byte-edit-without-rebuild case_byte_edit_without_rebuild" \
     "bytes-restored-is-green case_bytes_restored_is_green" \
     "added-input-detected case_added_input_detected" \
+    "removed-input-detected case_removed_input_detected" \
     "renamed-input-detected case_renamed_input_detected" \
     "target-stays-pruned case_target_stays_pruned" \
-    "missing-stamp-fails-loudly case_missing_stamp_fails_loudly" \
+    "digestless-elf-refused case_digestless_elf_refused" \
     "empty-input-set-fails-loudly case_empty_input_set_fails_loudly" \
-    "failed-compile-leaves-no-stamp case_failed_compile_leaves_no_stamp" \
+    "failed-compile-leaves-no-digest case_failed_compile_leaves_no_digest" \
     "no-mtime-operator-in-elf-check case_no_mtime_operator_in_elf_check"; do
     i=$((i + 1))
     FX=$base/fixture$i

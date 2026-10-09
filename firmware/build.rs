@@ -36,7 +36,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_LOG_DEFMT");
 }
 
-/// Stamp every firmware ELF with the cargo cfg set it was linked against.
+/// Embed in every firmware ELF with the cargo cfg set it was linked against.
 ///
 /// `target/thumbv7em-none-eabihf/release/main` is one name for two different images:
 /// `scripts/gates.sh` builds the console and the RTT-only cfg sets back to back, and the top-level
@@ -120,7 +120,7 @@ fn provenance() {
 /// Run `scripts/elf-inputs-digest.sh` and return its trimmed stdout. The input set is defined in
 /// `elf-inputs.manifest` and implemented once, in that script, which the Makefile and the elf-check
 /// side also call; re-implementing it here in Rust would be the second hand-kept copy that can drift
-/// from the checker. A failure stops the build: an ELF stamped with a guessed digest is worse than
+/// from the checker. A failure stops the build: an ELF carrying a guessed digest is worse than
 /// none.
 fn digest_inputs(args: &[&str]) -> String {
     let script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())

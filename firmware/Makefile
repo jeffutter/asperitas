@@ -225,7 +225,7 @@ ELF_INPUTS = $(shell bash $(ELF_INPUTS_SH) paths)
 # instead of a tracked file.
 MAIN_SRC = src/bin/$(BINARY).rs
 
-# The compiler, named once so `make build-elf CARGO=true` can drive the stamping logic with no
+# The compiler, named once so `make build-elf CARGO=...` can drive the forced-relink logic with no
 # cross-toolchain present -- which is how scripts/check-elf-staleness.sh asserts it against the
 # recipe that ships rather than a copy of it. A makefile assignment wins over the environment here,
 # so a stray exported CARGO (cargo itself exports one to build scripts) cannot redirect a real build.
@@ -245,7 +245,7 @@ ELF_INPUTS_SH = $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-inputs-digest
 
 # Per-file digests of the input set, sorted by path, hashed together. Names ride along in the hashed
 # stream, so a rename counts as a change; mtimes never enter it. `sha256sum -c` was considered and
-# rejected: mtime-immune and it names the culprit, but it is blind to an input ADDED since the stamp,
+# rejected: mtime-immune and it names the culprit, but it is blind to an input ADDED since the link,
 # which is half of what this has to catch.
 #
 # Three details in the body are load-bearing and each was measured rather than assumed:
@@ -274,7 +274,7 @@ endef
 # Measured here 2026-09-14. Trusting that would certify bytes nobody compiled, a silent pass, so `$(MAIN_SRC)` is touched first and cargo
 # is left no choice. Cost lands only where a recompile was already owed: a warm forced relink of this
 # crate measures ~0.69 s {{component:firmware-forced-relink}}.
-define ELF_BUILD_AND_STAMP
+define ELF_BUILD
 	want=$$( $(ELF_INPUTS_SHA256) ) || exit 1; \
 	have=$$( $(PROV) digest $(ELF) 2>/dev/null ) || have=; \
 	if [ "$$have" = "$$want" ]; then \
@@ -292,7 +292,7 @@ endef
 ## build.rs embeds the source digest `elf-check` compares against in the image's .asp.prov on every
 ## link, so the record cannot describe a link that did not happen. See the block above.
 build-elf:
-	@$(ELF_BUILD_AND_STAMP)
+	@$(ELF_BUILD)
 
 ## Program the ELF over the probe, verify read-back, reset, exit.
 ##
@@ -315,7 +315,7 @@ probe-run: build-elf
 	probe-rs run $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
 
 # Reading the cfg provenance out of the ELF belongs to scripts/elf-provenance.sh, which is the only
-# thing in the repo that parses the `.asp.prov` note firmware/build.rs stamps in. This is the first
+# thing in the repo that parses the `.asp.prov` note firmware/build.rs embeds. This is the first
 # time the Makefile reaches up into scripts/; scripts/check-doc-artifact-names.sh already reaches
 # down into this file to enumerate legal image names, so the coupling is mutual and both headers say
 # so. `bash` is spelled rather than relying on the executable bit plus shebang, because a checkout
@@ -327,13 +327,13 @@ PROV = bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-provenance.sh
 # the same reason.
 REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)'$(if $(filter 1,$(NO_DEFAULT)), NO_DEFAULT=1,)
 
-# The remedy for any elf-check failure: a relink that really links, then restamps. `rm -f $(ELF) &&
+# The remedy for any elf-check failure: a relink that really links, which re-embeds the digest. `rm -f $(ELF) &&
 # make build-elf` does not qualify -- measured, cargo re-uplifts the cached deps/main-<hash> hardlink
 # and the file comes back byte-identical (cargo #15313, #8649) -- and neither does `cargo clean -p
 # asperitas-firmware`, which reported "Removed 0 files", no recompile, and left the ELF untouched.
 # Under the content check the reason to prefer it over a plain `make build-elf` is sharper than the
-# mtime argument it started with: `build-elf` touches `$(MAIN_SRC)` itself whenever the stamp
-# disagrees, so following this line is what makes cargo prove the link instead of declining to make an
+# mtime argument it started with: `build-elf` touches `$(MAIN_SRC)` itself whenever the embedded
+# digest disagrees, so following this line is what makes cargo prove the link instead of declining to make an
 # offer. Measured warm on this tree, console cfg set: this remedy ~0.69 s {{component:firmware-forced-relink}}.
 # Forcing one by deleting target/$(TARGET)/release/.fingerprint/asperitas-firmware-* instead is slower,
 # and it reaches into cargo's private layout.

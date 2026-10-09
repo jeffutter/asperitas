@@ -2,8 +2,8 @@
 #
 # Digest (or enumerate) the source files a firmware ELF is built from. The input set lives in
 # firmware/elf-inputs.manifest and nowhere else; this is the one implementation of what to do with it,
-# called by firmware/build.rs (to embed the digest in .asp.prov), by firmware/Makefile (the sidecar
-# stamp, until it is removed) and by the checker, so producer and checker cannot disagree.
+# called by firmware/build.rs (to embed the digest in .asp.prov), by firmware/Makefile (the forced-relink
+# decision and elf-check) and by the checker, so producer and checker cannot disagree.
 #
 #   digest [path...]   print the hex digest on stdout. Optional paths replace the manifest's `path`
 #                      lines (the staleness selftest points the digest at a fixture tree).
