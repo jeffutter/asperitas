@@ -1,11 +1,11 @@
 ---
 id: TASK-064
 title: 'Give CI a cargo cache, so a push does not pay for seventeen cold builds'
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-13 05:36'
-updated_date: '2026-10-09 13:13'
+updated_date: '2026-10-09 14:19'
 labels:
   - planned
 dependencies:
@@ -32,11 +32,13 @@ Split because the win cannot be measured locally: writing the keys is agent work
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Parent umbrella: both subtasks are done.
+- [x] #1 Parent umbrella: both subtasks are done.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-09: Reassigned @human -> @agent; both subtasks are now agent work.
+
+2026-10-09: All three subtasks are Done (064.01 cache, 064.02 measurement, 064.03 shell-hook stdout fix). Wall time did not improve; follow-up TASK-072 targets the nix dev-shell step.
 <!-- SECTION:NOTES:END -->
