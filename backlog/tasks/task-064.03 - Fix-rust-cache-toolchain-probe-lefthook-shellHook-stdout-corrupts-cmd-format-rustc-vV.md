@@ -3,11 +3,11 @@ id: TASK-064.03
 title: >-
   Fix rust-cache toolchain probe: lefthook shellHook stdout corrupts cmd-format
   rustc -vV
-status: In Progress
+status: Done
 assignee:
-  - '@ralph'
+  - '@agent'
 created_date: '2026-10-09 13:27'
-updated_date: '2026-10-09 13:33'
+updated_date: '2026-10-09 13:55'
 labels:
   - planned
 dependencies: []
@@ -28,7 +28,7 @@ Run 37925833149 (first run after TASK-064.01) shows the cache never engaged. The
 <!-- AC:BEGIN -->
 - [x] #1 flake.nix shellHook emits nothing on stdout, so 'nix develop .#default --command rustc -vV' prints only rustc's output (check locally)
 - [x] #2 scripts or a selftest guards that 'nix develop .#default --command true' stdout is empty
-- [ ] #3 HUMAN-free: a pushed CI run's rust-cache step log shows a Cache Key line and Rust Versions listing the nix-provided rustc, with no ##[error] annotation
+- [x] #3 HUMAN-free: a pushed CI run's rust-cache step log shows a Cache Key line and Rust Versions listing the nix-provided rustc, with no ##[error] annotation
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -45,4 +45,6 @@ Approach: (1) flake.nix shellHook line 72: change 'lefthook install' to 'lefthoo
 
 <!-- SECTION:NOTES:BEGIN -->
 flake.nix shellHook now 'lefthook install >&2'. Verified locally: 'nix develop .#default --command rustc -vV' stdout is only rustc output. Added scripts/check-devshell-stdout.sh and a CI step ahead of rust-cache. Deliberately NOT in scripts/gates.sh: a new gate line forces a gate-costs ledger measurement and regenerated docs. AC#3 needs a pushed CI run; left unchecked, to be confirmed by TASK-064.02's measurement. Nix store caching decision still open.
+
+2026-10-09: AC #3 verified by the owner-authorised push of 8ecbb48. CI run 37938450034 (https://github.com/jeffutter/asperitas/actions/runs/37938450034) succeeded. The Swatinem/rust-cache step now logs 'Cache Key:' and 'Rust Versions:' with no ##[error] annotation, then 'No cache found.' (cold, as expected for the first keyed run); the post step saved the cache in 20 s. The nix rustc is rust-default-1.97.1. Job wall time 14m54s (13:39:52 to 13:54:46), against 17m10s for run 37925833149 where the cache never engaged; the toolchain-identity step took 2 s there is no 10 min nix wait in the cache-key path.
 <!-- SECTION:NOTES:END -->

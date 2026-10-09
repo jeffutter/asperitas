@@ -1,11 +1,11 @@
 ---
 id: TASK-064.02
 title: 'Measure the cache on a runner, cold run against warm run'
-status: Blocked
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-13 05:37'
-updated_date: '2026-10-09 13:27'
+updated_date: '2026-10-09 13:55'
 labels:
   - planned
 dependencies:
@@ -55,6 +55,8 @@ Verification: ACs 1-4 each backed by pasted log lines/URLs. Risk: pushing main s
 2026-10-09: Reassigned @human -> @agent. gh can run, list and read Actions logs, and the owner allows pushing main. TASK-063 is Done.
 
 2026-10-09 (agent): Blocked by TASK-064.03. Cold run 37925833149 (job wall 17m10s: 11:46:48-12:03:58; gates.sh ci step 6m13s; 'Toolchain identity' step 10m41s building the nix toolchain) shows the cache never engaged: rust-cache logged '##[error]Command failed: nix develop .#default --command rustup run sync hooks: (pre-commit, pre-push) rustc -vV' / 'error: toolchain sync is not installed' because flake.nix shellHook's 'lefthook install' prints to stdout and corrupts cmd-format output. No Cache Key line, no restore, no save. Toolchain identity step: rustc is /nix/store/...-rust-default-1.97.1, but rustup is reachable at /home/runner/.cargo/bin/rustup. Per-gate heavy lines of that run: 36.51s, 123.90s, 131.10s. A warm run now would measure nothing, so do not push for measurement until TASK-064.03 lands; then the first post-fix run is the cold run and a second push the warm run. Next step: implement TASK-064.03, then resume this ticket with the plan steps.
+
+2026-10-09: Unblocked. TASK-064.03 is Done; cold run with a working cache key is 37938450034 (14m54s, 'No cache found'). The warm run is the next push.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
