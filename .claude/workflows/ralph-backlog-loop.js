@@ -494,17 +494,26 @@ for (let i = 0; i < MAX_ITERATIONS; i++) {
   // noRalph, so no second data-gathering round trip is needed here — just
   // the deterministic pick and (if one was found) the mutation to move it.
   phase("Choose");
-  const unblocked = new Set(state.unblockedTodo);
+  // unblockedTodo is the authority on eligibility: it comes from one short
+  // script call. todoByPriority is a long list the State agent re-types by hand
+  // and it silently drops entries (a run once returned 20 of 27 and lost
+  // TASK-071, so the loop reported "drained" with a ready ticket waiting). So
+  // use it only to ORDER the unblocked tickets; any unblocked ticket it forgot
+  // sorts last instead of vanishing.
   const noRalph = new Set(state.noRalph);
+  const rank = new Map(state.todoByPriority.map((id, idx) => [id, idx]));
+  const byPriority = [...state.unblockedTodo].sort(
+    (a, b) =>
+      (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity) ||
+      state.unblockedTodo.indexOf(a) - state.unblockedTodo.indexOf(b),
+  );
   const target =
-    state.todoByPriority.find(
-      (id) => unblocked.has(id) && !noRalph.has(id) && !humanOnly.has(id),
-    ) ?? null;
+    byPriority.find((id) => !noRalph.has(id) && !humanOnly.has(id)) ?? null;
 
   if (!target) {
     stopReason = "drained";
-    const blockedOnHuman = state.todoByPriority.filter(
-      (id) => unblocked.has(id) && !noRalph.has(id) && humanOnly.has(id),
+    const blockedOnHuman = byPriority.filter(
+      (id) => !noRalph.has(id) && humanOnly.has(id),
     );
     log(
       blockedOnHuman.length > 0
