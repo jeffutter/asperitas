@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 11:43'
-updated_date: '2026-10-08 14:33'
+updated_date: '2026-10-14 02:12'
 labels:
   - planned
 dependencies:
@@ -156,6 +156,8 @@ AC #7 closed with the owner, 2026-10-08. The owner reviewed the README section a
 ### AC #5 moved to TASK-038.09; ticket closed with the owner, 2026-10-08
 
 Excerpt replay needs TASK-038.04, which is unbuilt and unplanned (QSPI slot storage, the first inbound console path, MDMA staging). At the owner's instruction, AC #5 is moved verbatim to TASK-038.09 (@human, depends on TASK-038.04) and ticked here as moved, not as measured, the same way AC #3 went to TASK-038.07. Dependencies on TASK-038.04 and TASK-038.06 are dropped: the first now belongs to TASK-038.09, and this ticket did not need 038.06's documentation (AC #7's README section was written here). TASK-034 stays listed. Its loop-gain and hum numbers come from this session (recorded in its notes), but its own criteria (cable labelled and left in place, outside observer, lab-setup note) are still the owner's to close.
+
+AC #3 evidence, 2026-10-13 (measured in TASK-038.07.02): rig in ring-fill mode filled all 1024 blocks in 349536 ms on the device clock against 349.626 s on the host clock (arm record to close record) and CAPMAX seconds_max 349 / us_max 349525333; 1 overrun ended it, audio_exit 0, no block overwritten, dump_reassemble proved 1024/1024. Console capture: audio/captures/2026-10-13-rig-ring-fill-349s.console.zst. Details in TASK-038.07.02's notes.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

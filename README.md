@@ -329,6 +329,7 @@ cargo run -p asperitas-logging --release --example dump_reassemble -- capture.bi
 | Callback cost, worst | 72 us of a 666 us period | 300 s run, `max_block_us` |
 | Callback spacing, worst | 714 us (limit 832) | 300 s run, `worst_gap_us` |
 | Blocks delivered / expected | 879 / 879, 0 overruns | 300 s run |
+| Ring filled to the last block | 1024 / 1024 blocks in 349.536 s on the device clock (349.626 s on the host, arm record to close record); 1 overrun ended it, 0 blocks overwritten | ring-fill run, 2026-10-13 |
 | Dump of 300 s of audio | 69.4 s; 414.9 kB/s PCM, 731.7 kB/s on the wire | `DUMPEND elapsed_ms=69421` |
 | Log loss during capture and dump | 0 | `dropped_full=0` throughout |
 | Loop gain at -20 dBFS, 1 kHz | -0.41 dB | returned peak -20.41 dBFS |
@@ -338,8 +339,8 @@ cargo run -p asperitas-logging --release --example dump_reassemble -- capture.bi
 
 The 300 s capture is archived as `audio/captures/2026-10-07-rig-sine-300s.console.zst`. The
 analysis behind every row is in TASK-038.05's notes, and the loopback setup is in
-`docs/reference/daisy-pod.md`. Not yet measured: a run that fills the whole ring (TASK-038.07),
-a sweep captured from its first sample (built in TASK-038.08, not yet run on the bench), and excerpt replay (TASK-038.04).
+`docs/reference/daisy-pod.md`. The ring-fill run is archived as
+`audio/captures/2026-10-13-rig-ring-fill-349s.console.zst`. Not yet measured: a sweep captured from its first sample (built in TASK-038.08, not yet run on the bench), and excerpt replay (TASK-038.04).
 
 ## Important Hardware Gotchas
 
