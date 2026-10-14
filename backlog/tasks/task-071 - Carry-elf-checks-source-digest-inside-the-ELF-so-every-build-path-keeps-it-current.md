@@ -3,11 +3,11 @@ id: TASK-071
 title: >-
   Carry elf-check's source digest inside the ELF so every build path keeps it
   current
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-10-08 01:49'
-updated_date: '2026-10-09 11:23'
+updated_date: '2026-10-14 13:15'
 labels:
   - planned
 dependencies:
@@ -44,15 +44,15 @@ Owner constraint: the input set is defined in one place that build.rs and elf-ch
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An ELF linked by any route - `make build-elf`, `make build`, or the raw `cargo build` invocations in `scripts/gates.sh` - passes `elf-check` when it was built from the sources on disk, with no `make build-elf` in between.
-- [ ] #2 Editing, adding or removing any digested input after the link makes `elf-check` refuse, and the remedy it prints makes it pass again.
-- [ ] #3 Cargo relinks when any digested input changes, including a newly added source file, so an edit can never leave a link whose embedded digest is out of date.
-- [ ] #4 The set of digested inputs is defined in exactly one place, used by both the producer in build.rs and the checker in elf-check.
-- [ ] #5 An ELF whose `.asp.prov` has no source digest (built before this change) is refused with a message that names the missing field and the remedy, not accepted and not misreported as stale.
-- [ ] #6 The sidecar `<binary>.elf-inputs.sha256` stamp is gone: nothing writes it, nothing reads it, and no doc or comment still describes it as the mechanism.
-- [ ] #7 `scripts/check-elf-staleness.sh`'s selftest covers at least: a raw-cargo relink passes, an edited input fails, an ELF without the digest is refused. It runs in the commit tier as it does today.
-- [ ] #8 The comment block above elf-check in firmware/Makefile, the `provenance()` doc in firmware/build.rs, and every doc that describes elf-check's freshness record are updated in the same change. The Cargo.lock caveat (no gate passes `--locked`) is kept or explicitly re-justified.
-- [ ] #9 `scripts/gates.sh commit` and `scripts/gates.sh push` pass, and `docs/gate-costs.json` is re-recorded if any gate's cost moves.
+- [x] #1 An ELF linked by any route - `make build-elf`, `make build`, or the raw `cargo build` invocations in `scripts/gates.sh` - passes `elf-check` when it was built from the sources on disk, with no `make build-elf` in between.
+- [x] #2 Editing, adding or removing any digested input after the link makes `elf-check` refuse, and the remedy it prints makes it pass again.
+- [x] #3 Cargo relinks when any digested input changes, including a newly added source file, so an edit can never leave a link whose embedded digest is out of date.
+- [x] #4 The set of digested inputs is defined in exactly one place, used by both the producer in build.rs and the checker in elf-check.
+- [x] #5 An ELF whose `.asp.prov` has no source digest (built before this change) is refused with a message that names the missing field and the remedy, not accepted and not misreported as stale.
+- [x] #6 The sidecar `<binary>.elf-inputs.sha256` stamp is gone: nothing writes it, nothing reads it, and no doc or comment still describes it as the mechanism.
+- [x] #7 `scripts/check-elf-staleness.sh`'s selftest covers at least: a raw-cargo relink passes, an edited input fails, an ELF without the digest is refused. It runs in the commit tier as it does today.
+- [x] #8 The comment block above elf-check in firmware/Makefile, the `provenance()` doc in firmware/build.rs, and every doc that describes elf-check's freshness record are updated in the same change. The Cargo.lock caveat (no gate passes `--locked`) is kept or explicitly re-justified.
+- [x] #9 `scripts/gates.sh commit` and `scripts/gates.sh push` pass, and `docs/gate-costs.json` is re-recorded if any gate's cost moves.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -61,3 +61,9 @@ Owner constraint: the input set is defined in one place that build.rs and elf-ch
 Planned against c3cb3d8
 Approach: split along the producer/consumer seam. 071.01 makes build.rs embed a source digest in .asp.prov from a single shared input-set definition, with rerun-if-changed covering inputs and containing directories. 071.02 switches elf-check to the embedded digest, adds the missing-field refusal, and deletes the sidecar stamp. 071.03 rewrites the selftest and docs and runs the gates. Order: 01, 02, 03. Risks: digest must be byte-identical between producer (Rust) and checker, so use one implementation; new-file detection needs directory-level rerun-if-changed; no gate passes --locked so Cargo.lock caveat stays. Integration: raw cargo build then make elf-check passes with no build-elf; edit then check refuses. Final: scripts/gates.sh commit and push. No direct work remains in the parent.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-14 verified in a live session by the agent. gates.sh commit (15 gates) and push (28 gates, 95 s) pass. Behavioural runs against the RTT-only main ELF: raw gates build then elf-check passes; an edit to src/bin/main.rs makes it refuse with the relink remedy; raw cargo build (no make build-elf) then passes; a new *.x file under crates/ followed by raw cargo build passes; after reverting, stale until the next relink, then passes. Selftest includes case_digestless_elf_refused ('no source_digest field'). No doc, script or Makefile mentions elf-inputs.sha256 or the sidecar. Tree clean after.
+<!-- SECTION:NOTES:END -->
