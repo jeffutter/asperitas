@@ -1,7 +1,7 @@
 ---
 id: TASK-038.04.07.02
 title: Add a bootloaded link layout and build targets for the firmware binaries
-status: In Progress
+status: Done
 assignee:
   - '@ralph'
 created_date: '2026-10-09 02:24'
@@ -31,16 +31,7 @@ After the bench proof (sibling HUMAN ticket) names the working addresses: add a 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Planned against b86def6
-
-Approach (single ticket, no sub-tickets: the pieces share one linker contract and ship together).
-1. Linker variant. Add firmware/memory-bootloaded.x beside memory.x (same load-bearing comments). Per docs/reference/daisy-seed3.md 'stock Daisy bootloader' section: FLASH = 0x24000000 LENGTH 480K (bootloader copies image from QSPI app region 0x90040000 into AXI SRAM, reset vector in 0x24xxxxxx), RAM = DTCM 0x20000000 128K. .data/.bss/stack go to DTCM. Move the (NOLOAD) .sram1_bss rule to a RAM_D2 region (0x30000000, 288K) because DMA1/2 cannot reach DTCM and AXI is now image space. Add ASSERTs: image end <= QSPI-copy budget, and an app-region size ASSERT so the image (stored from QSPI 0x90040000) ends strictly below 0x90100000 (excerpt slots, TASK-038.04.01) -> AC2.
-2. Selection. build.rs currently include_str!s memory.x; select the file by a cargo feature or env (e.g. LAYOUT=internal|bootloaded, passed through Makefile) and emit rerun-if-env-changed. Keep internal layout default for blinky/ledtest/podtest/panictest (fallback). Add memory-bootloaded.x to firmware/elf-inputs.manifest (name *.x already matches under path; add a 'path memory-bootloaded.x' line) so the provenance digest covers it, and make the layout part of the provenance cfg set in scripts/elf-provenance.sh so a stale internal-layout ELF is not mistaken for a bootloaded one.
-3. Makefile. Add LAYOUT variable; bootloaded builds produce <bin>.bin as before but flash target uses 0x90040000 only when LAYOUT=bootloaded (flash path docs are TASK-038.04.07.03, so keep the flash edit minimal: parametrise the address). Targets for main, rig (seed3, seed3+stim-ess, seed3+stim-pulse) and blinky. Update the size-budget comment block.
-4. Gates. scripts/check-image-load-addresses.sh: R1/R3 parse the FLASH region from memory.x; make it parse the layout the ELF was built for (read from provenance) so LMA-in-FLASH holds for 0x24000000 and R3 image length = highest LMA end - origin. Add a QSPI-app-region check (image size < 0x100000-0x40000 = 768K-ish budget, tied to the 0x100000 slot origin from the same constant used by the excerpt-layout code, do not restate it). Extend --selftest with a bootloaded fixture. Update scripts/gates.sh tiers, gate-costs.sh and check-elf-staleness.sh as needed.
-5. Rig size gate: in a scratch worktree apply wip/TASK-038.04.05-excerpt-install (762392c), build rig for all three feature sets in the bootloaded layout, confirm >= 2 KB spare in the target region (AC1), record sizes in implementation notes. Do not merge 762392c.
-Verification: make -C firmware build for each binary/feature set under LAYOUT=bootloaded and internal; scripts/check-image-load-addresses.sh and --selftest; project gates tiers (scripts/gates.sh) green. No hardware: on-device timing is TASK-038.04.07.04, flashing docs TASK-038.04.07.03 - do not tick HUMAN criteria.
-Risks: bootloader copies ~480 KB so DTCM-only data; the DMA buffers in D2 and linker INSERT ordering; cortex-m-rt SP = RAM origin+length (DTCM 128K -> 0x20020000, matches trial).
+SHIPPED by 05d78b5. This plan is superseded; the ticket's final summary describes what actually landed.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
