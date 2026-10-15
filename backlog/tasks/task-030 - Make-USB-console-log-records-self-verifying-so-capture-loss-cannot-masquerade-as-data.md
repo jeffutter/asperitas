@@ -3,11 +3,11 @@ id: TASK-030
 title: >-
   Make USB console log records self-verifying so capture loss cannot masquerade
   as data
-status: Blocked
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 01:23'
-updated_date: '2026-10-09 11:00'
+updated_date: '2026-10-15 04:19'
 labels:
   - planned
 dependencies:
@@ -41,13 +41,13 @@ The deeper problem is that loss is undetectable by the reader. Nothing on the wi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Log records are self-delimiting and carry their own integrity check, so a reader can distinguish a complete record from a damaged one.
-- [ ] #2 A record that does not fit the buffer is dropped whole, never partially; bytes buffered for other records remain valid.
-- [ ] #3 Concurrent producers cannot interleave inside a single record.
-- [ ] #4 Totals for dropped records and failed frames are reported to the host in-band, so a capture declares its own loss instead of appearing clean.
-- [ ] #5 Host-side tests cover truncation at every boundary between frames, corruption inside a frame, and interleaved multi-producer emission — each is detected and never mistaken for a valid record.
-- [ ] #6 Existing log call sites in firmware/src/bin/*.rs need no changes.
-- [ ] #7 docs/reference/daisy-seed3.md's probe-free debug channel section describes the framing and the loss counters.
+- [x] #1 Log records are self-delimiting and carry their own integrity check, so a reader can distinguish a complete record from a damaged one.
+- [x] #2 A record that does not fit the buffer is dropped whole, never partially; bytes buffered for other records remain valid.
+- [x] #3 Concurrent producers cannot interleave inside a single record.
+- [x] #4 Totals for dropped records and failed frames are reported to the host in-band, so a capture declares its own loss instead of appearing clean.
+- [x] #5 Host-side tests cover truncation at every boundary between frames, corruption inside a frame, and interleaved multi-producer emission — each is detected and never mistaken for a valid record.
+- [x] #6 Existing log call sites in firmware/src/bin/*.rs need no changes.
+- [x] #7 docs/reference/daisy-seed3.md's probe-free debug channel section describes the framing and the loss counters.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -385,6 +385,8 @@ Evidence for the park, from the files rather than ticket statuses:
 Next actionable step, in order: TASK-030.01 (ready now, `backlog task list --ready`), then .02, then .03. When .01-.03 are Done, flip 030 back to To Do for the human: only .04 remains and its acceptance criteria are HUMAN-prefixed.
 
 Also committed here: planning pass 2's edits to this file and the four child ticket files were still untracked/uncommitted in the working tree (auto_commit is off), so nothing had them.
+
+2026-10-14 closed in a live session with the owner after checking every child is Done: .01 codec and decoder with the adversarial property suite (AC 1, 5), .02 atomic-or-drop device path, sequence numbers, BOOT/STATUS counters, locked commit (AC 2, 3, 4, 6, and AC 8 there: no call-site change), .03 docs (AC 7: frame grammar, CRC and loss counters in docs/reference/daisy-seed3.md), .05 panictest table, and the hardware checks .06 (idle, zero bad frames) and .04 (66 s of controls, 6796 records, 0 bad frames, all 40 control events present, 102.5 records/s, panictest PANIC record framed with valid CRC). AC 6 rests on TASK-030.02 AC 8's recorded git diff check; a fresh diff against today is not meaningful because later tickets edited those bins.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
