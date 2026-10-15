@@ -82,7 +82,7 @@ since boot (modulo 1e8), and `body` is the ASCII-sanitised message.
 
 `query`, `restart` and `override` send host control commands on the same serial device the
 rig captures from. The grammar and codec are in `crates/asperitas-logging/src/control.rs`
-(`CTL VER|RSN|RST|SET|REL` out, `CTLR ...` replies back in the ordinary record stream); the
+(`CTL VER|RSN|RST|SET|REL|FX` out, `CTLR ...` replies back in the ordinary record stream); the
 rig uses that codec directly, so host and device cannot drift.
 
 ```
@@ -116,6 +116,34 @@ Exit codes for the control subcommands: 0 success, 1 the device rejected a comma
 I/O or timeout.
 
 Verified on the host with a fake transport, and on hardware 2026-10-15 (TASK-033.01): `query` and `restart` against `podtest` on a Seed3 re-enumerated with no BOOT/RESET and reported `reset_reason=software` (`captures/task-033-01-restart.txt`). A 240 s `capture` had `bad_frames=0` but `device_dropped=4041` in one gap (see `captures/task-033-01-podtest-240s.txt`).
+
+### Replay effect (`CTL FX`)
+
+The `rig` firmware built with `stim-excerpt` can run an `asperitas-dsp` processor over the replayed
+excerpt. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
+
+| `f` | effect | `v` (`0x0000..=0xFFFF` spans knob `0.0..=1.0`) |
+|-----|--------|------------------------------------------------|
+| `00` | bypass (default) | ignored |
+| `01` | gain | `Gain::params_from_normalised`: -60 dB to +12 dB |
+| `02` | one-pole low-pass | `OnePoleLowPass::params_from_normalised`: 20 Hz to 20 kHz, log taper |
+
+- **Default is bit-exact.** Bypass touches no sample, so captures taken without sending `FX`
+  are unchanged from before the control existed. Sending `f=00` returns to that state.
+- **Replies.** `CTLR ERR bad-value` for an unknown `f`; `CTLR ERR busy` once a capture is armed
+  (a change mid-capture would make the recording unrepeatable); `CTLR ERR unknown-verb` for any
+  other `CTL` verb, which this binary does not serve. Without `stim-excerpt` every `FX` is
+  `unknown-verb`.
+- **Timing.** The pass is held until the capture's first callback, `ARM_DELAY_MS` (2 s) after audio
+  starts. Send `FX` in that window, i.e. right after the console attaches. The `rig` host
+  subcommand for this is not written yet; until then send the frame body by hand.
+- **CRC.** The effect runs after the block is taken, so `EXCPLAY`'s CRC still describes the raw
+  stored samples and cannot detect the effect.
+- **Applied at the next block** after the reply; the processor starts from a clean state with no
+  smoothing ramp, so a given selection always produces the same output.
+
+Compile-checked only (host tests for the grammar and `ReplayFx`, `thumbv7em` build): no device
+claim until TASK-035.07.03.
 
 ## Convention: commit artifacts with hardware verification tickets
 

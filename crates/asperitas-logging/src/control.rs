@@ -22,6 +22,7 @@
 //! CTL RST                      restart the device
 //! CTL SET k=<2 hex> v=<4 hex>  override knob k with value v (0x0000..=0xFFFF spans 0.0..=1.0)
 //! CTL REL k=<2 hex>            release the override on knob k
+//! CTL FX f=<2 hex> v=<4 hex>   rig replay effect f (00 bypass, 01 gain, 02 low-pass) at value v
 //! ```
 //!
 //! Device to host:
@@ -29,8 +30,8 @@
 //! ```text
 //! CTLR VER <text>              1..=32 printable ASCII characters, no space
 //! CTLR RSN <token>             1..=16 characters from [a-z0-9_-]
-//! CTLR OK <VER|RSN|RST|SET|REL>   the verb was accepted
-//! CTLR ERR <code>              unknown-verb | malformed | bad-knob | bad-value
+//! CTLR OK <VER|RSN|RST|SET|REL|FX>   the verb was accepted
+//! CTLR ERR <code>              unknown-verb | malformed | bad-knob | bad-value | busy
 //! ```
 //!
 //! Hex is fixed width and lowercase, like the rest of the wire formats. Parsing is strict:
@@ -96,14 +97,18 @@ pub enum ErrorCode {
     BadKnob,
     /// Value not acceptable for the knob. Produced by the layer that applies it.
     BadValue,
+    /// The device cannot take this command right now (the rig refuses an effect change while a
+    /// capture is armed or dumping).
+    Busy,
 }
 
 impl ErrorCode {
-    const ALL: [ErrorCode; 4] = [
+    const ALL: [ErrorCode; 5] = [
         ErrorCode::UnknownVerb,
         ErrorCode::Malformed,
         ErrorCode::BadKnob,
         ErrorCode::BadValue,
+        ErrorCode::Busy,
     ];
 
     fn token(self) -> &'static [u8] {
@@ -112,6 +117,7 @@ impl ErrorCode {
             ErrorCode::Malformed => b"malformed",
             ErrorCode::BadKnob => b"bad-knob",
             ErrorCode::BadValue => b"bad-value",
+            ErrorCode::Busy => b"busy",
         }
     }
 }
@@ -126,8 +132,18 @@ pub enum Command {
     GetVersion,
     GetResetReason,
     Restart,
-    OverrideSet { knob: u8, value: u16 },
-    OverrideRelease { knob: u8 },
+    OverrideSet {
+        knob: u8,
+        value: u16,
+    },
+    OverrideRelease {
+        knob: u8,
+    },
+    /// Select the rig's replay effect `fx` (opaque code here) with a `0..=0xFFFF` value.
+    ReplayFx {
+        fx: u8,
+        value: u16,
+    },
 }
 
 /// The verb of a [`Command`], also what `CTLR OK` echoes.
@@ -138,15 +154,17 @@ pub enum Verb {
     Restart,
     Set,
     Release,
+    Fx,
 }
 
 impl Verb {
-    const ALL: [Verb; 5] = [
+    const ALL: [Verb; 6] = [
         Verb::Version,
         Verb::ResetReason,
         Verb::Restart,
         Verb::Set,
         Verb::Release,
+        Verb::Fx,
     ];
 
     fn token(self) -> &'static [u8] {
@@ -156,6 +174,7 @@ impl Verb {
             Verb::Restart => b"RST",
             Verb::Set => b"SET",
             Verb::Release => b"REL",
+            Verb::Fx => b"FX",
         }
     }
 }
@@ -169,6 +188,7 @@ impl Command {
             Command::Restart => Verb::Restart,
             Command::OverrideSet { .. } => Verb::Set,
             Command::OverrideRelease { .. } => Verb::Release,
+            Command::ReplayFx { .. } => Verb::Fx,
         }
     }
 
@@ -187,6 +207,12 @@ impl Command {
             Command::OverrideRelease { knob } => {
                 w.put(b" k=");
                 w.hex(u32::from(knob), 2);
+            }
+            Command::ReplayFx { fx, value } => {
+                w.put(b" f=");
+                w.hex(u32::from(fx), 2);
+                w.put(b" v=");
+                w.hex(u32::from(value), 4);
             }
             _ => {}
         }
@@ -219,6 +245,11 @@ pub fn parse_command(body: &[u8]) -> Result<Command, ControlError> {
         Verb::Release => Command::OverrideRelease {
             knob: r.field(b" k=", 2)? as u8,
         },
+        Verb::Fx => {
+            let fx = r.field(b" f=", 2)? as u8;
+            let value = r.field(b" v=", 4)? as u16;
+            Command::ReplayFx { fx, value }
+        }
     };
     r.finish()?;
     Ok(cmd)
@@ -596,6 +627,7 @@ mod tests {
             (any::<u8>(), any::<u16>())
                 .prop_map(|(knob, value)| Command::OverrideSet { knob, value }),
             any::<u8>().prop_map(|knob| Command::OverrideRelease { knob }),
+            (any::<u8>(), any::<u16>()).prop_map(|(fx, value)| Command::ReplayFx { fx, value }),
         ]
     }
 
@@ -668,6 +700,28 @@ mod tests {
     }
 
     #[test]
+    fn fx_parses_and_existing_verbs_are_unchanged() {
+        assert_eq!(
+            parse_command(b"CTL FX f=02 v=8000"),
+            Ok(Command::ReplayFx {
+                fx: 2,
+                value: 0x8000
+            })
+        );
+        assert_eq!(
+            parse_command(b"CTL SET k=01 v=ffff"),
+            Ok(Command::OverrideSet {
+                knob: 1,
+                value: 0xffff
+            })
+        );
+        assert_eq!(parse_command(b"CTL VER"), Ok(Command::GetVersion));
+        let mut b = [0u8; MAX_BODY];
+        let n = Reply::Error(ErrorCode::Busy).encode(&mut b);
+        assert_eq!(&b[..n], b"CTLR ERR busy");
+    }
+
+    #[test]
     fn adversarial_commands_are_rejected() {
         let cases: &[&[u8]] = &[
             b"",
@@ -690,6 +744,13 @@ mod tests {
             b"CTL SET v=ffff k=01",
             b"CTL SET k=01 v=-123",
             b"CTL SET k=01 v=1.5",
+            b"CTL FX",
+            b"CTL FX f=01",
+            b"CTL FX f=01 v=fff",
+            b"CTL FX f=01 v=FFFF",
+            b"CTL FX v=ffff f=01",
+            b"CTL FX k=01 v=ffff",
+            b"CTL FX f=01 v=ffff ",
             b"CTL REL",
             b"CTL REL k=zz",
             b"CTL REL k=01 v=0000",

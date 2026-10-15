@@ -105,6 +105,8 @@ mod console {
                 });
                 ok(cmd)
             }
+            // Served only by the rig's excerpt replay, not by these binaries.
+            Command::ReplayFx { .. } => Some(Reply::Error(ErrorCode::UnknownVerb)),
             // Handled by the caller: it never returns.
             Command::Restart => None,
         }

@@ -1241,6 +1241,42 @@ fn emit_exc_fail(failure: &asperitas_logging::excerpt::Failure) {
     emit_console(&body[..n]);
 }
 
+/// Answer one `CTL` record. The rig serves exactly one control verb, `FX` (replay effect, see
+/// "Replay effect" below); every other verb gets `unknown-verb`, as before this channel existed
+/// it was ignored, and a host that waits for an answer is better told. Parse failures are counted
+/// and answered by `route`.
+#[cfg(feature = "log-usb")]
+fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
+    use asperitas_logging::control::{route, ErrorCode, Reply, CONTROL};
+    let mut reply = None;
+    let rejected = route(
+        record,
+        &CONTROL,
+        |_| {},
+        |cmd| {
+            reply = Some(match cmd {
+                #[cfg(feature = "stim-excerpt")]
+                asperitas_logging::control::Command::ReplayFx { fx, value } => {
+                    // Changing the effect mid-capture would make the recording unrepeatable.
+                    if CAPTURE_ACTIVE.load(Ordering::Acquire) {
+                        Reply::Error(ErrorCode::Busy)
+                    } else if excerpt_play::select_fx(fx, value) {
+                        Reply::Ok(cmd.verb())
+                    } else {
+                        Reply::Error(ErrorCode::BadValue)
+                    }
+                }
+                _ => Reply::Error(ErrorCode::UnknownVerb),
+            });
+        },
+    );
+    if let Some(r) = reply.or(rejected) {
+        let mut body = [0u8; asperitas_logging::frame::MAX_BODY];
+        let n = r.encode(&mut body);
+        emit_console(&body[..n]);
+    }
+}
+
 /// Consume install records forever: the one consumer of `usb::inbound()`.
 ///
 /// Emits exactly one verdict per install - `EXCOK` after the header is written, or one `EXCFAIL` -
@@ -1264,6 +1300,10 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
     loop {
         let record = inbound.receive().await;
         let body = record.body();
+        if body.starts_with(asperitas_logging::control::CMD_PREFIX) {
+            handle_control(&record);
+            continue;
+        }
         let parsed = parse_record(body);
         if matches!(parsed, Err(RecordError::NotExcerpt)) {
             continue;
@@ -1403,6 +1443,16 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 // more than the estimate and is expected to fall. An estimate, not a reading: the observed figure is
 // `CAPSTAT`'s `max_block_us` on hardware (TASK-038.09). No bench claim is made here.
 //
+// ### Replay effect
+//
+// `CTL FX f=<2 hex> v=<4 hex>` selects an `asperitas_dsp::ReplayFx` for the replay: f 00 bypass (the
+// default), 01 gain, 02 one-pole low-pass; v spans the processor's `params_from_normalised` knob
+// range. Bypass touches no sample, so default captures are bit-exact with the pre-effect rig. The
+// effect runs after `take_block`, so EXCPLAY's CRC still describes the raw stored samples.
+// The pass is held until the capture's first callback, which is `ARM_DELAY_MS` after audio starts,
+// so the control must arrive in that window; it is refused with `busy` once a capture is armed.
+// `select_fx` publishes under a critical section and the callback picks it up at the next block.
+//
 // ### What EXCPLAY's CRC says
 //
 // It is the CRC of the samples handed to the DAC encoder (`replay::PassReport::crc16`). With `want`
@@ -1412,6 +1462,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 mod excerpt_play {
     use super::{emit_console, flash_of, FLASH};
     use asperitas_dsp::processor::{Frame, Processor};
+    use asperitas_dsp::replay_fx::{FxKind, ReplayFx};
     use asperitas_dsp::stimulus::Stimulus;
     use asperitas_logging::excerpt::{self, SlotHeader, HEADER_LEN};
     use asperitas_logging::replay::{
@@ -1419,7 +1470,10 @@ mod excerpt_play {
         BYTES_PER_SAMPLE,
     };
     use asperitas_logging::{console, error, info};
+    use core::cell::Cell;
     use core::fmt::Write as _;
+    use core::sync::atomic::{AtomicU32, Ordering};
+    use cortex_m::interrupt::Mutex;
     use cortex_m::peripheral::SCB;
 
     /// The slot this build plays: `ASP_RIG_EXCERPT_SLOT` when set, otherwise 0.
@@ -1500,6 +1554,22 @@ mod excerpt_play {
         REPLAY.finish().is_none()
     }
 
+    /// The pending effect selection `(kind code, value)` and a counter the callback compares with the
+    /// one it last applied, so the common case is a single relaxed atomic load.
+    static FX_REQUEST: Mutex<Cell<(u8, u16)>> = Mutex::new(Cell::new((0, 0)));
+    static FX_GENERATION: AtomicU32 = AtomicU32::new(0);
+
+    /// Request effect `code` at `value`. `false` for an unknown code, changing nothing.
+    #[cfg(feature = "log-usb")]
+    pub fn select_fx(code: u8, value: u16) -> bool {
+        if FxKind::from_code(code).is_none() {
+            return false;
+        }
+        cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).set((code, value)));
+        FX_GENERATION.fetch_add(1, Ordering::Release);
+        true
+    }
+
     /// One cache line, aligned like one, for the header read's destination.
     #[repr(align(32))]
     struct Line([u8; 32]);
@@ -1560,7 +1630,11 @@ mod excerpt_play {
         while let Some(claim) = REPLAY.claim_fill() {
             fill_half(scb, claim).await;
         }
-        Ok(ExcerptPlayer { header })
+        Ok(ExcerptPlayer {
+            header,
+            fx: ReplayFx::new(),
+            fx_seen: 0,
+        })
     }
 
     /// Refill halves as the callback drains them; after the pass, report it once.
@@ -1606,6 +1680,8 @@ mod excerpt_play {
     /// The generator the audio task holds: a thin front for the shared [`REPLAY`] core.
     pub struct ExcerptPlayer {
         header: SlotHeader,
+        fx: ReplayFx,
+        fx_seen: u32,
     }
 
     impl ExcerptPlayer {
@@ -1642,6 +1718,15 @@ mod excerpt_play {
                 let value = f32::from(sample) / 32768.0;
                 *frame = [value, value];
             }
+            let generation = FX_GENERATION.load(Ordering::Acquire);
+            if generation != self.fx_seen {
+                self.fx_seen = generation;
+                let (code, value) = cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).get());
+                if let Some(kind) = FxKind::from_code(code) {
+                    self.fx.select(kind, f32::from(value) / f32::from(u16::MAX));
+                }
+            }
+            self.fx.process(output);
         }
     }
 
