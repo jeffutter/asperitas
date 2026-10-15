@@ -33,6 +33,9 @@ pub mod encoder;
 // Ticker guard: pure arithmetic on Copy types, always available for host testing.
 pub mod ticker_guard;
 
+// Host override of knob values, upstream of DSP smoothing. Pure logic, host-testable.
+pub mod knob_override;
+
 // ---------------------------------------------------------------------------
 // Default init (no features)
 // ---------------------------------------------------------------------------

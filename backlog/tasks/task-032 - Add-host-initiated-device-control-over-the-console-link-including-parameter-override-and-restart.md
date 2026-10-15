@@ -3,15 +3,20 @@ id: TASK-032
 title: >-
   Add host-initiated device control over the console link, including parameter
   override and restart
-status: To Do
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:25'
-updated_date: '2026-09-09 01:31'
-labels: []
+updated_date: '2026-10-15 05:59'
+labels:
+  - planned
 dependencies:
   - TASK-030
   - TASK-031
+  - TASK-032.01
+  - TASK-032.02
+  - TASK-032.03
+  - TASK-032.04
 documentation:
   - docs/reference/daisy-seed3.md
 modified_files:
@@ -44,3 +49,13 @@ Restart deserves care separately from the others. A board that cannot be restart
 - [ ] #7 Firmware boots and logs normally when no host ever sends a command.
 - [ ] #8 The command set and framing are documented alongside the transport documentation from TASK-030.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against 14d22e6
+Approach: all work is delegated to four sub-tasks; the umbrella is a tracking ticket. The inbound CDC OUT path (crates/asperitas-logging/src/inbound.rs) already exists and was designed for this ticket, so no new transport is needed.
+.01 protocol codec and verb dispatcher (host-testable), .02 knob-boundary override layer with the upstream-vs-downstream smoothing test (host-testable, covers AC3/AC4), .03 firmware wiring (version, RCC reset reason, safe software restart, override apply), .04 asperitas-rig control subcommands. Order: .01 and .02 in parallel, then .03 and .04.
+Restart safety: serviced independent of audio and channel backpressure; BOOT/RESET/DFU entry untouched.
+Verification: cargo test --workspace on host; firmware builds via Makefile; hardware evidence is TASK-033.01. AC1 and AC2 are fully met only once .03 and .04 land.
+<!-- SECTION:PLAN:END -->

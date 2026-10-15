@@ -131,6 +131,7 @@ dependencies = [
 name = "asperitas-pod"
 version = "0.1.0"
 dependencies = [
+ "asperitas-dsp",
  "embassy-stm32",
  "embassy-time",
 ]
