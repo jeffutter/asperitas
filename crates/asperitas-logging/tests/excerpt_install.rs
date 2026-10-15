@@ -608,6 +608,57 @@ fn excstart_after_a_failure_or_while_verifying_starts_fresh() {
 }
 
 #[test]
+fn abort_mid_install_reports_the_open_crcs_and_ignores_the_rest() {
+    let pcm = ramp(200);
+    let crc = crc16_ccitt(&pcm);
+    let mut installer = Installer::new();
+    assert!(matches!(
+        installer.feed(start(pcm.len() as u32, crc)),
+        Action::InvalidateHeader { .. }
+    ));
+    assert_eq!(
+        installer.feed(data(0, &pcm[..EXC_CHUNK_RAW])),
+        Action::Accepted
+    );
+    let failure = installer.abort(Why::Busy);
+    assert_eq!(
+        failure,
+        Failure {
+            got: crc16_ccitt(&pcm[..EXC_CHUNK_RAW]),
+            want: crc,
+            why: Why::Busy,
+        }
+    );
+    assert!(!installer.is_open());
+    // The rest of the dead install draws no second EXCFAIL, and nothing reaches flash.
+    assert_eq!(
+        installer.feed(data(1, &pcm[EXC_CHUNK_RAW..2 * EXC_CHUNK_RAW])),
+        Action::Ignored
+    );
+    assert_eq!(installer.feed(ExcRecord::End), Action::Ignored);
+    // A later EXCSTART is a fresh install with nothing aborted.
+    assert!(matches!(
+        installer.feed(start(pcm.len() as u32, crc)),
+        Action::InvalidateHeader { aborted: None, .. }
+    ));
+}
+
+#[test]
+fn abort_with_nothing_open_declares_nothing() {
+    let mut installer = Installer::new();
+    assert_eq!(
+        installer.abort(Why::Busy),
+        Failure {
+            got: 0,
+            want: 0,
+            why: Why::Busy,
+        }
+    );
+    // Sticky like any rejection: a stray chunk of the refused upload is ignored, not `nostart`.
+    assert_eq!(installer.feed(data(0, &ramp(64))), Action::Ignored);
+}
+
+#[test]
 fn records_after_excend_fail_the_unverified_install() {
     let pcm = ramp(64);
     let mut installer = ready_to_verify(&pcm);
@@ -715,6 +766,7 @@ fn exc_fail_body_renders_got_want_and_why() {
             b"EXCFAIL got=1234 want=abcd why=malformed",
         ),
         (Why::State, b"EXCFAIL got=1234 want=abcd why=state"),
+        (Why::Busy, b"EXCFAIL got=1234 want=abcd why=busy"),
     ];
     let mut longest = 0;
     for (why, expect) in cases {

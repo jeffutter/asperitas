@@ -21,6 +21,10 @@
 //! console once the window closes, and the timing of every callback is measured against DWT so the
 //! host can tell a clean capture from a starved one. The run is a fixed timeline with no inbound
 //! control: see "Capture timeline" below.
+//!
+//! The one thing rig does read from the host is an excerpt install (TASK-038.04): framed records on
+//! the CDC OUT endpoint, written sector by sector into a QSPI slot and verified by readback. See
+//! "Excerpt install" below; it never runs alongside a capture.
 
 #![no_std]
 #![no_main]
@@ -42,9 +46,11 @@ use cortex_m::peripheral::{DWT, NVIC};
 use daisy_embassy::audio::{AudioConfig, Fs, Interface, Running, BLOCK_LENGTH};
 use daisy_embassy::hal::interrupt;
 use daisy_embassy::hal::interrupt::{InterruptExt, Priority};
-use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
+use daisy_embassy::hal::{bind_interrupts, dma, peripherals, qspi, usb};
 use daisy_embassy::{hal, new_daisy_board, DaisyBoard};
 use embassy_executor::{InterruptExecutor, Spawner};
+use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
+use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
 
 // ---------------------------------------------------------------------------
@@ -117,6 +123,16 @@ unsafe impl defmt::Logger for Logger {
 // SAI1 is deliberately absent from this struct - see the handler written by hand below.
 bind_interrupts!(pub struct RigUsbIrqs {
     OTG_FS => usb::InterruptHandler<peripherals::USB_OTG_FS>;
+});
+
+// The QSPI flash's two vectors, for `FlashBuilder::build_async` (the shape of daisy-embassy's
+// `examples/flash.rs`). A struct of their own rather than two more lines in `RigUsbIrqs`, because the
+// two have nothing in common but this binary: USB is bound whatever the transport, flash whether or
+// not anything installs, and folding them together would make the next reader wonder which half the
+// other depends on. SAI1 stays out of both, for the reason given at its hand-written handler.
+bind_interrupts!(pub struct RigFlashIrqs {
+    QUADSPI => qspi::InterruptHandler<peripherals::QUADSPI>;
+    MDMA => dma::InterruptHandler<peripherals::MDMA_CH0>;
 });
 
 // ---------------------------------------------------------------------------
@@ -551,6 +567,11 @@ static DUMPED: AtomicU32 = AtomicU32::new(0);
 static ARMED: AtomicBool = AtomicBool::new(false);
 /// Whether the producer currently owns a `Filling` block.
 static FILLING: AtomicBool = AtomicBool::new(false);
+/// Set by the capture timeline immediately before it arms and cleared only after its dump has
+/// ended, so it covers armed, filling, the drain of the last block, judging and dumping as one span
+/// with no gap between them. The excerpt installer refuses to touch flash while it is set. `ARMED`
+/// alone would not do: the producer clears it on overrun, minutes before the dump that follows.
+static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Set by the first audio callback.
 static AUDIO_STARTED: AtomicBool = AtomicBool::new(false);
 /// `CAPSTAT`'s `audio_exit`: 0 running, 1 `start_interface` failed, 2 `start_callback` failed.
@@ -865,9 +886,9 @@ fn report_stimulus_start(first_block: u32, end_block: u32, samples: u32) {
 // Capture timeline
 // ---------------------------------------------------------------------------
 //
-// rig arms itself. There is no inbound console channel to arm it through (runtime control is
-// TASK-032), so the run is a fixed timeline, repeated by resetting the board, which `slow-boot`
-// keeps safe for DFU:
+// rig arms itself. There is no inbound control channel to arm it through (runtime control is
+// TASK-032; the inbound path rig does read carries excerpt installs and nothing else), so the run is a
+// fixed timeline, repeated by resetting the board, which `slow-boot` keeps safe for DFU:
 //
 //   boot      BOOT, RIGCFG, RIGGEN, CAPMAX, then audio starts; a periodic stimulus plays from here,
 //             a one-shot one (the sweep) outputs silence until the first captured callback
@@ -887,8 +908,11 @@ fn report_stimulus_start(first_block: u32, end_block: u32, samples: u32) {
 // gates guarantee the window fits the ring, and a ring fill stops rather than overwrite, so nothing is
 // lost by waiting.
 //
-// Single-shot looks like a missing feature. It is the absence of an inbound channel, stated here so
-// nobody adds a re-arm path that nothing can trigger.
+// Single-shot looks like a missing feature. It is the absence of an inbound control channel, stated
+// here so nobody adds a re-arm path that nothing can trigger.
+//
+// `CAPTURE_ACTIVE` spans arm to `DUMPEND`. An excerpt install is refused for that whole span, and one
+// already open when it begins is abandoned at its next record: see "Excerpt install".
 
 /// Run the timeline above once, then idle. `one_shot` is the stimulus's `one_shot_samples`.
 async fn run_capture(ring: Ring, time_base: TimeBase, one_shot: Option<u32>) {
@@ -907,6 +931,7 @@ async fn run_capture(ring: Ring, time_base: TimeBase, one_shot: Option<u32>) {
     } else {
         info!("rig: capture armed for {CAPTURE_SECONDS} s ({WINDOW_BLOCKS} blocks)");
     }
+    CAPTURE_ACTIVE.store(true, Ordering::Release);
     ARMED.store(true, Ordering::Release);
 
     let deadline =
@@ -932,6 +957,7 @@ async fn run_capture(ring: Ring, time_base: TimeBase, one_shot: Option<u32>) {
         report_stimulus_start(first_block, end_block, samples);
     }
     dump_ring(ring, first_block, end_block).await;
+    CAPTURE_ACTIVE.store(false, Ordering::Release);
     info!("rig: run complete; reset to capture again");
 }
 
@@ -1061,6 +1087,256 @@ async fn dump_ring(_ring: Ring, first: u32, end: u32) {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Excerpt install
+// ---------------------------------------------------------------------------
+//
+// The host streams `EXCSTART` / `EXCDATA` / `EXCEND` records (`asperitas_logging::excerpt`) over the
+// CDC OUT endpoint; `usb::inbound()` hands them over whole and CRC-checked; `excerpt::Installer` turns
+// them into flash actions; the task below performs each action and nothing else. Every protocol
+// decision - ordering, short and overrun chunks, the stream CRC, when a sector is full, whether the
+// readback earns an `EXCOK` - is the installer's, and is covered by its host suite
+// (`crates/asperitas-logging/tests/excerpt_install.rs`, including `dropping_any_frame_never_verifies`
+// for truncation and the CRC-mismatch verdict tests for corruption). This side adds only flash I/O,
+// the capture gate and the reporting, so a truncated or corrupted upload reaches `EXCOK` here exactly
+// when it does there: never.
+//
+// ### Only the async flash API, and what that costs
+//
+// daisy-embassy's blocking `read` / `write` / `erase` wait on the chip's WIP bit in an unbounded busy
+// loop (`wait_for_write`): a stuck chip would hang thread mode, and with it the console that could
+// say so. The async calls auto-poll the status register in QUADSPI hardware and wake on its match
+// interrupt, so an erase pause is an await that costs thread mode nothing. Their price is that each
+// wait is bounded by `with_timeout(..).expect(..)` - 600 ms per sector erase, 1.6 ms per 256-byte page
+// program, twice the datasheet maxima - so a chip that misses one panics, and the panic handler turns
+// that into a `PANIC` record and a red LED. That is the chosen failure: loud and attributable, rather
+// than a silent hang. `firmware/build.rs` fails the build if this file ever calls a blocking flash
+// method or `FlashBuilder::build`. The one blocking wait left in the image is the driver's own
+// `reset()` inside `build_async`, run once at boot before audio starts.
+//
+// Wall clock is dominated by erases: a full 516,096-byte slot is 127 PCM sectors plus the header
+// sector, and at the IS25LP064A's typical sector erase (tens of milliseconds) that is seconds; a
+// 288,000-byte corpus clip is 71 + 1. Predicted against observed is TASK-038.04.06's table, not a
+// figure this comment can know.
+//
+// ### Why an install cannot disturb the capture
+//
+// 1. It never overlaps one. `CAPTURE_ACTIVE` spans arm to `DUMPEND`; an `EXCSTART` inside it is
+//    refused with `EXCFAIL ... why=busy`, and an install already open when it begins is abandoned the
+//    same way at its next record, so at most the one flash operation in flight runs into the window.
+// 2. It runs on the thread executor only. The SAI1 callback never names `FLASH`, the installer or
+//    anything below; its world is the ring and the atomics above.
+// 3. Its interrupts sit below the audio executor. `hal::init` gives MDMA `Priority::P0` (embassy-stm32
+//    0.6.0 `Config::default()`) and `Qspi::new_bank1` enables QUADSPI at the reset value, also P0, so
+//    both would preempt the P6 callback. `main` drops both to P7 right after `build_async`. Neither
+//    handler wakes anything at audio priority - each wakes a thread-mode task - so there is no reason
+//    for them to outrank SAI1, unlike the SAI DMA streams, which pend it. At P7 they preempt the
+//    callback zero times, and the most the callback can do to them is delay a wake by one callback
+//    (~76 us against the 1.6 ms page timeout). Priced at P0 instead, for whoever moves them: one page
+//    program is one MDMA transfer-complete plus one QUADSPI status-match interrupt, a few hundred
+//    cycles each, and at the datasheet's typical ~0.2 ms per page at most four pages fit a 666 us
+//    period - about eight ISRs, a few microseconds, against the ~590 us of headroom the callback
+//    leaves. Affordable, but not free, and not needed. The `nvic priority` line at boot reads both
+//    back.
+//
+// Bus traffic is the remaining coupling: MDMA writes the readback into AXI SRAM, which the SAI DMA
+// also reaches. Arbitration there is per beat, nanoseconds, and SDRAM (the ring) is not on the path.
+
+/// The board's QSPI flash, async-only (see above).
+type RigFlash = daisy_embassy::flash::Flash<'static, hal::mode::Async>;
+
+/// The one flash handle, built once in `main` before audio starts.
+///
+/// A mutex because two thread-mode tasks will want it: the excerpt installer here, and the replay
+/// refill (TASK-038.04.03.02). `ThreadModeRawMutex` because thread mode is the only place flash is
+/// ever touched - the raw mutex panics if an interrupt tries - and the `Option` because a `static`
+/// cannot run `build_async`. The rule for every user: hold the guard across your own flash awaits
+/// only, never across a channel receive or a timer, or the other user stalls behind a host that is
+/// thinking.
+static FLASH: Mutex<ThreadModeRawMutex, Option<RigFlash>> = Mutex::new(None);
+
+/// Sector size as a `usize`, for array lengths. The installer lends sectors as `[u8; SECTOR]`.
+#[cfg(feature = "log-usb")]
+const SECTOR_BYTES: usize = asperitas_logging::excerpt::SECTOR as usize;
+
+/// Erase or rewrite one whole sector of `slot`: erase when `data` is `None`, erase then program
+/// `data` otherwise. The only place this binary erases or writes QSPI.
+///
+/// The asserts run before the driver is called, because the driver erases the whole 4 KiB sector
+/// containing any address it is handed and asserts nothing but the chip's top address: an
+/// unaligned or out-of-slot address would silently take a neighbouring slot's sector with it.
+/// Length needs no runtime check - `[u8; SECTOR_BYTES]` is the only shape `data` can have - so
+/// every write is exactly one sector at a sector boundary inside the slot it names.
+#[cfg(feature = "log-usb")]
+async fn rewrite_sector(
+    flash: &mut RigFlash,
+    slot: u8,
+    address: u32,
+    data: Option<&[u8; SECTOR_BYTES]>,
+) {
+    use asperitas_logging::excerpt::{slot_base, SECTOR, SLOT_SPAN};
+    let base = slot_base(slot);
+    assert!(
+        base.is_some_and(|base| address.is_multiple_of(SECTOR)
+            && address >= base
+            && address + SECTOR <= base + SLOT_SPAN),
+        "rig: flash sector write outside its slot"
+    );
+    match data {
+        Some(data) => flash.write_async(address, data).await,
+        None => flash.erase_async(address, SECTOR).await,
+    }
+}
+
+/// Read `bytes` from `address` in sector-sized chunks and return their CRC-16 and how many bytes
+/// were read. `scratch` is the chunk buffer; the range must lie inside `slot`.
+#[cfg(feature = "log-usb")]
+async fn readback_crc(
+    flash: &mut RigFlash,
+    slot: u8,
+    address: u32,
+    bytes: u32,
+    scratch: &mut [u8; SECTOR_BYTES],
+) -> (u16, u32) {
+    use asperitas_logging::excerpt::{slot_base, SLOT_SPAN};
+    use asperitas_logging::frame::{crc16_ccitt_update, CRC16_INITIAL};
+    assert!(
+        slot_base(slot).is_some_and(|base| address >= base && address + bytes <= base + SLOT_SPAN),
+        "rig: flash readback outside its slot"
+    );
+    let mut crc = CRC16_INITIAL;
+    let mut read = 0u32;
+    while read < bytes {
+        let n = (bytes - read).min(SECTOR_BYTES as u32) as usize;
+        flash.read_async(address + read, &mut scratch[..n]).await;
+        crc = crc16_ccitt_update(crc, &scratch[..n]);
+        read += n as u32;
+    }
+    (crc, read)
+}
+
+/// The flash handle behind a held `FLASH` guard.
+///
+/// `main` stores the handle before it starts polling anything that calls this, so `None` here is a
+/// boot-order bug, not a runtime condition worth a quieter answer.
+#[cfg(feature = "log-usb")]
+fn flash_of<'g>(
+    guard: &'g mut embassy_sync::mutex::MutexGuard<'_, ThreadModeRawMutex, Option<RigFlash>>,
+) -> &'g mut RigFlash {
+    guard
+        .as_mut()
+        .expect("rig: FLASH is stored before the install task runs")
+}
+
+/// Report a failed install as `EXCFAIL`.
+#[cfg(feature = "log-usb")]
+fn emit_exc_fail(failure: &asperitas_logging::excerpt::Failure) {
+    let mut body = [0u8; asperitas_logging::frame::MAX_BODY];
+    let n = asperitas_logging::excerpt::exc_fail_body(failure, &mut body);
+    emit_console(&body[..n]);
+}
+
+/// Consume install records forever: the one consumer of `usb::inbound()`.
+///
+/// Emits exactly one verdict per install - `EXCOK` after the header is written, or one `EXCFAIL` -
+/// and no progress records: the outcome is what the host waits for, and per-sector chatter would
+/// share the pipe with everything else for no reader. Holds `FLASH` for one action at a time.
+///
+/// The installer's 4 KiB sector buffer and the 4 KiB `scratch` live in this future, which is part of
+/// `main`'s statically allocated task, not on the stack.
+#[cfg(feature = "log-usb")]
+async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
+    use asperitas_logging::excerpt::{
+        exc_ok_body, parse_record, Action, ExcRecord, Installer, RecordError, Verdict, Why,
+        HEADER_LEN,
+    };
+
+    let mut installer = Installer::new();
+    let mut scratch = [0u8; SECTOR_BYTES];
+    // The slot the open install named in its `EXCSTART`, so every sector write is bounds-checked
+    // against the slot the host asked for, not against one re-derived from the address being checked.
+    let mut target: Option<u8> = None;
+    loop {
+        let record = inbound.receive().await;
+        let body = record.body();
+        let parsed = parse_record(body);
+        if matches!(parsed, Err(RecordError::NotExcerpt)) {
+            continue;
+        }
+
+        // The capture gate, checked per record. Checking and acting happen with no await between
+        // them, and the timeline sets `CAPTURE_ACTIVE` on this same thread executor, so the two
+        // cannot interleave inside that span.
+        let starting = matches!(parsed, Ok(ExcRecord::Start { .. }));
+        if CAPTURE_ACTIVE.load(Ordering::Acquire) && (starting || installer.is_open()) {
+            info!("rig: excerpt install refused: a capture is armed or dumping");
+            emit_exc_fail(&installer.abort(Why::Busy));
+            continue;
+        }
+
+        let action = match parsed {
+            Ok(parsed) => installer.feed(parsed),
+            // Re-parsed inside, which is what turns the grammar error into `why=malformed`.
+            Err(_) => installer.feed_body(body),
+        };
+        match action {
+            Action::InvalidateHeader {
+                slot,
+                address,
+                aborted,
+            } => {
+                if let Some(old) = aborted {
+                    info!("rig: excerpt install for slot {old} abandoned by a new EXCSTART");
+                }
+                info!("rig: excerpt install into slot {slot} started");
+                target = Some(slot);
+                let mut guard = FLASH.lock().await;
+                rewrite_sector(flash_of(&mut guard), slot, address, None).await;
+            }
+            Action::WriteSector { address, data, .. } => {
+                let slot = target.expect("rig: the installer wrote a sector with no EXCSTART seen");
+                let mut guard = FLASH.lock().await;
+                rewrite_sector(flash_of(&mut guard), slot, address, Some(data)).await;
+            }
+            Action::Verify {
+                slot,
+                address,
+                bytes,
+            } => {
+                let mut guard = FLASH.lock().await;
+                let flash = flash_of(&mut guard);
+                let (crc, len) = readback_crc(flash, slot, address, bytes, &mut scratch).await;
+                match installer.verdict(crc, len) {
+                    Verdict::Ok {
+                        slot,
+                        address,
+                        header,
+                        encoded,
+                    } => {
+                        // The header goes last and as a whole sector: its presence is the proof
+                        // that everything before it read back clean.
+                        scratch.fill(0xFF);
+                        scratch[..HEADER_LEN].copy_from_slice(&encoded);
+                        rewrite_sector(flash, slot, address, Some(&scratch)).await;
+                        drop(guard);
+                        info!("rig: excerpt slot {slot} installed and verified");
+                        let mut out = [0u8; asperitas_logging::frame::MAX_BODY];
+                        let n = exc_ok_body(&header, &mut out);
+                        emit_console(&out[..n]);
+                    }
+                    Verdict::Fail(failure) => {
+                        drop(guard);
+                        error!("rig: excerpt readback did not match; slot {slot} left blank");
+                        emit_exc_fail(&failure);
+                    }
+                }
+            }
+            Action::Reject(failure) => emit_exc_fail(&failure),
+            Action::Accepted | Action::Ignored => {}
+        }
+    }
+}
+
 /// The audio callback, running on [`AUDIO_EXECUTOR`] at SAI1's priority.
 ///
 /// `generator` is a sole `&'static mut`: the only other handle was consumed by the move through
@@ -1069,18 +1345,19 @@ async fn dump_ring(_ring: Ring, first: u32, end: u32) {
 /// highest-rate path in the firmware, where the whole point of the interrupt executor is to
 /// avoid one.
 ///
-/// ### Timer-slot budget: 5 named users of 8 slots, and none of them here
+/// ### Timer-slot budget: 6 named users of 8 slots, and none of them here
 ///
 /// `generic-queue-8` is fixed by daisy-embassy's own `embassy-time` dependency; adding a
 /// `generic-queue-N` here would collide on `const QUEUE_SIZE` and fail to compile, so eight is
 /// the whole budget. Its users: boot 1 (DWT calibration, the codec's 2 ms startup delay,
 /// `slow-boot`'s linger), `CAPSTAT` reporting ticker 1, LED blink 1, capture timeline 1 (arm delay,
-/// window deadline, early-stop poll), dump retry 1, USB drain 0 - deliberately zero, see `usb.rs`'s
-/// parking drain. Five, as a ceiling. In practice fewer are held at once: slots are keyed by
-/// *waker*, every one of those five runs inside `main`'s task (boot before the select, the rest
+/// window deadline, early-stop poll), dump retry 1, excerpt install 1 (the flash driver's
+/// `with_timeout` on every erase and page program), USB drain 0 - deliberately zero, see `usb.rs`'s
+/// parking drain. Six, as a ceiling. In practice fewer are held at once: slots are keyed by
+/// *waker*, every one of those six runs inside `main`'s task (boot before the select, the rest
 /// joined inside it), and so they collapse onto that task's single slot. Overflow does not panic:
 /// `queue_generic.rs` evicts the furthest-out timer and wakes it early, so a blown budget shows up
-/// as a mistimed `CAPSTAT` rather than an error. Count a new timer against the five above, and a
+/// as a mistimed `CAPSTAT` rather than an error. Count a new timer against the six above, and a
 /// new *task* with a timer against the eight.
 ///
 /// This task takes none of them: after `start_callback` is awaited there is nothing left to
@@ -1381,6 +1658,10 @@ async fn main(_spawner: Spawner) {
     // internally for exactly this.
     let declared_hz = hal::rcc::clocks(&p.RCC).sys.to_hertz().map(|hz| hz.0);
 
+    // The flash's DMA channel, taken before the macro: `new_daisy_board!` moves the fields it uses
+    // out of `p` and leaves `MDMA_CH0` behind, but `p` is gone from view after this line.
+    let flash_dma = p.MDMA_CH0;
+
     let board: DaisyBoard<'_> = new_daisy_board!(p);
 
     // Discard USB peripherals - usb::init() steals them directly via Peri::steal(). Same
@@ -1423,6 +1704,15 @@ async fn main(_spawner: Spawner) {
     let ring = Ring {
         base: sdram.init(&mut embassy_time::Delay).cast::<u8>(),
     };
+
+    // The QSPI flash, async-only, then its two vectors below the audio executor: see "Excerpt install"
+    // for both choices. Before audio starts, because `build_async` resets the chip with the driver's
+    // blocking status wait; that is the only blocking flash wait in the image, and it runs once,
+    // here, with nothing yet to starve.
+    let flash = board.flash.build_async(flash_dma, RigFlashIrqs);
+    interrupt::QUADSPI.set_priority(Priority::P7);
+    interrupt::MDMA.set_priority(Priority::P7);
+    *FLASH.lock().await = Some(flash);
 
     // Build the generator before audio starts. `ExponentialSweep`'s constructor peak-normalises
     // by scanning its whole 384,000-sample record, which is milliseconds at 48 kHz but belongs
@@ -1491,18 +1781,29 @@ async fn main(_spawner: Spawner) {
 
     // Effective NVIC priorities, read back after the vector was unmasked. Lower numbers win on
     // Cortex-M (P0 is the highest, seven implemented bits, no subpriority on this part), so the
-    // claim being checked is `tim5 < sai1` and `dma1_* < sai1`.
+    // claim being checked is `tim5 < sai1` and `dma1_* < sai1`, and the opposite for the flash:
+    // `sai1 < quadspi` and `sai1 < mdma`.
     info!(
-        "rig: nvic priority sai1={} dma1_stream0={} dma1_stream1={} tim5={}",
+        "rig: nvic priority sai1={} dma1_stream0={} dma1_stream1={} tim5={} quadspi={} mdma={}",
         NVIC::get_priority(interrupt::SAI1),
         NVIC::get_priority(interrupt::DMA1_STREAM0),
         NVIC::get_priority(interrupt::DMA1_STREAM1),
         NVIC::get_priority(interrupt::TIM5),
+        NVIC::get_priority(interrupt::QUADSPI),
+        NVIC::get_priority(interrupt::MDMA),
     );
 
     // Thread mode is left to what must not run at audio priority: the console drain, which is also
-    // the reporting task that paces `STATUS`, the boot LED, `CAPSTAT`, and the capture timeline with
-    // its dump. None of them has a deadline.
+    // the reporting task that paces `STATUS`, the boot LED, `CAPSTAT`, the capture timeline with
+    // its dump, and the excerpt installer. None of them has a deadline.
+    //
+    // The inbound reader is switched on here and only here, before `run()` is first polled: rig is
+    // the one binary with a consumer for it, and every other binary keeps EP OUT unread.
+    #[cfg(feature = "log-usb")]
+    let install_fut = run_install(asperitas_logging::usb::enable_inbound());
+    // No console, no inbound path, nothing to install from. Same `pending()` stand-in as below.
+    #[cfg(not(feature = "log-usb"))]
+    let install_fut = core::future::pending::<()>();
     #[cfg(feature = "log-usb")]
     let console_fut = asperitas_logging::usb::run();
     // No drain task exists without the console, and RTT needs no task to exist at all - the
@@ -1511,10 +1812,12 @@ async fn main(_spawner: Spawner) {
     #[cfg(not(feature = "log-usb"))]
     let console_fut = core::future::pending::<()>();
     let led_fut = asperitas_logging::led::blink_task();
-    // The timeline finishes after its dump; the reporter never does, so the join never completes.
-    let rig_fut = embassy_futures::join::join(
+    // The timeline finishes after its dump; the reporter and the installer never do, so the join
+    // never completes.
+    let rig_fut = embassy_futures::join::join3(
         report_capstat(time_base),
         run_capture(ring, time_base, one_shot),
+        install_fut,
     );
 
     // All three loop forever, so reaching past the select means one of them returned: the thread

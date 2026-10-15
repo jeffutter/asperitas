@@ -135,4 +135,8 @@ defmt = "1"
 defmt-rtt = { version = "1", optional = true }
 embassy-time = "0.5"
 embassy-futures = "0.1"
+# `rig` keeps its QSPI flash handle in a `Mutex<ThreadModeRawMutex, _>` so the excerpt install task
+# and the replay refill (TASK-038.04.03.02) can share it. Major 0.6 on purpose: it is the one
+# asperitas-logging already links, so this adds an edge to the graph and no new crate.
+embassy-sync = "0.6"
 static_cell = "2"

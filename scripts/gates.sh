@@ -267,9 +267,9 @@ gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-
 # skipped that way is precisely the decoration that would read green while the drift lives.
 #
 # What it adds to the tier, from three consecutive `commit` runs on this tree: 0.464 s / 0.457 s / 0.457 s. gate-costs:exempt reason="the three samples behind one published figure, which is keyed below"
-# About a tenth of what the tier itself costs at ~8 s {{tier:commit}} - a tenth of pre-commit spent to make
+# About a tenth of what the tier itself costs at ~13 s {{tier:commit}} - a tenth of pre-commit spent to make
 # eight files' worth of cost figures impossible to get wrong, which is what the ledger is for. It publishes
-# 0.54 s {{gate:gate-costs-current}} warm, and that is the figure anything else here quotes.
+# 0.57 s {{gate:gate-costs-current}} warm, and that is the figure anything else here quotes.
 #
 # Adding this line invalidated its own measurement set, and not in a way a person could fix by running
 # the recorder. A new gate can only be priced by a tier run that contains it, and on that first run it is
@@ -405,16 +405,16 @@ gate push cargo-doc-all-features "=== cargo doc (workspace, all features) ===" \
 gate push bootloaded-builds "=== firmware bootloaded layout builds ===" scripts/check-bootloaded-builds.sh
 
 gate push rig-stim-ess-build "=== firmware rig build (stim-ess) ===" -C firmware \
-  cargo build --release --features seed3,stim-ess --bin rig
+  env ASPERITAS_LAYOUT=bootloaded cargo build --release --features seed3,stim-ess --bin rig
 
 gate push rig-stim-pulse-build "=== firmware rig build (stim-pulse) ===" -C firmware \
-  cargo build --release --features seed3,stim-pulse --bin rig
+  env ASPERITAS_LAYOUT=bootloaded cargo build --release --features seed3,stim-pulse --bin rig
 
 gate push rig-window-override-build "=== firmware rig build (shortened capture window) ===" -C firmware \
-  env ASP_RIG_CAPTURE_SECONDS=30 cargo build --release --features seed3 --bin rig
+  env ASPERITAS_LAYOUT=bootloaded ASP_RIG_CAPTURE_SECONDS=30 cargo build --release --features seed3 --bin rig
 
 gate push rig-ring-fill-build "=== firmware rig build (ring-fill capture window) ===" -C firmware \
-  env ASP_RIG_CAPTURE_SECONDS=ring cargo build --release --features seed3 --bin rig
+  env ASPERITAS_LAYOUT=bootloaded ASP_RIG_CAPTURE_SECONDS=ring cargo build --release --features seed3 --bin rig
 
 # One spelling of the RTT-only cfg set, shared by the build below and the provenance gate after it.
 # Kept as two literals they are free to drift, and a drifted expectation makes the gate refuse the
@@ -426,7 +426,10 @@ RTT_ONLY_FEATURES="seed3 log-defmt"
 # every tier that runs them ends on the RTT-only image -- which is what the provenance gate below
 # asserts rather than what any comment here claims. So this pair stays adjacent, in this order, with
 # nothing building firmware after it.
-gate push firmware-cross-compile "=== firmware cross-compile ===" -C firmware cargo build --release --features seed3
+# rig is left out: with the excerpt install path it no longer links into the 128 KB internal flash
+# (TASK-038.04.05), and the bootloaded-builds gate above builds it for the layout it does fit.
+gate push firmware-cross-compile "=== firmware cross-compile ===" -C firmware \
+  cargo build --release --features seed3 --bin main --bin blinky --bin podtest --bin ledtest --bin panictest
 
 # The RTT-only image is the only build that links build.rs's `-Tdefmt.x` fragment and the
 # `#[cfg(not(feature = "log-defmt"))]` logger stubs in the same binary; the console build above
@@ -465,7 +468,7 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 #
 # `push` tier and placed here because pre-commit builds no firmware, so the ELFs it reads may not exist
 # at all -- and inventing a skip path for that is the blind spot TASK-062 had to remove from elf-check.
-# Measured 0.94 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
+# Measured 0.95 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
 # processes, six objdumps at ~29 ms {{component:objdump-invocation}} each and six objcopies at
 # ~31 ms {{component:objcopy-invocation}}. Its parser's own assertions are a separate commit-tier gate,
 # `=== load-addresses --selftest ===`, placed with the other selftests ahead of every cargo invocation --
@@ -499,7 +502,7 @@ gate commit rig-stim-pulse-clippy "=== firmware clippy (rig, stim-pulse) ===" -C
 gate push cargo-test "=== cargo test ===" cargo test --workspace
 
 # THE ONE DELIBERATELY CI-ONLY GATE, and it is priced rather than merely absent (TASK-061 AC #3).
-# ~87 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
+# ~82 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
 # flag -- more than every other push-tier gate combined. Its compile-time half DOES run in the push tier,
 # as the pod-hw clippy above, so what stays remote is runtime coverage of pod-hw code paths. Accepted
 # because CI is the authority for that coverage, TASK-018.01's fixup made the same split on purpose

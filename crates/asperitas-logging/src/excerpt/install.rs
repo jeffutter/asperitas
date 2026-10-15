@@ -47,6 +47,7 @@
 //! | a record the grammar refuses, including an `EXCSTART` with an odd or over-capacity length | `malformed` |
 //! | streamed bytes whose CRC is not the declared one | `stream` |
 //! | [`Installer::verdict`] called with no install awaiting one | `state` |
+//! | the device refused the install outright through [`Installer::abort`] (rig: a capture is armed or dumping) | `busy` |
 //! | readback length differs from the declared one | `length` |
 //! | readback CRC differs from the declared one | (none: the bare `got=`/`want=` form) |
 //!
@@ -145,6 +146,9 @@ pub enum Why {
     Malformed(RecordError),
     /// [`Installer::verdict`] with no install awaiting verification.
     State,
+    /// The caller refused the install through [`Installer::abort`] because the device is doing
+    /// something flash traffic must not overlap (rig: a capture armed, filling or dumping).
+    Busy,
 }
 
 impl Why {
@@ -161,6 +165,7 @@ impl Why {
             Why::Early { .. } => Some("early"),
             Why::Malformed(_) => Some("malformed"),
             Why::State => Some("state"),
+            Why::Busy => Some("busy"),
         }
     }
 }
@@ -435,13 +440,24 @@ impl Installer {
         matches!(self.state, State::Receiving(_) | State::Verifying(_))
     }
 
-    fn fail(&mut self, why: Why) -> Action<'_> {
+    /// Fail the install for a reason the caller decided rather than the stream, and return the
+    /// failure to report with [`exc_fail_body`].
+    ///
+    /// The installer then behaves exactly as after any other rejection: the rest of the dead
+    /// install is [`Action::Ignored`] until the next `EXCSTART`, so one refused upload costs the
+    /// host one `EXCFAIL`, not one per remaining chunk. With no install open, `got` and `want` are
+    /// both 0, as for every failure that had nothing declared to compare against.
+    pub fn abort(&mut self, why: Why) -> Failure {
         let (got, want) = match self.state {
             State::Receiving(open) | State::Verifying(open) => (open.crc, open.want),
             State::Idle | State::Failed => (0, 0),
         };
         self.state = State::Failed;
-        Action::Reject(Failure { got, want, why })
+        Failure { got, want, why }
+    }
+
+    fn fail(&mut self, why: Why) -> Action<'_> {
+        Action::Reject(self.abort(why))
     }
 }
 
