@@ -1,0 +1,26 @@
+{
+  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-gain6.console.zst",
+  "comparison": {
+    "dc_lsb": 1.3511906146424755,
+    "delay_samples": 81,
+    "gain_deviation_db": 5.990953434541531,
+    "loop_gain_db": 5.580953434541531,
+    "reference_peak_lsb": 19106.61576665302,
+    "reference_rms_lsb": 1815.0203582160616,
+    "residual_peak_at": 1502,
+    "residual_peak_db": -21.506952835851063,
+    "residual_peak_lsb": 1606.335022438784,
+    "residual_rms_db": -30.827961644542803,
+    "residual_rms_lsb": 52.1775182253128,
+    "samples": 144000
+  },
+  "excerpt": "audio/instruments/mandolin_single_note_soft.wav",
+  "failures": [
+    "outside tolerance: loop gain 5.581 dB deviates 5.991 dB from baseline"
+  ],
+  "fx": {
+    "code": 0,
+    "value": 0
+  },
+  "pass": false
+}

@@ -136,7 +136,8 @@ excerpt. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
   `unknown-verb`.
 - **Timing.** The pass is held until the capture's first callback, `ARM_DELAY_MS` (2 s) after audio
   starts. Send `FX` in that window, i.e. right after the console attaches. The `rig` host
-  subcommand for this is not written yet; until then send the frame body by hand.
+  subcommand for this is not written yet; `cargo run -p asperitas-logging --example ctl_frame -- <fx hex> <value hex>` prints the
+  framed command to send, and a session script that sends it the moment the console attaches (about 3.7 s after a probe reset) lands inside the window.
 - **CRC.** The effect runs after the block is taken, so `EXCPLAY`'s CRC still describes the raw
   stored samples and cannot detect the effect.
 - **Applied at the next block** after the reply; the processor starts from a clean state with no
@@ -149,8 +150,19 @@ limits are the same at every setting; a capture taken at a different setting tha
 fails on loop gain (gain) or residual/alignment (low-pass). Host-synthesized captures cover this;
 a device capture at non-identity settings is TASK-035.07.03.
 
-Compile-checked only (host tests for the grammar and `ReplayFx`, `thumbv7em` build): no device
-claim until TASK-035.07.03.
+Measured on the board 2026-10-15 (TASK-035.07.03), `mandolin_single_note_soft` in slot 0, 10 s window, each
+setting sent right after the console attached and answered `CTLR OK FX`:
+
+| `CTL FX` | `analyze --fx --fx-value` | loop gain vs model | residual RMS | residual peak | verdict |
+|---|---|---|---|---|---|
+| `f=01 v=eaaa` (+6 dB) | `gain 0xEAAA` | -0.009 dB | -30.8 dB | -21.5 dB | pass |
+| `f=01 v=aaaa` (-12 dB) | `gain 0xAAAA` | -0.009 dB | -30.8 dB | -21.5 dB | pass |
+| `f=02 v=aaaa` (2 kHz) | `lowpass 0xAAAA` | -0.009 dB | -32.9 dB | -30.0 dB | pass |
+
+Each capture aligned at 81 samples. The wrong setting fails: the +6 dB capture against `bypass` is 5.99 dB off on
+loop gain, the -12 dB capture against the +6 dB setting fails, and the low-pass capture against `bypass` fails. The
+callback cost with the effect on is `max_block_us=19` against 15 without, 30 of 30 blocks delivered, no overruns. The
+captures are `audio/captures/2026-10-15-rig-fx-*.console.zst` and the reports `captures/task-035-07-03-*.json`.
 
 ## Convention: commit artifacts with hardware verification tickets
 
