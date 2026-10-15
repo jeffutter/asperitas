@@ -459,6 +459,46 @@ pub fn route(
 }
 
 // ---------------------------------------------------------------------------
+// Reset reason (STM32H7 RCC_RSR)
+// ---------------------------------------------------------------------------
+
+/// Map an STM32H7 `RCC_RSR` value to the token `CTLR RSN` reports.
+///
+/// Several flags are set together on one reset, so the choice is by priority, most specific
+/// cause first: a power-on reset also sets BORRSTF and PINRSTF, and a software reset also sets
+/// PINRSTF (the reset is driven out through NRST). Reading PINRSTF first would label every
+/// restart "pin". Bits per RM0433 RCC_RSR: 17 CPURSTF, 21 BORRSTF, 22 PINRSTF, 23 PORRSTF,
+/// 24 SFTRSTF, 26 IWDG1RSTF, 28 WWDG1RSTF, 30 LPWRRSTF. No cause flag set (cleared by a
+/// bootloader before our code ran) is `unknown`.
+pub fn reset_reason_from_rsr(rsr: u32) -> ReasonText {
+    const PORRSTF: u32 = 1 << 23;
+    const BORRSTF: u32 = 1 << 21;
+    const IWDG1RSTF: u32 = 1 << 26;
+    const WWDG1RSTF: u32 = 1 << 28;
+    const LPWRRSTF: u32 = 1 << 30;
+    const SFTRSTF: u32 = 1 << 24;
+    const PINRSTF: u32 = 1 << 22;
+    let token: &[u8] = if rsr & PORRSTF != 0 {
+        b"power-on"
+    } else if rsr & BORRSTF != 0 {
+        b"brown-out"
+    } else if rsr & IWDG1RSTF != 0 {
+        b"iwdg"
+    } else if rsr & WWDG1RSTF != 0 {
+        b"wwdg"
+    } else if rsr & LPWRRSTF != 0 {
+        b"low-power"
+    } else if rsr & SFTRSTF != 0 {
+        b"software"
+    } else if rsr & PINRSTF != 0 {
+        b"pin"
+    } else {
+        b"unknown"
+    };
+    ReasonText::reason(token).unwrap_or_else(|_| ReasonText::reason(b"unknown").unwrap())
+}
+
+// ---------------------------------------------------------------------------
 // Byte helpers
 // ---------------------------------------------------------------------------
 
@@ -533,6 +573,20 @@ mod tests {
     use crate::inbound::{InboundFeed, InboundStats};
     use log::Level;
     use proptest::prelude::*;
+
+    #[test]
+    fn reset_reason_prefers_specific_cause() {
+        let r = |v| reset_reason_from_rsr(v).as_bytes().to_vec();
+        assert_eq!(r((1 << 23) | (1 << 22) | (1 << 21)), b"power-on");
+        assert_eq!(r((1 << 24) | (1 << 22)), b"software");
+        assert_eq!(r(1 << 22), b"pin");
+        assert_eq!(r((1 << 26) | (1 << 22)), b"iwdg");
+        assert_eq!(r(1 << 28), b"wwdg");
+        assert_eq!(r(1 << 30), b"low-power");
+        assert_eq!(r(1 << 21), b"brown-out");
+        assert_eq!(r(0), b"unknown");
+        assert_eq!(r(1 << 17), b"unknown");
+    }
 
     fn command() -> impl Strategy<Value = Command> {
         prop_oneof![

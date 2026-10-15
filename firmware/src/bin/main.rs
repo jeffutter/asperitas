@@ -5,6 +5,9 @@ include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see 
 
 use core::cell::UnsafeCell;
 
+#[path = "../host_control.rs"]
+mod host_control;
+
 use asperitas_dsp::filter::OnePoleLowPass;
 use asperitas_dsp::gain::Gain;
 use asperitas_dsp::processor::{Frame, Processor};
@@ -178,6 +181,9 @@ async fn knob_poll_task(knob_state: &'static KnobState) {
 
 #[embassy_executor::main]
 async fn main(spawner: embassy_executor::Spawner) {
+    // Before anything else can touch RCC_RSR: CTL RSN reports what this read.
+    host_control::capture_reset_reason();
+
     // Install the backend before the first record exists. Under `log-usb` this would be wrong —
     // the logger cannot be installed until the device is live, and [`usb::init`] below does it —
     // so it is only this configuration's entry point. Everything logged before the console comes
@@ -214,6 +220,10 @@ async fn main(spawner: embassy_executor::Spawner) {
     let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
     #[cfg(feature = "log-usb")]
     info!("USB logging initialized");
+    // Host control (VER/RSN/RST/SET/REL). Must precede `usb::run()` below, which reads the
+    // enable flag once when it starts.
+    #[cfg(feature = "log-usb")]
+    host_control::spawn(&spawner);
 
     // Initialize shared knob state.
     let knob_state = KNOB_STATE.init(KnobState::new());
@@ -268,7 +278,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     let console_fut = core::future::pending::<()>();
     let audio_fut = interface.start_callback(|input, output| {
         // Read latest knob positions under critical section.
-        let knobs = cortex_m::interrupt::free(|_| knob_state.read());
+        let knobs = host_control::merge(cortex_m::interrupt::free(|_| knob_state.read()));
 
         // Update processor params at block rate.
         filter.set_params(&OnePoleLowPass::params_from_normalised(knobs[0]));

@@ -1051,6 +1051,47 @@ button reset or a power cycle, or with the probe still attached. A probe memory 
 core long enough to overrun the SAI ring (`audio_exit` went to 2), so never read memory during a
 capture.
 
+## Host control channel (firmware wiring)
+
+Status: built and linked for `main` and `podtest` (TASK-032.03). **Not verified on hardware**:
+compiling is not evidence, and TASK-033.01 owns the board run.
+
+The protocol (`CTL VER|RSN|RST|SET|REL`, `CTLR` replies) is `asperitas_logging::control`; the knob
+table is `asperitas_pod::knob_override`. The firmware side is one shared file,
+`firmware/src/host_control.rs`, pulled into each binary with `#[path]` (the package has no lib
+target). Console builds only (`log-usb`); the RTT-only build has no inbound path and compiles the
+module down to `capture_reset_reason` and `merge`.
+
+- **Consumer.** `host_control::spawn` calls `usb::enable_inbound()` before `usb::run()` starts and
+  spawns one executor task that `receive()`s `InboundRecord`s and hands each to `control::route`.
+  The task does nothing slow, so the 4-deep inbound channel does not stay full and the USB reader's
+  flow control does not engage in practice.
+- **Replies never block.** They go through `emit_record`, which commits whole or not at all and
+  returns `false` when the console has no room. A dropped reply is the host's timeout to handle.
+- **Override.** `SET`/`REL` write a `cortex_m::interrupt::Mutex<RefCell<KnobOverride<2>>>`. `main`
+  calls `host_control::merge` on the knob readings inside the audio callback, after the pot read
+  and before `params_from_normalised`, so injected values pass through the DSP smoothing as a
+  turned pot does. Knob ids 0 and 1; anything else is `bad-knob`. `podtest` logs raw ADC counts to
+  measure the pot itself, so it accepts and holds overrides but does not merge them into its log.
+- **Version.** `build.rs` exports `ASPERITAS_VERSION` = `CARGO_PKG_VERSION` + `+` + `git describe
+  --always --dirty --tags` (package version alone without git), filtered to printable ASCII and cut
+  to 32 bytes. `-dirty` can lag: only HEAD moves trigger a rerun.
+- **Reset reason.** `capture_reset_reason()` is the first statement of `main`: it reads `RCC_RSR`
+  into a static, then sets `RMVF` to clear it (the flags are sticky across resets). The mapping is
+  `control::reset_reason_from_rsr`, host-tested; priority is specific cause first, because a
+  power-on also sets BOR and PIN, and a software reset also sets PIN. A bootloader that cleared
+  the register before our code ran reads `unknown`.
+- **Restart.** `RST` replies `OK RST`, waits 20 ms on the control task's own timer for the
+  console drain to ship it, then `SCB::sys_reset()`. It depends on neither the audio path nor
+  channel space (only on the executor running), masks nothing, and leaves BOOT0 and NRST alone, so
+  the BOOT/RESET/DFU sequence works exactly as before. A reset lands in the application, not the
+  ROM bootloader.
+- **Panic path.** The panic handler takes no lock and touches no inbound state, so inbound traffic
+  cannot block it. After a panic the executor is dead, so `RST` is not serviced; recover with the
+  RESET button as before.
+- **Not wired:** `rig` (a one-shot timeline with no inbound channel by design, and about 24 KB of
+  flash headroom left).
+
 ## External SDRAM: address, MPU and caches (measured)
 
 Read off the running board through the probe on 2026-10-08, after `rig` had brought the SDRAM up with

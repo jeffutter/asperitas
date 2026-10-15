@@ -29,6 +29,7 @@ fn main() {
     }
 
     provenance();
+    version();
 
     println!("cargo:rerun-if-changed=memory.x");
     // Printing any rerun-if directive opts out of the default "rerun if anything changed", so the
@@ -139,4 +140,35 @@ fn digest_inputs(args: &[&str]) -> String {
         );
     }
     String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+/// Export `ASPERITAS_VERSION` for `CTL VER`: the package version, plus `git describe` when a
+/// repository and git are available. Wire-safe by construction (printable, no space, at most 32
+/// bytes) because `control::VersionText` rejects anything else and the reply is useless then.
+fn version() {
+    let pkg = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
+    let describe = std::process::Command::new("git")
+        .args(["describe", "--always", "--dirty", "--tags"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let mut v = match describe {
+        Some(d) => format!("{pkg}+{d}"),
+        None => pkg,
+    };
+    v.retain(|c| c.is_ascii_graphic());
+    v.truncate(32);
+    println!("cargo:rustc-env=ASPERITAS_VERSION={v}");
+    // HEAD and its reflog move on commit/checkout; the index/worktree state behind `-dirty` has no cheap trigger,
+    // so a dirty marker can lag until the next build that reruns this script.
+    // Only paths that exist: cargo reruns a script every build for a rerun-if-changed path that is
+    // missing (a worktree's `.git` is a file, a source tarball has none).
+    for p in ["../.git/HEAD", "../.git/logs/HEAD"] {
+        if std::path::Path::new(p).exists() {
+            println!("cargo:rerun-if-changed={p}");
+        }
+    }
 }

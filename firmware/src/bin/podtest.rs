@@ -3,6 +3,9 @@
 
 include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see build.rs
 
+#[path = "../host_control.rs"]
+mod host_control;
+
 use asperitas_logging::info;
 use asperitas_pod::encoder::{ControlEvent, ControlSurface};
 use asperitas_pod::knob::Knobs;
@@ -142,7 +145,10 @@ const _: () = assert!(ENCRAW_WORST_CASE_LINES_PER_SECOND < 58);
 const ENCRAW_STATE_LABELS: [&str; 4] = ["00", "01", "10", "11"];
 
 #[embassy_executor::main]
-async fn main(_spawner: embassy_executor::Spawner) {
+async fn main(spawner: embassy_executor::Spawner) {
+    // Before anything else can touch RCC_RSR: CTL RSN reports what this read.
+    host_control::capture_reset_reason();
+
     // Install the backend before the first record exists; with the console compiled in,
     // `usb::init` below does it instead.
     #[cfg(not(feature = "log-usb"))]
@@ -163,6 +169,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Init USB CDC serial logging.
     #[cfg(feature = "log-usb")]
     let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
+
+    // Host control (VER/RSN/RST/SET/REL), before `usb::run()` reads the enable flag. podtest logs
+    // RAW ADC counts to measure the pot itself, so unlike `main` it does not merge overrides into
+    // what it logs; SET/REL are accepted and held so the control path can be exercised here.
+    #[cfg(feature = "log-usb")]
+    host_control::spawn(&spawner);
+    #[cfg(not(feature = "log-usb"))]
+    let _ = spawner; // no console, no control channel
 
     // Linger on the pre-init red so it can actually be seen. Boot takes a few
     // milliseconds, so without the delay red → green reads as "always green"
