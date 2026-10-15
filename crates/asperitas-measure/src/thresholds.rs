@@ -135,3 +135,27 @@ pub const PARAM_STEP_MERGE_BLOCKS: usize = 3;
 ///
 /// Origin: TASK-035.04; keeps the JSON bounded, as [`DISCONTINUITY_MAX_POSITIONS`].
 pub const PARAM_STEP_MAX_POSITIONS: usize = 64;
+
+/// Largest allowed residual RMS of an excerpt replay against the `asperitas-cli` reference, in dB
+/// relative to the reference RMS, after alignment, loop-gain normalization and DC removal.
+///
+/// Bit-exactness is not claimed and cannot be. The device path is excerpt PCM, DAC encoder, analog
+/// loopback cable, ADC, so the capture differs from the reference by: two converters, each with its
+/// own reconstruction/decimation filter (a small frequency-dependent gain and phase, which makes the
+/// residual scale with the signal rather than sit at a fixed floor); an analog noise floor of about
+/// 16 bits ([`NOISE_DISTORTION_LSB_RMS`], 0.35 LSB RMS); a loop gain of [`LOOP_GAIN_DB`] that the
+/// comparison fits rather than assumes; and a DC offset ([`DC_LSB`]) that it removes. Of those the
+/// converter response dominates for a loud musical signal, so the limit is relative to the reference.
+///
+/// Origin: TASK-035.05, set from the `mand_soft` replay fixture (`compare.rs` tests): residual
+/// -30.9 dB. -25 dB leaves about 6 dB of margin, while a one-sample misalignment (about -17.5 dB), a
+/// wrong excerpt and a 2000-sample dropout all land above it.
+pub const COMPARE_RESIDUAL_RMS_DB: f64 = -25.0;
+
+/// Largest allowed residual peak of an excerpt replay, in dB relative to the reference peak. Same
+/// reason bit-exactness is not claimed as [`COMPARE_RESIDUAL_RMS_DB`]; the peak is looser because a
+/// pluck's attack transient excites the converter filters hardest.
+///
+/// Origin: TASK-035.05, set from the `mand_soft` replay fixture: residual peak
+/// -21.5 dB (803 LSB at sample 1502, the attack), so -15 dB leaves 6.5 dB of margin.
+pub const COMPARE_RESIDUAL_PEAK_DB: f64 = -15.0;
