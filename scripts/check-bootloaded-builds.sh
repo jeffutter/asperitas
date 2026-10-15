@@ -37,6 +37,7 @@ MATRIX=(
   "rig:seed3"
   "rig:seed3,stim-ess"
   "rig:seed3,stim-pulse"
+  "rig:seed3,stim-excerpt"
 )
 
 ELF_DIR=firmware/target/thumbv7em-none-eabihf/release

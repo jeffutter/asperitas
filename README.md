@@ -336,6 +336,18 @@ first captured callback and starts it there: the capture holds the whole sweep, 
 PCM playback began (0 by construction; the echo arrives one loop latency later). The gate line
 `rig: gate stimulus samples a..b inside the N-sample capture` says whether the window held all of it.
 
+`stim-excerpt` plays an excerpt installed into QSPI instead of a computed waveform, once, from the
+first captured callback like the sweep. `ASP_RIG_EXCERPT_SLOT=<n>` picks the slot at build time (default 0;
+a value outside `0..14` fails the build). The staging ping-pong is read from QSPI by a thread-mode task and
+the callback never touches flash. After one full pass `rig` sends one
+`EXCPLAY proto=1 slot=<n> bytes=<n> crc16=<hex> want=<hex> underruns=<n> clean=<0|1>` record. `crc16` covers
+only the samples handed to the DAC encoder, and `want` is the CRC stored at install: equal CRCs with
+`clean=1` say the QSPI-to-encoder path delivered the excerpt intact, and say nothing about the codec or
+the cable. A slot that is blank or holds no valid header makes `rig` send
+`EXCPLAYFAIL proto=1 slot=<n> why=<empty|invalid>`, show red and start no audio. An excerpt install is refused
+until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootloaded`); not yet exercised on
+a board (TASK-038.09).
+
 Hold the console open with **one** reader for the whole run. A reader restarted mid-dump loses
 whatever macOS had buffered, which was 19 blocks once. Then turn the capture back into PCM. The
 reassembler exits non-zero if any block is incomplete:

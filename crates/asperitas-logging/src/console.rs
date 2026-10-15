@@ -1,6 +1,7 @@
 //! Device-side console state: sequence numbers, cumulative loss counters, and the record
 //! bodies whose bytes are a wire contract (`BOOT`, `STATUS`, and the six measurement-rig
-//! verbs `RIGCFG`, `RIGGEN`, `CAPSTAT`, `CAPMAX`, `STIMSTART`, `DUMPEND`).
+//! verbs `RIGCFG`, `RIGGEN`, `CAPSTAT`, `CAPMAX`, `STIMSTART`, `DUMPEND`, plus the replay pair
+//! `EXCPLAY` and `EXCPLAYFAIL`).
 //!
 //! # Why this module is not behind `log-usb`
 //!
@@ -602,8 +603,102 @@ pub fn dumpend_body(d: &DumpSummary, out: &mut [u8; BODY_WINDOW]) -> usize {
     w.filled()
 }
 
-// One record each, at their own worst case. These six lines are the half a drifted format
+/// One completed replay pass, as one `EXCPLAY` record (TASK-038.04.03.02).
+///
+/// Sent once per boot, from thread mode, after the callback has handed the last source sample to the
+/// DAC encoder.
+///
+/// # What `crc16` covers
+///
+/// The CRC-16/CCITT-FALSE of the samples the audio callback handed to the DAC encoder, in order
+/// (`crate::replay`). `want` is the CRC the slot header stored when the excerpt was installed, which
+/// the install verified against the host's. Equal CRCs with `clean=1` say the QSPI-to-DAC-encoder
+/// path delivered the excerpt intact and unbroken. They say **nothing** about the codec, the analog
+/// stage or the cable: what comes back through them is the capture's business (TASK-035 AC #4).
+#[derive(Clone, Copy, Debug)]
+pub struct ExcerptPlay {
+    /// Slot played, `0..excerpt::SLOT_COUNT`.
+    pub slot: u8,
+    /// Source bytes handed to the encoder: the excerpt's length once the pass is complete.
+    pub bytes: u32,
+    /// CRC-16 of those bytes as the callback handed them out.
+    pub crc16: u16,
+    /// The CRC the slot header stored.
+    pub want: u16,
+    /// Blocks of silence inserted because a staging half was late.
+    pub underruns: u32,
+    /// Whether the pass played without an underrun.
+    pub clean: bool,
+}
+
+/// Field table behind [`exc_play_body`].
+const EXCPLAY_FIELDS: [(&str, usize); 6] = [
+    ("slot", 3),
+    ("bytes", U32_MAX_DIGITS),
+    ("crc16", 4),
+    ("want", 4),
+    ("underruns", U32_MAX_DIGITS),
+    ("clean", 1),
+];
+
+/// Worst-case `EXCPLAY` body.
+const EXCPLAY_WORST: usize = saturated_len("EXCPLAY proto=1", &EXCPLAY_FIELDS);
+
+/// Render an `EXCPLAY` record body into `out`, returning the bytes written.
+pub fn exc_play_body(play: &ExcerptPlay, out: &mut [u8; BODY_WINDOW]) -> usize {
+    let mut w = TruncWriter::new(out);
+    let _ = core::write!(
+        w,
+        "EXCPLAY proto=1 slot={} bytes={} crc16={:04x} want={:04x} underruns={} clean={}",
+        play.slot,
+        play.bytes,
+        play.crc16,
+        play.want,
+        play.underruns,
+        u8::from(play.clean),
+    );
+    w.filled()
+}
+
+/// Why a boot refused to play the slot it was built for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlayRefusal {
+    /// The slot holds no header at all: blank flash, or an install that never finished.
+    Empty,
+    /// The slot holds something that is not a valid header (wrong version, torn write, bad field).
+    Invalid,
+}
+
+impl PlayRefusal {
+    /// The wire spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            PlayRefusal::Empty => "empty",
+            PlayRefusal::Invalid => "invalid",
+        }
+    }
+}
+
+/// Field table behind [`exc_play_refused_body`]; `why` is the longest spelling, `invalid`.
+const EXCPLAYFAIL_FIELDS: [(&str, usize); 2] = [("slot", 3), ("why", 7)];
+
+/// Worst-case `EXCPLAYFAIL` body.
+const EXCPLAYFAIL_WORST: usize = saturated_len("EXCPLAYFAIL proto=1", &EXCPLAYFAIL_FIELDS);
+
+/// Render an `EXCPLAYFAIL` record body into `out`, returning the bytes written.
+///
+/// The record a boot sends instead of playing silence when its slot holds no playable excerpt.
+pub fn exc_play_refused_body(slot: u8, why: PlayRefusal, out: &mut [u8; BODY_WINDOW]) -> usize {
+    let mut w = TruncWriter::new(out);
+    let _ = core::write!(w, "EXCPLAYFAIL proto=1 slot={} why={}", slot, why.as_str());
+    w.filled()
+}
+
+// One record each, at their own worst case. These lines are the half a drifted format
 // string breaks and a runtime test would only catch on the night it runs.
+const _: () = assert!(EXCPLAY_WORST < crate::frame::MAX_BODY);
+const _: () = assert!(EXCPLAYFAIL_WORST < crate::frame::MAX_BODY);
 const _: () = assert!(RIGCFG_WORST < crate::frame::MAX_BODY);
 const _: () = assert!(RIGGEN_WORST < crate::frame::MAX_BODY);
 const _: () = assert!(CAPSTAT_WORST < crate::frame::MAX_BODY);
@@ -1136,6 +1231,55 @@ mod tests {
             core::str::from_utf8(&out[..n]).unwrap(),
             "STIMSTART proto=1 first_block=4 offset=0"
         );
+    }
+
+    #[test]
+    fn excplay_body_pins_field_names_and_order() {
+        let mut out = [0u8; BODY_WINDOW];
+        let play = ExcerptPlay {
+            slot: 3,
+            bytes: 288_000,
+            crc16: 0x0abc,
+            want: 0x0abc,
+            underruns: 0,
+            clean: true,
+        };
+        let n = exc_play_body(&play, &mut out);
+        assert_eq!(
+            core::str::from_utf8(&out[..n]).unwrap(),
+            "EXCPLAY proto=1 slot=3 bytes=288000 crc16=0abc want=0abc underruns=0 clean=1"
+        );
+    }
+
+    #[test]
+    fn excplay_body_renders_worst_case_inside_its_table() {
+        let mut out = [0u8; BODY_WINDOW];
+        let play = ExcerptPlay {
+            slot: 255,
+            bytes: u32::MAX,
+            crc16: 0xffff,
+            want: 0x0000,
+            underruns: u32::MAX,
+            clean: false,
+        };
+        let n = exc_play_body(&play, &mut out);
+        assert_eq!(n, EXCPLAY_WORST);
+        assert!(n < crate::frame::MAX_BODY);
+        assert!(core::str::from_utf8(&out[..n])
+            .unwrap()
+            .ends_with("clean=0"));
+    }
+
+    #[test]
+    fn excplayfail_body_pins_field_names_and_fits() {
+        let mut out = [0u8; BODY_WINDOW];
+        let n = exc_play_refused_body(13, PlayRefusal::Empty, &mut out);
+        assert_eq!(
+            core::str::from_utf8(&out[..n]).unwrap(),
+            "EXCPLAYFAIL proto=1 slot=13 why=empty"
+        );
+        let n = exc_play_refused_body(255, PlayRefusal::Invalid, &mut out);
+        assert_eq!(n, EXCPLAYFAIL_WORST);
     }
 
     #[test]

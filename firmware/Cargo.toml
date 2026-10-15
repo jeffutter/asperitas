@@ -38,6 +38,11 @@ log-defmt = ["asperitas-logging/log-defmt", "dep:defmt-rtt"]
 stim-sine = []
 stim-ess = []
 stim-pulse = []
+# Replay an excerpt installed in QSPI (TASK-038.04): the generator reads its slot through an internal-RAM
+# ping-pong instead of computing a waveform. Counts as one stimulus for rig's exclusion assert. The slot
+# is `ASP_RIG_EXCERPT_SLOT` at build time (default 0). Needs the async flash, so it builds only with the
+# bootloaded layout like the rest of the install path. See "Excerpt replay" in `src/bin/rig.rs`.
+stim-excerpt = []
 
 [profile.release]
 # probe-rs decodes symbols, backtraces and defmt log locations from DWARF - and it accepts
