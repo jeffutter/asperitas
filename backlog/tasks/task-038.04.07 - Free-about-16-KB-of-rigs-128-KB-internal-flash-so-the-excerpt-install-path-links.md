@@ -3,11 +3,11 @@ id: TASK-038.04.07
 title: >-
   Free about 16 KB of rig's 128 KB internal flash so the excerpt install path
   links
-status: Blocked
+status: Done
 assignee:
   - '@human'
 created_date: '2026-10-08 16:39'
-updated_date: '2026-10-09 02:25'
+updated_date: '2026-10-15 17:05'
 labels:
   - task
   - planned
@@ -35,9 +35,9 @@ Trade-off the plan must weigh: any opt-level change alters the codegen of the au
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 rig builds for seed3, seed3,stim-ess and seed3,stim-pulse with the install path from wip/TASK-038.04.05-excerpt-install (762392c) applied, each with at least 2 KB of internal flash to spare, sizes recorded in the notes
-- [ ] #2 The chosen route and the rejected ones are written down with measured sizes; if callback codegen changes, the notes say the TASK-038.05 timings predate it and a @human re-measure subtask exists
-- [ ] #3 All gates tiers that build firmware pass; no other binary's behaviour changes except as the chosen route states
+- [x] #1 rig builds for seed3, seed3,stim-ess and seed3,stim-pulse with the install path from wip/TASK-038.04.05-excerpt-install (762392c) applied, each with at least 2 KB of internal flash to spare, sizes recorded in the notes
+- [x] #2 The chosen route and the rejected ones are written down with measured sizes; if callback codegen changes, the notes say the TASK-038.05 timings predate it and a @human re-measure subtask exists
+- [x] #3 All gates tiers that build firmware pass; no other binary's behaviour changes except as the chosen route states
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -67,4 +67,6 @@ For the planner:
 - **Flashing changes for every binary:** the make targets, the probe-flash path (the SDRAM/QSPI app is no longer in internal flash), elf-provenance/load-address gates, and the README and daisy-seed3.md flashing sections.
 - **Code placement:** running from AXI SRAM changes where code executes, so rig's callback timing (72 us, TASK-038.05) needs one re-measure once a bootloaded rig runs.
 - **Parked work:** the install path is on branch wip/TASK-038.04.05-excerpt-install (762392c) and needs rebasing once this lands.
+
+2026-10-15: closed in a live session with the owner; the owner agreed each criterion was met. All four children Done (.01 bootloader proof, .02 layout, .03 docs, .04 timing). #1: rig with the install path (762392c, scratch tree) links bootloaded at 144,137 / 145,929 / 144,489 bytes for seed3 / stim-ess / stim-pulse with about 347 KB spare in the 480 KB region (the criterion's 'internal flash' is superseded by the owner's 2026-10-08 bootloader decision). #2: route and rejected options with measured sizes in README and daisy-seed3.md (.03); callback timing re-measured on hardware (.04): 47 us worst callback vs 72 us internal, 692 us worst spacing vs 714 us. #3: scripts/gates.sh push green, 29 gates, on 2026-10-15 after the e5801c7 linker fix. Next: rebase wip/TASK-038.04.05-excerpt-install (762392c) onto this layout and pick up TASK-038.04.05.
 <!-- SECTION:NOTES:END -->
