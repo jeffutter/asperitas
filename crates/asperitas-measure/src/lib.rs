@@ -6,6 +6,7 @@
 //!   firmware runs.
 //! - [`thresholds`] is the only place a numeric limit is written down.
 
+pub mod align;
 pub mod capture;
 pub mod stimulus;
 pub mod thresholds;
