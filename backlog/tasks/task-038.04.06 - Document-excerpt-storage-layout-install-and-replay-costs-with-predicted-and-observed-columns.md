@@ -3,11 +3,11 @@ id: TASK-038.04.06
 title: >-
   Document excerpt storage layout, install and replay costs with predicted and
   observed columns
-status: Blocked
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-08 15:29'
-updated_date: '2026-10-08 15:54'
+updated_date: '2026-10-15 18:14'
 labels:
   - task
   - planned
