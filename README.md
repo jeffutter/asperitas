@@ -351,6 +351,10 @@ cargo run -p asperitas-logging --release --example dump_reassemble -- capture.bi
 | Callback cost, worst | 72 us of a 666 us period | 300 s run, `max_block_us` |
 | Callback spacing, worst | 714 us (limit 832) | 300 s run, `worst_gap_us` |
 | Blocks delivered / expected | 879 / 879, 0 overruns | 300 s run |
+| Callback cost, worst, bootloaded layout | 47 us of a 666 us period (internal flash: 72 us) | 300 s run from QSPI behind the Daisy bootloader, 2026-10-15, `max_block_us` |
+| Callback spacing, worst, bootloaded layout | 692 us (limit 832; internal flash: 714 us) | same run, `worst_gap_us` |
+| Blocks delivered / expected, bootloaded layout | 879 / 879, 0 overruns, `audio_exit=0` | same run |
+| Dump of 300 s of audio, bootloaded layout | 60.2 s (internal flash: 69.4 s); 879 blocks, 28,803,072 PCM bytes, every block proved | `DUMPEND elapsed_ms=60232` |
 | Ring filled to the last block | 1024 / 1024 blocks in 349.536 s on the device clock (349.626 s on the host, arm record to close record); 1 overrun ended it, 0 blocks overwritten | ring-fill run, 2026-10-13 |
 | Dump of 300 s of audio | 69.4 s; 414.9 kB/s PCM, 731.7 kB/s on the wire | `DUMPEND elapsed_ms=69421` |
 | Log loss during capture and dump | 0 | `dropped_full=0` throughout |
@@ -361,7 +365,7 @@ cargo run -p asperitas-logging --release --example dump_reassemble -- capture.bi
 
 The 300 s capture is archived as `audio/captures/2026-10-07-rig-sine-300s.console.zst`. The
 analysis behind every row is in TASK-038.05's notes, and the loopback setup is in
-`docs/reference/daisy-pod.md`. The ring-fill run is archived as
+`docs/reference/daisy-pod.md`. The bootloaded 300 s run is archived as `audio/captures/2026-10-15-rig-sine-300s-bootloaded.console.zst`; its 36 `dropped_full` all fall before the host attached (t=1.2 s to 27 s), none during the dump. The ring-fill run is archived as
 `audio/captures/2026-10-13-rig-ring-fill-349s.console.zst`. Not yet measured: a sweep captured from its first sample (built in TASK-038.08, not yet run on the bench), and excerpt replay (TASK-038.04).
 
 ## Important Hardware Gotchas
