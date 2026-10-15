@@ -8,10 +8,12 @@
 //! - [`compare`] checks a replayed excerpt against the `asperitas-cli` reference.
 //! - [`metrics`] reports level, silence, discontinuity candidates and spurs as JSON.
 //! - [`param_step`] flags audible level steps from unsmoothed parameter changes.
+//! - [`cli`] is the `asperitas-measure analyze` command over all of the above.
 //! - [`thresholds`] is the only place a numeric limit is written down.
 
 pub mod align;
 pub mod capture;
+pub mod cli;
 pub mod compare;
 pub mod metrics;
 pub mod param_step;

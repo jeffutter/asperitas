@@ -451,6 +451,11 @@ analysis behind every row is in TASK-038.05's notes, and the loopback setup is i
 `docs/reference/daisy-pod.md`. The bootloaded 300 s run is archived as `audio/captures/2026-10-15-rig-sine-300s-bootloaded.console.zst`; its 36 `dropped_full` all fall before the host attached (t=1.2 s to 27 s), none during the dump. The ring-fill run is archived as
 `audio/captures/2026-10-13-rig-ring-fill-349s.console.zst`. Not yet measured: a sweep captured from its first sample (built in TASK-038.08, not yet run on the bench), and excerpt replay (TASK-038.04).
 
+To judge a capture, run `cargo run -p asperitas-measure --release -- analyze <capture.console.zst>`
+(add `--excerpt <clip.wav>` for an excerpt replay). It prints metrics as JSON and exits 0 pass,
+1 failed verdict, 2 error. Usage, metric definitions, blind spots and the fixture workflow are in
+`docs/reference/asperitas-rig.md`.
+
 ## Important Hardware Gotchas
 
 ### Pod audio is line level

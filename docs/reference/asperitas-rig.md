@@ -129,6 +129,56 @@ replace the ticket's own `HUMAN:` criteria.
 See also [daisy-seed3.md](daisy-seed3.md) for the console channels and what a drop count
 does and does not describe (RTT captures carry no loss ledger).
 
-## Analysis crate
+## Analysis: `asperitas-measure`
 
-`crates/asperitas-measure` loads a committed `.console.zst` capture (strictly: any refused block is an error), regenerates the stimulus from `asperitas-dsp`, and holds every numeric threshold in `src/thresholds.rs`. The CLI and full docs follow with TASK-035.06.
+`crates/asperitas-measure` judges a committed `.console.zst` capture. It loads the capture
+strictly (any refused block is an error), regenerates the stimulus from `asperitas-dsp`, aligns
+the two, and reports metrics as one JSON document on stdout. Every numeric limit lives in
+`src/thresholds.rs`, each with its origin; nothing else writes a limit as a literal.
+
+```sh
+cargo run -p asperitas-measure --release -- analyze <capture.console.zst> [--stimulus sine|sweep|pulse]
+cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav
+```
+
+Exit codes match `asperitas-rig`: **0** pass, **1** failed verdict (the JSON lists `failures`,
+each also on stderr), **2** usage, load or I/O error. The default stimulus is the sine. Only the
+sine is judged against the TASK-034 baseline; `sweep` and `pulse` are reported and checked for
+alignment stability only. `--excerpt` instead compares an excerpt replay with the
+`asperitas-cli` reference of the same clip.
+
+### Metrics
+
+| Metric | Meaning | Fails when |
+|---|---|---|
+| `alignment` | Loopback delay per 1 s window by cross-correlation. | A window's delay moves more than 0.25 sample from the first (a slip). |
+| `level.deviation_db` | Capture RMS over stimulus RMS, minus the baseline loop gain (-0.41 dB). | More than 0.05 dB. |
+| `silence` | Runs of at least 1 ms at or below 2 LSB. | Any run. |
+| `discontinuities` | Samples where the capture minus gain-scaled, delayed stimulus jumps more than 8 LSB; nearby ones merge. | Any event. |
+| `spurs` | Largest non-fundamental FFT peaks, in dBc. | Worst above -80 dBc. |
+| `param_steps` | 1 ms block-RMS changes over 5 dB (an unsmoothed parameter change). | Any event. |
+| `comparison` (`--excerpt`) | Residual of the replay against the reference after alignment, gain fit and DC removal. | Residual RMS above -25 dB or peak above -15 dB relative to the reference, or loop gain off baseline. |
+
+### Blind spots
+
+- A level, noise or spur deviation belongs to the output and input converters combined; it cannot
+  be split between them. A clean report is evidence about the loop, not proof of either converter.
+- Faults common to stimulus and capture are invisible: a shared clock error, and a left/right
+  swap on a single-lane loopback.
+- The spur report assumes a tone; its "fundamental" is the strongest bin, so it means nothing for
+  a sweep or pulse (which is why those are not judged).
+- `param_steps` sees only level steps. A step in a quiet passage (blocks under 2 LSB RMS are
+  ignored) or one that does not change level (a filter cutoff step) goes unseen.
+- Excerpt comparison is not bit-exact and cannot be: the path adds two converters, an analog
+  noise floor and a fitted gain. See `COMPARE_RESIDUAL_RMS_DB` for the budget.
+- Alignment of a sine is determined modulo its period; the smallest delay among the ties is used.
+
+### Fixture workflow
+
+1. Capture with `asperitas-rig` (see above); the artifact is a `.console.zst`.
+2. Run `analyze` on it. Commit the capture under `audio/captures/` with the hardware verification
+   ticket, as for any rig artifact.
+3. A new committed capture becomes a regression fixture by adding a test in
+   `crates/asperitas-measure/tests/cli.rs` (or the module tests) naming it.
+4. If a limit has to move, change `thresholds.rs` and update its "Origin" note with the capture
+   and ticket that justify the new value.
