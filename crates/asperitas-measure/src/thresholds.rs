@@ -147,6 +147,16 @@ pub const PARAM_STEP_MAX_POSITIONS: usize = 64;
 /// comparison fits rather than assumes; and a DC offset ([`DC_LSB`]) that it removes. Of those the
 /// converter response dominates for a loud musical signal, so the limit is relative to the reference.
 ///
+/// The same budget applies at every `CTL FX` setting (TASK-035.07.02): the reference is processed
+/// at the commanded setting, so the fitted loop gain stays comparable to [`LOOP_GAIN_DB`] and is
+/// judged by [`LEVEL_DEVIATION_TOL_DB`]; a capture processed at another gain misses it by the dB
+/// difference, and a low-pass mismatch shows as residual or an alignment slip. Synthetic captures
+/// (the fixture with the processor applied host-side) measure residual -30.9 dB for gain at -12,
+/// +6 and -38 dB, -32.1 and -33.1 dB for low-pass (the filter removes the attack content that
+/// dominates the residual), loop-gain deviation -0.009 dB throughout. Synthetic captures scale or
+/// filter the loopback noise with the signal, which a real DAC/ADC would not (its noise floor is
+/// fixed), so heavy attenuation on the device may need a looser limit: revisit in TASK-035.07.03.
+///
 /// Origin: TASK-035.05, set from the `mand_soft` replay fixture (`compare.rs` tests): residual
 /// -30.9 dB. -25 dB leaves about 6 dB of margin, while a one-sample misalignment (about -17.5 dB), a
 /// wrong excerpt and a 2000-sample dropout all land above it.

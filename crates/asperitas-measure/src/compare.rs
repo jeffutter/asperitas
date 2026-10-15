@@ -1,10 +1,16 @@
 //! Compare a replayed-excerpt capture with what `asperitas-cli process` produces for the same audio.
 //!
 //! The rig replays an installed QSPI excerpt through the DAC; the loopback returns it through the
-//! ADC. The reference is the same excerpt PCM run through `asperitas_dsp::Gain` at 0 dB, the code
-//! and the int16-to-float convention `asperitas-cli process` uses. The firmware's replay path runs
-//! no processor (`firmware/src/bin/rig.rs`: `excerpt_play` hands PCM straight to the DAC encoder),
-//! so identity is what the device does; processor-on-device is TASK-035.07.
+//! ADC. The reference is the same excerpt PCM run through the processor the capture was taken
+//! with ([`FxSetting`], the `CTL FX` selection: bypass, `Gain`, or `OnePoleLowPass`), using the
+//! code and the int16-to-float convention `asperitas-cli process` uses. Bypass (the default, and
+//! what the device does unless told otherwise) is identity. The device capture at non-identity
+//! settings is TASK-035.07.03.
+//!
+//! Because the reference already contains the commanded processing, the fitted loop gain stays
+//! comparable to [`thresholds::LOOP_GAIN_DB`] at every setting: a capture processed with a
+//! different gain than the reference shows up as loop-gain deviation (and, for a low-pass, as
+//! residual), never as a silent re-normalization.
 //!
 //! The capture is aligned to the reference, then a least-squares gain and DC offset are fitted and
 //! removed (the loop gain and converter offset), and the remaining residual is reported in LSB and
@@ -13,20 +19,53 @@
 
 use std::fmt;
 
-use asperitas_dsp::gain::{Gain, GainParams};
-use asperitas_dsp::processor::Processor;
+use asperitas_dsp::replay_fx::{FxKind, ReplayFx};
 use asperitas_logging::excerpt::{parse_wav, WavError};
 use asperitas_logging::frame::crc16_ccitt;
 use serde::Serialize;
 
 use crate::align::{align, assert_stable, AlignError};
-use crate::capture::{Capture, SAMPLE_RATE_HZ};
+use crate::capture::Capture;
 use crate::thresholds;
 
 /// Full scale of the 16-bit capture, LSB.
 const FULL_SCALE: f64 = 32768.0;
 
-/// The reference side: the excerpt as `asperitas-cli process gain gain_db=0` renders its left lane.
+/// The processor selection of the replay, as `CTL FX f=<code> v=<value>` carries it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct FxSetting {
+    /// Wire code: 0 bypass, 1 gain, 2 low-pass ([`FxKind::from_code`]).
+    pub code: u8,
+    /// Wire value, `0..=0xFFFF` spanning the processor's normalised knob `0.0..=1.0`.
+    pub value: u16,
+}
+
+impl FxSetting {
+    pub const BYPASS: FxSetting = FxSetting { code: 0, value: 0 };
+
+    /// Parse the `--fx` name (`bypass`, `gain`, `lowpass`) and `--fx-value` wire value.
+    pub fn from_name(name: &str, value: u16) -> Option<FxSetting> {
+        let code = match name {
+            "bypass" => 0,
+            "gain" => 1,
+            "lowpass" => 2,
+            _ => return None,
+        };
+        Some(FxSetting { code, value })
+    }
+
+    fn kind(self) -> Option<FxKind> {
+        FxKind::from_code(self.code)
+    }
+
+    /// The knob the firmware derives from the wire value (`value / u16::MAX`).
+    pub fn knob(self) -> f32 {
+        f32::from(self.value) / f32::from(u16::MAX)
+    }
+}
+
+/// The reference side: the excerpt as `asperitas-cli process` renders its left lane at the same
+/// processor and parameters the firmware's replay used.
 #[derive(Clone, Debug)]
 pub struct Reference {
     /// Left-lane samples, float in [-1, 1].
@@ -38,18 +77,25 @@ pub struct Reference {
 impl Reference {
     /// Build the reference from the bytes of a mono 48 kHz 16-bit WAV (an `audio/instruments` clip).
     pub fn from_excerpt_wav(raw: &[u8]) -> Result<Reference, CompareError> {
+        Self::from_excerpt_wav_fx(raw, FxSetting::BYPASS)
+    }
+
+    /// As [`Reference::from_excerpt_wav`], processed by `fx`.
+    pub fn from_excerpt_wav_fx(raw: &[u8], fx: FxSetting) -> Result<Reference, CompareError> {
         let pcm = parse_wav(raw).map_err(CompareError::Wav)?;
-        let mut gain = Gain::default();
-        gain.set_sample_rate(SAMPLE_RATE_HZ as f32);
-        gain.set_params(&GainParams { gain_db: 0.0 });
+        let kind = fx.kind().ok_or(CompareError::UnknownFx(fx.code))?;
+        let mut replay = ReplayFx::new();
+        replay.select(kind, fx.knob());
         // `asperitas-cli` widens int16 by dividing by i16::MAX and feeds the same value to both lanes.
-        let samples = pcm
+        let mut frames: Vec<[f32; 2]> = pcm
             .chunks_exact(2)
             .map(|b| {
                 let v = f32::from(i16::from_le_bytes([b[0], b[1]])) / f32::from(i16::MAX);
-                gain.tick([v, v])[0]
+                [v, v]
             })
             .collect();
+        replay.process(&mut frames);
+        let samples = frames.iter().map(|f| f[0]).collect();
         Ok(Reference {
             samples,
             pcm_crc16: crc16_ccitt(pcm),
@@ -60,6 +106,8 @@ impl Reference {
 #[derive(Debug)]
 pub enum CompareError {
     Wav(WavError),
+    /// The `CTL FX` code names no effect.
+    UnknownFx(u8),
     /// The reference is shorter than one alignment window.
     ReferenceTooShort {
         have: usize,
@@ -79,6 +127,7 @@ impl fmt::Display for CompareError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             CompareError::Wav(e) => write!(f, "excerpt WAV rejected: {e:?}"),
+            CompareError::UnknownFx(c) => write!(f, "unknown effect code {c}"),
             CompareError::ReferenceTooShort { have, need } => {
                 write!(f, "reference has {have} samples, need at least {need}")
             }
@@ -312,6 +361,93 @@ mod tests {
         let verdict = compare(&c, &clip("mandolin_single_note_soft")).and_then(|c| c.check());
         eprintln!("{verdict:?}");
         assert!(verdict.is_err());
+    }
+
+    const MAND_SOFT: &str = "mandolin_single_note_soft";
+
+    fn clip_fx(fx: FxSetting) -> Reference {
+        Reference::from_excerpt_wav_fx(
+            &std::fs::read(root(&format!("audio/instruments/{MAND_SOFT}.wav"))).unwrap(),
+            fx,
+        )
+        .unwrap()
+    }
+
+    /// The replay capture as a device running `fx` would have returned it, synthesized host-side:
+    /// the real loopback capture (converters, noise, loop gain) with the processor applied to it.
+    /// The converters are close to linear, so processing before or after them agrees to well
+    /// within the residual budget.
+    fn synth(fx: FxSetting) -> Capture {
+        let mut c = replay();
+        let mut replay_fx = ReplayFx::new();
+        replay_fx.select(fx.kind().unwrap(), fx.knob());
+        let mut frames: Vec<[f32; 2]> = c
+            .samples
+            .iter()
+            .map(|&s| {
+                let v = f32::from(s) / 32768.0;
+                [v, v]
+            })
+            .collect();
+        replay_fx.process(&mut frames);
+        for (s, f) in c.samples.iter_mut().zip(&frames) {
+            *s = (f[0] * 32768.0).round().clamp(-32768.0, 32767.0) as i16;
+        }
+        c
+    }
+
+    fn fx(name: &str, value: u16) -> FxSetting {
+        FxSetting::from_name(name, value).unwrap()
+    }
+
+    // Gain knob v/65535: 0.6667 = -12 dB, 0.8333 = 0 dB, 0.9167 = +6 dB. Low-pass log taper.
+    const SETTINGS: [(&str, u16); 5] = [
+        ("gain", 43_690),
+        ("gain", 58_982),
+        ("gain", 20_000),
+        ("lowpass", 52_000),
+        ("lowpass", 40_000),
+    ];
+
+    #[test]
+    fn processed_captures_match_their_own_settings() {
+        for (name, v) in SETTINGS {
+            let s = fx(name, v);
+            let c = compare(&synth(s), &clip_fx(s)).unwrap();
+            eprintln!("{name} {v}: {}", c.to_json());
+            c.check().unwrap_or_else(|e| panic!("{name} {v}: {e}"));
+        }
+    }
+
+    #[test]
+    fn bypass_setting_is_the_identity_reference() {
+        assert_eq!(clip_fx(FxSetting::BYPASS).samples, clip(MAND_SOFT).samples);
+    }
+
+    #[test]
+    fn capture_processed_with_a_different_setting_fails() {
+        for ((name, v), (rname, rv)) in [
+            (("gain", 43_690), ("gain", 58_982)),
+            (("gain", 43_690), ("gain", 40_000)),
+            (("lowpass", 52_000), ("lowpass", 40_000)),
+            (("lowpass", 52_000), ("bypass", 0)),
+            (("gain", 43_690), ("bypass", 0)),
+        ] {
+            let verdict =
+                compare(&synth(fx(name, v)), &clip_fx(fx(rname, rv))).and_then(|c| c.check());
+            eprintln!("{name} {v} vs {rname} {rv}: {verdict:?}");
+            assert!(verdict.is_err(), "{name} {v} vs {rname} {rv} passed");
+        }
+    }
+
+    #[test]
+    fn unknown_fx_code_is_a_typed_error() {
+        let raw = std::fs::read(root(&format!("audio/instruments/{MAND_SOFT}.wav"))).unwrap();
+        let bad = FxSetting { code: 9, value: 0 };
+        assert!(matches!(
+            Reference::from_excerpt_wav_fx(&raw, bad),
+            Err(CompareError::UnknownFx(9))
+        ));
     }
 
     #[test]

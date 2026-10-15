@@ -3,14 +3,16 @@
 //!
 //! ```text
 //! asperitas-measure analyze <capture.console.zst> [--stimulus sine|sweep|pulse]
-//! asperitas-measure analyze <capture.console.zst> --excerpt <clip.wav>
+//! asperitas-measure analyze <capture.console.zst> --excerpt <clip.wav> \
+//!     [--fx bypass|gain|lowpass] [--fx-value <0..65535 | 0xHEX>]
 //! ```
 //!
 //! The first form judges a steady-stimulus loopback capture. Only the sine is judged against the
 //! TASK-034 baseline (level, silence, discontinuities, spurs, parameter steps); the sweep and
 //! pulse are reported and checked for alignment stability only, because the baseline limits are
 //! defined for the sine. The second form judges an excerpt replay against the `asperitas-cli`
-//! reference. Exit 0 passes, 1 is a failed verdict, 2 is a usage, load or I/O error.
+//! reference run at the same `CTL FX` selection (`--fx`, `--fx-value` take the wire values sent to
+//! the board; default bypass). Exit 0 passes, 1 is a failed verdict, 2 is a usage, load or I/O error.
 
 use std::io::Write;
 
@@ -19,7 +21,7 @@ use serde_json::{json, Value};
 
 use crate::align::{align, assert_stable};
 use crate::capture::Capture;
-use crate::compare::{compare, Reference};
+use crate::compare::{compare, FxSetting, Reference};
 use crate::metrics::analyze;
 use crate::param_step::detect_param_steps;
 use crate::stimulus::Stimulus;
@@ -44,11 +46,11 @@ impl Outcome {
 }
 
 const USAGE: &str = "usage: asperitas-measure analyze <capture.console.zst> \
-[--stimulus sine|sweep|pulse | --excerpt <clip.wav>]";
+[--stimulus sine|sweep|pulse | --excerpt <clip.wav> [--fx bypass|gain|lowpass] [--fx-value <0..65535|0xHEX>]]";
 
 enum Mode {
     Stimulus(String),
-    Excerpt(String),
+    Excerpt(String, FxSetting),
 }
 
 /// Run the command with `args` (without the program name). The JSON report goes to `out`;
@@ -70,7 +72,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Outcome
     };
     let result = match mode {
         Mode::Stimulus(name) => judge_stimulus(&capture, &name),
-        Mode::Excerpt(wav) => judge_excerpt(&capture, &wav),
+        Mode::Excerpt(wav, fx) => judge_excerpt(&capture, &wav, fx),
     };
     match result {
         Ok((report, failures)) => {
@@ -105,23 +107,48 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
     let mut path = None;
     let mut stimulus = None;
     let mut excerpt = None;
+    let mut fx_name = None;
+    let mut fx_value = None;
     while let Some(a) = it.next() {
         match a.as_str() {
             "--stimulus" => stimulus = Some(it.next().ok_or("--stimulus needs a value")?.clone()),
             "--excerpt" => excerpt = Some(it.next().ok_or("--excerpt needs a value")?.clone()),
+            "--fx" => fx_name = Some(it.next().ok_or("--fx needs a value")?.clone()),
+            "--fx-value" => {
+                fx_value = Some(parse_wire_value(
+                    it.next().ok_or("--fx-value needs a value")?,
+                )?)
+            }
             s if s.starts_with("--") => return Err(format!("unknown flag {s}")),
             _ if path.is_none() => path = Some(a.clone()),
             _ => return Err(format!("unexpected argument {a:?}")),
         }
     }
     let path = path.ok_or("missing capture path")?;
+    if excerpt.is_none() && (fx_name.is_some() || fx_value.is_some()) {
+        return Err("--fx and --fx-value need --excerpt".into());
+    }
     let mode = match (stimulus, excerpt) {
         (Some(_), Some(_)) => return Err("--stimulus and --excerpt are exclusive".into()),
-        (None, Some(w)) => Mode::Excerpt(w),
+        (None, Some(w)) => {
+            let name = fx_name.unwrap_or_else(|| "bypass".into());
+            let fx = FxSetting::from_name(&name, fx_value.unwrap_or(0))
+                .ok_or_else(|| format!("unknown --fx {name:?} (bypass, gain, lowpass)"))?;
+            Mode::Excerpt(w, fx)
+        }
         (Some(s), None) => Mode::Stimulus(s),
         (None, None) => Mode::Stimulus("sine".into()),
     };
     Ok((path, mode))
+}
+
+/// A `CTL FX v=` value: decimal or `0x` hex, `0..=0xFFFF`.
+fn parse_wire_value(s: &str) -> Result<u16, String> {
+    let parsed = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(h) => u16::from_str_radix(h, 16),
+        None => s.parse::<u16>(),
+    };
+    parsed.map_err(|_| format!("--fx-value {s:?} is not 0..=65535 or 0x0000..=0xFFFF"))
 }
 
 /// `Ok((report, failures))` when the analysis ran; `Err` only for conditions that are not a
@@ -197,14 +224,21 @@ fn judge_stimulus(capture: &Capture, name: &str) -> Result<(Value, Vec<String>),
     Ok((report, failures))
 }
 
-fn judge_excerpt(capture: &Capture, wav: &str) -> Result<(Value, Vec<String>), String> {
+fn judge_excerpt(
+    capture: &Capture,
+    wav: &str,
+    fx: FxSetting,
+) -> Result<(Value, Vec<String>), String> {
     let raw = std::fs::read(wav).map_err(|e| format!("{wav}: {e}"))?;
-    let reference = Reference::from_excerpt_wav(&raw).map_err(|e| format!("{wav}: {e}"))?;
+    let reference = Reference::from_excerpt_wav_fx(&raw, fx).map_err(|e| format!("{wav}: {e}"))?;
     match compare(capture, &reference) {
         Ok(c) => {
             let failures = c.check().err().map(|e| e.to_string()).into_iter().collect();
-            Ok((json!({"excerpt": wav, "comparison": c}), failures))
+            Ok((json!({"excerpt": wav, "fx": fx, "comparison": c}), failures))
         }
-        Err(e) => Ok((json!({"excerpt": wav}), vec![format!("comparison: {e}")])),
+        Err(e) => Ok((
+            json!({"excerpt": wav, "fx": fx}),
+            vec![format!("comparison: {e}")],
+        )),
     }
 }

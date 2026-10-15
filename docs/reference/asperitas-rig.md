@@ -142,6 +142,13 @@ excerpt. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
 - **Applied at the next block** after the reply; the processor starts from a clean state with no
   smoothing ramp, so a given selection always produces the same output.
 
+To judge a capture taken with a `CTL FX` selection, pass the same wire values to `analyze`:
+`--fx bypass|gain|lowpass` and `--fx-value <0..65535 or 0xHEX>` (the `v=` sent to the board). The
+reference then runs `ReplayFx` at that selection, and the report carries an `fx` object. The
+limits are the same at every setting; a capture taken at a different setting than the one passed
+fails on loop gain (gain) or residual/alignment (low-pass). Host-synthesized captures cover this;
+a device capture at non-identity settings is TASK-035.07.03.
+
 Compile-checked only (host tests for the grammar and `ReplayFx`, `thumbv7em` build): no device
 claim until TASK-035.07.03.
 
@@ -167,6 +174,7 @@ the two, and reports metrics as one JSON document on stdout. Every numeric limit
 ```sh
 cargo run -p asperitas-measure --release -- analyze <capture.console.zst> [--stimulus sine|sweep|pulse]
 cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav
+cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav --fx gain --fx-value 43690
 ```
 
 Exit codes match `asperitas-rig`: **0** pass, **1** failed verdict (the JSON lists `failures`,
@@ -185,7 +193,7 @@ alignment stability only. `--excerpt` instead compares an excerpt replay with th
 | `discontinuities` | Samples where the capture minus gain-scaled, delayed stimulus jumps more than 8 LSB; nearby ones merge. | Any event. |
 | `spurs` | Largest non-fundamental FFT peaks, in dBc. | Worst above -80 dBc. |
 | `param_steps` | 1 ms block-RMS changes over 5 dB (an unsmoothed parameter change). | Any event. |
-| `comparison` (`--excerpt`) | Residual of the replay against the reference after alignment, gain fit and DC removal. | Residual RMS above -25 dB or peak above -15 dB relative to the reference, or loop gain off baseline. |
+| `comparison` (`--excerpt`, optional `--fx`) | Residual of the replay against the reference after alignment, gain fit and DC removal. | Residual RMS above -25 dB or peak above -15 dB relative to the reference, or loop gain off baseline. |
 
 ### Blind spots
 
