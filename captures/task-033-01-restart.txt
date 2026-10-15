@@ -1,0 +1,8 @@
+fw=0.1.0+2e88930 reset_reason=software
+exit=0
+restarted device=/dev/cu.usbmodem101 fw=0.1.0+2e88930 reset_reason=software boot_record=false
+exit=0
+/dev/cu.usbmodem101
+/dev/cu.usbmodem1102
+asperitas-rig: multiple console devices found: /dev/cu.usbmodem101, /dev/cu.usbmodem1102; pass --device to choose
+exit=2

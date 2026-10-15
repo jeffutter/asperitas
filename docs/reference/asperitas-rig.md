@@ -115,7 +115,7 @@ Exit codes for the control subcommands: 0 success, 1 the device rejected a comma
 (`CTLR ERR`, for example `bad-knob`) or the override acks were incomplete, 2 usage, device,
 I/O or timeout.
 
-Verified on the host with a fake transport only; hardware runs are TASK-033.01.
+Verified on the host with a fake transport, and on hardware 2026-10-15 (TASK-033.01): `query` and `restart` against `podtest` on a Seed3 re-enumerated with no BOOT/RESET and reported `reset_reason=software` (`captures/task-033-01-restart.txt`). A 240 s `capture` had `bad_frames=0` but `device_dropped=4041` in one gap (see `captures/task-033-01-podtest-240s.txt`).
 
 ## Convention: commit artifacts with hardware verification tickets
 

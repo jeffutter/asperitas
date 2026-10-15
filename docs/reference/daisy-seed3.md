@@ -1053,8 +1053,10 @@ capture.
 
 ## Host control channel (firmware wiring)
 
-Status: built and linked for `main` and `podtest` (TASK-032.03). **Not verified on hardware**:
-compiling is not evidence, and TASK-033.01 owns the board run.
+Status: built and linked for `main` and `podtest` (TASK-032.03). Verified on hardware for `podtest`
+(TASK-033.01, 2026-10-15): `VER`/`RSN` query and `RST` restart with re-enumeration and
+`reset_reason=software`, over the probe-flashed image. `main` and `SET`/`REL` on a live knob path are
+not covered by that run.
 
 The protocol (`CTL VER|RSN|RST|SET|REL`, `CTLR` replies) is `asperitas_logging::control`; the knob
 table is `asperitas_pod::knob_override`. The firmware side is one shared file,
