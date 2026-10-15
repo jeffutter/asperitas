@@ -3,11 +3,11 @@ id: TASK-038.04
 title: >-
   Store and replay instrument excerpts from QSPI through an internal-RAM staging
   buffer
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 11:40'
-updated_date: '2026-10-08 15:54'
+updated_date: '2026-10-15 18:40'
 labels:
   - planned
 dependencies:
@@ -42,13 +42,13 @@ Bit-exactness has to be scoped honestly. What this ticket can prove is that the 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Excerpt storage layout is expressed as constants owned by one module and mirrored in `docs/reference/daisy-seed3.md`: area starts at offset 0x100000, stride 512 KiB, fourteen slots, top 4 KiB sector reserved because the driver bounds check uses `MAX_ADDRESS = 0x7FFFFF` rather than 0x800000, and DaisyBootloader's region below 0x40000 stays untouched so installing it later does not require moving excerpts.
-- [ ] #2 Install arrives as framed console records on the existing CDC OUT endpoint — `EXCSTART name=<tag> bytes=<n> crc16=<c>`, then `EXCDATA i=<j> b64=<payload>`, then `EXCEND` — decoded with the existing `frame::Decoder`; the device buffers exactly one 4 KiB sector at a time and calls only `Flash::write_async` at sector-aligned addresses, so the driver's implicit sector erase can never reach into a neighbouring slot.
-- [ ] #3 After install the device reads the slot back and compares length and CRC-16 against `EXCSTART`, reporting `EXCOK` or `EXCFAIL got=<crc> want=<crc>`; a truncated or corrupted upload cannot produce a success record.
-- [ ] #4 Replay draws samples only from an internal-RAM ping-pong pair refilled by `read_async` over an MDMA channel with interrupt bindings for QUADSPI and MDMA; the audio callback performs no QSPI access, and the staging depth is justified numerically against refill latency in a comment a reviewer can check rather than chosen by feel.
-- [ ] #5 Bit-exactness is claimed only where it can be observed: across one full pass through an excerpt the device reports the CRC-16 of the samples it handed to the DAC encoder, that value equals the CRC the host computed from the source file, and both code and documentation state that this says nothing about what returns through the codec and patch cable, matching the posture TASK-035 AC #4 already takes.
-- [ ] #6 Storage and timing costs are documented with predicted and observed columns: 96,000 bytes per second for mono 16-bit, install wall-clock including per-sector erases, and replay margin, alongside the rule that the blocking flash API may not be used anywhere in this binary because its status wait is an unbounded busy loop.
-- [ ] #7 Host tests cover slot address arithmetic, slot header validation, the install state machine, and WAV header rejection from synthetic inputs with no board attached, and `examples/excerpt_stream.rs` output is checked against pinned golden frames so the wire format cannot drift.
+- [x] #1 Excerpt storage layout is expressed as constants owned by one module and mirrored in `docs/reference/daisy-seed3.md`: area starts at offset 0x100000, stride 512 KiB, fourteen slots, top 4 KiB sector reserved because the driver bounds check uses `MAX_ADDRESS = 0x7FFFFF` rather than 0x800000, and DaisyBootloader's region below 0x40000 stays untouched so installing it later does not require moving excerpts.
+- [x] #2 Install arrives as framed console records on the existing CDC OUT endpoint — `EXCSTART name=<tag> bytes=<n> crc16=<c>`, then `EXCDATA i=<j> b64=<payload>`, then `EXCEND` — decoded with the existing `frame::Decoder`; the device buffers exactly one 4 KiB sector at a time and calls only `Flash::write_async` at sector-aligned addresses, so the driver's implicit sector erase can never reach into a neighbouring slot.
+- [x] #3 After install the device reads the slot back and compares length and CRC-16 against `EXCSTART`, reporting `EXCOK` or `EXCFAIL got=<crc> want=<crc>`; a truncated or corrupted upload cannot produce a success record.
+- [x] #4 Replay draws samples only from an internal-RAM ping-pong pair refilled by `read_async` over an MDMA channel with interrupt bindings for QUADSPI and MDMA; the audio callback performs no QSPI access, and the staging depth is justified numerically against refill latency in a comment a reviewer can check rather than chosen by feel.
+- [x] #5 Bit-exactness is claimed only where it can be observed: across one full pass through an excerpt the device reports the CRC-16 of the samples it handed to the DAC encoder, that value equals the CRC the host computed from the source file, and both code and documentation state that this says nothing about what returns through the codec and patch cable, matching the posture TASK-035 AC #4 already takes.
+- [x] #6 Storage and timing costs are documented with predicted and observed columns: 96,000 bytes per second for mono 16-bit, install wall-clock including per-sector erases, and replay margin, alongside the rule that the blocking flash API may not be used anywhere in this binary because its status wait is an unbounded busy loop.
+- [x] #7 Host tests cover slot address arithmetic, slot header validation, the install state machine, and WAV header rejection from synthetic inputs with no board attached, and `examples/excerpt_stream.rs` output is checked against pinned golden frames so the wire format cannot drift.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -112,4 +112,6 @@ Do not add a serial-port dependency to the workspace for this. Framing belongs t
 - **No inbound console path exists:** the CDC OUT endpoint is allocated (usb.rs ep_out_buffer) but never read on device; frame::Decoder runs only in host tests. Install over CDC OUT is the first host-to-device path, overlapping TASK-032 (host control). Decide whether this ticket builds a general inbound path TASK-032 then reuses, or a narrow install-only one.
 - **Likely leaves:** slot layout and host tooling (WAV parsing, excerpt_stream); the inbound console path; install with readback EXCOK/EXCFAIL; replay through an internal-RAM ping-pong with DAC-path CRC; docs (shared with TASK-038.06). rig needed two splits after two deadline failures, so size the leaves accordingly.
 - **Bench facts to plan around (TASK-038.05):** f64 now runs on the FPU (eed633b); callback headroom is about 590 us of 666; the loop is straight at -0.41 dB; the SDRAM window is Device memory (no unaligned access). A replay path that reads QSPI inside the callback would fight the 666 us budget, which is AC #4's point.
+
+2026-10-15: closed at the owner's direction in a live session. All seven children are Done (.01 module, .02 inbound reader, .03 replay with .03.01 core and .03.02 wiring, .04 install state machine and golden frames, .05 install from rig, .06 docs, .07 bootloader route with .07.01-.07.04). AC mapping: #1 .01 + .06 (doc mirror guarded by excerpt_docs.rs); #2 .04 + .05; #3 .04 + .05; #4 .03.02; #5 .03; #6 .06; #7 .01 + .04. Hardware evidence from TASK-038.09 on 2026-10-15: mandolin_single_note_soft installed to slot 0 (EXCOK crc16=15fd, 5.82 s), replayed with EXCPLAY crc16=15fd want=15fd underruns=0 clean=1, owner heard the returned clip as identical to the source. Known gaps, not blockers: replay staging margin and USB time were not measured separately (doc cells say so); whether MDMA can reach DTCM was never confirmed because TASK-074 moved the staging to AXI SRAM instead.
 <!-- SECTION:NOTES:END -->
