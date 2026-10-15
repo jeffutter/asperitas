@@ -64,3 +64,15 @@ SECTIONS {
     *(.sram1_bss*)
   } > RAM
 } INSERT AFTER .bss;
+
+/*
+ * Rig's excerpt replay staging (`REPLAY`, TASK-074). The bootloaded layout moves it to the AXI tail
+ * (memory-bootloaded.x has the reasoning); here AXI SRAM is the whole RAM region, so the same section name
+ * lands in it. NOLOAD and zeroed by rig at boot, as there. Keeping one name keeps rig.rs layout-blind.
+ */
+SECTIONS {
+  .replay_bss (NOLOAD) : ALIGN(32) {
+    *(.replay_bss)
+    *(.replay_bss*)
+  } > RAM
+} INSERT AFTER .bss;

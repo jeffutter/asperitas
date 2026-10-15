@@ -30,6 +30,9 @@ MEMORY
   FLASH : ORIGIN = 0x24000000, LENGTH = 480K
   RAM   : ORIGIN = 0x20000000, LENGTH = 128K
   RAM_D2 : ORIGIN = 0x30000000, LENGTH = 288K
+  /* The 32 KB of AXI SRAM above the 480 KB image the bootloader copies. Nothing is loaded here; it is
+   * the one RAM region both MDMA and the CPU are known to reach without a caveat (see .replay_bss). */
+  AXI_TAIL : ORIGIN = 0x24000000 + 480K, LENGTH = 32K
 }
 
 SECTIONS {
@@ -37,6 +40,21 @@ SECTIONS {
     *(.sram1_bss)
     *(.sram1_bss*)
   } > RAM_D2
+} INSERT BEFORE .bss;
+
+/* Rig's excerpt replay staging (`REPLAY`, firmware/src/bin/rig.rs, TASK-074). Not DTCM: whether MDMA, the
+ * master `Flash::read_async` refills it with, can write DTCM at 0x20000000 was not confirmed from RM0433
+ * (the TCMs hang off MDMA's separate AHBS port, and a transfer must be steered to it; nothing in this tree
+ * does that), and a refill that lands nowhere would play zeros. AXI SRAM is reached by MDMA's ordinary
+ * master port. NOLOAD, no AT>: the image is not grown, and rig zeroes the section itself at boot
+ * (`excerpt_play::zero_staging`) because cortex-m-rt zeroes only [__sbss, __ebss). The region LENGTH is the
+ * overflow check: the linker refuses a staging that does not fit. scripts/check-bootloaded-builds.sh
+ * checks the symbol's final address. */
+SECTIONS {
+  .replay_bss (NOLOAD) : ALIGN(32) {
+    *(.replay_bss)
+    *(.replay_bss*)
+  } > AXI_TAIL
 } INSERT BEFORE .bss;
 
 /* cortex-m-rt zeroes [__sbss, __ebss) and sets __ebss, and the stack end, from the location counter

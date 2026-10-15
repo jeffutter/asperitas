@@ -62,6 +62,23 @@ for entry in "${MATRIX[@]}"; do
   fi
 
   bash scripts/check-image-load-addresses.sh "$bin" || failed=1
+
+  # TASK-074: the replay staging must sit in the AXI tail above the image (memory-bootloaded.x AXI_TAIL,
+  # 0x24078000..0x24080000), never in DTCM where plain .bss would put it.
+  case ",$features," in
+    *,stim-excerpt,*)
+      replay_addr=$(rust-nm "$ELF_DIR/$bin" 2>/dev/null | awk '$3 ~ /REPLAY/ && $2 ~ /^[dDbB]$/ {print $1; exit}')
+      if [ -z "$replay_addr" ]; then
+        printf '%s\n' "check-bootloaded-builds: no REPLAY symbol in $bin [$features] (rust-nm missing or symbol stripped)" >&2
+        failed=1
+      elif [ $((16#$replay_addr)) -lt $((0x24078000)) ] || [ $((16#$replay_addr)) -ge $((0x24080000)) ]; then
+        printf '%s\n' "check-bootloaded-builds: REPLAY at 0x$replay_addr is outside the AXI tail 0x24078000..0x24080000" >&2
+        failed=1
+      else
+        printf '%s\n' "REPLAY staging at 0x$replay_addr (AXI tail)"
+      fi
+      ;;
+  esac
 done
 
 exit "$failed"

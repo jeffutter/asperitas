@@ -1144,7 +1144,7 @@ async fn dump_ring(_ring: Ring, first: u32, end: u32) {
 //    leaves. Affordable, but not free, and not needed. The `nvic priority` line at boot reads both
 //    back.
 //
-// Bus traffic is the remaining coupling: MDMA writes the readback into AXI SRAM, which the SAI DMA
+// Bus traffic is the remaining coupling: MDMA writes the readback into AXI SRAM (the staging's own region, either layout), which the SAI DMA
 // also reaches. Arbitration there is per beat, nanoseconds, and SDRAM (the ring) is not on the path.
 
 /// The board's QSPI flash, async-only (see above).
@@ -1372,23 +1372,24 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 //
 // ### Where the staging lives, and the D-cache
 //
-// The staging is `REPLAY`'s `.bss`, which the link layout places in the image's RAM region: AXI SRAM
-// under `memory-internal.x` (cacheable by the default memory map) and DTCM under `memory-bootloaded.x`
-// (tightly coupled, never cached; rig only links under the latter, because the excerpt install path no
-// longer fits internal flash). MDMA, the master `Flash::read_async` uses, reaches both; the bus-matrix
-// path to DTCM is the same one ST's own QSPI-over-MDMA examples use with the default H7 link layout.
+// The staging is `REPLAY`, placed by name in the `.replay_bss` section (NOLOAD, zeroed at boot by
+// `zero_staging`) and always in AXI SRAM: the whole RAM region under `memory-internal.x`, and the 32 KB
+// `AXI_TAIL` above the 480 KB bootloaded image under `memory-bootloaded.x`. AXI SRAM is cacheable by the
+// default memory map. It is deliberately not the DTCM that plain `.bss` is under the bootloaded layout
+// (TASK-074): MDMA, the master `Flash::read_async` uses, reaches the TCMs only through its separate AHBS
+// port, DMA1/DMA2 cannot reach DTCM at all, and nothing here confirmed from RM0433 that an MDMA refill into
+// DTCM lands. `scripts/check-bootloaded-builds.sh` checks the symbol's address in the bootloaded image.
 // The argument for either cache state, which `fill_half` carries out:
 //
 // * D-cache off (nothing in this stack enables it today; RIGCFG reports the live bit): MDMA's writes
 //   are the only writes, loads go to memory, no maintenance is needed and none is done.
-// * D-cache on, buffer in AXI SRAM: MDMA writes memory behind the cache. The CPU never writes a
+// * D-cache on (the buffer is in AXI SRAM): MDMA writes memory behind the cache. The CPU never writes a
 //   staging byte (the callback only reads; `take_block` takes `&self` and the halves are written only
 //   through a `FillClaim`), so no line over a half is ever dirty and nothing can be written back over
 //   the DMA's data. The only hazard is a stale clean line from the half's previous contents, so after
 //   each read completes `fill_half` invalidates the half's cache lines before publishing it. The
 //   range is rounded up to a whole line; halves are 32-byte aligned and a multiple of 32 long
 //   (compile-time asserts in `replay`), so the rounding stays inside the half.
-// * Buffer in DTCM: caches do not cover it, and the invalidation, if run, touches no line.
 //
 // ### The interrupt budget the callback keeps
 //
@@ -1474,7 +1475,21 @@ mod excerpt_play {
     );
 
     /// The staging ping-pong. See "Where the staging lives" above for what region it is in.
+    ///
+    /// `.replay_bss` is NOLOAD in both link layouts, so nothing initialises it: [`zero_staging`] must
+    /// run before the first use. All-zero is a valid idle state (`PHASE_IDLE`, `HalfState::Empty`).
+    #[link_section = ".replay_bss"]
     static REPLAY: ReplayCore = ReplayCore::new();
+
+    /// Zero the staging. Called once from `main`, before [`load`] and before any other task exists.
+    pub fn zero_staging() {
+        // SAFETY: called once at boot, single-threaded, before the SAI interrupt or any refill can
+        // touch the core. `addr_of!` takes the address without making a reference. The core is
+        // plain integers and atomics for which all-zero bytes are valid.
+        unsafe {
+            core::ptr::write_bytes(core::ptr::addr_of!(REPLAY).cast_mut(), 0, 1);
+        }
+    }
 
     /// Whether the pass has been started and has not yet completed.
     ///
@@ -2097,6 +2112,8 @@ async fn main(_spawner: Spawner) {
     //
     // `stim-excerpt` builds it from the slot instead: the header read, the pass start and both halves'
     // first fill happen here, before `prepare_interface`, so the audio start is not delayed by flash.
+    #[cfg(feature = "stim-excerpt")]
+    excerpt_play::zero_staging();
     #[cfg(feature = "stim-excerpt")]
     let player = match excerpt_play::load(&mut cp.SCB).await {
         Ok(player) => player,
