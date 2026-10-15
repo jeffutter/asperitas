@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 03:25'
-updated_date: '2026-10-15 04:15'
+updated_date: '2026-10-15 04:18'
 labels:
   - planned
 dependencies:
@@ -103,6 +103,8 @@ AC3: not rigged for audio. Owner answered 'n' at the audio question; no one list
 AC4: 6796 records over 66.306 s = 102.5 records/s, against TASK-030.06's idle 101.3 records/s (zero drops there). Seq 0x3a..0x1ac5 contiguous, gaps=0 (6796 = 6853-58+1). Last STATUS: sent=6748 dropped_full=17 bytes_dropped=1037 trunc=0 ep_err=0. The 17 drops are already in the first STATUS (seq 0x9e, t=1.5 s) and unchanged at the last, so all happened before the reader attached and none during the capture. BOOT records seen: 0, the reader attached about 0.5 s after boot (first seq 0x3a), as in TASK-030.06. No criterion failed, no bug ticket filed.
 
 Not done: step 7, the panictest spot check, and TASK-046's red-LED timing observation (script: scripts/bench-030-04.py panic). Not an acceptance criterion here. Closed with the owner in a live session.
+
+2026-10-14 panictest spot check (step 7), run live with the owner via scripts/bench-030-04.py panic; capture audio/captures/2026-10-14-panictest.console.zst. console_decode: records=18 bad_frames=0 resyncs=0 discarded_bytes=0, 1632 bytes all accounted for, seq contiguous. The countdown lines and one framed 'PANIC: panictest: deliberate panic ... at src/bin/panictest.rs:183:9' record (seq 0x15, t=10000 ms) arrived with a valid CRC. Owner observed the red LED about 3 s after the PANIC line.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

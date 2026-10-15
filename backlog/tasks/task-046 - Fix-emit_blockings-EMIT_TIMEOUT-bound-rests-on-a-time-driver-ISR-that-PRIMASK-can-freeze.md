@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-09-10 08:08'
-updated_date: '2026-09-10 13:36'
+updated_date: '2026-10-15 04:18'
 labels:
   - planned
 dependencies:
@@ -297,6 +297,8 @@ State explicitly: (a) the bound is now processor cycles (480 MHz × 3 s) accumul
 Implemented per plan. New module crates/asperitas-logging/src/spin_budget.rs (pub(crate), gated cfg(any(feature="log-usb", test))): EMIT_TIMEOUT_CYCLES = 480_000_000*3, EMIT_TIMEOUT_MAX_POLLS = 20_000_000, arch-gated cycle_counter_running()/cycle_count() seam (arm: DCB::enable_trace + DWT::unlock + enable_cycle_counter + readback; non-arm: reports unavailable), and SpinBudget accumulating u32 wrapping_sub deltas into a u64 with the dual-bound expired(). usb.rs: EMIT_TIMEOUT Duration const and the while Instant::now() < deadline loop deleted; emit_blocking now does 'while !budget.expired(cycle_count())'; import narrowed to embassy_time::Instant (used only by now_ms); docs split transport vs clock assumption into distinct sentences; now_ms records its t_ms staleness under the same masked condition. panic_handler.rs names the new clock. Deviation from plan 2a: the constants are referenced from usb.rs prose as code spans, not intra-doc links, because they are private and public-doc links to them would fire rustdoc::private_intra_doc_links (the very warning class AC #12 guards). One extra test (start_begins_fresh_and_never_panics) exists because start()/the helpers were dead_code under default-feature clippy until something called them. Bonus: removing the old [EMIT_TIMEOUT] link also removed one pre-existing rustdoc error under -D warnings (25 -> 24 at boot-led,log-usb,log-defmt).
 
 Verification (all via nix develop): fmt --all --check clean; clippy -p asperitas-logging --all-targets -D warnings clean; clippy --workspace --all-targets -D warnings clean with and without asperitas-pod/pod-hw; cargo test -p asperitas-logging green with 6 new spin_budget tests running under default features (so CI's plain cargo test --workspace executes them); --features log-usb builds+passes on host; cargo test --workspace green both variants; dump_reassemble --selftest passes; firmware release seed3 build succeeds and make clippy (-D warnings) clean; Cargo.lock and firmware/Cargo.lock untouched; grep of usb.rs for Instant|Duration shows only now_ms() and its import. Bench branch discrimination appended to TASK-030.04 as a note (no dependency edge, per plan section 7).
+
+2026-10-14 bench observation requested by TASK-030.04: panictest on hardware, host attached. The PANIC record arrived (valid CRC). The owner saw the red LED about 3 s after the PANIC line, which matches the cycle-bound branch (DWT CYCCNT counts on real silicon after TRCENA+LAR unlock) rather than the immediate fast exit. Caveat: the host was attached, so this is the delivered-record path with a roughly 3 s wait before halt; the plan's cleanest discriminator was the host-unplugged variant, not run. Seconds were reported as a rounded figure, not stopwatch-timed.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
