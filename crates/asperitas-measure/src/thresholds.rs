@@ -105,3 +105,33 @@ pub const SPUR_REPORT_COUNT: usize = 8;
 ///
 /// Origin: TASK-035.03, set from the fixtures' measured worst spur (see `metrics.rs` tests).
 pub const SPUR_MAX_DBC: f64 = -80.0;
+
+/// Block length for the parameter-step envelope, samples (1 ms at 48 kHz, a whole number of
+/// periods of the rig's 1 kHz sine so a steady tone has constant block RMS).
+///
+/// Origin: TASK-035.04.
+pub const PARAM_STEP_BLOCK_SAMPLES: usize = 48;
+
+/// Largest allowed change in block RMS between blocks one or two apart, dB.
+///
+/// Origin: TASK-035.04, set from `param_step.rs` tests: a 10.4 dB level change (`gain_db` 24) through the
+/// smoothed `Gain` (10 ms time constant) peaks at 2.8 dB over two blocks, the same change snapped
+/// (unsmoothed) reads 10.4 dB. 5 dB sits between with 1.5x margin either side.
+pub const PARAM_STEP_MAX_DB: f64 = 5.0;
+
+/// Blocks quieter than this RMS (linear, full scale 1.0) are ignored, so a dB ratio against idle
+/// noise cannot read as a step. About 2 LSB of 16-bit, as [`SILENCE_LSB`].
+///
+/// Origin: TASK-035.04.
+pub const PARAM_STEP_FLOOR_RMS: f32 = 2.0 / 32768.0;
+
+/// Step flags closer together than this many blocks are one event (a step falling inside a block
+/// flags both its boundaries).
+///
+/// Origin: TASK-035.04.
+pub const PARAM_STEP_MERGE_BLOCKS: usize = 3;
+
+/// Most step positions stored in the report; the count stays exact.
+///
+/// Origin: TASK-035.04; keeps the JSON bounded, as [`DISCONTINUITY_MAX_POSITIONS`].
+pub const PARAM_STEP_MAX_POSITIONS: usize = 64;
