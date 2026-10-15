@@ -9,6 +9,8 @@ asperitas-dsp = { path = "../asperitas-dsp" }
 # Pure-Rust zstd decoder: no C toolchain needed to build the host tooling.
 ruzstd = "0.8.2"
 rustfft = "6.4.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [lints]
 workspace = true

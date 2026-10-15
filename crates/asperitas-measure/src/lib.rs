@@ -4,9 +4,12 @@
 //! - [`capture`] reassembles a committed `.console.zst` into samples, strictly.
 //! - [`stimulus`] regenerates the played signal from the same `asperitas-dsp` processors the rig
 //!   firmware runs.
+//! - [`align`] finds the loopback delay per window and flags slips.
+//! - [`metrics`] reports level, silence, discontinuity candidates and spurs as JSON.
 //! - [`thresholds`] is the only place a numeric limit is written down.
 
 pub mod align;
 pub mod capture;
+pub mod metrics;
 pub mod stimulus;
 pub mod thresholds;

@@ -48,3 +48,60 @@ pub const ALIGN_TRACK_SAMPLES: usize = 8;
 ///
 /// Origin: TASK-035.02; fixture sine peaks agree to far better than this.
 pub const ALIGN_TIE_FRACTION: f32 = 0.98;
+
+/// Largest allowed deviation of measured loop gain from [`LOOP_GAIN_DB`], dB.
+///
+/// Origin: TASK-035.03, set from the 2026-10-07 and 2026-10-15 fixture deviations (see
+/// `metrics.rs` tests) with margin: both fixtures measured within 0.005 dB.
+pub const LEVEL_DEVIATION_TOL_DB: f64 = 0.05;
+
+/// A sample counts as silent when its magnitude is at most this, 16-bit LSB.
+///
+/// Origin: TASK-035.03; the rig noise floor is 0.35 LSB RMS and DC is -0.49 LSB
+/// ([`NOISE_DISTORTION_LSB_RMS`], [`DC_LSB`]), so 2 LSB is several sigma of idle noise.
+pub const SILENCE_LSB: i16 = 2;
+
+/// A silent run is reported once it lasts this many samples (1 ms at 48 kHz). The 1 kHz sine
+/// crosses zero for only a few samples at a time, so this cannot trigger on the stimulus itself.
+///
+/// Origin: TASK-035.03.
+pub const SILENCE_MIN_RUN_SAMPLES: usize = 48;
+
+/// A discontinuity candidate is a sample where the aligned residual (capture minus gain-scaled,
+/// delayed stimulus) jumps by more than this from the previous sample, 16-bit LSB.
+///
+/// Origin: TASK-035.03, set from the largest residual jump in the fixtures (see `metrics.rs` tests).
+pub const DISCONTINUITY_JUMP_LSB: f64 = 8.0;
+
+/// Candidates closer together than this many samples are one event (a dropout produces a jump at
+/// each edge, a step produces one).
+///
+/// Origin: TASK-035.03.
+pub const DISCONTINUITY_MERGE_SAMPLES: usize = 8;
+
+/// Most discontinuity positions stored in the report; the count stays exact.
+///
+/// Origin: TASK-035.03; keeps the JSON bounded for a badly broken capture.
+pub const DISCONTINUITY_MAX_POSITIONS: usize = 64;
+
+/// Spectrum frame length, samples (a 2.9 Hz bin at 48 kHz, fine enough to separate mains-related
+/// hum from the 1 kHz fundamental).
+///
+/// Origin: TASK-035.03.
+pub const SPUR_FFT_SAMPLES: usize = 16_384;
+
+/// Bins either side of the fundamental treated as the fundamental itself (a Hann main lobe is
+/// +-2 bins; one more for the peak's off-bin position).
+///
+/// Origin: TASK-035.03.
+pub const SPUR_EXCLUDE_BINS: usize = 3;
+
+/// Number of largest non-fundamental spectral peaks reported.
+///
+/// Origin: TASK-035.03.
+pub const SPUR_REPORT_COUNT: usize = 8;
+
+/// Highest allowed spur level relative to the fundamental, dB (negative).
+///
+/// Origin: TASK-035.03, set from the fixtures' measured worst spur (see `metrics.rs` tests).
+pub const SPUR_MAX_DBC: f64 = -80.0;
