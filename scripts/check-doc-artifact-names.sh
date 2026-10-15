@@ -53,7 +53,12 @@ cd "$ROOT" || exit 2
 #   capture.bin: a console log capture read OFF the board, not an image flashed TO it. Quoted as
 #   the dump destination in README.md's console-capture section and in
 #   docs/reference/daisy-seed3.md's flashing walkthrough.
-ALLOWED_TOKENS=(capture.bin)
+#
+#   dsy_bootloader_v6_4-intdfu-2000ms.bin: the stock DaisyBootloader release image, downloaded from
+#   electro-smith/DaisyBootloader and flashed to internal flash once. Third-party, so no
+#   firmware/Makefile target can produce it. Quoted in docs/reference/daisy-seed3.md's bootloader
+#   section.
+ALLOWED_TOKENS=(capture.bin dsy_bootloader_v6_4-intdfu-2000ms.bin)
 
 DOC_FILES=()
 LEGAL_BINS=()

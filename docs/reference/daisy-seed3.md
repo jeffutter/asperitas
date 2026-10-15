@@ -1094,6 +1094,43 @@ module down to `capture_reset_reason` and `merge`.
 - **Not wired:** `rig` (a one-shot timeline with no inbound channel by design, and about 24 KB of
   flash headroom left).
 
+## The stock Daisy bootloader on Seed3 (measured)
+
+Measured 2026-10-15 with the owner at the bench (TASK-038.04.07.01). The stock DaisyBootloader
+works on the Seed3 for the bootloader, DFU and QSPI parts; the audio part is still unproven
+(see the end of this section). The upstream README lists only Seed, Seed2 DFM and PatchSM, so this
+is outside its stated support.
+
+- **Binary:** `dist/dsy_bootloader_v6_4-intdfu-2000ms.bin` from electro-smith/DaisyBootloader
+  (v6.4.0; DFU on the onboard USB-C, 2000 ms grace period), 130,188 bytes, SHA-256
+  `76296b6bd625e5e5dbeba2431619a0ed90ae2c0a3a99258df00a64a0b8b9ec35`. It fits the 128 KB internal
+  flash. Fetch it with `gh api repos/electro-smith/DaisyBootloader/contents/dist/<name> -H
+  "Accept: application/vnd.github.raw"`.
+- **Install:** enter system DFU (BOOT, tap RESET, release BOOT), then
+  `dfu-util -a 0 -s 0x08000000:leave -D dsy_bootloader_v6_4-intdfu-2000ms.bin`. dfu-util reports
+  "File downloaded successfully" and then the usual `Error during download get_status`. This
+  **overwrites whatever is in internal flash**, so `rig`/`main` must be reflashed via the new
+  route (or the probe) afterwards.
+- **Enumerates:** the board appears as USB product "Daisy Bootloader" with a single DFU interface,
+  `@Flash /0x90000000/64*4Kg/0x90040000/60*64Kg/0x90400000/60*64Kg`. That is the QSPI part
+  presented by the bootloader, so it does drive this chip. The app region starts at `0x90040000`.
+- **Where it runs the app:** the bootloader reads the app's reset vector (word at +4). An address in
+  AXI SRAM (`0x24xxxxxx`) makes it copy the image from QSPI into SRAM and jump; one in QSPI
+  (`0x90xxxxxx`) makes it run in place. Anything else is an error. In SRAM mode it copies
+  about 480 KB to `0x24000000`, so the app's `.data`/`.bss` cannot live in AXI SRAM.
+- **App flash:** `dfu-util -a 0 -s 0x90040000:leave -D ledtest.bin`.
+- **Working link layout (trial):** `FLASH = 0x24000000, 480K` and `RAM = 0x20000000, 128K` (DTCM).
+  The initial stack pointer is then `0x20020000` and the reset vector `0x24000299`. `ledtest`
+  built this way was flashed to `0x90040000` and ran: the Pod RGB LED cycled as it does from
+  internal flash.
+- **Re-entering the bootloader with an app installed:** after any reset the bootloader's DFU
+  interface is visible from about 0.7 s for its 2 s grace period, then it jumps to the app. No
+  button is needed: `probe-rs reset ... --connect-under-reset` then `dfu-util -w -a 0 -s
+  0x90040000:leave -D ledtest.bin` reflashed the app. Without a probe, a RESET tap does the same.
+- **Not proven:** `main`/`rig` with the SAI DMA buffers. They must sit in D2 (`0x30000000`), and
+  AXI SRAM is now image space; that layout is TASK-038.04.07.02, and re-measuring `rig`'s callback
+  timing from it is TASK-038.04.07.04.
+
 ## External SDRAM: address, MPU and caches (measured)
 
 Read off the running board through the probe on 2026-10-08, after `rig` had brought the SDRAM up with
