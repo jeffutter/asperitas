@@ -7,7 +7,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-09 05:08'
-updated_date: '2026-09-09 01:35'
+updated_date: '2026-10-15 05:55'
 labels:
   - review-followup
 dependencies:
@@ -40,4 +40,6 @@ Correct axis: per this project's CLAUDE.md, "If a criterion says HUMAN:, no amou
 Restructured 2026-09-09 into an umbrella with two subtasks. The original four criteria were measurements — take a capture, compute a median interval, check for bursts, report the number — carrying HUMAN: prefixes only because no unattended capture path existed. TASK-030 and TASK-031 create that path, so the measurement moved to TASK-027.02 where an agent can carry it, and what genuinely needs hands (flashing over DFU, leaving the bench cabled) stayed as TASK-027.01.
 
 This ticket stays @human under the parent-inherits-strictest rule and cannot close until TASK-027.01 does. The measurement criteria themselves no longer ask a person to do arithmetic.
+
+2026-10-15 measurement (TASK-027.02): captures/task-027-02-podtest-knob.txt, 250 s via asperitas-rig (bad_frames=0, accounting_ok=true, 25360 records, one leading gap seq 0x25->0x1bb with device_dropped=405 and 49 discarded bytes from pre-attach, so rig verdict=fail on discarded_bytes only; stats use records after the gap). Knob interval from body t= over 24828 deltas (scripts/knob-interval.py): median 10.0 ms, mean 10.071, p5 10, p95 11, min 10, max 11, stdev 0.257 ms (1 ms quantisation). No deltas <=2 ms, no stalls >20 ms, so no catch-up bursts. Controls assumed untouched. Consistent with true 1 kHz poll rate.
 <!-- SECTION:NOTES:END -->
