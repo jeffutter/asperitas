@@ -3,11 +3,11 @@ id: TASK-032
 title: >-
   Add host-initiated device control over the console link, including parameter
   override and restart
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:25'
-updated_date: '2026-10-15 05:59'
+updated_date: '2026-10-15 11:49'
 labels:
   - planned
 dependencies:
@@ -40,14 +40,14 @@ Restart deserves care separately from the others. A board that cannot be restart
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The host can query firmware version and the reset reason of the current boot, and can request a restart, over the same USB connection already used for logging.
-- [ ] #2 The host can place a mapped parameter under host control, drive it across its full range, and release it back to knob control.
-- [ ] #3 Host-driven values enter upstream of parameter smoothing, so the smoothing path stays in circuit during measurement; a test shows the difference between injecting upstream of smoothing versus downstream.
-- [ ] #4 Knob-driven behaviour is unchanged when host control is not active, covered by existing host-side tests.
-- [ ] #5 Control traffic shares the framed transport and cannot corrupt the log stream, covered by a test that interleaves commands with logging.
-- [ ] #6 A malformed or unsupported command is answered with an error response and leaves device state unchanged.
-- [ ] #7 Firmware boots and logs normally when no host ever sends a command.
-- [ ] #8 The command set and framing are documented alongside the transport documentation from TASK-030.
+- [x] #1 The host can query firmware version and the reset reason of the current boot, and can request a restart, over the same USB connection already used for logging.
+- [x] #2 The host can place a mapped parameter under host control, drive it across its full range, and release it back to knob control.
+- [x] #3 Host-driven values enter upstream of parameter smoothing, so the smoothing path stays in circuit during measurement; a test shows the difference between injecting upstream of smoothing versus downstream.
+- [x] #4 Knob-driven behaviour is unchanged when host control is not active, covered by existing host-side tests.
+- [x] #5 Control traffic shares the framed transport and cannot corrupt the log stream, covered by a test that interleaves commands with logging.
+- [x] #6 A malformed or unsupported command is answered with an error response and leaves device state unchanged.
+- [x] #7 Firmware boots and logs normally when no host ever sends a command.
+- [x] #8 The command set and framing are documented alongside the transport documentation from TASK-030.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -59,3 +59,9 @@ Approach: all work is delegated to four sub-tasks; the umbrella is a tracking ti
 Restart safety: serviced independent of audio and channel backpressure; BOOT/RESET/DFU entry untouched.
 Verification: cargo test --workspace on host; firmware builds via Makefile; hardware evidence is TASK-033.01. AC1 and AC2 are fully met only once .03 and .04 land.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered by TASK-032.01 (control.rs codec and verb dispatcher, proptest and adversarial suites), .02 (KnobOverride in asperitas-pod), .03 (firmware wiring: CTL VER/RSN/RST/SET/REL, reset reason from RCC_RSR, build.rs version), .04 (asperitas-rig query/restart/override). Criterion evidence: #1 query verified on hardware 2026-10-15 (podtest, `asperitas-rig query` printed `fw=0.1.0+f3c4f89 reset_reason=power-on`); restart is host-tested only. #2 override set/sweep/release host-tested; not run on a board. #3 knob_boundary_injection_is_smoothed_direct_set_is_not. #4 merge_without_override_is_bit_identical plus the existing suite. #5 write_whole_rounds_are_byte_exact_under_randomized_interleaving and the rig query_skips_interleaved_logs test (replies and logs share the framed transport). #6 control_reaches_control_and_rejects_are_counted_without_effect plus the adversarial command suite. #7 podtest flashed with the control wiring booted and logged a 5 s capture with no host command sent (bad_frames=0, accounting_ok=true, 528 podtest lines; the verdict failed only on pre-attach drops and 32 discarded leading bytes). #8 docs/reference/daisy-seed3.md, section 'Host control channel (firmware wiring)'. Not verified on hardware and left to TASK-033.01: the RST restart and re-enumeration, SET/REL driving a knob on the main binary, and the reset-reason value after a software restart. Observed, unexplained: reset_reason read `power-on` after a probe-rs reset; the RSR priority mapping is host-tested but TASK-033.01 should check what a probe reset reports. Binaries: podtest only was run; main was not flashed.
+<!-- SECTION:FINAL_SUMMARY:END -->
