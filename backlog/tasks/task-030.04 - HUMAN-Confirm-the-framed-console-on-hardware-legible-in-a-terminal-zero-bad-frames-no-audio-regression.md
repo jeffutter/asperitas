@@ -3,11 +3,11 @@ id: TASK-030.04
 title: >-
   HUMAN: Confirm the framed console on hardware - legible in a terminal, zero
   bad frames, no audio regression
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 03:25'
-updated_date: '2026-10-09 11:00'
+updated_date: '2026-10-15 04:15'
 labels:
   - planned
 dependencies:
@@ -40,10 +40,10 @@ ticket with the offending timestamps rather than checking a box.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: Capture at least 60 s of podtest to a raw file while turning the encoder through several detents and pressing and releasing the encoder click and both buttons several times; decoding the file reports zero records failing the integrity check
-- [ ] #2 HUMAN: Every encoder click, press and release performed during that capture is present in the decoded output - this reproduces the specific loss that ate two button presses in TASK-018.04
-- [ ] #3 HUMAN: With logging running, confirm audio output through main.rs is free of clicks, dropouts or pitch artefacts attributable to the logging path, or state explicitly that the bench was not rigged for audio at that moment
-- [ ] #4 HUMAN: Record the decoded record count and integrity failures next to TASK-030.06's idle numbers, and if any criterion fails file a bug ticket carrying the offending timestamps instead of checking the box
+- [x] #1 HUMAN: Capture at least 60 s of podtest to a raw file while turning the encoder through several detents and pressing and releasing the encoder click and both buttons several times; decoding the file reports zero records failing the integrity check
+- [x] #2 HUMAN: Every encoder click, press and release performed during that capture is present in the decoded output - this reproduces the specific loss that ate two button presses in TASK-018.04
+- [x] #3 HUMAN: With logging running, confirm audio output through main.rs is free of clicks, dropouts or pitch artefacts attributable to the logging path, or state explicitly that the bench was not rigged for audio at that moment
+- [x] #4 HUMAN: Record the decoded record count and integrity failures next to TASK-030.06's idle numbers, and if any criterion fails file a bug ticket carrying the offending timestamps instead of checking the box
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -94,6 +94,15 @@ Bench observation requested from TASK-046 (now done): when you rig the console c
 2026-10-09: Block lifted. A plain probe flash is recoverable with the debugger, provided the project's probe tooling is used (chip description ASPERITAS_H750IB, never a stock --chip STM32H7 attach, which can leave the debug port dead until the USB-C is replugged). Boot-path changes (bootloader install, bootloaded layout) stay Blocked.
 
 2026-10-09: Split. The flash, idle capture, decode, counters and trailing-record criteria moved to TASK-030.06 (@agent), which this ticket now depends on. What remains here needs hands (encoder, buttons) or ears.
+
+2026-10-14 bench session run live with the owner via scripts/bench-030-04.py (probe-flash of podtest, FEATURES='seed3 log-defmt', console on /dev/cu.usbmodem101). Capture archived: audio/captures/2026-10-14-podtest-controls-66s.console.zst (430717 bytes raw, 66.3 s device time).
+
+AC1: console_decode records=6796 bad_frames=0 resyncs=0 discarded_bytes=0; bytes pushed=accounted_for=430717. 66 s of capture, above the 60 s bar, with the encoder turned both ways and the click, BTN1 and BTN2 pressed.
+AC2: owner performed 5 CW, 5 CCW detents, 5 encoder clicks, 5 BTN1, 5 BTN2 presses; decoded: ENC +1 x5, ENC -1 x5, CLICK press x5, BTN1 press x5, BTN2 press x5, each with a matching release (15 releases). 40 control records, none missing.
+AC3: not rigged for audio. Owner answered 'n' at the audio question; no one listened to main.rs output while logging, so no claim is made either way.
+AC4: 6796 records over 66.306 s = 102.5 records/s, against TASK-030.06's idle 101.3 records/s (zero drops there). Seq 0x3a..0x1ac5 contiguous, gaps=0 (6796 = 6853-58+1). Last STATUS: sent=6748 dropped_full=17 bytes_dropped=1037 trunc=0 ep_err=0. The 17 drops are already in the first STATUS (seq 0x9e, t=1.5 s) and unchanged at the last, so all happened before the reader attached and none during the capture. BOOT records seen: 0, the reader attached about 0.5 s after boot (first seq 0x3a), as in TASK-030.06. No criterion failed, no bug ticket filed.
+
+Not done: step 7, the panictest spot check, and TASK-046's red-LED timing observation (script: scripts/bench-030-04.py panic). Not an acceptance criterion here. Closed with the owner in a live session.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
