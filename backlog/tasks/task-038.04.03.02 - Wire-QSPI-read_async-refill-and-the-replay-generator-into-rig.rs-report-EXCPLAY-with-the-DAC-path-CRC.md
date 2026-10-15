@@ -3,11 +3,11 @@ id: TASK-038.04.03.02
 title: >-
   Wire QSPI read_async refill and the replay generator into rig.rs, report
   EXCPLAY with the DAC-path CRC
-status: Blocked
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-08 15:39'
-updated_date: '2026-10-08 15:54'
+updated_date: '2026-10-15 17:29'
 labels:
   - task
   - planned
