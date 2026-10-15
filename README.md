@@ -127,6 +127,27 @@ error, so trust that line rather than the dfu-util noise above it.
 
 If the app doesn't start, power-cycle the USB-C cable.
 
+### Bootloaded layout (`LAYOUT=bootloaded`)
+
+`rig` with the excerpt install path no longer fits the 128 KB internal flash, so every binary
+can also be built for the stock Daisy bootloader. The image runs from AXI SRAM and is stored in
+QSPI at `0x90040000`:
+
+```bash
+cd firmware
+make flash-all LAYOUT=bootloaded BINARY=rig   # builds rig-bootloaded.bin, DFUs it to 0x90040000
+```
+
+- The bootloader is installed once (`docs/reference/daisy-seed3.md`, *The stock Daisy bootloader
+  on Seed3*). After that no BOOT button is needed: it shows its DFU interface for about 2 s after
+  any reset, so tap RESET and run `make flash LAYOUT=bootloaded` straight away (`dfu-util -w` waits).
+- `make flash` without `LAYOUT` still writes `$(BINARY).bin` to `0x08000000` and **overwrites the
+  bootloader** if it is installed. Pass `LAYOUT=bootloaded` for every app flash on a bootloaded board.
+- `probe-flash` and `probe-run` refuse a bootloaded ELF (AXI SRAM does not survive a reset). The
+  probe can still reset the board into the bootloader's DFU window.
+- Booting `main` and `rig` from this layout, and `rig`'s callback timing there, are not yet verified
+  on hardware (TASK-038.04.07.04). `ledtest` is the only app proven so far.
+
 ## Developing DSP Logic
 
 Iterate on your laptop — no flashing required until you're ready to test on hardware.

@@ -75,8 +75,9 @@ USB enumerates — see *Flashing and logging over an ST-Link probe* below.
 
 The Seed3's onboard USB-C supports DFU. The STM32H750's built-in system bootloader
 exposes DFU at `0x08000000` (128 KB internal flash), which is enough for a
-reasonably-sized effect. Larger applications need the Daisy bootloader, which relocates
-the application into QSPI.
+reasonably-sized effect. Larger applications use the Daisy bootloader, which relocates
+the application into QSPI; the project's `LAYOUT=bootloaded` builds do that (see *The stock Daisy
+bootloader on Seed3* below).
 
 ### Enter DFU mode
 
@@ -162,7 +163,8 @@ the core is running and the fault is downstream.
 - **DFU mode is not sticky.** Once a flashed app boots, the bootloader is gone. Repeat
   BOOT+RESET before *every* flash, or dfu-util reports `No DFU capable USB device
   available`.
-- **Binary size check:** internal flash is one 128 KB sector, so anything at or over 131,072 bytes
+- **Binary size check:** this applies to the default `LAYOUT=internal` only; a `LAYOUT=bootloaded` image
+  has 480K (491,520 bytes) instead. Internal flash is one 128 KB sector, so anything at or over 131,072 bytes
   cannot fit. Measured 2026-09-12 at `[profile.release] debug = 2`, from `make build`'s output named
   for the binary: `blinky.bin` is 65,638 bytes built with defaults (`FEATURES="seed3"`), 25,176 as
   RTT-only (`NO_DEFAULT=1 FEATURES="seed3 log-defmt"`), and 21,202 with no transport at all
@@ -1156,6 +1158,43 @@ internal-flash layout is `firmware/memory-internal.x` and stays the default.
 - **rig with the install path:** wip commit `762392c` (excerpt install, does not link in 128 KB; it
   overflows internal flash by 12.5 to 14.8 KB) applied in a scratch tree links bootloaded at 144,137
   (sine), 145,929 (`stim-ess`) and 144,489 (`stim-pulse`) bytes, leaving about 347 KB of the 480K.
+
+### Flashing the bootloaded app, and the probe
+
+- **App flash:** `make flash-all LAYOUT=bootloaded BINARY=<bin>` runs `dfu-util -a 0 -s
+  0x90040000:leave -D rig-bootloaded.bin` for `BINARY=rig` (checked with `make -n`, 2026-10-15; the internal layout
+  expands to `-s 0x08000000:leave -D rig.bin`). The board must show the bootloader's DFU interface:
+  tap RESET and flash within the 2 s grace period (`dfu-util -w` waits for it), or use the probe to
+  reset it (`probe-rs reset ... --connect-under-reset`).
+- **Never `make flash` without `LAYOUT=bootloaded` on a bootloaded board:** it writes to `0x08000000`
+  and replaces the bootloader. Recovery is BOOT+RESET and reinstalling it as described above.
+- **Probe path:** the app no longer lives in internal flash, so `probe-flash` and `probe-run` refuse
+  `LAYOUT=bootloaded` (the ELF links into AXI SRAM, which a reset erases). The probe still reaches
+  the internal-layout binaries and can reset the board into the bootloader. RTT logging from a
+  bootloaded app is not available through those targets.
+- **The 128 KB wall:** the single-sector limit above no longer applies to bootloaded builds. The image
+  budget there is 480K, and the install-path `rig` leaves about 347 KB.
+- **Unverified:** booting `main` and `rig` from this layout is not proven on hardware until
+  TASK-038.04.07.04.
+
+### Rejected routes for freeing internal flash (measured, TASK-038.04.07)
+
+Measured 2026-10-08 on the tree with the excerpt install path (wip commit `762392c`), which links at
+143,312 B (seed3), 145,104 B (`stim-ess`) and 143,536 B (`stim-pulse`) against 131,072 B of flash
+(baseline 125,016 B at `1ef8714`, so the install path costs about 18.3 KB at opt-level 3).
+
+| Route | Result (seed3) | Why not |
+|---|---|---|
+| whole-workspace `opt-level = "s"` | 116,856 B | fits, but changes callback codegen for every binary, invalidating the TASK-038.05 timings |
+| whole-workspace `opt-level = "z"` | 111,548 B | same |
+| `asperitas-logging` at `"s"` alone | 131,904 B | still 832 B over |
+| plus `embassy-usb` and `embassy-usb-synopsys-otg` at `"s"` | 132,720 B | worse; generic async code is monomorphized into the bin crate |
+| `embassy-stm32` at `"s"` | 142,064 B | barely moves |
+| split rig into its own package with a per-package override | not built | still changes rig's callback codegen, and leaves little room for later growth |
+
+Chosen: the Daisy bootloader route, with the sizes in *The bootloaded link layout* above. It moves
+the callback's code and SAI buffers (AXI SRAM and D2), so the TASK-038.05 timings predate it
+regardless; the re-measure is TASK-038.04.07.04.
 
 ## External SDRAM: address, MPU and caches (measured)
 
