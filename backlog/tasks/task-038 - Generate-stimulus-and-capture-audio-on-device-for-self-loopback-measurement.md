@@ -1,11 +1,11 @@
 ---
 id: TASK-038
 title: Generate stimulus and capture audio on-device for self-loopback measurement
-status: Blocked
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 02:12'
-updated_date: '2026-09-09 11:59'
+updated_date: '2026-10-15 18:51'
 labels:
   - planned
 dependencies:
@@ -46,13 +46,13 @@ One constraint worth stating before implementation starts: the dump must not be 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A build mode plays deterministic stimulus out of the Pod jack — sine at a selectable level, swept sine, and an impulse train — generated in the DSP domain so its amplitude is exact and its phase starts at a sample boundary.
-- [ ] #2 Input samples are recorded into SDRAM with the footprint stated in bytes per second, and recording cannot overwrite a block that is being dumped.
-- [ ] #3 Recorded blocks reach the host through the framed transport from TASK-030 with a checksum that either matches or the host reports loss, and dumping does not starve the audio callback — verified by the drop counter staying at zero during a dump.
-- [ ] #4 Maximum capturable duration is reported by the device rather than guessed by the caller, with headroom over live audio buffers stated.
-- [ ] #5 A named excerpt from audio/instruments/ can be stored in QSPI and replayed as stimulus bit-exactly, so playing-real-material tests need no host analog path; storage cost per second is documented.
-- [ ] #6 Host-side tests parse the dump format from synthetic data with no board attached.
-- [ ] #7 Usage is documented alongside the other host tooling, and the SDRAM and QSPI budgets land in docs/reference/daisy-seed3.md.
+- [x] #1 A build mode plays deterministic stimulus out of the Pod jack — sine at a selectable level, swept sine, and an impulse train — generated in the DSP domain so its amplitude is exact and its phase starts at a sample boundary.
+- [x] #2 Input samples are recorded into SDRAM with the footprint stated in bytes per second, and recording cannot overwrite a block that is being dumped.
+- [x] #3 Recorded blocks reach the host through the framed transport from TASK-030 with a checksum that either matches or the host reports loss, and dumping does not starve the audio callback — verified by the drop counter staying at zero during a dump.
+- [x] #4 Maximum capturable duration is reported by the device rather than guessed by the caller, with headroom over live audio buffers stated.
+- [x] #5 A named excerpt from audio/instruments/ can be stored in QSPI and replayed as stimulus bit-exactly, so playing-real-material tests need no host analog path; storage cost per second is documented.
+- [x] #6 Host-side tests parse the dump format from synthetic data with no board attached.
+- [x] #7 Usage is documented alongside the other host tooling, and the SDRAM and QSPI budgets land in docs/reference/daisy-seed3.md.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -122,6 +122,8 @@ Parked by agent run 2026-09-09 without implementation work: this ticket is an um
 Assignee corrected @agent -> @human. This was the only remaining instance of the TASK-004 misassignment: auditing every parent with an unfinished child, TASK-018, TASK-019, TASK-027 and TASK-030 already carry @human, TASK-038 alone did not. Consequence: '~/.pi/agent/extensions/ralph/unblocked-todo.sh' filters by assignee (default agent) *and* holds back containers with an unfinished child, so it now fails this ticket twice over — verified by 'backlog/unblocked-todo.sh "Dev Ready"' returning nothing both before and after the change. The pick that sent an agent here therefore did not come from that filter; whoever selects by ID should read the assignee field first.
 
 Next actionable step belongs to the loop on the children, in plan order: TASK-038.01 and TASK-038.02 in parallel (no shared files), then .03, .04, .06, then hand .05 to a human with the bench rigged. This parent goes Done only when .01-.06 are Done, which requires .05's recorded numbers.
+
+2026-10-15: closed in a live session with the owner, who walked through all seven criteria and agreed each was met. All nine children are Done (.01 stimulus processors, .02 dump codec, .03 rig firmware, .04 excerpt store with its seven sub-tickets, .05 bench verification, .06 docs, .07 ring-fill, .08 one-shot stimuli, .09 excerpt install and replay on hardware). AC mapping: #1 .01 + .03 + .05; #2 .03 + .05 + .07; #3 .02 + .05 (and the bootloaded 300 s run on 2026-10-15: 879/879 blocks, 0 overruns, 0 drops during the dump); #4 CAPMAX record (seconds_max 349); #5 .04 + .09 (mandolin_single_note_soft, EXCOK crc16=15fd, EXCPLAY crc16=15fd want=15fd, heard as identical); #6 .02 (dump_reassemble and its self-test); #7 .06. Open caveats, none blocking: rig now ships in the bootloaded layout (TASK-038.04.07), whose layout bug was found and fixed on hardware (e5801c7); the replay staging margin and USB time were not measured separately; the MDMA-to-DTCM question was left unanswered because TASK-074 moved the staging to AXI SRAM.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
