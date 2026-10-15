@@ -27,6 +27,7 @@
 //! so a short read cannot be mistaken for a clean capture.
 
 pub mod cli;
+pub mod control;
 
 use std::fmt::Write as _;
 use std::io::{self, Read};

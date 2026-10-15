@@ -6,7 +6,7 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::{capture, render, verdict, Policy};
+use crate::{capture, render, verdict, Capture, Policy};
 
 /// Process exit status. Failed verdicts are kept distinct from usage and I/O errors so a
 /// script can tell "the capture is untrustworthy" from "the capture did not happen".
@@ -132,8 +132,30 @@ impl<R: Read> Read for Deadline<R> {
     }
 }
 
-/// Capture from `reader` to EOF, write the artifact to `out`, print the summary (the
-/// artifact up to its record list) to `stdout`, and judge it.
+/// Write the artifact for `cap` to `out`, print its summary (the artifact up to its record
+/// list) to `stdout`, and judge it. Returns the outcome and the rendered artifact.
+pub fn report(
+    cap: &Capture,
+    policy: &Policy,
+    out: &Path,
+    stdout: &mut dyn io::Write,
+) -> io::Result<Outcome> {
+    let text = render(cap, policy);
+    std::fs::write(out, &text)?;
+    let summary = text
+        .split_once("--\n")
+        .map_or(text.as_str(), |(head, _)| head);
+    stdout.write_all(summary.as_bytes())?;
+    let outcome = if verdict(&cap.summary, policy).is_pass() {
+        Outcome::Pass
+    } else {
+        Outcome::Fail
+    };
+    Ok(outcome)
+}
+
+/// Capture from `reader` to EOF, write the artifact to `out`, print the summary to
+/// `stdout`, and judge it.
 pub fn run<R: Read>(
     reader: R,
     policy: &Policy,
@@ -141,17 +163,7 @@ pub fn run<R: Read>(
     stdout: &mut dyn io::Write,
 ) -> io::Result<Outcome> {
     let cap = capture(reader)?;
-    let text = render(&cap, policy);
-    std::fs::write(out, &text)?;
-    let summary = text
-        .split_once("--\n")
-        .map_or(text.as_str(), |(head, _)| head);
-    stdout.write_all(summary.as_bytes())?;
-    Ok(if verdict(&cap.summary, policy).is_pass() {
-        Outcome::Pass
-    } else {
-        Outcome::Fail
-    })
+    report(&cap, policy, out, stdout)
 }
 
 #[cfg(test)]

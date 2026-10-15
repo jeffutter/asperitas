@@ -7,9 +7,12 @@ whenever a ticket's evidence comes from the console.
 
 ## Usage
 
+Subcommands: `capture` (below), `query`, `restart` and `override` (see [Control](#control)).
+The flags below belong to `capture`; `--device` is shared by all of them.
+
 ```
-cargo run -p asperitas-rig -- --duration 10 --out captures/example.txt
-cargo run -p asperitas-rig -- --device /dev/cu.usbmodem1234 --duration 30 --out out.txt --max-drops 2
+cargo run -p asperitas-rig -- capture --duration 10 --out captures/example.txt
+cargo run -p asperitas-rig -- capture --device /dev/cu.usbmodem1234 --duration 30 --out out.txt --max-drops 2
 ```
 
 | Flag | Meaning |
@@ -74,6 +77,45 @@ Header: fixed-order `key=value` lines, then `verdict=pass` or
 After the `--` separator, one line per validated record: `level seq t_ms body`, where
 `level` is `I`, `W`, `E`, `D` or `T`, `seq` is 8 hex digits, `t_ms` is device milliseconds
 since boot (modulo 1e8), and `body` is the ASCII-sanitised message.
+
+## Control
+
+`query`, `restart` and `override` send host control commands on the same serial device the
+rig captures from. The grammar and codec are in `crates/asperitas-logging/src/control.rs`
+(`CTL VER|RSN|RST|SET|REL` out, `CTLR ...` replies back in the ordinary record stream); the
+rig uses that codec directly, so host and device cannot drift.
+
+```
+asperitas-rig query [--device P]
+asperitas-rig restart [--device P] [--reenumerate-timeout 15]
+asperitas-rig override --knob 2 --value 0.5   --duration 10 --out o.txt [--device P] [--max-drops N]
+asperitas-rig override --knob 2 --sweep 0:1   --duration 10 --out o.txt
+```
+
+- `query` prints `fw=<version> reset_reason=<token>`.
+- `restart` sends `RST`, waits for the console to vanish and re-enumerate (the USB number can
+  change, so it re-scans, or reuses `--device` when given), reopens it and queries the new
+  boot. It prints `restarted device=<path> fw=.. reset_reason=.. boot_record=<bool>`.
+  `boot_record=false` is not an error: the device may log `BOOT` before the host attaches.
+  The query reply is the proof of life. Fails (exit 2) after `--reenumerate-timeout` seconds.
+- `override` holds (`--value L`) or sweeps (`--sweep FROM:TO`, linear, 20 steps per second)
+  knob `--knob K` while capturing the same port for `--duration`, writes the usual artifact,
+  then releases. Levels are `0..=1` and map to the wire range `0x0000..=0xFFFF`; a level
+  outside `0..=1` is a usage error (exit 2), never clamped.
+
+**Release guarantee.** `override` always sends `REL` for its knob after the last `SET`: after
+a finished sweep, after the capture dies mid-run, and after a failed write. The capture
+listens `0.5 s` past `--duration` so the `REL` ack is in the artifact. The run passes only
+if the normal capture verdict passes, every `SET` and the `REL` were acknowledged
+(`CTLR OK SET|REL`) and no `CTLR ERR` appeared. The override summary line
+(`override knob=.. sets_sent=.. set_acks=.. rel_acks=.. device_errors=..`) follows the
+artifact summary on stdout.
+
+Exit codes for the control subcommands: 0 success, 1 the device rejected a command
+(`CTLR ERR`, for example `bad-knob`) or the override acks were incomplete, 2 usage, device,
+I/O or timeout.
+
+Verified on the host with a fake transport only; hardware runs are TASK-033.01.
 
 ## Convention: commit artifacts with hardware verification tickets
 
