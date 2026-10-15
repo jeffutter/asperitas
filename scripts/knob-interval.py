@@ -25,9 +25,13 @@ def main(path):
     start = 0
     if first_gap and "->" in first_gap:
         after = int(first_gap.split("->")[1], 16)
-        start = next(i for i, (s, _) in enumerate(recs) if s >= after)
+        start = next((i for i, (s, _) in enumerate(recs) if s >= after), None)
+        if start is None:
+            sys.exit(f"no knob records at or after seq {after:08x}; capture too short")
     recs = recs[start:]
     d = [b[1] - a[1] for a, b in zip(recs, recs[1:])]
+    if len(d) < 2:
+        sys.exit(f"need at least 2 intervals, have {len(d)}; capture too short")
     q = statistics.quantiles(d, n=20)
     print(f"first_gap line: {first_gap}")
     print(f"knob records used: {len(recs)}  deltas: {len(d)}")
