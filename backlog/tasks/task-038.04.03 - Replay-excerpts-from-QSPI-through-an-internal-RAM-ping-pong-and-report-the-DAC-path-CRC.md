@@ -3,11 +3,11 @@ id: TASK-038.04.03
 title: >-
   Replay excerpts from QSPI through an internal-RAM ping-pong and report the
   DAC-path CRC
-status: Blocked
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-08 15:28'
-updated_date: '2026-10-08 15:54'
+updated_date: '2026-10-15 18:14'
 labels:
   - task
   - planned
