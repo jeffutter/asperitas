@@ -128,3 +128,7 @@ replace the ticket's own `HUMAN:` criteria.
 
 See also [daisy-seed3.md](daisy-seed3.md) for the console channels and what a drop count
 does and does not describe (RTT captures carry no loss ledger).
+
+## Analysis crate
+
+`crates/asperitas-measure` loads a committed `.console.zst` capture (strictly: any refused block is an error), regenerates the stimulus from `asperitas-dsp`, and holds every numeric threshold in `src/thresholds.rs`. The CLI and full docs follow with TASK-035.06.

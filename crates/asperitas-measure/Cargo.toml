@@ -1,0 +1,13 @@
+[package]
+name = "asperitas-measure"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+asperitas-logging = { path = "../asperitas-logging" }
+asperitas-dsp = { path = "../asperitas-dsp" }
+# Pure-Rust zstd decoder: no C toolchain needed to build the host tooling.
+ruzstd = "0.8.2"
+
+[lints]
+workspace = true

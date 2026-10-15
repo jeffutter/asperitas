@@ -1,16 +1,20 @@
 ---
 id: TASK-035
 title: 'Add loopback measurement analysis: stimulus, alignment, and objective metrics'
-status: To Do
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:26'
-updated_date: '2026-10-08 14:16'
-labels: []
+updated_date: '2026-10-15 19:57'
+labels:
+  - planned
 dependencies:
-  - TASK-031
-  - TASK-034
-  - TASK-038
+  - TASK-035.01
+  - TASK-035.02
+  - TASK-035.03
+  - TASK-035.04
+  - TASK-035.05
+  - TASK-035.06
 references:
   - 'https://github.com/daisy-embassy/daisy-embassy/pull/80'
   - audio/captures/2026-10-07-rig-sine-300s.console.zst
@@ -44,6 +48,15 @@ The fault this arrangement cannot see is one common to both directions — a sha
 - [ ] #6 Unit tests run on recorded fixtures with no board and no audio hardware attached, so CI stays green without the bench.
 - [ ] #7 Usage is documented alongside the other host tooling.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against 9f78a4f
+Approach: new host-only crate asperitas-measure consuming committed console captures (no board in CI) and regenerating stimulus from asperitas-dsp. Split: .01 skeleton+thresholds (AC5,6); .02 alignment+stability (AC1); .03 metrics+loop-gain normalization (AC2); .04 step detector with positive/negative control (AC3); .05 cli-vs-device comparison with documented tolerance (AC4); .06 CLI entry point and docs (AC7). Order: .01, .02, .03, then .04/.05, then .06.
+Verification: cargo test --workspace on fixtures; run analyze on 2026-10-07 sine capture and confirm it reproduces TASK-038.05 baseline numbers.
+Risks: rig.rs may not run a processor on the device path (affects .05); common-mode faults (shared clock, channel swap) remain uncovered and must be stated in docs. No direct work beyond sub-tickets.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
