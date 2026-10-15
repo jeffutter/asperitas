@@ -194,3 +194,25 @@ that lane carries the stimulus.
 The loopback proves both jacks use the same contact for word 0. It does not prove that contact is
 the tip, which is the left channel by the usual TRS convention. One listen settles it: play a
 left-only tone into headphones and hear which ear it is in.
+
+## Lab setup: permanent self-loopback (measured)
+
+Recorded 2026-10-15 with the owner at the bench (TASK-034).
+
+- **Cable:** a male-to-male 3.5 mm TRS (stereo) cable, roughly 1 ft, coiled, from the Pod's output
+  jack to its input jack. It stays in place; every automated `rig` run assumes it is there. To use
+  headphones or a phone on the output, unplug the output end for the duration and put it back.
+- **Loop gain:** -0.41 dB end to end at a -20 dBFS, 1 kHz sine (peak -20.41 dBFS, RMS -23.42 dBFS),
+  no clipping. Normalise later loopback measurements against this.
+- **Hum, buzz, DC:** a 30 s capture shows DC of -0.50 LSB and a worst 20 to 120 Hz bin of -122.5 dBFS
+  at 60 Hz, about 100 dB below the tone. The loudest spur outside the tone is the 2 kHz harmonic at
+  -114.6 dBFS. After a fitted 1 kHz sine is removed the residual is 0.35 LSB RMS (-99.5 dBFS), at the
+  16-bit capture floor. There is no audible or measurable hum; the loop is limited by the capture format.
+- **Independent observer:** headphones on the output jack, with `rig` playing the sine. The owner heard
+  a steady, clean 1 kHz tone at a sane level in both ears. This is the check the device cannot make
+  about itself: a shared clock fault or a lane error inside the capture code would still produce a
+  tidy self-measurement, but would be audible as a wrong pitch or level. No scope was used.
+- **Stimulus level:** -20 dBFS, the `rig` default.
+- **How it was measured:** `rig` with the default `stim-sine`, `ASP_RIG_CAPTURE_SECONDS=30`, reset over
+  the probe; raw console bytes captured to a file, rebuilt with `dump_reassemble` (every block proved,
+  0 discarded bytes), then analysed offline.
