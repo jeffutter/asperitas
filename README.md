@@ -345,8 +345,9 @@ only the samples handed to the DAC encoder, and `want` is the CRC stored at inst
 `clean=1` say the QSPI-to-encoder path delivered the excerpt intact, and say nothing about the codec or
 the cable. A slot that is blank or holds no valid header makes `rig` send
 `EXCPLAYFAIL proto=1 slot=<n> why=<empty|invalid>`, show red and start no audio. An excerpt install is refused
-until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootloaded`); not yet exercised on
-a board (TASK-038.09).
+until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootloaded`); exercised on a board
+2026-10-15 (TASK-038.09): `mandolin_single_note_soft` installed in slot 0 (`EXCOK`, 5.82 s) and replayed with
+`EXCPLAY crc16=15fd want=15fd underruns=0 clean=1`.
 
 Hold the console open with **one** reader for the whole run. A reader restarted mid-dump loses
 whatever macOS had buffered, which was 19 blocks once. Then turn the capture back into PCM. The

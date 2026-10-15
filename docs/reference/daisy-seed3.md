@@ -1294,13 +1294,13 @@ in the ticket, not re-read from a sheet in this repo; estimated = a guess with n
 | Erase time, 288 kB clip | at most 21.6 s | datasheet max 300 ms x 72 sectors | pending TASK-038.09 |
 | Program time per sector | at most 12.8 ms | datasheet max 0.8 ms x 16 pages of 256 B | pending TASK-038.09 |
 | Install wall clock, 190 kB clip | at most 15.0 s | 14.4 s erase + 48 x 12.8 ms program (0.61 s); excludes USB and readback | pending TASK-038.09 |
-| Install wall clock, 288 kB clip | at most 22.5 s | 21.6 s erase + 72 x 12.8 ms program (0.92 s); excludes USB and readback | pending TASK-038.09 |
-| Wire bytes, 288 kB install | about 493 kB | derived: 2250 chunks x (191 B body + 28 B frame overhead) = 492,750, plus `EXCSTART` and `EXCEND` frames | pending TASK-038.09 |
+| Install wall clock, 288 kB clip | at most 22.5 s | 21.6 s erase + 72 x 12.8 ms program (0.92 s); excludes USB and readback | measured 2026-10-15: 5.82 s from the first stream byte to `EXCOK` (includes USB transfer, erase, program and readback), slot 0, `mandolin_single_note_soft` |
+| Wire bytes, 288 kB install | about 493 kB | derived: 2250 chunks x (191 B body + 28 B frame overhead) = 492,750, plus `EXCSTART` and `EXCEND` frames | measured 2026-10-15: 492,867 bytes written by `excerpt_stream` |
 | Wire bytes, 190 kB install | about 326 kB | derived: 1486 full chunks x 219 + one 104 B chunk (159 + 28) = 325,621, plus start and end frames | pending TASK-038.09 |
-| USB transfer time | well under 1 s | estimated: full-speed bulk, ceiling unmeasured | pending TASK-038.09 |
+| USB transfer time | well under 1 s | estimated: full-speed bulk, ceiling unmeasured | not separated from the install wall clock above, which was 5.82 s in total; the ceiling stays unmeasured |
 | Replay staging half | 8,192 B, plays for 85,333 us | derived: `replay::HALF_BYTES`, two halves, 16 KiB of AXI SRAM | pending TASK-038.09 |
 | Worst-case half refill | 18,192 us | estimated: 10,000 us scheduling (`ASSUMED_SCHEDULING_LATENCY_MICROS`) + 8,192 us transfer at an assumed 1 MB/s QSPI floor | pending TASK-038.09 |
-| Replay margin | 4.69x (85,333 / 18,192); build fails below 4x | estimated: the inputs above are assumptions; the QUADSPI kernel clock is unset in the HAL config, so the real read rate is unknown | pending TASK-038.09 |
+| Replay margin | 4.69x (85,333 / 18,192); build fails below 4x | estimated: the inputs above are assumptions; the QUADSPI kernel clock is unset in the HAL config, so the real read rate is unknown | measured 2026-10-15 only as an outcome: one 3.00 s pass, `underruns=0 clean=1`; the margin itself was not measured |
 
 Erase dominates the install: the USB stream and the programming are small beside it. If the observed
 erase time lands near typical rather than maximum, the install takes seconds, not tens of seconds.
