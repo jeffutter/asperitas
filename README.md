@@ -11,7 +11,8 @@ asperitas/
 ├── firmware/          # Embedded firmware (Seed3 binary)
 │   ├── src/bin/       # Binaries (main, blinky, ledtest, panictest)
 │   ├── Makefile       # Build + DFU flash targets
-│   └── memory.x       # Linker memory layout
+│   ├── memory-internal.x    # Linker layout, internal flash (default)
+│   └── memory-bootloaded.x  # Linker layout, stock Daisy bootloader (QSPI image run from AXI SRAM)
 ├── crates/
 │   ├── asperitas-dsp/     # Core DSP logic (hardware-independent)
 │   ├── asperitas-cli/     # Offline WAV-in/WAV-out CLI + golden-file tests

@@ -7,11 +7,11 @@
 # kept by hand -- because a list kept by hand is exactly what went wrong here:
 #
 #   R1  Every ALLOC + PROGBITS section's LMA lies inside the FLASH region parsed from
-#       firmware/memory.x. This is the general rule, and it does not care which linker input put the
+#       firmware/memory-internal.x. This is the general rule, and it does not care which linker input put the
 #       section there or what it is called.
 #
 #   R2  When `.sram1_bss` is present it is NOBITS -- objdump prints `BSS`. daisy-embassy tags its two
-#       SAI DMA buffers with that name and firmware/memory.x places them `(NOLOAD)` in AXI SRAM. If a
+#       SAI DMA buffers with that name and firmware/memory-internal.x places them `(NOLOAD)` in AXI SRAM. If a
 #       dependency bump renames the section, or the SECTIONS rule stops matching its input sections,
 #       the output section becomes an orphan again. Checking the name turns that into a failure named
 #       by the thing that changed, instead of a coincidence that happens to hold.
@@ -21,7 +21,29 @@
 #       got dropped, which is what lets the old `--only-section` keep-list stay dead. It is also the
 #       assertion that says `.defmt*` survived into the image without grepping the Makefile for a flag.
 #
-# WHY THIS IS LOAD-BEARING. Before TASK-059 put the `(NOLOAD)` rule in firmware/memory.x, `.sram1_bss`
+#   R4  A bootloaded image (see "Two layouts" below) is stored in QSPI from QSPI_APP_OFFSET, and the
+#       excerpt slots start at EXCERPT_AREA_START. The region the linker may fill and the image that
+#       came out must both end at or below that address. Both numbers are parsed, never restated:
+#       QSPI_APP_OFFSET from the `QSPI_APP_OFFSET = ` marker in firmware/memory-bootloaded.x, and
+#       EXCERPT_AREA_START from crates/asperitas-logging/src/excerpt.rs, which is where the slot layout
+#       is defined.
+#
+#   R6  A bootloaded image leaves at least MIN_SPARE bytes of its FLASH region unused. The region is
+#       the bootloader's copy budget, and an image that fills it to the byte is one dependency bump from
+#       failing to link. 2 KB is the headroom TASK-038.04.07.02 asked for. Not applied to the internal
+#       layout, where the linker's own overflow error is the existing (and tighter) contract.
+#
+#   R5  A bootloaded image's `.sram1_bss` lies inside the RAM_D2 region. AXI SRAM is image space there
+#       and DMA1/DMA2 cannot reach DTCM, so the SAI buffers anywhere else stop audio with no error.
+#
+# Two layouts. firmware/build.rs links either memory-internal.x (FLASH = internal flash, DFU to
+# 0x08000000) or memory-bootloaded.x (FLASH = the AXI SRAM the stock Daisy bootloader copies the QSPI
+# image into). One ELF path serves both, so each ELF is graded against the layout its own lowest
+# file-backed LMA falls in: a vector table at 0x24000000 is a bootloaded image, anything else is held to
+# the internal-flash region and refused by R1 when it does not fit. Which layout an ELF was BUILT for is
+# the provenance stamp's business (`make elf-check LAYOUT=...`), not this gate's.
+#
+# WHY THIS IS LOAD-BEARING. Before TASK-059 put the `(NOLOAD)` rule in firmware/memory-internal.x, `.sram1_bss`
 # was one of those orphans, and `llvm-objcopy -O binary` writes a memory image spanning lowest to
 # highest *load* address -- so `main.bin` came out at 469,763,536 bytes of mostly zeros. Nothing was
 # red: `make build` succeeded, DFU reported a clean transfer, and the board booted whatever prefix of
@@ -60,7 +82,7 @@
 # rust-objdump and rust-objcopy, plus literal objdump rows for every trap the row regex and the Type
 # column offer. Its codes are the same shape - 0 every case passed, 1 at least one case failed (all of
 # them reported in the one run), 2 the suite could not run at all, which here means no shim on PATH or
-# no firmware/memory.x to parse a FLASH region out of. It builds nothing and writes nothing outside a
+# no firmware/memory-internal.x to parse a FLASH region out of. It builds nothing and writes nothing outside a
 # `mktemp -d`.
 #
 # Cost rules the selftest obeys, because it runs inside the pre-commit hook:
@@ -86,7 +108,12 @@ ROOT=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT" || exit 2
 
 CARGO_CONFIG=$ROOT/firmware/.cargo/config.toml
-MEMORY_X=$ROOT/firmware/memory.x
+MEMORY_INTERNAL=$ROOT/firmware/memory-internal.x
+MEMORY_BOOTLOADED=$ROOT/firmware/memory-bootloaded.x
+EXCERPT_RS=$ROOT/crates/asperitas-logging/src/excerpt.rs
+
+# Smallest slack a bootloaded image may leave in its FLASH region (R6).
+MIN_SPARE=2048
 
 VIOLATIONS=()
 TMP=""
@@ -124,15 +151,16 @@ derive_release_dir() {
   RELEASE_DIR=$ROOT/firmware/target/$target/release
 }
 
-# FLASH's extent is parsed from the linker script instead of hardcoded, because moving to the 8 MB QSPI
-# region is a live plan in this project and an `0x08020000` constant would then be a gate that passes
-# by lying. Accepts the K/M suffix LENGTH is written with.
-parse_flash_region() {
-  local line origin len unit
-  [ -f "$MEMORY_X" ] || die "no ${MEMORY_X#"$ROOT"/} - the FLASH region every rule compares against lives in it"
+# A region's extent is parsed from the linker script instead of hardcoded, because moving the image
+# between internal flash, AXI SRAM and QSPI is a live plan in this project and a `0x08020000` constant
+# would then be a gate that passes by lying. Accepts the K/M suffix LENGTH is written with.
+# <file> <region-name> -> REGION_ORIGIN, REGION_LEN
+parse_region() {
+  local file=$1 region=$2 line origin len unit
+  [ -f "$file" ] || die "no ${file#"$ROOT"/} - the $region region every rule compares against lives in it"
 
-  line=$(grep -m1 -E '^[[:space:]]*FLASH[[:space:]]*:[[:space:]]*ORIGIN' "$MEMORY_X") ||
-    die "no FLASH region definition in ${MEMORY_X#"$ROOT"/}"
+  line=$(grep -m1 -E "^[[:space:]]*${region}[[:space:]]*:[[:space:]]*ORIGIN" "$file") ||
+    die "no $region region definition in ${file#"$ROOT"/}"
 
   origin=$(printf '%s' "$line" |
     sed -nE 's/.*ORIGIN[[:space:]]*=[[:space:]]*(0[xX][0-9a-fA-F]+).*/\1/p')
@@ -148,10 +176,47 @@ parse_flash_region() {
     '') ;;
     *) die "unparsable LENGTH unit in: $line" ;;
   esac
-  (( len > 0 )) || die "FLASH LENGTH parses as zero in: $line"
+  (( len > 0 )) || die "$region LENGTH parses as zero in: $line"
 
-  FLASH_ORIGIN=$(( origin ))
-  FLASH_LEN=$len
+  REGION_ORIGIN=$(( origin ))
+  REGION_LEN=$len
+}
+
+# Both layouts' regions, the two QSPI numbers R4 needs, and the default layout (internal) selected so
+# callers that never pick one behave as before. Sets INT_*, BOOT_*, D2_*, QSPI_APP_OFFSET,
+# EXCERPT_AREA_START, and through select_layout the FLASH_* the rules read.
+parse_flash_region() {
+  local line
+
+  parse_region "$MEMORY_INTERNAL" FLASH
+  INT_ORIGIN=$REGION_ORIGIN INT_LEN=$REGION_LEN
+  parse_region "$MEMORY_BOOTLOADED" FLASH
+  BOOT_ORIGIN=$REGION_ORIGIN BOOT_LEN=$REGION_LEN
+  parse_region "$MEMORY_BOOTLOADED" RAM_D2
+  D2_ORIGIN=$REGION_ORIGIN D2_END=$(( REGION_ORIGIN + REGION_LEN ))
+
+  line=$(grep -m1 -E 'QSPI_APP_OFFSET[[:space:]]*=[[:space:]]*0[xX][0-9a-fA-F]+' "$MEMORY_BOOTLOADED") ||
+    die "no 'QSPI_APP_OFFSET = 0x...' marker in ${MEMORY_BOOTLOADED#"$ROOT"/}"
+  QSPI_APP_OFFSET=$(( $(printf '%s' "$line" | sed -nE 's/.*QSPI_APP_OFFSET[[:space:]]*=[[:space:]]*(0[xX][0-9a-fA-F]+).*/\1/p') ))
+
+  [ -f "$EXCERPT_RS" ] || die "no ${EXCERPT_RS#"$ROOT"/} - the excerpt area R4 keeps clear of the image is defined there"
+  line=$(grep -m1 -E 'pub const EXCERPT_AREA_START:[[:space:]]*u32[[:space:]]*=' "$EXCERPT_RS") ||
+    die "no 'pub const EXCERPT_AREA_START: u32 = ...' in ${EXCERPT_RS#"$ROOT"/}"
+  line=$(printf '%s' "$line" | sed -nE 's/.*=[[:space:]]*(0[xX][0-9a-fA-F_]+)[[:space:]]*;.*/\1/p')
+  [ -n "$line" ] || die "cannot parse a hex value out of EXCERPT_AREA_START in ${EXCERPT_RS#"$ROOT"/}"
+  EXCERPT_AREA_START=$(( ${line//_/} ))
+
+  select_layout internal
+}
+
+# <internal|bootloaded> -> LAYOUT_SEL and the FLASH_* every rule reads.
+select_layout() {
+  LAYOUT_SEL=$1
+  if [ "$1" = bootloaded ]; then
+    FLASH_ORIGIN=$BOOT_ORIGIN FLASH_LEN=$BOOT_LEN FLASH_FILE=firmware/memory-bootloaded.x
+  else
+    FLASH_ORIGIN=$INT_ORIGIN FLASH_LEN=$INT_LEN FLASH_FILE=firmware/memory-internal.x
+  fi
   FLASH_END=$(( FLASH_ORIGIN + FLASH_LEN ))
 }
 
@@ -337,6 +402,24 @@ evaluate_sections() { # <display-name>
   N_LOADED=0 N_ZERO=0 ZERO_NAMES=''
   SRAM_NOTE='.sram1_bss=absent'
 
+  # Pick the layout this image belongs to from where its lowest file-backed section loads, before any
+  # rule compares against a region. classify_type is run here once per row and again below; the second
+  # pass is the one that reports.
+  local first_low=''
+  for (( IDX = 0; IDX < ${#SEC_NAMES[@]}; IDX++ )); do
+    classify_type "${SEC_TYPES[$IDX]}"
+    (( FILE_BACKED )) || continue
+    size=${SEC_SIZES[$IDX]}
+    (( size == 0 )) && continue
+    lma=${SEC_LMAS[$IDX]}
+    if [ -z "$first_low" ] || (( lma < first_low )); then first_low=$lma; fi
+  done
+  if [ -n "$first_low" ] && (( first_low >= BOOT_ORIGIN && first_low < BOOT_ORIGIN + BOOT_LEN )); then
+    select_layout bootloaded
+  else
+    select_layout internal
+  fi
+
   # R1, and the water marks R3 needs.
   for (( IDX = 0; IDX < ${#SEC_NAMES[@]}; IDX++ )); do
     classify_type "${SEC_TYPES[$IDX]}"
@@ -364,7 +447,7 @@ evaluate_sections() { # <display-name>
     if [ -z "$SPAN_HIGH" ] || (( end > SPAN_HIGH )); then SPAN_HIGH=$end; fi
 
     if (( lma < FLASH_ORIGIN || end > FLASH_END )); then
-      VIOLATIONS+=("${name}: ${SEC_NAMES[$IDX]}: LMA $(hex8 "$lma")..$(hex8 "$end") is outside FLASH $(hex8 "$FLASH_ORIGIN")..$(hex8 "$FLASH_END") - a file-backed section loading outside flash makes 'objcopy -O binary' span the gap, which is the 469 MB image of TASK-059; give the section '(NOLOAD)' placement in firmware/memory.x, or a load address with AT>")
+      VIOLATIONS+=("${name}: ${SEC_NAMES[$IDX]}: LMA $(hex8 "$lma")..$(hex8 "$end") is outside FLASH $(hex8 "$FLASH_ORIGIN")..$(hex8 "$FLASH_END") - a file-backed section loading outside flash makes 'objcopy -O binary' span the gap, which is the 469 MB image of TASK-059; give the section '(NOLOAD)' placement in $FLASH_FILE, or a load address with AT>")
       R1_FAILED=1
       continue
     fi
@@ -384,7 +467,7 @@ evaluate_sections() { # <display-name>
     case ${SEC_TYPES[$i]} in
       BSS) ;;
       *)
-        VIOLATIONS+=("${name}: .sram1_bss: typed '${SEC_TYPES[$i]}' rather than BSS - firmware/memory.x places it '(NOLOAD)', so a file-backed section by that name means the SECTIONS rule stopped matching daisy-embassy's input sections (renamed upstream, most likely) and rust-lld is placing an orphan with LMA == VMA again")
+        VIOLATIONS+=("${name}: .sram1_bss: typed '${SEC_TYPES[$i]}' rather than BSS - firmware/memory-internal.x places it '(NOLOAD)', so a file-backed section by that name means the SECTIONS rule stopped matching daisy-embassy's input sections (renamed upstream, most likely) and rust-lld is placing an orphan with LMA == VMA again")
         ;;
     esac
     break
@@ -398,6 +481,29 @@ evaluate_sections() { # <display-name>
   # refuses first. Hand-emitted fixtures are what cover it, which is TASK-068.
   if [ -n "$HIGH" ]; then
     EXPECTED=$(( HIGH - FLASH_ORIGIN ))
+  fi
+
+  # R4 and R5 only mean something for the layout that is stored in QSPI and runs from AXI SRAM.
+  if [ "$LAYOUT_SEL" = bootloaded ]; then
+    if (( QSPI_APP_OFFSET + FLASH_LEN > EXCERPT_AREA_START )); then
+      VIOLATIONS+=("${name}: the bootloaded FLASH region ($(( FLASH_LEN / 1024 ))K) stored at QSPI offset $(hex8 "$QSPI_APP_OFFSET") would end at $(hex8 $(( QSPI_APP_OFFSET + FLASH_LEN ))), past the excerpt area at $(hex8 "$EXCERPT_AREA_START") - shrink FLASH LENGTH in firmware/memory-bootloaded.x")
+    fi
+    if [ -n "$HIGH" ] && (( QSPI_APP_OFFSET + HIGH - FLASH_ORIGIN > EXCERPT_AREA_START )); then
+      VIOLATIONS+=("${name}: the image stored at QSPI offset $(hex8 "$QSPI_APP_OFFSET") ends at $(hex8 $(( QSPI_APP_OFFSET + HIGH - FLASH_ORIGIN ))), past the excerpt area at $(hex8 "$EXCERPT_AREA_START") - installing excerpts would overwrite the app")
+    fi
+    if [ -n "$HIGH" ] && (( FLASH_END - HIGH < MIN_SPARE )); then
+      VIOLATIONS+=("${name}: only $(( FLASH_END - HIGH )) bytes of the $(( FLASH_LEN / 1024 ))K bootloaded FLASH region are left (need at least $MIN_SPARE) - the next dependency bump would stop this image linking")
+    fi
+    for (( i = 0; i < ${#SEC_NAMES[@]}; i++ )); do
+      [ "${SEC_NAMES[$i]}" = ".sram1_bss" ] || continue
+      lma=${SEC_LMAS[$i]}
+      size=${SEC_SIZES[$i]}
+      end=$(( lma + size ))
+      if (( lma < D2_ORIGIN || end > D2_END )); then
+        VIOLATIONS+=("${name}: .sram1_bss at $(hex8 "$lma")..$(hex8 "$end") is outside RAM_D2 $(hex8 "$D2_ORIGIN")..$(hex8 "$D2_END") - AXI SRAM is image space in the bootloaded layout and DMA1/DMA2 cannot reach DTCM, so SAI audio would stop with no error")
+      fi
+      break
+    done
   fi
 }
 
@@ -438,12 +544,12 @@ decide_image() { # <display-name>
 # told apart from a pass that checked nothing. Returned rather than echoed by check_one_elf only in the
 # sense that a case may capture it -- a child run and an in-process row set answer to the same string.
 format_summary() {
-  local low_s=none high_s=none
+  local low_s=none high_s=none spare_s=n/a
   [ -z "$LOW" ] || low_s=$(hex8 "$LOW")
-  [ -z "$HIGH" ] || high_s=$(hex8 "$HIGH")
-  printf '%-9s image=%-30s low=%s high=%s expected=%s loaded=%d skipped=%d excluded_zero_size=%s %s\n' \
-    "$SUMMARY_NAME" "$IMAGE" \
-    "$low_s" "$high_s" \
+  [ -z "$HIGH" ] || { high_s=$(hex8 "$HIGH"); spare_s=$(( FLASH_END - HIGH )); }
+  printf '%-9s layout=%-10s image=%-30s low=%s high=%s spare=%s expected=%s loaded=%d skipped=%d excluded_zero_size=%s %s\n' \
+    "$SUMMARY_NAME" "$LAYOUT_SEL" "$IMAGE" \
+    "$low_s" "$high_s" "$spare_s" \
     "${EXPECTED:-n/a}" "$N_LOADED" \
     "$(( ${#SEC_NAMES[@]} - N_LOADED - N_ZERO ))" \
     "${ZERO_NAMES:-none}" "$SRAM_NOTE"
@@ -486,12 +592,12 @@ report() {
 
   {
     printf '%s\n' "image load-address check FAILED (${#VIOLATIONS[@]} violation(s))"
-    printf '%s\n' "checked ${#ELF_PATHS[@]} ELF(s) against FLASH $(hex8 "$FLASH_ORIGIN")..$(hex8 "$FLASH_END"), $(( FLASH_LEN / 1024 ))K parsed from firmware/memory.x"
+    printf '%s\n' "checked ${#ELF_PATHS[@]} ELF(s); each is held to the FLASH region of the layout it loads in: internal $(hex8 "$INT_ORIGIN")..$(hex8 $(( INT_ORIGIN + INT_LEN ))) ($(( INT_LEN / 1024 ))K, firmware/memory-internal.x) or bootloaded $(hex8 "$BOOT_ORIGIN")..$(hex8 $(( BOOT_ORIGIN + BOOT_LEN ))) ($(( BOOT_LEN / 1024 ))K, firmware/memory-bootloaded.x)"
     printf '\n'
     printf '%s\n' "${VIOLATIONS[@]}"
     printf '\n'
     printf '%s\n' 'The rule is that a section with file content loads inside flash. Data that exists only in'
-    printf '%s\n' 'RAM gets (NOLOAD) placement in firmware/memory.x, the way .sram1_bss has since TASK-059.'
+    printf '%s\n' 'RAM gets (NOLOAD) placement in firmware/memory-internal.x, the way .sram1_bss has since TASK-059.'
   } >&2
   return 1
 }
@@ -972,7 +1078,7 @@ case_section_outside_flash_violation() {
   expect_violations 1
   out=$(violations_text)
   expect_has "names the section responsible" '.oops: LMA 0x24001000..0x24001020' "$out"
-  expect_has "against the region parsed from memory.x" 'is outside FLASH 0x08000000..0x08020000' "$out"
+  expect_has "against the region parsed from memory-internal.x" 'is outside FLASH 0x08000000..0x08020000' "$out"
   expect_eq "the in-flash part is still measured" 64 "$EXPECTED"
   decide_image fixture
   expect_eq "and no image is claimed, because objcopy must not run" \
@@ -990,6 +1096,67 @@ case_lowest_lma_must_be_flash_origin() {
   expect_has "refuses the length formula, not just the address" \
     'lowest file-backed LMA 0x08000100 is not the FLASH origin 0x08000000' "$out"
   expect_eq "so no length is reported" 'not-measured(bad-low-address)' "$IMAGE"
+}
+
+# The bootloaded layout, graded from rows the way the internal one is. `.data` loads from the AXI SRAM
+# image just after `.text` and runs from DTCM; the SAI buffers sit in D2. A vector table at 0x24000000
+# is what selects the layout, so no knob names it.
+ROWS_BOOTLOADED='  1 .vector_table                            00000298 24000000 24000000 DATA
+  2 .text                                    00019ac4 24000298 24000298 TEXT
+  3 .data                                    00000198 20000000 2401e948 DATA
+  4 .bss                                     000031d0 20000198 20000198 BSS
+  5 .sram1_bss                               00000400 30000000 30000000 BSS'
+
+case_bootloaded_layout_selected_and_clean() {
+  load_rows "$ROWS_BOOTLOADED"
+  evaluate_sections fixture
+  expect_violations 0
+  expect_eq "layout follows the lowest file-backed LMA" bootloaded "$LAYOUT_SEL"
+  expect_eq "image length is measured from the AXI SRAM origin" $(( 0x2401e948 + 0x198 - 0x24000000 )) "$EXPECTED"
+  expect_eq ".sram1_bss in D2 is reported where it is" '.sram1_bss=BSS@0x30000000(1024)' "$SRAM_NOTE"
+  load_rows '  1 .text                                    00000040 08000000 08000000 TEXT'
+  evaluate_sections fixture
+  expect_eq "an internal-flash image goes back to the internal layout" internal "$LAYOUT_SEL"
+}
+
+# R5. Same image with the buffers left in AXI SRAM, which is where the internal layout puts them and
+# where the bootloader's copy now lands: DMA would work, the image would be overwritten under it.
+case_bootloaded_sram1_bss_outside_d2() {
+  local out
+  load_rows "${ROWS_BOOTLOADED/30000000 30000000/20003368 20003368}"
+  evaluate_sections fixture
+  expect_violations 1
+  out=$(violations_text)
+  expect_has "names the section and the region it left" '.sram1_bss at 0x20003368..0x20003768 is outside RAM_D2 0x30000000..0x30048000' "$out"
+}
+
+# R6. The same image with one section pushed to within 1 KB of the end of the region.
+case_bootloaded_needs_spare() {
+  local out
+  load_rows "${ROWS_BOOTLOADED/2401e948 DATA/24077c00 DATA}"
+  evaluate_sections fixture
+  expect_violations 1
+  out=$(violations_text)
+  expect_has "names the slack and the requirement" 'bytes of the 480K bootloaded FLASH region are left (need at least 2048)' "$out"
+  load_rows "$ROWS_BOOTLOADED"
+  evaluate_sections fixture
+  expect_violations 0
+}
+
+# R4, both halves. The constants are the real parsed ones, moved by assignment inside the case (each case
+# runs in its own subshell) to the state where the image would reach the excerpt area.
+case_bootloaded_image_must_end_below_excerpt_area() {
+  local out
+  load_rows "$ROWS_BOOTLOADED"
+  evaluate_sections fixture
+  expect_violations 0
+  expect_eq "the real layout leaves the excerpt area clear" 1 $(( QSPI_APP_OFFSET + BOOT_LEN <= EXCERPT_AREA_START ))
+  EXCERPT_AREA_START=$(( QSPI_APP_OFFSET + 0x10000 ))
+  evaluate_sections fixture
+  expect_violations 2
+  out=$(violations_text)
+  expect_has "region-level refusal" 'would end at' "$out"
+  expect_has "image-level refusal" 'installing excerpts would overwrite the app' "$out"
 }
 
 case_no_rows_parsed_is_fatal() {
@@ -1010,7 +1177,7 @@ run_selftest() {
   command -v rust-objcopy >/dev/null 2>&1 \
     || die "no rust-objcopy on PATH - the selftest reads its fixtures with cargo-binutils, available in nix develop .#default"
 
-  # Every case compares against the real FLASH region parsed from firmware/memory.x. There is no knob for
+  # Every case compares against the real FLASH region parsed from firmware/memory-internal.x. There is no knob for
   # faking it: a parameter to inject a region would be exactly the decision this gate exists to refuse.
   parse_flash_region
   fx_make_dir
@@ -1038,6 +1205,10 @@ run_selftest() {
   run_case section-outside-flash-violation case_section_outside_flash_violation
   run_case lowest-lma-must-be-flash-origin case_lowest_lma_must_be_flash_origin
   run_case no-rows-parsed-is-fatal case_no_rows_parsed_is_fatal
+  run_case bootloaded-layout-selected-and-clean case_bootloaded_layout_selected_and_clean
+  run_case bootloaded-sram1-bss-outside-d2 case_bootloaded_sram1_bss_outside_d2
+  run_case bootloaded-needs-spare case_bootloaded_needs_spare
+  run_case bootloaded-image-ends-below-excerpt-area case_bootloaded_image_must_end_below_excerpt_area
 
   if [ "$ST_FAILED" = 0 ]; then
     printf '%s\n' "$PROG: selftest passed ($ST_TOTAL cases)" >&2
@@ -1091,8 +1262,10 @@ main() {
   TMP=$(mktemp -d) || die "mktemp -d failed, so R3 has nowhere to write its test images"
   trap 'if [ -n "${TMP:-}" ]; then rm -rf "$TMP"; fi' EXIT
 
-  printf 'checking %d ELF(s) against FLASH %s..%s (%dK from firmware/memory.x)\n' \
-    "${#ELF_PATHS[@]}" "$(hex8 "$FLASH_ORIGIN")" "$(hex8 "$FLASH_END")" "$(( FLASH_LEN / 1024 ))"
+  printf 'checking %d ELF(s) against FLASH internal %s..%s (%dK) or bootloaded %s..%s (%dK), QSPI app offset %s, excerpts from %s\n' \
+    "${#ELF_PATHS[@]}" "$(hex8 "$INT_ORIGIN")" "$(hex8 $(( INT_ORIGIN + INT_LEN )))" "$(( INT_LEN / 1024 ))" \
+    "$(hex8 "$BOOT_ORIGIN")" "$(hex8 $(( BOOT_ORIGIN + BOOT_LEN )))" "$(( BOOT_LEN / 1024 ))" \
+    "$(hex8 "$QSPI_APP_OFFSET")" "$(hex8 "$EXCERPT_AREA_START")"
 
   for (( i = 0; i < ${#ELF_PATHS[@]}; i++ )); do
     require_elf "${ELF_PATHS[$i]}" "${ELF_NAMES[$i]}"

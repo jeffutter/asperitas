@@ -10,7 +10,8 @@
 # refreshing every mtime in the tree does not.
 path src
 path build.rs
-path memory.x
+path memory-internal.x
+path memory-bootloaded.x
 path Cargo.toml
 path Cargo.lock
 path ../crates

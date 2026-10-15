@@ -20,6 +20,36 @@ BINARY  = main
 FEATURES = seed3
 TARGET   = thumbv7em-none-eabihf
 
+# --- Link layout --------------------------------------------------------------------------------
+#
+# `internal` (default): the image links into the 128 KB internal flash (memory-internal.x) and `make flash`
+# DFUs it to 0x08000000, the STM32 system bootloader's flash. It is the fallback every binary can
+# use, and the only layout blinky, ledtest, podtest and panictest are expected to need.
+#
+# `bootloaded`: the image links for the stock Daisy bootloader (memory-bootloaded.x). It runs from
+# AXI SRAM, is stored in QSPI from 0x90040000, and is written there with the bootloader's DFU
+# interface. That layout exists because rig with the excerpt install path no longer fits 128 KB
+# (TASK-038.04.07). The bootloader itself is installed once, see docs/reference/daisy-seed3.md.
+#
+# The layout reaches build.rs as ASPERITAS_LAYOUT, which stamps it into the ELF's .asp.prov and
+# selects the linker script. The two layouts share one ELF path (target/.../release/$(BINARY)), so
+# `make elf-check LAYOUT=...` refuses an ELF built for the other one. The .bin carries the layout in
+# its name for the same reason BINARY is in it: `main.bin` flashed to 0x08000000 and
+# `main-bootloaded.bin` flashed to 0x90040000 are not interchangeable, and a shared name would let
+# whichever build ran last own the file the next `make flash` reads.
+LAYOUT = internal
+ifeq ($(LAYOUT),internal)
+IMAGE_SUFFIX =
+FLASH_ADDR   = 0x08000000
+else ifeq ($(LAYOUT),bootloaded)
+IMAGE_SUFFIX = -bootloaded
+FLASH_ADDR   = 0x90040000
+else
+$(error LAYOUT must be internal or bootloaded, got '$(LAYOUT)')
+endif
+IMAGE = $(BINARY)$(IMAGE_SUFFIX).bin
+export ASPERITAS_LAYOUT = $(LAYOUT)
+
 # --- Probe flashing (ST-Link) -------------------------------------------------
 #
 # The probe path drives the ELF, not `$(BINARY).bin`: defmt frames are decoded from
@@ -101,7 +131,7 @@ all: build
 ## *load* address, so with every file-backed section loaded in flash the plain image is exactly
 ## what flash must hold -- and it is. `.data` runs from a RAM VMA of 0x24000000 but a flash LMA
 ## of 0x08015808, and `.sram1_bss`, where daisy-embassy puts its SAI DMA buffers
-## (`src/audio.rs:20-22`), is `(NOLOAD)` placement from `firmware/memory.x`. No keep-list is
+## (`src/audio.rs:20-22`), is `(NOLOAD)` placement from `firmware/memory-internal.x`. No keep-list is
 ## needed here, and none belongs here.
 ##
 ## What this buys is worth one sentence of vigilance. Before that `(NOLOAD)` rule the section was
@@ -120,11 +150,16 @@ all: build
 ## new dependency is most likely to be added for. Treat these as measurements of this profile at
 ## this commit, not constants: debug info moves .text (see firmware/Cargo.toml).
 ##
+## `LAYOUT=bootloaded` links the same sources into the 480K AXI SRAM image the stock Daisy bootloader
+## copies from QSPI (memory-bootloaded.x). Measured 2026-10-15, `-O binary`, FEATURES="seed3":
+## blinky 78,438, main 107,621, rig 125,762 (stim-ess 127,586, stim-pulse 125,986), against 491,520.
+## scripts/check-bootloaded-builds.sh builds that matrix and requires 2 KB spare in each.
+##
 ## The output carries `$(BINARY)` in its name so the artifact cannot outlive the command that made
 ## it. See the note beside `BINARY` above.
 build:
 	cargo objcopy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
-		-O binary $(BINARY).bin
+		-O binary $(IMAGE)
 
 ## Flash $(BINARY).bin to the Seed3 via DFU and start it
 ## Prerequisite: hold BOOT, tap RESET, release BOOT on the board
@@ -147,7 +182,7 @@ build:
 ## bars still render live.
 flash:
 	@log=$$(mktemp); \
-	dfu-util -a 0 -s 0x08000000:leave -D $(BINARY).bin 2>&1 | tee "$$log"; \
+	dfu-util -a 0 -s $(FLASH_ADDR):leave -D $(IMAGE) 2>&1 | tee "$$log"; \
 	if grep -q "File downloaded successfully" "$$log"; then \
 		rm -f "$$log"; \
 		printf "\nFlashed and started (dfu-util's exit-74 on leave is expected).\n"; \
@@ -308,12 +343,14 @@ build-elf:
 ## flag from this recipe and from `probe-run`; `make probe-log` attaches to an
 ## already-flashed board with no reset at all.
 probe-flash: build-elf
+	@test "$(LAYOUT)" = internal || { echo "probe-flash writes the ELF where it links; a LAYOUT=$(LAYOUT) image links into AXI SRAM, which a reset erases. Flash it with 'make flash-all LAYOUT=$(LAYOUT)'." >&2; exit 1; }
 	probe-rs download $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) --verify $(PROBE_EXTRA)
 	probe-rs reset --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
 
 ## Flash, then stay attached and stream RTT/defmt. Interactive use — the loop wants
 ## probe-flash, which exits.
 probe-run: build-elf
+	@test "$(LAYOUT)" = internal || { echo "probe-run loads the ELF where it links; a LAYOUT=$(LAYOUT) image links into AXI SRAM, which a reset erases. Flash it with 'make flash-all LAYOUT=$(LAYOUT)'." >&2; exit 1; }
 	probe-rs run $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
 
 # Reading the cfg provenance out of the ELF belongs to scripts/elf-provenance.sh, which is the only
@@ -327,7 +364,7 @@ PROV = bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-provenance.sh
 # What the operator asked for, spelled the way they asked for it, so the line elf-check prints is
 # copy-pasteable rather than a template. BINARY is included even when it is the default `main` for
 # the same reason.
-REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)'$(if $(filter 1,$(NO_DEFAULT)), NO_DEFAULT=1,)
+REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)' LAYOUT=$(LAYOUT)$(if $(filter 1,$(NO_DEFAULT)), NO_DEFAULT=1,)
 
 # The remedy for any elf-check failure: a relink that really links, which re-embeds the digest. `rm -f $(ELF) &&
 # make build-elf` does not qualify -- measured, cargo re-uplifts the cached deps/main-<hash> hardlink
@@ -363,7 +400,7 @@ elf-check:
 		echo "no $(ELF) - run 'make build-elf' with the FEATURES and NO_DEFAULT you mean to flash" >&2; \
 		exit 1; \
 	}
-	@$(PROV) check $(ELF) "$(FEATURES)" "$(NO_DEFAULT)" || { \
+	@$(PROV) check $(ELF) "$(FEATURES)" "$(NO_DEFAULT)" "$(LAYOUT)" || { \
 		echo "that ELF was built for a different cfg set than you are asking to decode with, so its symbols and defmt metadata describe a binary that is not on the board." >&2; \
 		echo "Force a real relink: $(REMEDY)" >&2; \
 		exit 1; \
@@ -428,7 +465,7 @@ check:
 ## the recipe above hard-wires one binary. The only place any tier still reaches make is the
 ## docs-artifact-name lint, and only with `-n` (see its header warning about why that flag is not
 ## optional). Cost of those two gates, local warm inside `nix develop .#default`, as the commit tier
-## that publishes them pays them: 0.23 s {{gate:firmware-clippy}} and 0.22 s {{gate:firmware-clippy-rtt}} when nothing
+## that publishes them pays them: 0.23 s {{gate:firmware-clippy}} and 0.21 s {{gate:firmware-clippy-rtt}} when nothing
 ## changed, several times that straight after a build, tens of seconds in a fresh target dir. Landed
 ## with TASK-060.03, re-pointed by TASK-061.02 when the hook job names died.
 clippy:

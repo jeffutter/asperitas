@@ -17,7 +17,8 @@
 #
 #   show       <elf>                          print the normalized provenance on stdout, exit 0
 #   digest     <elf>                          print the embedded source digest (exit 2 if the ELF has none)
-#   check      <elf> <FEATURES> <NO_DEFAULT>  exit 0 on a match, quiet
+#   check      <elf> <FEATURES> <NO_DEFAULT> [LAYOUT]  exit 0 on a match, quiet; LAYOUT (internal or
+#                                             bootloaded) is compared too when given
 #   --selftest                                assert this script's own logic, exit 0/1/2
 #
 # `check` takes what the operator asked for as the raw FEATURES / NO_DEFAULT strings the Makefile
@@ -63,7 +64,7 @@ usage() {
   cat <<'EOF'
 usage: scripts/elf-provenance.sh show <elf>
        scripts/elf-provenance.sh digest <elf>
-       scripts/elf-provenance.sh check <elf> <FEATURES> <NO_DEFAULT>
+       scripts/elf-provenance.sh check <elf> <FEATURES> <NO_DEFAULT> [LAYOUT]
        scripts/elf-provenance.sh --selftest
 EOF
 }
@@ -128,6 +129,8 @@ parse_blob() {
   PROV_FEATURES=""
   PROV_DEFMT_LOG=""
   PROV_SOURCE_DIGEST=""
+  # Absent from an ELF older than TASK-038.04.07.02, and every one of those linked into internal flash.
+  PROV_LAYOUT="internal"
   local seen_default=0 seen_features=0
 
   while IFS= read -r line || [ -n "$line" ]; do
@@ -143,6 +146,7 @@ parse_blob() {
       default) PROV_DEFAULT=$value; seen_default=1 ;;
       features) PROV_FEATURES=$(printf '%s' "$value" | normalize_features); seen_features=1 ;;
       defmt_log) PROV_DEFMT_LOG=$value ;;
+      layout) PROV_LAYOUT=$value ;;
       source_digest) PROV_SOURCE_DIGEST=$value ;; # optional: absent from an ELF older than TASK-071
       *) : ;; # unknown key: forward-compatible, ignore it rather than refuse a newer stamp
     esac
@@ -201,7 +205,7 @@ expected_from_metadata() {
 # set it wants to argue about; the arm hands over the path the blob came from, so a refusal still
 # names a file. Exit 0 on a match, 1 on a different cfg set naming both, 2 if it could not run.
 compare_request() {
-  local elf=$1 blob=$2 asked_features=$3 asked_no_default=$4
+  local elf=$1 blob=$2 asked_features=$3 asked_no_default=$4 asked_layout=${5:-}
   local want_default=1 want_features closure=""
 
   parse_blob "$blob" || return 2
@@ -212,6 +216,14 @@ compare_request() {
     closure=$EXPECTED_CLOSURE
   fi
   want_features=$(printf '%s %s' "$asked_features" "$closure" | normalize_features)
+
+  # The layout is a property of the image like the feature set: one ELF path serves both link
+  # layouts, and a bootloaded ELF flashed to internal flash (or the reverse) boots nothing. Compared
+  # only when the caller names one, so callers that predate the layout keep their meaning.
+  if [ -n "$asked_layout" ] && [ "$PROV_LAYOUT" != "$asked_layout" ]; then
+    printf '%s\n' "$elf was linked for layout=$PROV_LAYOUT; you asked for layout=$asked_layout (LAYOUT=\"$asked_layout\")" >&2
+    return 1
+  fi
 
   if [ "$PROV_DEFAULT" = "$want_default" ] && [ "$PROV_FEATURES" = "$want_features" ]; then
     return 0
@@ -267,7 +279,7 @@ compare_request() {
 #   C4  No `cargo build`, `cargo clippy`, `cargo objcopy`, `cargo objdump` or `make`, and no path under
 #       firmware/target/: those either rebuild or re-point the artifact the provenance gate audits.
 #
-# Measured against those rules: 0.98 s {{gate:elf-provenance-selftest}} as the commit tier runs it, which holds
+# Measured against those rules: ~1 s {{gate:elf-provenance-selftest}} as the commit tier runs it, which holds
 # AC #3's sub-second budget but misses the plan's stricter target. The gap is the tools
 # themselves: seven rust-objcopy invocations at ~31 ms {{component:objcopy-invocation}} each and the two
 # memoized `cargo metadata` runs at ~52 ms {{component:cargo-metadata-invocation}}, every
@@ -451,6 +463,8 @@ defmt_log=}
 BLOB_FUTURE_KEY=${BLOB_CONSOLE/defmt_log=/boot_stage=seven
 }
 BLOB_CONSOLE_WARN=${BLOB_CONSOLE/defmt_log=/defmt_log=warn}
+BLOB_BOOTLOADED=${BLOB_CONSOLE/defmt_log=/defmt_log=
+layout=bootloaded}
 
 # One temp dir for the whole run, removed on any exit. Deliberately not under firmware/target/, so a
 # selftest can never be mistaken for build residue the provenance gate might read.
@@ -635,6 +649,27 @@ case_unknown_key_ignored() {
   expect_eq "fields survive an unknown key" log_usb,seed3 "$PROV_FEATURES"
 }
 
+case_layout_field() {
+  parse_blob "$BLOB_CONSOLE" || fail "console stamp unparseable"
+  expect_eq "a stamp with no layout= line is an internal-flash image" internal "$PROV_LAYOUT"
+  parse_blob "$BLOB_BOOTLOADED" || fail "bootloaded stamp unparseable"
+  expect_eq "layout" bootloaded "$PROV_LAYOUT"
+  compare_request boot.elf "$BLOB_BOOTLOADED" "seed3" "" bootloaded || fail "bootloaded image refused when bootloaded was asked for"
+  compare_request console.elf "$BLOB_CONSOLE" "seed3" "" internal || fail "a pre-layout stamp refused when internal was asked for"
+}
+
+case_layout_mismatch_refused() {
+  local out rc
+  out=$(compare_request boot.elf "$BLOB_BOOTLOADED" "seed3" "" internal 2>&1)
+  rc=$?
+  [ "$rc" = 1 ] || fail "bootloaded image asked for as internal: exited $rc, wanted 1"
+  expect_has "names both layouts" "linked for layout=bootloaded; you asked for layout=internal" "$out"
+  out=$(compare_request console.elf "$BLOB_CONSOLE" "seed3" "" bootloaded 2>&1)
+  rc=$?
+  [ "$rc" = 1 ] || fail "internal image asked for as bootloaded: exited $rc, wanted 1"
+  expect_has "names both layouts" "linked for layout=internal; you asked for layout=bootloaded" "$out"
+}
+
 case_source_digest_optional() {
   parse_blob "$BLOB_WITH_DIGEST" || fail "a stamp carrying source_digest was refused"
   expect_eq "digest present" 0123abcd "$PROV_SOURCE_DIGEST"
@@ -748,6 +783,8 @@ run_selftest() {
   run_case missing-keys-refused case_missing_keys_refused
   run_case unknown-key-ignored case_unknown_key_ignored
   run_case source-digest-optional case_source_digest_optional
+  run_case layout-field case_layout_field
+  run_case layout-mismatch-refused case_layout_mismatch_refused
   run_case no-provenance-section-refused case_no_provenance_section_refused
   run_case not-an-object-file-refused case_not_an_object_file_refused
   run_case normalize-features-table case_normalize_features_table
@@ -777,7 +814,7 @@ case $mode in
     [ $# -eq 2 ] || { usage >&2; exit 2; }
     blob=$(read_blob "$2") || exit 2
     parse_blob "$blob" || exit 2
-    printf 'default=%s features=%s defmt_log=%s source_digest=%s\n' "$PROV_DEFAULT" "$PROV_FEATURES" "$PROV_DEFMT_LOG" "$PROV_SOURCE_DIGEST"
+    printf 'default=%s features=%s defmt_log=%s layout=%s source_digest=%s\n' "$PROV_DEFAULT" "$PROV_FEATURES" "$PROV_DEFMT_LOG" "$PROV_LAYOUT" "$PROV_SOURCE_DIGEST"
     ;;
 
   digest)
@@ -792,9 +829,9 @@ case $mode in
     ;;
 
   check)
-    [ $# -eq 4 ] || { usage >&2; exit 2; }
+    [ $# -eq 4 ] || [ $# -eq 5 ] || { usage >&2; exit 2; }
     blob=$(read_blob "$2") || exit 2
-    compare_request "$2" "$blob" "$3" "$4"
+    compare_request "$2" "$blob" "$3" "$4" "${5:-}"
     exit $?
     ;;
 

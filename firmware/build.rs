@@ -3,13 +3,36 @@ use std::path::PathBuf;
 
 fn main() {
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    std::fs::write(out.join("memory.x"), include_str!("memory.x")).unwrap();
+    // Two link layouts share the one file name the linker looks for. `internal` (the default) is the
+    // 128 KB internal flash that DFU-to-0x08000000 loads; `bootloaded` is the AXI-SRAM image the
+    // stock Daisy bootloader copies out of QSPI (memory-bootloaded.x). Selected per build with
+    // ASPERITAS_LAYOUT, which `make LAYOUT=...` sets.
+    let layout = env::var("ASPERITAS_LAYOUT").unwrap_or_default();
+    let memory_x = match layout.as_str() {
+        "" | "internal" => include_str!("memory-internal.x"),
+        "bootloaded" => include_str!("memory-bootloaded.x"),
+        other => panic!("ASPERITAS_LAYOUT={other:?}: expected \"internal\" or \"bootloaded\""),
+    };
+    let layout = if layout.is_empty() {
+        "internal"
+    } else {
+        layout.as_str()
+    };
+    std::fs::write(out.join("memory.x"), memory_x).unwrap();
+    // Reaching the compiler as an env var makes the layout part of the crate's fingerprint, so
+    // flipping it relinks the binary even though no source file changed.
+    println!("cargo:rustc-env=ASPERITAS_LAYOUT={layout}");
+    println!("cargo:rerun-if-env-changed=ASPERITAS_LAYOUT");
 
     // Without this, the copy written above is inert: nothing tells the linker
     // to look in OUT_DIR. The build still worked only because the linker also
-    // searches the crate root, where memory.x happens to live. Emitting the
-    // search path makes the copy actually authoritative, and keeps ours ahead
-    // of the memory.x that embassy-stm32's `memory-x` feature generates.
+    // searches the crate root. Emitting the search path makes the copy actually authoritative, and
+    // keeps ours ahead of the memory.x that embassy-stm32's `memory-x` feature generates.
+    //
+    // The crate root must therefore hold NO file named memory.x: measured with the layouts split,
+    // lld resolves `INCLUDE memory.x` against the working directory before any -L path, so a
+    // root-level memory.x silently beat the selected layout (an image stamped bootloaded that linked
+    // for internal flash). The two layouts are memory-internal.x and memory-bootloaded.x for that reason.
     println!("cargo:rustc-link-search={}", out.display());
 
     // defmt 1.x puts one byte of every format string's metadata in its own `.defmt.<level>.<json>`
@@ -28,10 +51,11 @@ fn main() {
         println!("cargo:rustc-link-arg=-Tdefmt.x");
     }
 
-    provenance();
+    provenance(layout);
     version();
 
-    println!("cargo:rerun-if-changed=memory.x");
+    println!("cargo:rerun-if-changed=memory-internal.x");
+    println!("cargo:rerun-if-changed=memory-bootloaded.x");
     // Printing any rerun-if directive opts out of the default "rerun if anything changed", so the
     // feature test above needs its own trigger or a feature flip would reuse the stale link line.
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_LOG_DEFMT");
@@ -57,7 +81,7 @@ fn main() {
 ///
 /// Read by `scripts/elf-provenance.sh`, filed as TASK-062.02, which is the only thing in the repo
 /// that parses this blob.
-fn provenance() {
+fn provenance(layout: &str) {
     // Section name, format tag and key order are defined here and nowhere else. The blob leads with
     // the tag so a later format change is detected by its absence instead of being misparsed.
     const SECTION: &str = ".asp.prov";
@@ -91,7 +115,7 @@ fn provenance() {
     // `.asciz` on one line and the bytes in the ELF come out with real newlines.
     let source_digest = digest_inputs(&["digest"]);
     let body = format!(
-        "{TAG}\\ndefault={default}\\nfeatures={}\\ndefmt_log={defmt_log}\\nsource_digest={source_digest}\\n",
+        "{TAG}\\ndefault={default}\\nfeatures={}\\ndefmt_log={defmt_log}\\nlayout={layout}\\nsource_digest={source_digest}\\n",
         features.join(",")
     );
     let asm = format!(

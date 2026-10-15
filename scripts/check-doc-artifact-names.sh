@@ -100,12 +100,16 @@ derive_legal_image_names() {
   [ "${#targets[@]}" -gt 0 ] || die "no targets in firmware/src/bin/*.rs: the legal set would be \
 empty and every name in the docs would look wrong"
 
+  # Both link layouts name their images differently (`rig.bin`, `rig-bootloaded.bin`), so the legal
+  # set is derived once per layout rather than listing the second spelling here.
+  local layout
+  for layout in internal bootloaded; do
   for src in "${targets[@]}"; do
     name=${src##*/}
     name=${name%.rs}
 
-    if ! rules=$(make -n -C firmware BINARY="$name" build flash 2>&1); then
-      printf '%s\n' "check-doc-artifact-names: make -n -C firmware BINARY=$name build flash failed:" >&2
+    if ! rules=$(make -n -C firmware BINARY="$name" LAYOUT="$layout" build flash 2>&1); then
+      printf '%s\n' "check-doc-artifact-names: make -n -C firmware BINARY=$name LAYOUT=$layout build flash failed:" >&2
       printf '%s\n' "$rules" >&2
       exit 2
     fi
@@ -131,6 +135,7 @@ Makefile before touching a document.")
     # Basename, because that is the shape a doc quotes it in: a path in the recipe would otherwise
     # never match a token grepped out of prose.
     LEGAL_BINS+=("${built##*/}")
+  done
   done
 }
 

@@ -114,7 +114,7 @@ spanning the lowest to the highest **load** address, so the image is right only 
 file-backed section is loaded in flash. It is: `.data` runs from a RAM VMA of `0x24000000` but a
 flash LMA of `0x08015808`, and `.sram1_bss` - the two `GroundedArrayCell::uninit()` SAI DMA buffers
 daisy-embassy `ca9bcc9` tags `#[link_section = ".sram1_bss"]` (`src/audio.rs:20-22`) - gets
-`(NOLOAD)` placement from `firmware/memory.x`. Measured 2026-09-13, a plain `-O binary` and
+`(NOLOAD)` placement from `firmware/memory-internal.x`. Measured 2026-09-13, a plain `-O binary` and
 `make build` agree byte-for-size on all six binaries: `main` 88,581, `rig` 106,811, `blinky`
 65,638, `ledtest` 17,774, `podtest` 72,689, `panictest` 65,958.
 
@@ -172,7 +172,7 @@ the core is running and the fault is downstream.
   matching `firmware/Makefile:4`; `flake.nix:38-63` is the list. No additional setup needed. What
   the shell leaves out is usbutils, so `lsusb` (*Enter DFU mode*) has to come from outside it, and
   `dfu-util --list` is the equivalent that works inside.
-- **memory.x RAM length is load-bearing.** AXI SRAM is **512 KB**, not 1 MB — the
+- **memory-internal.x RAM length is load-bearing.** AXI SRAM is **512 KB**, not 1 MB — the
   advertised "1 MB" is the total across all domains (AXI 512K + D2 288K + D3 64K + DTCM
   128K + ITCM 64K), and only the AXI region is contiguous at `0x24000000`. `cortex-m-rt`
   derives the initial stack pointer from `ORIGIN + LENGTH`, so declaring 1M put SP past
@@ -487,9 +487,9 @@ decoder that is not your sources mislabels live output into something that looks
 
 `--chip STM32H750IBKx` is the exact string, verified host-side against the pinned toolchain:
 `probe-rs chip info STM32H750IBKx` reports NVM `0x08000000..0x08020000` (128 KiB) and AXI SRAM
-`0x24000000..0x24080000` (512 KiB), which matches `firmware/memory.x` (re-run 2026-09-12 against
+`0x24000000..0x24080000` (512 KiB), which matches `firmware/memory-internal.x` (re-run 2026-09-12 against
 probe-rs-tools 0.32.0). Bare `STM32H750IB`
-resolves too; use the full string so it reads as the same part `memory.x` describes.
+resolves too; use the full string so it reads as the same part `memory-internal.x` describes.
 
 **Why the probe path takes the ELF and DFU takes `$(BINARY).bin`.** `probe-rs` decodes `defmt`
 frames from the ELF's `.defmt` section and its symbol table, and unwinds with its DWARF. Flash
@@ -659,7 +659,7 @@ Two erase-and-debug details that are cheap to state and expensive to rediscover:
 **The D-cache is the other way to lose the control block, and it is armed by a future change, not
 by anything today.** `_SEGGER_RTT` lands wherever the linker puts `.data`: measured at
 `0x24000008` (48 bytes) in a `log-defmt` release image, the first words of AXI SRAM — the same
-`0x24000000..0x24080000` region probe-rs's own `STM32H750IBKx` entry reports and `memory.x`
+`0x24000000..0x24080000` region probe-rs's own `STM32H750IBKx` entry reports and `memory-internal.x`
 describes. Enable the Cortex-M7 D-cache over that region and the host stops seeing what the core
 wrote: the core's writes live in the cache until they're evicted, while the debug port reads go to
 the memory system and never consult the cache. Either the `SEGGER RTT` magic string isn't there yet,
@@ -1127,9 +1127,35 @@ is outside its stated support.
   interface is visible from about 0.7 s for its 2 s grace period, then it jumps to the app. No
   button is needed: `probe-rs reset ... --connect-under-reset` then `dfu-util -w -a 0 -s
   0x90040000:leave -D ledtest.bin` reflashed the app. Without a probe, a RESET tap does the same.
-- **Not proven:** `main`/`rig` with the SAI DMA buffers. They must sit in D2 (`0x30000000`), and
-  AXI SRAM is now image space; that layout is TASK-038.04.07.02, and re-measuring `rig`'s callback
-  timing from it is TASK-038.04.07.04.
+- **Not proven:** `main`/`rig` with the SAI DMA buffers running from the bootloaded layout. They sit
+  in D2 (`0x30000000`) because AXI SRAM is now image space; the layout builds (next subsection) but
+  re-measuring `rig`'s callback timing from it is TASK-038.04.07.04.
+
+### The bootloaded link layout (built, TASK-038.04.07.02)
+
+`firmware/memory-bootloaded.x` is the trial layout above made permanent: `FLASH = 0x24000000, 480K`,
+`RAM = DTCM 0x20000000, 128K`, and `RAM_D2 = 0x30000000, 288K` for the `.sram1_bss` SAI buffers. The
+internal-flash layout is `firmware/memory-internal.x` and stays the default.
+
+- **Selecting it:** `ASPERITAS_LAYOUT=bootloaded`, or `make build LAYOUT=bootloaded BINARY=<bin>`, which
+  writes `rig-bootloaded.bin` (or `main-bootloaded.bin`, and so on) and makes `make flash LAYOUT=bootloaded` write it to `0x90040000`. The
+  layout is stamped into the ELF's `.asp.prov`, and `make elf-check LAYOUT=...` refuses an ELF built for
+  the other one (the two layouts share `target/.../release/<bin>`). `probe-flash` and `probe-run`
+  refuse a bootloaded ELF: it links into AXI SRAM, which a reset erases.
+- **Why the file is not called `memory.x`:** lld resolves cortex-m-rt's `INCLUDE memory.x` against the
+  working directory before any `-L` path, so a `memory.x` in `firmware/` silently beat the layout
+  `build.rs` selected (measured: an ELF stamped bootloaded that linked for internal flash). The crate
+  root now holds no file by that name; `build.rs` writes the selected one into `OUT_DIR`.
+- **QSPI budget:** the image is stored from QSPI offset `0x40000` and the excerpt slots start at
+  `0x100000` (`EXCERPT_AREA_START`). `scripts/check-image-load-addresses.sh` parses both and fails if
+  the region or an image reaches the slots, if `.sram1_bss` is outside D2, or if less than 2 KB of the
+  480K is left. `scripts/check-bootloaded-builds.sh` (a push-tier gate) builds and grades the matrix.
+- **Measured sizes** (`-O binary`, 2026-10-15, spare = 491,520 minus image): blinky 78,438, main 107,621,
+  rig 125,762 (sine), 127,586 (`stim-ess`), 125,986 (`stim-pulse`). Reset vector `0x24000299`, initial
+  SP `0x20020000`, `.sram1_bss` at `0x30000000` (both buffers, 1 KB).
+- **rig with the install path:** wip commit `762392c` (excerpt install, does not link in 128 KB; it
+  overflows internal flash by 12.5 to 14.8 KB) applied in a scratch tree links bootloaded at 144,137
+  (sine), 145,929 (`stim-ess`) and 144,489 (`stim-pulse`) bytes, leaving about 347 KB of the 480K.
 
 ## External SDRAM: address, MPU and caches (measured)
 
