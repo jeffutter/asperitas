@@ -167,9 +167,10 @@ flash-all: build flash
 # * They take the ELF, not `$(BINARY).bin` (see CHIP/ELF above). Flashing the .bin
 #   would additionally need `--binary-format bin --base-address 0x08000000`, which
 #   is one more way to lose the distinction between the two artifacts.
-# * `probe-rs download --reset` rather than `cargo flash`: equivalent, but it keeps
-#   a single artifact path in this file. `--reset` is the analogue of dfu-util's
-#   `:leave` — the board runs again when the command exits.
+# * `probe-rs download` rather than `cargo flash`: equivalent, but it keeps a single
+#   artifact path in this file. The trailing `probe-rs reset` is the analogue of dfu-util's
+#   `:leave` - the board runs again when the recipe exits. (`download --reset` existed in
+#   0.32.0 and is gone on probe-rs main, which the flake builds.)
 # * `--verify` is genuine read-back verification. Do NOT transplant the "File
 #   downloaded successfully" grep from `flash:` above; that idiom exists only
 #   because dfu-util exits 74 even on success.
@@ -301,13 +302,14 @@ build-elf:
 ## probe-rs skips its custom reset sequence and only drives the pin - see
 ## "Flashing and logging over an ST-Link probe" in docs/reference/daisy-seed3.md.
 ## Stock probe-rs 0.32.0 never halts this core under reset (it arms vector catch before
-## enabling halting debug), so this depends on the patched probe-rs the flake builds:
-## nix/probe-rs-cortex-m-reset-catch.patch. With it, under-reset flashes reliably here.
+## enabling halting debug), so this depends on the probe-rs-from-main (upstream PR #4441)
+## the flake builds. With it, under-reset flashes reliably here.
 ## The two knobs are `PROBE_EXTRA="--speed 1000"` and `UNDER_RESET=0`, which drops the
 ## flag from this recipe and from `probe-run`; `make probe-log` attaches to an
 ## already-flashed board with no reset at all.
 probe-flash: build-elf
-	probe-rs download $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) --verify --reset $(PROBE_EXTRA)
+	probe-rs download $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) --verify $(PROBE_EXTRA)
+	probe-rs reset --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
 
 ## Flash, then stay attached and stream RTT/defmt. Interactive use — the loop wants
 ## probe-flash, which exits.

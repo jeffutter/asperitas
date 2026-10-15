@@ -33,6 +33,26 @@
             extensions = [ "rust-src" "rust-analyzer" "llvm-tools-preview" ];
           };
 
+          # probe-rs main at the merge of PR #4441 (enable halting debug in the Cortex-M reset
+          # catch), which fixes --connect-under-reset on this board. Replace with plain
+          # `pkgs.probe-rs-tools` once nixpkgs ships a release containing it (after 0.32.0).
+          probeRs = pkgs.probe-rs-tools.overrideAttrs (old: rec {
+            version = "0.32.0-unstable-2026-10-11";
+            src = pkgs.fetchFromGitHub {
+              owner = "probe-rs";
+              repo = "probe-rs";
+              rev = "5214b96b9a3ba6f42eae69cd55ad3dee49538224";
+              hash = "sha256-SJ6Vmv85v07s7+w0WnLF4ZJMgEP64aOgaISHbXRk3eY=";
+            };
+            # nixpkgs' test skip list targets 0.32.0; six DAP-server tests on main fail in the
+            # sandbox and we don't use the DAP server.
+            doCheck = false;
+            cargoDeps = pkgs.rustPlatform.fetchCargoVendor {
+              inherit src;
+              hash = "sha256-cyFWzOY6oMTXVvNiz6JBDxpzIXyx97H7thmU2cjXvy4=";
+            };
+          });
+
           # `default` is the bench shell. `ci` is the same shell minus the patched probe-rs, which a
           # runner must build from source (about 9.8 of the 10.6 minutes CI spent entering the
           # shell, TASK-072) and no CI gate uses. Every other package, the toolchain above and the
@@ -49,9 +69,8 @@
               # targets in firmware/Makefile. Lock pins probe-rs-tools 0.32.0.
               # No udev rules here: this flake ships devShells only, and Darwin
               # needs no rule for an ST-Link (the Linux caveat lives in README).
-              # Patched so --connect-under-reset halts the core: stock 0.32.0
-              # arms vector catch without C_DEBUGEN and the core runs past it.
-              # See the patch header; drop it once upstream ships a fix.
+              # Built from probe-rs main (see probeRs above): stock 0.32.0 arms vector
+              # catch without C_DEBUGEN, so --connect-under-reset runs past it.
               pkgs.cargo-binutils        # objcopy to produce raw .bin for DFU
 
               pkgs.pkg-config
@@ -62,9 +81,7 @@
               pkgs.jq                    # JSON processing for backlog scripts
             ]
             ++ pkgs.lib.optionals withProbe [
-              (pkgs.probe-rs-tools.overrideAttrs (old: {
-                patches = (old.patches or [ ]) ++ [ ./nix/probe-rs-cortex-m-reset-catch.patch ];
-              }))
+              probeRs
             ]
             # Host audio backend. On Linux cpal talks to ALSA and needs the
             # library + its .pc file at build time. On Darwin it uses the

@@ -439,8 +439,8 @@ through `--chip-description-path`, so the `--chip STM32H750IBKx` strings elsewhe
 now read `--chip ASPERITAS_H750IB`. Measured: `probe-rs read b32 0x08000000 4 --chip
 ASPERITAS_H750IB --chip-description-path firmware/asperitas-h750.yaml --protocol swd` returns the
 vector table on a freshly power-cycled board without wedging the port. Since measured
-(TASK-037): flashing with it, RTT, and `--connect-under-reset`, the last only with the patched
-probe-rs described under *Under reset* below. Because that sequence never sets `DBGMCU_CR`, firmware
+(TASK-037): flashing with it, RTT, and `--connect-under-reset`, the last only with the
+probe-rs-from-main described under *Under reset* below. Because that sequence never sets `DBGMCU_CR`, firmware
 that sleeps in WFI must set the debug-in-sleep bits itself. `Failed to read component information at 0xe000e000` while attached means the core
 was not accessible (held in reset or a stuck debug port), not a wiring fault.
 
@@ -466,7 +466,7 @@ Expanded (`make -n probe-flash probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1
 
 ```
 cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
-probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --connect-under-reset --verify --reset
+probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --connect-under-reset --verify && probe-rs reset --chip STM32H750IBKx --non-interactive --connect-under-reset
 probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive
 ```
 
@@ -748,7 +748,7 @@ it leaves RTT alone. Whoever enables caching for DSP headroom is the one who bre
 and will not suspect the cache. TASK-038.03 reached the same caches-off finding independently, from
 the SDRAM-coherence side.
 
-**Under reset only works with the flake's patched probe-rs.** Measured 2026-10-07: stock probe-rs
+**Under reset only works with the flake's probe-rs (main, post-0.32.0).** Measured 2026-10-07: stock probe-rs
 0.32.0 fails every `--connect-under-reset` attach on this board with `Unable to wait for 0 halted` /
 `Timeout while attaching to target under reset`, while a plain attach always works. The cause is
 probe-rs, not the reset net or the probe. Since probe-rs #3485 it arms reset vector catch
@@ -758,11 +758,11 @@ survives nRESET and is cleared only by power-on, which is why an OpenOCD session
 set) let exactly one probe-rs attach through. The stock ST sequences leave it set after a failed
 attach, so stock chip names fail only once after power-up (probe-rs #4113). Our renamed chip gets
 `DefaultArmSequence`, whose session teardown writes `DHCSR = 0`, so it failed every time.
-`nix/probe-rs-cortex-m-reset-catch.patch`, applied to `probe-rs-tools` in `flake.nix`, sets
-C_DEBUGEN while reset is still held. With it, 5 of 5 reads and 3 of 3 `make probe-flash` runs passed
+Upstream PR #4441 (merged 2026-10-11, built from main in `flake.nix` until a release) sets
+C_DEBUGEN while reset is still held; it started life as our local patch. With it, 5 of 5 reads and 3 of 3 `make probe-flash` runs passed
 under reset, against 0 of 4 stock runs interleaved with them. Full trace and the controlled test:
-[docs/upstream/probe-rs-connect-under-reset.md](../upstream/probe-rs-connect-under-reset.md). Drop
-the patch when upstream ships a fix. The #3516 discussion below still describes the probe class in
+[docs/upstream/probe-rs-connect-under-reset.md](../upstream/probe-rs-connect-under-reset.md). Move
+to the released probe-rs-tools when one ships. The #3516 discussion below still describes the probe class in
 general, but it was not what failed here.
 
 **Under reset, an ST-Link gets a plain reset, not a chip-specific one.** `probe-flash` passes
@@ -811,7 +811,7 @@ Expanded (`make -n probe-flash UNDER_RESET=0 FEATURES="seed3 log-defmt" NO_DEFAU
 
 ```
 cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
-probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive  --verify --reset
+probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive  --verify && probe-rs reset --chip STM32H750IBKx --non-interactive
 ```
 
 `UNDER_RESET=0` drops the flag from `probe-flash` and `probe-run` only; the default expansion is

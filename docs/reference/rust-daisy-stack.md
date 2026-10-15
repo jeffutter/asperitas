@@ -108,11 +108,11 @@ the same configuration as this project — confirmed:
   `firmware/Cargo.toml` ships `debug = 2` (measured 2026-09-12; the warning precedes probe
   discovery, which is why one boardless `probe-rs attach … --non-interactive --list-rtt` is the
   check). Verified host-side only otherwise: command expansion, the chip entry via
-  `probe-rs chip info`, and flag values via `--help`. **The flake builds probe-rs-tools 0.32.0
-  with a local patch** (`nix/probe-rs-cortex-m-reset-catch.patch`): stock 0.32.0 never halts a
+  `probe-rs chip info`, and flag values via `--help`. **The flake builds probe-rs-tools from
+  probe-rs main** (commit `5214b96`, the merge of upstream PR #4441): stock 0.32.0 never halts a
   Cortex-M under `--connect-under-reset` unless an earlier session left `DHCSR.C_DEBUGEN` set,
-  and on this board's renamed chip entry that means it always fails. Re-check before bumping
-  probe-rs, and drop the patch once upstream fixes the attach order. Bench measurements are
+  and on this board's renamed chip entry that means it always fails. Switch back to nixpkgs'
+  `probe-rs-tools` once a release containing #4441 reaches the pinned nixpkgs. Bench measurements are
   TASK-037's. Commands and caveats:
   [daisy-seed3.md](./daisy-seed3.md#flashing-and-logging-over-an-st-link-probe)
 - `dfu-util` — probe-free flashing over the Seed3's USB-C; see
