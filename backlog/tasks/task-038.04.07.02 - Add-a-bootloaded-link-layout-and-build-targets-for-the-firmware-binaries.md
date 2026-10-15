@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-10-09 02:24'
-updated_date: '2026-10-15 16:19'
+updated_date: '2026-10-15 16:59'
 labels:
   - planned
 dependencies:
@@ -39,6 +39,8 @@ SHIPPED by 05d78b5. This plan is superseded; the ticket's final summary describe
 <!-- SECTION:NOTES:BEGIN -->
 Landed: firmware/memory-bootloaded.x (FLASH 0x24000000 480K, RAM DTCM 128K, RAM_D2 288K for .sram1_bss), selected by ASPERITAS_LAYOUT in build.rs and stamped as layout= in .asp.prov. IMPORTANT: the internal layout file was renamed memory.x -> memory-internal.x. Measured: lld resolves 'INCLUDE memory.x' from the cwd before any -L path, so a crate-root memory.x silently beat the OUT_DIR copy (an ELF stamped bootloaded linked for internal flash). Makefile: LAYOUT=internal|bootloaded, images <bin>-bootloaded.bin flashed to 0x90040000, elf-check compares layout, probe-flash/probe-run refuse bootloaded. Gates: check-image-load-addresses.sh picks the layout from the ELF's lowest file-backed LMA and adds R4 (image and region end below EXCERPT_AREA_START, both parsed from memory-bootloaded.x QSPI_APP_OFFSET marker and excerpt.rs), R5 (.sram1_bss inside RAM_D2), R6 (>= 2048 spare); new push gate bootloaded-builds (scripts/check-bootloaded-builds.sh) builds and grades blinky, main, rig x3 before the cross-build pair; ledger refreshed with GATE_COSTS_BOOTSTRAP=1 (new gate unpriced). check-doc-artifact-names derives legal image names for both layouts.
 Sizes (-O binary, bootloaded, bytes; region 491,520): blinky 78,438; main 107,621; rig 125,762 / stim-ess 127,586 / stim-pulse 125,986. AC1 with 762392c: cherry-picked onto HEAD in a scratch worktree (conflicts in rig.rs/build.rs resolved by hand, worktree removed): rig 144,137 / 145,929 / 144,489 bytes, about 347 KB spare; the same tree overflows internal flash by 12.5-14.8 KB. Reset vector 0x24000299, SP 0x20020000, .sram1_bss at 0x30000000 verified in the ELF. Not verified (no hardware): that the image boots and audio runs from this layout; that is TASK-038.04.07.04. Gates: scripts/gates.sh push green (29 gates).
+
+2026-10-15 (found on hardware in TASK-038.04.07.04): the shipped memory-bootloaded.x inserted .sram1_bss (> RAM_D2) AFTER .bss, so cortex-m-rt's __ebss resolved to 0x30000400 and rig hard-faulted in Reset before main (no USB). The gates here checked load addresses and spare size but nothing boots the image or checks __ebss. Fixed in e5801c7: INSERT BEFORE .bss plus ASSERT(__ebss <= ORIGIN(RAM)+LENGTH(RAM)), which the linker now enforces on every bootloaded build.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
