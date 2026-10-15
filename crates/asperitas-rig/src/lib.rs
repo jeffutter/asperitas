@@ -26,6 +26,8 @@
 //! A read error is returned as `Err` from [`capture`]; it is never folded into a verdict,
 //! so a short read cannot be mistaken for a clean capture.
 
+pub mod cli;
+
 use std::fmt::Write as _;
 use std::io::{self, Read};
 
