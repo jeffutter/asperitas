@@ -1,14 +1,17 @@
 ---
 id: TASK-031
 title: Add a host-side rig runner that produces integrity-checked captures
-status: To Do
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:24'
-updated_date: '2026-09-09 01:31'
-labels: []
+updated_date: '2026-10-15 04:26'
+labels:
+  - planned
 dependencies:
-  - TASK-030
+  - TASK-031.01
+  - TASK-031.02
+  - TASK-031.03
 modified_files:
   - crates/asperitas-rig/src/main.rs
   - crates/asperitas-rig/Cargo.toml
@@ -37,3 +40,10 @@ This is also the foundation the audio measurement work builds on, so the artifac
 - [ ] #5 Unit tests replay synthetic byte streams, including deliberately truncated and corrupted frames, and pass with no board attached.
 - [ ] #6 Usage is documented where the other host tooling is documented.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against c493eb2
+Approach: new workspace crate crates/asperitas-rig reusing asperitas_logging::frame::Decoder (already host-testable, same as examples/console_decode.rs). Split: .01 engine+artifact+verdict (pure, tested on synthetic streams), .02 serial CLI with exit codes, .03 docs. Order: .01 -> .02 -> .03. Work is fully delegated to sub-tickets. Final check: cargo test --workspace, cargo clippy, run the CLI against a recorded byte file via the injected reader path; hardware capture is left to TASK-033.
+<!-- SECTION:PLAN:END -->
