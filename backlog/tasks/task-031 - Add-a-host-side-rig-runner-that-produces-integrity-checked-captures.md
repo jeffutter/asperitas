@@ -1,11 +1,11 @@
 ---
 id: TASK-031
 title: Add a host-side rig runner that produces integrity-checked captures
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:24'
-updated_date: '2026-10-15 04:26'
+updated_date: '2026-10-15 04:47'
 labels:
   - planned
 dependencies:
@@ -33,12 +33,12 @@ This is also the foundation the audio measurement work builds on, so the artifac
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A host command runs a capture of a requested duration against a connected board and writes an artifact containing timestamped records plus a summary: record count, dropped-record count as reported by the device, and count of frames failing the integrity check.
-- [ ] #2 The command exits non-zero when any frame fails its integrity check or the device reports drops above a configurable threshold, so a lossy capture cannot be mistaken for a clean one.
-- [ ] #3 Capture artifacts have a stable structure and are committed alongside hardware verification tickets as reviewable evidence.
-- [ ] #4 No manual serial configuration beyond selecting the device is needed on macOS or Linux.
-- [ ] #5 Unit tests replay synthetic byte streams, including deliberately truncated and corrupted frames, and pass with no board attached.
-- [ ] #6 Usage is documented where the other host tooling is documented.
+- [x] #1 A host command runs a capture of a requested duration against a connected board and writes an artifact containing timestamped records plus a summary: record count, dropped-record count as reported by the device, and count of frames failing the integrity check.
+- [x] #2 The command exits non-zero when any frame fails its integrity check or the device reports drops above a configurable threshold, so a lossy capture cannot be mistaken for a clean one.
+- [x] #3 Capture artifacts have a stable structure and are committed alongside hardware verification tickets as reviewable evidence.
+- [x] #4 No manual serial configuration beyond selecting the device is needed on macOS or Linux.
+- [x] #5 Unit tests replay synthetic byte streams, including deliberately truncated and corrupted frames, and pass with no board attached.
+- [x] #6 Usage is documented where the other host tooling is documented.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,3 +47,9 @@ This is also the foundation the audio measurement work builds on, so the artifac
 Planned against c493eb2
 Approach: new workspace crate crates/asperitas-rig reusing asperitas_logging::frame::Decoder (already host-testable, same as examples/console_decode.rs). Split: .01 engine+artifact+verdict (pure, tested on synthetic streams), .02 serial CLI with exit codes, .03 docs. Order: .01 -> .02 -> .03. Work is fully delegated to sub-tickets. Final check: cargo test --workspace, cargo clippy, run the CLI against a recorded byte file via the injected reader path; hardware capture is left to TASK-033.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered via TASK-031.01 (engine, verdict, deterministic artifact), .02 (serial CLI, exit codes 0/1/2, device auto-detect, --max-drops), .03 (docs/reference/asperitas-rig.md). Verified at close: cargo test --workspace 378 passed, clippy clean, 19 asperitas-rig tests (golden artifact, truncated/corrupted frames, drop threshold, exit codes) pass with no board. CLI run on this host with two boards attached exits 2 and asks for --device, as documented. Not exercised: a real hardware capture (left to TASK-033/.01) and Linux /dev/ttyACM* detection (covered only by unit tests on the name filter).
+<!-- SECTION:FINAL_SUMMARY:END -->
