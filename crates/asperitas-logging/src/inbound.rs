@@ -38,9 +38,8 @@
 //! for what was rejected. It parses no commands and assigns no meaning to a body — the
 //! consumer (`excerpt::parse_record` today) does that. TASK-032 (host control) can reuse all of
 //! it unchanged: [`InboundFeed`], [`InboundRecord`], [`INBOUND`]'s counters and `usb.rs`'s
-//! channel are transport, not install policy. What TASK-032 would add is a dispatcher that
-//! routes records by verb to more than one consumer, which is deliberately absent here because
-//! with a single consumer it would be a configuration parameter nobody uses.
+//! channel are transport, not install policy. TASK-032 added the dispatcher that routes records by verb to
+//! more than one consumer; it lives in [`crate::control`] and reads [`InboundRecord`] unchanged.
 //!
 //! # Counters
 //!
