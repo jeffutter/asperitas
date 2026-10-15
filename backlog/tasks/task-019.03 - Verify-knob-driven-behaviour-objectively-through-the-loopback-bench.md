@@ -48,6 +48,8 @@ Renamed 2026-09-09 from 'the loopback bench' to the Pod self-loopback, and added
 
 Stimulus budget corrected 2026-09-09: criterion #4 originally asked for three files from audio/instruments/. The 8 MB QSPI flash also carries the firmware image via XIP, so realistic excerpt space is on the order of a megabyte or two — roughly one to two 10 s mono 16-bit excerpts. Asking for three would have quietly meant overwriting the application. Criterion #4 now names one excerpt as the requirement and treats extra coverage as budget permitting.
 
+Correction 2026-10-15 (TASK-038.04.06): the XIP clause above is wrong for this stack. The default layout links the application at 0x08000000 in internal flash and has no execute-in-place path from QSPI; the bootloaded layout has the stock Daisy bootloader copy an image from QSPI at 0x90040000 into AXI SRAM, which still is not XIP. Either way the excerpt area (0x100000 to 0x7FF000 within the QSPI, 14 slots of 516,096 bytes each) is a separate region, so the budget is far larger than one to two clips. See "Instrument excerpts in QSPI" in docs/reference/daisy-seed3.md.
+
 Sweeping parameters under host control still exercises smoothing, since TASK-032 injects upstream of it; the excerpt choice affects signal realism only.
 
 Loopback evidence from TASK-038.05 (2026-10-07/08), the measured baseline this ticket compares against:

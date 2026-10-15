@@ -1235,6 +1235,101 @@ What that settles:
 - daisy-embassy's region base looks like a mistaken `0xD000_0000`, perhaps from AN4891's wording for
   the bank-2 window. It lives in a third-party crate, so it is recorded here rather than patched.
 
+## Instrument excerpts in QSPI
+
+Recorded from the code at `0e12f7e`; nothing in this section has run on a board. Every observed cell
+reads `pending TASK-038.09`, which is the ticket that installs a clip and measures it on the bench.
+The owner of every constant below is `crates/asperitas-logging/src/excerpt.rs`; this table mirrors it
+and `crates/asperitas-logging/tests/excerpt_docs.rs` fails when the two drift. Change the module
+first, then this table. The README owns the workflow (TASK-038.06) and the SDRAM budget; this section
+holds only what is specific to excerpts and is linked from there, not restated there. The application
+itself is not placed in QSPI by the default layout (see *Flashing the Seed3*); the bootloaded layout
+puts its image at `0x90040000`, above the bootloader region, which is why the excerpt area starts well
+clear of it.
+
+### Layout (derived from the `excerpt` constants)
+
+| Region | Range | Notes |
+|---|---|---|
+| Daisy bootloader | `0x0` to `0x40000` | Untouched. `BOOTLOADER_END` = 0x40000. |
+| Unused | `0x40000` to `0x100000` | Headroom between the bootloader and the excerpt area. |
+| Excerpt area start | `0x100000` | `EXCERPT_AREA_START`. |
+| Slot stride | `0x80000` (512 KiB) | `SLOT_STRIDE`; slot `n` is at `0x100000 + n * 0x80000`. |
+| Slots | 14 slots, 0 to 13 | `SLOT_COUNT`. Slot 0 at `0x100000`, slot 13 at `0x780000`. |
+| Header sector | first 4096 B of each slot | `SlotHeader`, 30 B used (`HEADER_LEN`). PCM starts one sector in. |
+| PCM capacity | 516,096 B per slot | `PCM_CAPACITY`: stride minus header sector minus guard sector. 5.38 s mono 16-bit at 48 kHz. |
+| Slot guard | last sector of every stride | Never written. |
+| Reserved top sector | `0x7FF000` to `0x800000` | The guard sector of slot 13 is this sector. |
+
+Why the top sector is reserved: `daisy_embassy::flash` asserts `address + len <= 0x7FFFFF`, so byte
+`0x7FFFFF` is unreachable and its sector is left alone. Every slot gives up its top sector so all 14
+share one capacity. Erase granularity is 4096 B sectors (`SECTOR`); every slot base and PCM base is
+sector-aligned (const-asserted in the module).
+
+### Rules
+
+- **Only the async flash API may be used in `rig`.** The blocking `read` / `write` / `erase` wait on
+  the chip's WIP bit in an unbounded busy loop (`wait_for_write`), which would hang thread mode and the
+  console with it. The async calls bound each wait with a timeout (600 ms per sector erase, 1.6 ms per
+  256-byte page program) and panic on a miss, which surfaces as a `PANIC` record and a red LED.
+  `firmware/build.rs` fails the build if `rig.rs` calls a blocking flash method.
+- **Writes are whole, sector-aligned, 4096-byte sectors.** The driver erases the sector containing
+  every address it writes, so a partial or unaligned write would erase its neighbour. 128 raw bytes
+  per `EXCDATA` chunk (`EXC_CHUNK_RAW`) means 32 chunks fill exactly one sector.
+- **The top sector is reserved** because the driver asserts against `0x7FFFFF` (above).
+- **The bootloader region below `0x40000` is never touched.**
+
+### Costs, predicted and observed
+
+Basis labels: derived = arithmetic on constants in the code; datasheet = IS25LP064A figure as quoted
+in the ticket, not re-read from a sheet in this repo; estimated = a guess with no measurement behind it.
+
+| Quantity | Predicted | Derivation | Observed |
+|---|---|---|---|
+| Playback rate | 96,000 B/s | derived: 48,000 Hz x 1 channel x 2 B (`replay::BYTES_PER_SECOND`) | pending TASK-038.09 |
+| Corpus clip PCM sizes | 190,312 to 288,000 B | derived: WAV file size minus 44-byte header, `audio/instruments/` (octave_mandolin_fast_run 190,312; mandolin_fast_run 207,756; six clips at 288,000) | n/a (file sizes) |
+| Sectors for a 288,000 B clip | 71 PCM + 1 header = 72 | derived: ceil(288,000 / 4096) = 71 | pending TASK-038.09 |
+| Sectors for a 190,312 B clip | 47 PCM + 1 header = 48 | derived: ceil(190,312 / 4096) = 47 | pending TASK-038.09 |
+| Erase time, 190 kB clip | at most 14.4 s (47 PCM sectors alone: 14.1 s) | datasheet max 300 ms x 48 sectors; typical is far lower (tens of ms), so this is an upper bound | pending TASK-038.09 |
+| Erase time, 288 kB clip | at most 21.6 s | datasheet max 300 ms x 72 sectors | pending TASK-038.09 |
+| Program time per sector | at most 12.8 ms | datasheet max 0.8 ms x 16 pages of 256 B | pending TASK-038.09 |
+| Install wall clock, 190 kB clip | at most 15.0 s | 14.4 s erase + 48 x 12.8 ms program (0.61 s); excludes USB and readback | pending TASK-038.09 |
+| Install wall clock, 288 kB clip | at most 22.5 s | 21.6 s erase + 72 x 12.8 ms program (0.92 s); excludes USB and readback | pending TASK-038.09 |
+| Wire bytes, 288 kB install | about 493 kB | derived: 2250 chunks x (191 B body + 28 B frame overhead) = 492,750, plus `EXCSTART` and `EXCEND` frames | pending TASK-038.09 |
+| Wire bytes, 190 kB install | about 326 kB | derived: 1486 full chunks x 219 + one 104 B chunk (159 + 28) = 325,621, plus start and end frames | pending TASK-038.09 |
+| USB transfer time | well under 1 s | estimated: full-speed bulk, ceiling unmeasured | pending TASK-038.09 |
+| Replay staging half | 8,192 B, plays for 85,333 us | derived: `replay::HALF_BYTES`, two halves, 16 KiB of AXI SRAM | pending TASK-038.09 |
+| Worst-case half refill | 18,192 us | estimated: 10,000 us scheduling (`ASSUMED_SCHEDULING_LATENCY_MICROS`) + 8,192 us transfer at an assumed 1 MB/s QSPI floor | pending TASK-038.09 |
+| Replay margin | 4.69x (85,333 / 18,192); build fails below 4x | estimated: the inputs above are assumptions; the QUADSPI kernel clock is unset in the HAL config, so the real read rate is unknown | pending TASK-038.09 |
+
+Erase dominates the install: the USB stream and the programming are small beside it. If the observed
+erase time lands near typical rather than maximum, the install takes seconds, not tens of seconds.
+
+### Replay CRC posture
+
+The replay `crc16` in `EXCPLAY` covers only the samples handed to the DAC encoder; silence and the
+zero padding after the last sample are excluded. It equals the host's CRC of the WAV data chunk and the
+CRC stored in the slot header (`want`). Equal CRCs with `clean=1` prove the QSPI-to-encoder path
+delivered the excerpt intact and in order. They prove nothing about the codec, the analog path or the
+cable; that is TASK-035's measurement (its AC #4), not this one.
+
+### Record grammar
+
+One worked line each, with the host test that pins its format. Install records ride `frame` untouched.
+
+| Record | Direction | Worked line | Pinned by |
+|---|---|---|---|
+| `EXCSTART` | host to device | `EXCSTART slot=03 name=mand_chord bytes=288000 crc16=beef` | `bodies_have_the_documented_shape` in `crates/asperitas-logging/tests/excerpt.rs` |
+| `EXCDATA` | host to device | `EXCDATA i=002a b64=AAH+` | `bodies_have_the_documented_shape` in `crates/asperitas-logging/tests/excerpt.rs` |
+| `EXCEND` | host to device | `EXCEND` | `bodies_have_the_documented_shape` in `crates/asperitas-logging/tests/excerpt.rs` |
+| `EXCOK` | device to host | `EXCOK name=guitar_a bytes=288000 crc16=beef` | `exc_ok_body_renders_the_pinned_format` in `crates/asperitas-logging/tests/excerpt_install.rs` |
+| `EXCFAIL` | device to host | `EXCFAIL got=1234 want=abcd why=order` (plain CRC mismatch omits `why`) | `exc_fail_body_renders_got_want_and_why` in `crates/asperitas-logging/tests/excerpt_install.rs` |
+| `EXCPLAY` | device to host | `EXCPLAY proto=1 slot=3 bytes=288000 crc16=0abc want=0abc underruns=0 clean=1` | `excplay_body_pins_field_names_and_order` in `crates/asperitas-logging/src/console.rs` |
+| `EXCPLAYFAIL` | device to host | `EXCPLAYFAIL proto=1 slot=13 why=empty` | `excplayfail_body_pins_field_names_and_fits` in `crates/asperitas-logging/src/console.rs` |
+
+The whole stream, framed, is pinned byte for byte by `excerpt_stream_matches_pinned_golden_frames` against the
+golden fixture in `crates/asperitas-logging/tests/golden/`.
+
 ## libDaisy (C++) has no Seed3 support
 
 As of libDaisy `v8.1.0` (released 2026-02-23) and `master` as of 2026-06-26, there is
