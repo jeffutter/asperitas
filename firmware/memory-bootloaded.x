@@ -37,4 +37,12 @@ SECTIONS {
     *(.sram1_bss)
     *(.sram1_bss*)
   } > RAM_D2
-} INSERT AFTER .bss;
+} INSERT BEFORE .bss;
+
+/* cortex-m-rt zeroes [__sbss, __ebss) and sets __ebss, and the stack end, from the location counter
+ * after .bss. A section inserted AFTER .bss that lives in another region leaves that counter in the
+ * other region, so the zeroing loop ran from DTCM across unmapped memory to D2 and took an imprecise
+ * bus fault before main (measured 2026-10-15, TASK-038.04.07.04: HFSR FORCED, CFSR 0x400, stacked PC
+ * in Reset, __ebss = 0x30000400). .sram1_bss is NOLOAD and needs no zeroing; inserting it BEFORE .bss leaves
+ * .bss as the last section placed, so the counter ends in RAM, and this assert keeps __ebss inside RAM. */
+ASSERT(__ebss <= ORIGIN(RAM) + LENGTH(RAM), "__ebss left RAM: a section inserted after .bss lives in another region")
