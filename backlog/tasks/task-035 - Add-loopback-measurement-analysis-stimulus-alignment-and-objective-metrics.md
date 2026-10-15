@@ -1,11 +1,11 @@
 ---
 id: TASK-035
 title: 'Add loopback measurement analysis: stimulus, alignment, and objective metrics'
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-09 01:26'
-updated_date: '2026-10-15 19:57'
+updated_date: '2026-10-15 23:49'
 labels:
   - planned
 dependencies:
@@ -40,13 +40,13 @@ The fault this arrangement cannot see is one common to both directions — a sha
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Analysis consumes a stimulus/capture pair produced by TASK-038 and reports the cross-correlation offset per window; repeating the capture shows the same offset, confirming the single-clock-domain assumption rather than assuming it.
-- [ ] #2 Each capture reports machine-readable metrics — peak and RMS level, runs of silence, sample-discontinuity candidates with counts and positions, and a spectral spur report — normalized against the loop gain recorded in TASK-034.
-- [ ] #3 A parameter-step detector passes an intentionally unsmoothed parameter ramp and rejects the smoothed one, demonstrating the detector has sensitivity rather than merely never firing.
-- [ ] #4 Device-through-loopback output agrees with asperitas-cli output over the same QSPI-stored excerpt at matched parameters within a stated tolerance, and the reason bit-exactness is not claimed is written down so nobody later loosens the tolerance to make a test pass.
-- [ ] #5 Thresholds live in one place and tests assert on the metrics, so a ticket can fail on a number rather than an opinion.
-- [ ] #6 Unit tests run on recorded fixtures with no board and no audio hardware attached, so CI stays green without the bench.
-- [ ] #7 Usage is documented alongside the other host tooling.
+- [x] #1 Analysis consumes a stimulus/capture pair produced by TASK-038 and reports the cross-correlation offset per window; repeating the capture shows the same offset, confirming the single-clock-domain assumption rather than assuming it.
+- [x] #2 Each capture reports machine-readable metrics — peak and RMS level, runs of silence, sample-discontinuity candidates with counts and positions, and a spectral spur report — normalized against the loop gain recorded in TASK-034.
+- [x] #3 A parameter-step detector passes an intentionally unsmoothed parameter ramp and rejects the smoothed one, demonstrating the detector has sensitivity rather than merely never firing.
+- [x] #4 Device-through-loopback output agrees with asperitas-cli output over the same QSPI-stored excerpt at matched parameters within a stated tolerance, and the reason bit-exactness is not claimed is written down so nobody later loosens the tolerance to make a test pass.
+- [x] #5 Thresholds live in one place and tests assert on the metrics, so a ticket can fail on a number rather than an opinion.
+- [x] #6 Unit tests run on recorded fixtures with no board and no audio hardware attached, so CI stays green without the bench.
+- [x] #7 Usage is documented alongside the other host tooling.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -67,4 +67,6 @@ Loopback evidence from TASK-038.05 (2026-10-07/08), the measured baseline this t
 - Timing: max_block_us 72 of 666, worst_gap_us 714 of 832; dump 69.4 s for 300 s (414.9 kB/s PCM).
 - Summary table: README 'Measurement rig'. Full analysis: TASK-038.05 notes. Setup: docs/reference/daisy-pod.md 'Self-loopback channel mapping (measured)'.
 - Caveats: the ESS build misses its first 2 s (20-112 Hz) until TASK-038.08 lands. Timing figures are only valid after a RESET-button boot, not straight after a probe flash.
+
+2026-10-15: closed in a live session with the owner, who walked through all seven criteria and agreed each was met. All seven children Done (.01 crate and thresholds, .02 alignment, .03 metrics, .04 step detector, .05 excerpt comparison, .06 CLI and docs, .07 processor on the replay path with the on-board capture). AC mapping: #1 .02 (all five replay captures aligned at 81 samples); #2 .03 (JSON metrics, loop gain -0.42 dB vs the -0.41 dB baseline); #3 .04 (snapped step flagged, smoothed passes; re-baselined once after TASK-075); #4 .05 + .07 (passes at identity and at gain +6 dB, gain -12 dB and low-pass 2 kHz on hardware; the no-bit-exactness reasoning is in thresholds.rs and asperitas-rig.md); #5 thresholds.rs; #6 cargo test -p asperitas-measure, 40 tests on committed fixtures, no board; #7 .06 docs. Limit stated in the description and unchanged: a fault common to both directions (shared clock, channel swap in the capture code) is invisible here and stays with TASK-034 criterion #2.
 <!-- SECTION:NOTES:END -->
