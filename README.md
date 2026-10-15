@@ -321,6 +321,18 @@ output jack to its input jack into external SDRAM, then dumps the recording over
 console. It decides start and end itself: 2 s after audio starts it arms, captures for the build's
 window (300 s by default), dumps, and idles until RESET.
 
+Pick the stimulus by the question. Exactly one stimulus feature goes in the image; the default is the sine.
+
+| Question | Build | Why |
+|---|---|---|
+| What is the loop gain and its noise floor? | `seed3` (sine) or `seed3 stim-pulse` | A steady tone is easy to difference against; the pulse train adds timing edges. |
+| What is the frequency response? | `seed3 stim-ess` | The exponential sweep covers the band once; it starts at the first captured callback. |
+| How does the loop treat real material? | `seed3 stim-excerpt` | Plays an installed instrument clip once, from the first captured callback. Needs the bootloaded layout. |
+
+Only the first two are available from a plain internal-flash image. Records the build prints at boot
+(`RIGCFG`, `RIGGEN`, `CAPMAX`) say what it was configured to do; their field-by-field grammar is in
+`docs/reference/daisy-seed3.md`, *Rig record grammar*.
+
 ```bash
 cd firmware
 make probe-flash BINARY=rig FEATURES=seed3                    # sine, -20 dBFS, 1 kHz
@@ -349,13 +361,71 @@ until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootlo
 2026-10-15 (TASK-038.09): `mandolin_single_note_soft` installed in slot 0 (`EXCOK`, 5.82 s) and replayed with
 `EXCPLAY crc16=15fd want=15fd underruns=0 clean=1`.
 
-Hold the console open with **one** reader for the whole run. A reader restarted mid-dump loses
-whatever macOS had buffered, which was 19 blocks once. Then turn the capture back into PCM. The
-reassembler exits non-zero if any block is incomplete:
+### Installing an excerpt
+
+An excerpt is mono 48 kHz 16-bit WAV (the corpus in `audio/instruments/` already is). Flash the
+bootloaded layout once (`make flash LAYOUT=bootloaded`, see *Bootloaded layout* above), then stream the
+clip into a slot (`0..13`) with a name of 1 to 16 characters of `[a-z0-9_]`, with the board running
+`rig` and its console visible on the host:
+
+```bash
+cargo run -p asperitas-logging --example excerpt_stream -- \
+    audio/instruments/mandolin_single_note_soft.wav 0 mandolin_soft > /dev/cu.usbmodem*
+```
+
+The tool writes frames and exits 0 without knowing whether they worked. The device reads every byte back
+from flash and sends `EXCOK name=... bytes=... crc16=...` or `EXCFAIL got=... want=...` on the console;
+that record is the only verdict, so capture the console while you install (next section). Installing
+erases the slot's sectors, and erase dominates the time: the datasheet bound is about 22.5 s for a
+288 kB clip and the one reading is 5.82 s (derived upper bound versus one measurement, 2026-10-15). An
+install is refused until the replay pass of a `stim-excerpt` build has completed. Layout, costs and
+the `EXC*` grammar: `docs/reference/daisy-seed3.md`, *Instrument excerpts in QSPI*.
+
+### Capturing the console
+
+Hold the console open with **one** reader for the whole run, started before the board boots or before
+you tap RESET so `BOOT` is in the file. Save raw bytes, not scrollback. A reader restarted mid-dump
+loses whatever macOS had buffered, which was 19 blocks once.
+
+```bash
+cat /dev/cu.usbmodem* > capture.bin        # leave running; interrupt after DUMPEND
+cargo run -p asperitas-logging --example console_decode -- capture.bin > clean.txt
+grep -E 'RIGCFG|CAPMAX|CAPSTAT|DUMPEND|STIMSTART|EXC(OK|FAIL|PLAY)' clean.txt
+```
+
+Judge the run from the records, not from the audio. `DUMPEND` ends the dump and carries
+`dropped_full` and `refused`; a nonzero `dropped_full` before the dump started is the host attaching late
+and does not matter, one during the dump does. `CAPSTAT` carries `overrun`, `max_block_us` and
+`worst_gap_us`. For a fixed-length evidence capture with a verdict, `asperitas-rig capture` does the same
+job and is described in `docs/reference/asperitas-rig.md`.
+
+### Reassembling a dump
+
+The reassembler turns `capture.bin` back into PCM and exits non-zero if any block is incomplete or fails
+its CRC:
 
 ```bash
 cargo run -p asperitas-logging --release --example dump_reassemble -- capture.bin --out capture.pcm
 ```
+
+The PCM is headerless signed 16-bit little-endian, mono, 48 kHz. For a sweep or excerpt build, the
+`STIMSTART` record gives `offset`, the sample index in this PCM where playback began; the echo arrives
+one loop latency later.
+
+### Where artifacts go
+
+Compress the raw console bytes and commit them with the ticket whose evidence they are, under
+`audio/captures/<date>-rig-<what>.console.zst`; the reassembled PCM is derived and need not be kept. Keep
+`clean.txt` out of the repository unless a ticket quotes it. Record in the ticket which build produced the
+capture (features, `ASP_RIG_*` variables, layout), since `RIGCFG` and `RIGGEN` in the capture say it only
+for the stimulus and window.
+
+### Which numbers are readings
+
+Arithmetic, readings and estimates are labelled as such in `docs/reference/daisy-seed3.md`, *Capture
+budgets (SDRAM)*. In short: ring size, seconds, base64 efficiency (0.568) and about 169 kB/s of wire per
+second of capture are derived; callback cost, the 60-69 s dump of 300 s, and the 5.82 s install are
+readings; the full-speed USB ceiling and sustained FMC write throughput are not measured.
 
 ### Observed on the bench (2026-10-07/08)
 

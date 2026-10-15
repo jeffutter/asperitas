@@ -337,8 +337,33 @@ lost `STATUS` record is indistinguishable from nothing having changed, except th
 leaves behind — silence means "probably nothing changed", not "nothing changed".
 
 `AUDIO` and `AUDEND` are a third reserved pair carrying base64 audio dumps over the same framing
-(`crates/asperitas-logging/src/dump.rs`); their grammar and the rig workflow around them belong to
-TASK-038.06, not here.
+(`crates/asperitas-logging/src/dump.rs`); the rig verbs and the dump pair are tabled together in
+*Rig record grammar* below, and the workflow around them is the README's *Measurement rig* section.
+
+#### Rig record grammar
+
+Everything `rig` says that is not a log line, in one place. Bodies ride `frame` untouched, so `level`,
+`seq` and `t_ms` belong to the frame. Field names and order are the contract, and each row is pinned by
+the host test named beside it. The worked lines are test fixtures, not captures. The excerpt verbs
+(`EXCSTART`, `EXCDATA`, `EXCEND`, `EXCOK`, `EXCFAIL`, `EXCPLAY`) are tabled under *Instrument excerpts
+in QSPI*.
+
+| Record | Sent | Worked line | Pinned by |
+|---|---|---|---|
+| `RIGCFG` | once at boot | `RIGCFG proto=1 capture=mono16 lane=L blocks=879 block_bytes=32768 bytes_per_s=96000 capsec_us=349525333 window_s=300 cpu_hz=480000000 icache=1 dcache=0` | `rigcfg_body_pins_field_names_and_order` in `crates/asperitas-logging/src/console.rs` |
+| `RIGGEN` | once at boot | `RIGGEN proto=1 name=sine sample_rate_hz=48000 level_dbfs=-20.0 frequency_hz=1000 period_samples=48` (generator text clipped to 160 B) | `riggen_body_carries_the_generator_text_verbatim` in `console.rs` |
+| `CAPMAX` | once at boot | `CAPMAX proto=1 total_bytes=28800000 ring_bytes=33554432 seconds_max=349 us_max=349525333 unused_headroom_bytes=4754432` | `capmax_body_pins_field_names_and_order` in `console.rs` |
+| `CAPSTAT` | about 1 Hz | `CAPSTAT proto=1 delivered=412 expected=467 overrun=0 max_block_us=731 worst_gap_us=1102 audio_exit=0 dumped=100 dropped_full=3` | `capstat_body_pins_field_names_and_order` in `console.rs` |
+| `STIMSTART` | once, one-shot stimulus builds | `STIMSTART proto=1 first_block=4 offset=0` | `stimstart_body_pins_field_names_and_order` in `console.rs` |
+| `AUDIO` | per chunk, during the dump | `AUDIO blk=1234 n=40 c=3f d=8J9hAH//XA==` (final chunk, 7 raw bytes) | `golden_padded_final_chunks_survive_framing` in `crates/asperitas-logging/tests/console_dump.rs` |
+| `AUDEND` | closes each block | `AUDEND blk=0000 n=03 bytes=00009 crc16=29b1` | `golden_audend_frame_is_reproduced_byte_for_byte` in `console_dump.rs` |
+| `DUMPEND` | once, the dump summary | `DUMPEND proto=1 blocks=879 chunks=224145 bytes=28800000 elapsed_ms=311402 refused=17 stall_ms=940 sent=4118 dropped_full=3 bytes_dropped=12288` | `dumpend_body_pins_field_names_and_order` in `console.rs` |
+
+`AUDIO` and `AUDEND` carry their widths and size table in the module docs of
+`crates/asperitas-logging/src/dump.rs`, which is normative. `RIGCFG` and `CAPMAX` report constants the
+firmware was compiled with, not measurements. `CAPSTAT` counters are since-boot. `DUMPEND` is the
+tightest body on the wire (194 of 200 bytes at saturation). Its `elapsed_ms` is a reading; a dump rate
+computed from it is derived from that reading (see *Capture budgets*).
 
 **Direction:** `~` is device→host only. `>` (0x3E) is reserved host→device for TASK-032's commands, with
 identical field and CRC rules so one parser serves both directions. The audio dump rejected Ascii85 and
@@ -655,8 +680,12 @@ Two erase-and-debug details that are cheap to state and expensive to rediscover:
   out keeping resident data in internal flash beside the firmware.
 - **Sleep modes break RTT discovery** on several STM32 parts: unless `DBG_SLEEP` /
   `DBG_STANDBY` / `DBG_STOP` are set in `DBGMCU_CR`, the RTT control block is never found once
-  the core has slept (probe-rs #350). Nothing here sleeps — the embassy executor busy-loops —
-  so the busy loop is the safe state and is not to be "optimised" without reading that issue.
+  the core has slept (probe-rs #350). This stack does sleep: embassy-executor 0.10 (as pinned) runs
+  `asm!("wfe")` after every `poll()` that finds nothing to do (`src/platform/cortex_m.rs`, `Executor::run`),
+  and has no feature to opt out. Nothing in `firmware/src` sets the `DBGMCU_CR` bits (no `DBGMCU`
+  reference), so the hazard is live whenever the core idles in `wfe`. The ST-Link path works anyway
+  because the probe attaches and halts the core rather than finding the block while it sleeps; treat
+  any change that lengthens idle time, or moves `_SEGGER_RTT`, as needing a fresh attach test.
 
 **The D-cache is the other way to lose the control block, and it is armed by a future change, not
 by anything today.** `_SEGGER_RTT` lands wherever the linker puts `.data`: measured at
@@ -1235,13 +1264,41 @@ What that settles:
 - daisy-embassy's region base looks like a mistaken `0xD000_0000`, perhaps from AN4891's wording for
   the bank-2 window. It lives in a third-party crate, so it is recorded here rather than patched.
 
+### Capture budgets (SDRAM)
+
+Basis labels: derived = arithmetic on constants in `crates/asperitas-logging/src/capture.rs`;
+measured = a reading from a board, with its date; estimated = a guess with no measurement behind it.
+A derived figure is not a reading and must not be cited as one.
+
+| Quantity | Value | Basis |
+|---|---|---|
+| SDRAM device | 64 MiB (`FMC_SDCR1` configures 9 col x 13 row x 4 banks x 32-bit) | measured 2026-10-08, register read above |
+| Capture ring | 33,554,432 B = 32 MiB (`RING_BYTES`: 1,024 blocks of 32,768 B) | derived, constants |
+| Unused SDRAM beyond the ring | 32 MiB | derived: 64 MiB minus 32 MiB |
+| Ring headroom over the default 300 s window | 4,754,432 B (`CAPMAX unused_headroom_bytes`) | derived: 33,554,432 minus 28,800,000 |
+| Capturable seconds, mono 16-bit | 349.5 s, floored to 349 (`CAPMAX seconds_max`) | derived: 33,554,432 / 96,000 |
+| Same ring, stereo 16-bit (192,000 B/s) | 174.8 s | derived; no stereo capture is built |
+| Same ring, mono 32-bit (192,000 B/s) | 174.8 s | derived; the 16-bit decision halved this cost |
+| Ring filled end to end | 349.536 s on the device clock | measured 2026-10-13 |
+| Bytes per second, mono 16-bit | 96,000 | derived: 48,000 x 2 |
+| Base64 useful-byte efficiency | 0.568 per record (129 of a 227 B frame), 0.567 per block | derived: `published_efficiency_matches_the_encoder` and `useful_fraction_per_mille` |
+| Wire cost per second of capture | about 169 kB/s (745 records/s x 227 B) | derived, same test |
+| Wire cost of one ring block | 57,788 B | derived: `wire_bytes_per_block`, confirmed by `tests/capture_geometry.rs` |
+| Dump of 300 s of audio over USB CDC, internal-flash layout | 69.4 s, 414.9 kB/s PCM, 731.7 kB/s on the wire | measured 2026-10-08, `DUMPEND elapsed_ms=69421` |
+| Same, bootloaded layout | 60.2 s | measured 2026-10-15, `DUMPEND elapsed_ms=60232` |
+| Full-speed USB bulk ceiling | not separated from the above; the measured wire rate is a lower bound | the dump may be paced by the device, so it is not the ceiling |
+| Sustained FMC write throughput | not measured | the ring kept up with 879 of 879 blocks, which bounds it only from below |
+
+Why capture is 16-bit mono: the dump is the binding constraint, not memory. At 192,000 B/s the same
+window would cost twice the wire time on a link that already needs about a fifth of the run to dump.
+
 ## Instrument excerpts in QSPI
 
 Recorded from the code at `0e12f7e`; nothing in this section has run on a board. Every observed cell
 reads `pending TASK-038.09`, which is the ticket that installs a clip and measures it on the bench.
 The owner of every constant below is `crates/asperitas-logging/src/excerpt.rs`; this table mirrors it
 and `crates/asperitas-logging/tests/excerpt_docs.rs` fails when the two drift. Change the module
-first, then this table. The README owns the workflow (TASK-038.06) and the SDRAM budget; this section
+first, then this table. The README owns the workflow and *Capture budgets (SDRAM)* owns the SDRAM budget; this section
 holds only what is specific to excerpts and is linked from there, not restated there. The application
 itself is not placed in QSPI by the default layout (see *Flashing the Seed3*); the bootloaded layout
 puts its image at `0x90040000`, above the bootloader region, which is why the excerpt area starts well
@@ -1265,6 +1322,19 @@ Why the top sector is reserved: `daisy_embassy::flash` asserts `address + len <=
 `0x7FFFFF` is unreachable and its sector is left alone. Every slot gives up its top sector so all 14
 share one capacity. Erase granularity is 4096 B sectors (`SECTOR`); every slot base and PCM base is
 sector-aligned (const-asserted in the module).
+
+### Storage per second by format (derived)
+
+Derived from `PCM_CAPACITY` (516,096 B per slot) and the sample format; the only format the replay path
+plays is mono 16-bit at 48 kHz. The other rows show what a format change would cost.
+
+| Format | Bytes per second | Seconds per slot | Seconds in 14 slots |
+|---|---|---|---|
+| mono 16-bit, 48 kHz (the replay format) | 96,000 | 5.376 | 75.3 |
+| stereo 16-bit or mono 32-bit | 192,000 | 2.688 | 37.6 |
+
+Sectors per second of mono 16-bit audio: 96,000 / 4,096 = 23.4. Erase time scales with that (see
+*Costs*): at the datasheet maximum of 300 ms per sector, one second of audio costs up to 7.0 s to erase.
 
 ### Rules
 

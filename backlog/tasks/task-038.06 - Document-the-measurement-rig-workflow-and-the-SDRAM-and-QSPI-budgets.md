@@ -1,12 +1,13 @@
 ---
 id: TASK-038.06
 title: Document the measurement rig workflow and the SDRAM and QSPI budgets
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-09 11:44'
-updated_date: '2026-10-08 14:16'
-labels: []
+updated_date: '2026-10-15 18:48'
+labels:
+  - planned
 dependencies:
   - TASK-038.03
   - TASK-038.04
@@ -38,12 +39,18 @@ While writing this down, stale statements surface. Fix them in the same change r
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A README section placed between "Debugging Without a Probe" and "Important Hardware Gotchas" walks the rig workflow end to end — choosing a stimulus mode, flashing `rig`, capturing the console during a dump, installing an excerpt, reassembling a dump into samples, and where artifacts get committed — so the bench session in TASK-038.05 can be run from the page alone.
-- [ ] #2 `docs/reference/daisy-seed3.md` carries the SDRAM budget (total, capture ring size, bytes per second by sample format, capturable seconds, unused headroom) and the QSPI budget (excerpt area start, slot stride, slot count, reserved regions including DaisyBootloader's, bytes per second by format) as tables, with every predicted figure explicitly labelled as a prediction until TASK-038.05 supplies observations.
-- [ ] #3 The record grammars this epic adds — `RIGCFG`, `CAPSTAT`, `CAPMAX`, `AUDIO`, `AUDEND`, `EXCSTART`, `EXCDATA`, `EXCEND`, `EXCOK`, `EXCFAIL` — are documented in one place with one worked example line each, beside what TASK-030.03 documents for `BOOT` and `STATUS`, each pointing at the host test that pins it.
-- [ ] #4 Every claim is attributed to its source: derived arithmetic versus measured reading versus estimate, covering base64 useful-byte efficiency, wire cost per second of capture, erase-dominated install time, and the still-unmeasured full-speed USB CDC ceiling, so a prediction cannot later be cited as a measurement.
-- [ ] #5 Stale statements found while writing are corrected in the same change, specifically: TASK-019.03's note that the firmware image occupies QSPI via XIP (this stack links to internal flash and exposes no execute-in-place path); the parent ticket's "48 kHz mono float" footprint wording, replaced by the 16-bit decision together with the dump-bandwidth reason that produced it; `docs/reference/daisy-seed3.md:480-483`'s claim that "nothing here sleeps - the embassy executor busy-loops", which is false for embassy-executor 0.10 as pinned (`platform/cortex_m.rs:104-108` runs `asm!("wfe")` whenever `poll()` finds nothing, with no feature to opt out); and `:504-506`'s "nothing here calls it" about `SdRamBuilder::build`, which stops being true the moment `rig.rs` ships.
+- [x] #1 A README section placed between "Debugging Without a Probe" and "Important Hardware Gotchas" walks the rig workflow end to end — choosing a stimulus mode, flashing `rig`, capturing the console during a dump, installing an excerpt, reassembling a dump into samples, and where artifacts get committed — so the bench session in TASK-038.05 can be run from the page alone.
+- [x] #2 `docs/reference/daisy-seed3.md` carries the SDRAM budget (total, capture ring size, bytes per second by sample format, capturable seconds, unused headroom) and the QSPI budget (excerpt area start, slot stride, slot count, reserved regions including DaisyBootloader's, bytes per second by format) as tables, with every predicted figure explicitly labelled as a prediction until TASK-038.05 supplies observations.
+- [x] #3 The record grammars this epic adds — `RIGCFG`, `CAPSTAT`, `CAPMAX`, `AUDIO`, `AUDEND`, `EXCSTART`, `EXCDATA`, `EXCEND`, `EXCOK`, `EXCFAIL` — are documented in one place with one worked example line each, beside what TASK-030.03 documents for `BOOT` and `STATUS`, each pointing at the host test that pins it.
+- [x] #4 Every claim is attributed to its source: derived arithmetic versus measured reading versus estimate, covering base64 useful-byte efficiency, wire cost per second of capture, erase-dominated install time, and the still-unmeasured full-speed USB CDC ceiling, so a prediction cannot later be cited as a measurement.
+- [x] #5 Stale statements found while writing are corrected in the same change, specifically: TASK-019.03's note that the firmware image occupies QSPI via XIP (this stack links to internal flash and exposes no execute-in-place path); the parent ticket's "48 kHz mono float" footprint wording, replaced by the 16-bit decision together with the dump-bandwidth reason that produced it; `docs/reference/daisy-seed3.md:480-483`'s claim that "nothing here sleeps - the embassy executor busy-loops", which is false for embassy-executor 0.10 as pinned (`platform/cortex_m.rs:104-108` runs `asm!("wfe")` whenever `poll()` finds nothing, with no feature to opt out); and `:504-506`'s "nothing here calls it" about `SdRamBuilder::build`, which stops being true the moment `rig.rs` ships.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the TASK-038.06 commit. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
@@ -64,4 +71,12 @@ Verified facts to state, all checked locally on 2026-09-12 against daisy-embassy
 - Mark clearly which figures are arithmetic and which are readings. Ring geometry (`RING_BLOCK_BYTES` 32 768, `RING_BLOCKS` 1 024, `RING_BYTES` 33 554 432 = 32 MiB of the 64 MB device, 96 000 B/s raw, 349 s floor) is arithmetic from `asperitas_logging::capture`; wire cost per second is derived; anything about sustained FMC write throughput or USB FS bulk ceiling is an estimate until TASK-038.05 measures it.
 
 2026-10-08: the README 'Measurement rig' section now exists (TASK-038.05 AC #7), placed where this ticket's AC #1 asks, holding the bench measurements and a minimal flash/reassemble recipe. Extend it with the full workflow (stimulus choice, excerpt install) instead of starting a second section. Two of this ticket's open questions are now measured: the full-speed USB dump rate (69.4 s for 300 s = 414.9 kB/s PCM, 731.7 kB/s wire) and the SDRAM memory model (docs/reference/daisy-seed3.md 'External SDRAM: address, MPU and caches (measured)'). AC #4's 'still-unmeasured full-speed USB' should now cite the measurement.
+
+README Measurement rig extended in place (stimulus choice table, excerpt install, console capture, reassembly, artifact location, which numbers are readings). daisy-seed3.md gained 'Rig record grammar' (RIGCFG, RIGGEN, CAPMAX, CAPSTAT, STIMSTART, AUDIO, AUDEND, DUMPEND with pinning tests; EXC* verbs already tabled by TASK-038.04.06), 'Capture budgets (SDRAM)' and a QSPI storage-per-second table, each row labelled derived/measured/estimated. Stale fixes: executor busy-loop claim replaced with the embassy-executor 0.10 wfe fact (verified in the registry source); the SdRamBuilder::build 'nothing calls it' claim and the XIP/48 kHz float corrections were already made by earlier tickets (TASK-038.04.06 and the TASK-038 notes). The USB ceiling is stated as not separated from the measured dump rate. Verified: cargo test -p asperitas-logging --test excerpt_docs passes; docs only, no hardware claims added.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Docs-only: README rig workflow completed; daisy-seed3.md gained rig record grammar, SDRAM capture budget and QSPI storage tables with derived/measured/estimated labels; corrected the wfe/busy-loop claim.
+<!-- SECTION:FINAL_SUMMARY:END -->
