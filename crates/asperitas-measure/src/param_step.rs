@@ -83,8 +83,7 @@ mod tests {
     const STEP_AT: usize = 4_800 + 17; // deliberately not block-aligned
 
     /// -20 dBFS 1 kHz sine through Gain, changing to `to_db` at STEP_AT; `snap` skips smoothing.
-    /// Gain currently maps `gain_db` through natural exp (24 "dB" is a 10.4 dB level change), so
-    /// the tests use the measured step, not the nominal one.
+    /// A 10.4 dB step keeps the peak (0.1 * 3.31) below the output clamp, so the step is not flattened.
     fn run(to_db: f32, snap: bool) -> Vec<f32> {
         let mut gain = Gain::default();
         gain.set_sample_rate(48_000.0);
@@ -106,7 +105,7 @@ mod tests {
 
     #[test]
     fn unsmoothed_step_is_flagged_at_the_step() {
-        for to_db in [24.0, -24.0] {
+        for to_db in [10.4, -10.4] {
             let r = detect_param_steps(&run(to_db, true));
             assert_eq!(r.count, 1, "{to_db} dB: {r:?}");
             let p = r.positions[0];
@@ -119,7 +118,7 @@ mod tests {
 
     #[test]
     fn smoothed_step_passes() {
-        for to_db in [24.0, -24.0] {
+        for to_db in [10.4, -10.4] {
             let r = detect_param_steps(&run(to_db, false));
             assert_eq!(r.count, 0, "{to_db} dB: {r:?}");
         }
@@ -127,7 +126,7 @@ mod tests {
 
     #[test]
     fn limit_sits_between_smoothed_and_unsmoothed_with_margin() {
-        for to_db in [24.0, -24.0] {
+        for to_db in [10.4, -10.4] {
             let snapped = detect_param_steps(&run(to_db, true)).max_step_db;
             let smooth = detect_param_steps(&run(to_db, false)).max_step_db;
             eprintln!("{to_db} dB: snapped {snapped:.2} dB, smoothed {smooth:.2} dB");

@@ -114,7 +114,7 @@ pub const PARAM_STEP_BLOCK_SAMPLES: usize = 48;
 
 /// Largest allowed change in block RMS between blocks one or two apart, dB.
 ///
-/// Origin: TASK-035.04, set from `param_step.rs` tests: a 10.4 dB level change (`gain_db` 24) through the
+/// Origin: TASK-035.04, set from `param_step.rs` tests: a 10.4 dB level change (`gain_db` 10.4) through the
 /// smoothed `Gain` (10 ms time constant) peaks at 2.8 dB over two blocks, the same change snapped
 /// (unsmoothed) reads 10.4 dB. 5 dB sits between with 1.5x margin either side.
 pub const PARAM_STEP_MAX_DB: f64 = 5.0;

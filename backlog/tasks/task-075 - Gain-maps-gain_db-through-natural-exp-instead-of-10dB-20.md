@@ -1,11 +1,13 @@
 ---
 id: TASK-075
 title: Gain maps gain_db through natural exp instead of 10^(dB/20)
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-15 20:33'
-labels: []
+updated_date: '2026-10-15 21:26'
+labels:
+  - planned
 dependencies: []
 priority: medium
 ordinal: 168800
@@ -19,6 +21,24 @@ crates/asperitas-dsp/src/gain.rs set_params uses libm::expf(gain_db/20), so gain
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 set_params converts dB to linear as 10^(dB/20), with a unit test at +6.02 dB giving ~x2
-- [ ] #2 cargo test, clippy and fmt pass; asperitas-measure param_step tests re-baselined if needed
+- [x] #1 set_params converts dB to linear as 10^(dB/20), with a unit test at +6.02 dB giving ~x2
+- [x] #2 cargo test, clippy and fmt pass; asperitas-measure param_step tests re-baselined if needed
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by 334cd74. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+gain.rs now uses powf(10, db/20); added test at +6.0206 dB -> x2. param_step tests re-baselined to a true 10.4 dB step (same measured numbers as before: snapped 10.4, smoothed 2.8); thresholds doc comment updated. Full workspace tests, clippy, fmt pass.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Gain maps gain_db via 10^(dB/20); param_step tests re-baselined to gain_db 10.4 so thresholds are unchanged.
+<!-- SECTION:FINAL_SUMMARY:END -->

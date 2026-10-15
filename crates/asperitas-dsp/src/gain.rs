@@ -1,6 +1,6 @@
 //! Stereo gain processor with smoothed parameter transitions.
 
-use libm::expf as exp;
+use libm::powf;
 
 use crate::processor::{Frame, Processor};
 use crate::smooth::Smoother;
@@ -51,8 +51,8 @@ impl Processor for Gain {
 
     fn set_params(&mut self, params: &Self::Params) {
         // Convert dB to linear gain, clamped to prevent overflow.
-        // -96 dB ≈ 2.5e-5 (practical silence), +96 dB ≈ 4e4 (clipped by saturation).
-        let gain_linear = exp(params.gain_db / 20.0);
+        // 10^(dB/20): -60 dB = 1e-3, +6.02 dB ~ x2, +78.3 dB hits the ceiling below.
+        let gain_linear = powf(10.0, params.gain_db / 20.0);
         let gain_clamped = gain_linear.clamp(0.0, 8192.0); // ~78 dB ceiling
         self.smoother_l.set_target(gain_clamped);
         self.smoother_r.set_target(gain_clamped);
@@ -164,6 +164,16 @@ mod normalised_tests {
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_params_converts_db_to_linear_base_10() {
+        let mut g = Gain::default();
+        g.set_params(&GainParams { gain_db: 6.0206 });
+        g.reset();
+        let out = g.tick([0.25, 0.25]);
+        assert!((out[0] - 0.5).abs() < 1e-3, "got {}", out[0]);
+        assert!((out[1] - 0.5).abs() < 1e-3, "got {}", out[1]);
+    }
 
     #[test]
     fn gain_parse_rejects_unknown_key() {
