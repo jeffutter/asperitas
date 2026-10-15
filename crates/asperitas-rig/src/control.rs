@@ -332,7 +332,7 @@ pub fn level_to_wire(x: f64) -> Result<u16, ControlError> {
 
 /// `SET` schedule for a hold (`from == to`) or a sweep: `(offset from start, wire value)`.
 ///
-/// A hold is one `SET` at time zero. A sweep steps at [`SWEEP_HZ`], reaching `to` on its
+/// A hold is one `SET` at time zero. A sweep steps at `SWEEP_HZ`, reaching `to` on its
 /// last step.
 pub fn schedule(
     from: f64,
