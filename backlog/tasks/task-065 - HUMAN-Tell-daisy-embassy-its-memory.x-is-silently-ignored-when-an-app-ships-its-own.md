@@ -3,7 +3,7 @@ id: TASK-065
 title: >-
   HUMAN: Tell daisy-embassy its memory.x is silently ignored when an app ships
   its own
-status: Blocked
+status: Backlog
 assignee:
   - '@human'
 created_date: '2026-09-13 06:59'

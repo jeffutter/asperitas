@@ -3,7 +3,7 @@ id: TASK-051
 title: >-
   Ask Electrosmith what loads the Seed3 nRESET net, and whether a schematic will
   be published
-status: Blocked
+status: Backlog
 assignee:
   - '@human'
 created_date: '2026-09-11 00:34'
