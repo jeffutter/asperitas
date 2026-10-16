@@ -3,7 +3,7 @@ id: TASK-019
 title: >-
   Wire asperitas-dsp into the firmware audio callback with knobs driving
   parameters
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
@@ -32,5 +32,9 @@ Umbrella ticket. It is `@human` because it inherits the strictest assignee among
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All subtasks are Done
+- [x] #1 All subtasks are Done
 <!-- AC:END -->
+
+## Implementation Notes
+
+2026-10-16: Closed with the owner. Subtasks TASK-019.01, TASK-019.02 (closed the same day after the listening session) and TASK-019.03 with its .01 to .05 children are all Done.
