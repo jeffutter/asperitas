@@ -3,13 +3,13 @@ id: TASK-079
 title: >-
   DSP: stop processors clamping their own output; one saturating stage at the
   host boundary
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:12'
+updated_date: '2026-10-16 22:32'
 labels:
-  - review-2026-10
-  - dsp
+  - planned
 dependencies:
   - TASK-077
 priority: medium
@@ -29,7 +29,25 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No processor in asperitas-dsp clamps its own output; the codec/WAV boundary still saturates
-- [ ] #2 Boundedness proptests assert a real bound on unclamped output
-- [ ] #3 main's audible behaviour is unchanged (Gain is last in its chain and encode_block clamps identically)
+- [x] #1 No processor in asperitas-dsp clamps its own output; the codec/WAV boundary still saturates
+- [x] #2 Boundedness proptests assert a real bound on unclamped output
+- [x] #3 main's audible behaviour is unchanged (Gain is last in its chain and encode_block clamps identically)
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by 6ebf05f. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Removed the output clamps from Gain, OnePoleLowPass and the sine/sweep/pulse stimuli. Boundary clamps in firmware audio.rs (decode/encode_block), cli wav_io.rs and measure compare.rs remain. Gain proptest now asserts |out| <= |in|*max(1,gain); filter asserts |out| <= peak input; stimulus tests already assert the level ceiling. main chain ends in Gain and encode_block clamps, so audible output is unchanged.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Per-processor +-1 clamps removed from asperitas-dsp; saturation happens only at the codec/WAV boundary. Boundedness proptests now assert real bounds on unclamped output.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -67,10 +67,7 @@ impl Processor for Gain {
     fn tick(&mut self, input: Frame) -> Frame {
         let g_l = self.smoother_l.advance();
         let g_r = self.smoother_r.advance();
-        [
-            (sanitize(input[0]) * g_l).clamp(-1.0, 1.0),
-            (sanitize(input[1]) * g_r).clamp(-1.0, 1.0),
-        ]
+        [sanitize(input[0]) * g_l, sanitize(input[1]) * g_r]
     }
 
     fn reset(&mut self) {

@@ -44,15 +44,18 @@ proptest! {
     }
 
     #[test]
-    fn gain_output_bounded(block in arb_block()) {
+    fn gain_output_bounded(block in arb_block(), gain_db in -24.0f32..24.0) {
         let mut g = Gain::default();
         g.set_sample_rate(48_000.0);
-        g.set_params(&GainParams::default());
+        g.set_params(&GainParams { gain_db });
         let mut out = vec![Frame::default(); block.len()];
         g.process_block(&block, &mut out);
-        for f in &out {
-            prop_assert!(f[0].abs() <= 1.0 + EPSILON, "left unbounded: {}", f[0]);
-            prop_assert!(f[1].abs() <= 1.0 + EPSILON, "right unbounded: {}", f[1]);
+        // The smoother ramps from unity to the target, so the gain never exceeds the larger of
+        // the two. Output is unclamped, so this bound is real.
+        let max_gain = libm::powf(10.0, gain_db / 20.0).max(1.0);
+        for (f, i) in out.iter().zip(&block) {
+            prop_assert!(f[0].abs() <= i[0].abs() * max_gain * (1.0 + EPSILON) + EPSILON, "left unbounded: {}", f[0]);
+            prop_assert!(f[1].abs() <= i[1].abs() * max_gain * (1.0 + EPSILON) + EPSILON, "right unbounded: {}", f[1]);
         }
     }
 
@@ -178,9 +181,12 @@ proptest! {
         f.set_params(&FilterParams::default());
         let mut out = vec![Frame::default(); block.len()];
         f.process_block(&block, &mut out);
+        // A one-pole low-pass is a convex average of past inputs, so it cannot exceed the
+        // largest input magnitude. Output is unclamped, so a runaway would show here.
+        let peak = block.iter().flat_map(|f| f.iter()).fold(0.0f32, |m, v| m.max(v.abs()));
         for frame in &out {
-            prop_assert!(frame[0].abs() <= 1.0 + EPSILON, "left unbounded: {}", frame[0]);
-            prop_assert!(frame[1].abs() <= 1.0 + EPSILON, "right unbounded: {}", frame[1]);
+            prop_assert!(frame[0].abs() <= peak + EPSILON, "left unbounded: {}", frame[0]);
+            prop_assert!(frame[1].abs() <= peak + EPSILON, "right unbounded: {}", frame[1]);
         }
     }
 

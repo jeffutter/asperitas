@@ -242,7 +242,7 @@ impl core::fmt::Write for DescWriter<'_> {
 /// Peak amplitude for a peak-referenced dBFS level: `10^(dbfs/20)`.
 ///
 /// Levels above 0 dBFS clamp to unity. A source that exceeded full scale would be clipped by the
-/// output clamp anyway, and a clipped stimulus is not the waveform the analysis reproduces.
+/// output stage anyway, and a clipped stimulus is not the waveform the analysis reproduces.
 fn amplitude_for_dbfs(dbfs: f32) -> (f32, f64) {
     let level = if dbfs.is_finite() {
         dbfs.clamp(MIN_LEVEL_DBFS, 0.0)
@@ -377,7 +377,7 @@ impl Processor for Sine {
         }
 
         let v = (self.amplitude * sin(angle)) as f32;
-        [v.clamp(-1.0, 1.0), v.clamp(-1.0, 1.0)]
+        [v, v]
     }
 
     fn reset(&mut self) {
@@ -574,7 +574,7 @@ impl Processor for ExponentialSweep {
         self.index += 1;
 
         let v = (self.scale * self.taper(n) * sin(self.phase(n))) as f32;
-        [v.clamp(-1.0, 1.0), v.clamp(-1.0, 1.0)]
+        [v, v]
     }
 
     fn reset(&mut self) {
@@ -824,7 +824,7 @@ impl Processor for PulseTrain {
         };
 
         let v = (self.amplitude * normalized) as f32;
-        [v.clamp(-1.0, 1.0), v.clamp(-1.0, 1.0)]
+        [v, v]
     }
 
     fn reset(&mut self) {

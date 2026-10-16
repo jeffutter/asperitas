@@ -72,7 +72,7 @@ impl Processor for OnePoleLowPass {
         let (in_l, in_r) = (sanitize(input[0]), sanitize(input[1]));
         self.prev_l = sanitize(self.prev_l + alpha * (in_l - self.prev_l));
         self.prev_r = sanitize(self.prev_r + alpha * (in_r - self.prev_r));
-        [self.prev_l.clamp(-1.0, 1.0), self.prev_r.clamp(-1.0, 1.0)]
+        [self.prev_l, self.prev_r]
     }
 
     fn reset(&mut self) {
