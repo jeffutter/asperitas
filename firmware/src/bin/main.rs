@@ -14,8 +14,12 @@ use asperitas_dsp::processor::{Frame, Processor};
 use asperitas_logging::info;
 use asperitas_pod::knob::Knobs;
 use asperitas_pod::ticker_guard::should_reset;
+use daisy_embassy::audio::{Interface, Running};
+use daisy_embassy::hal::interrupt;
+use daisy_embassy::hal::interrupt::{InterruptExt, Priority};
 use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
 use daisy_embassy::{hal, new_daisy_board, DaisyBoard};
+use embassy_executor::InterruptExecutor;
 use static_cell::StaticCell;
 
 // Re-export the panic handler from asperitas-logging.
@@ -88,6 +92,11 @@ struct KnobState {
     inner: UnsafeCell<[f32; 2]>,
 }
 
+// Safety: every access goes through `cortex_m::interrupt::free`, and the part has one core, so the
+// knob task and the audio interrupt cannot overlap on the cell. The audio task is spawned on an
+// interrupt executor, which requires `Send` of what it borrows.
+unsafe impl Sync for KnobState {}
+
 impl KnobState {
     const fn new() -> Self {
         Self {
@@ -134,8 +143,85 @@ fn encode_block(input: &[Frame; BLOCK_LENGTH], output: &mut [u32]) {
     }
 }
 
+/// Why the audio loop ended, for a debug probe to read: 0 still running, 1 `NotATransmitter`,
+/// 2 `NotAReceiver`, 3 `Overrun`, with 0x10 added when the interface failed to start. The loop
+/// that follows halts the core, so without this the reason is gone.
+#[used]
+static AUDIO_EXIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Callbacks run since boot, for a probe: how far the audio loop got before it ended.
+#[used]
+static AUDIO_BLOCKS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+fn sai_error_code(e: hal::sai::Error) -> u32 {
+    match e {
+        hal::sai::Error::NotATransmitter => 1,
+        hal::sai::Error::NotAReceiver => 2,
+        hal::sai::Error::Overrun => 3,
+    }
+}
+
 /// Poll interval for control surface (~1 kHz).
 const POLL_INTERVAL_MS: u64 = 1;
+
+/// Executor that owns the audio callback, driven by the SAI1 interrupt.
+///
+/// The callback must run within about 1.3 ms of every DMA half-transfer (two 32-frame halves at
+/// 48 kHz), or the SAI ring overruns and `start_callback` returns `Overrun`. On the thread
+/// executor that deadline is shared with the knob task's blocking ADC reads and the USB console,
+/// and `main` lost that race at boot, every boot, ending in `AUDIO_EXIT == 3` and a silent
+/// output. An interrupt executor above thread mode, below the DMA streams, makes the deadline
+/// the callback's own. Same arrangement as `rig` (`src/bin/rig.rs`, "Audio executor"), whose
+/// comments carry the priority argument.
+static AUDIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
+
+/// The SAI1 vector: poll the audio executor. Hand-written for the reason given at `rig`'s
+/// `SAI1`: `bind_interrupts!` and `#[interrupt]` cannot both name a vector.
+#[interrupt]
+unsafe fn SAI1() {
+    // Safety: only reachable after `start()` has unmasked the vector.
+    unsafe { AUDIO_EXECUTOR.on_interrupt() }
+}
+
+/// The audio callback: low-pass filter (knob 1) then gain (knob 2), once per block.
+#[embassy_executor::task]
+async fn audio_task(
+    mut interface: Interface<'static, Running>,
+    knob_state: &'static KnobState,
+    mut filter: OnePoleLowPass,
+    mut gain: Gain,
+) {
+    let outcome = interface
+        .start_callback(|input, output| {
+            AUDIO_BLOCKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            // Read latest knob positions under critical section.
+            let knobs = host_control::merge(cortex_m::interrupt::free(|_| knob_state.read()));
+
+            // Update processor params at block rate.
+            filter.set_params(&OnePoleLowPass::params_from_normalised(knobs[0]));
+            gain.set_params(&Gain::params_from_normalised(knobs[1]));
+
+            // Decode input buffer to stack frames.
+            let mut frames_in = [Frame::default(); BLOCK_LENGTH];
+            decode_block(input, &mut frames_in);
+
+            // Process through DSP chain: low-pass filter → gain.
+            let mut frames_out = [Frame::default(); BLOCK_LENGTH];
+            filter.process_block(&frames_in, &mut frames_out);
+
+            let mut frames_processed = [Frame::default(); BLOCK_LENGTH];
+            gain.process_block(&frames_out, &mut frames_processed);
+
+            // Encode processed frames back to output buffer.
+            encode_block(&frames_processed, output);
+        })
+        .await;
+    // `Ok` is `Infallible`, so this is the SAI hardware error. Say so on the LED and leave the
+    // reason where a probe can read it; thread mode keeps running the console.
+    let Err(e) = outcome;
+    AUDIO_EXIT.store(sai_error_code(e), core::sync::atomic::Ordering::Relaxed);
+    asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Panicked);
+}
 
 /// Async task that polls knobs at ~1 kHz and stores values for the audio callback.
 ///
@@ -144,15 +230,7 @@ const POLL_INTERVAL_MS: u64 = 1;
 /// Bounded catch-up (TASK-026): if the executor stalls, the ticker is reset
 /// on overrun rather than replaying missed ticks back-to-back.
 #[embassy_executor::task]
-async fn knob_poll_task(knob_state: &'static KnobState) {
-    // The Pod's knobs are wired to Seed GPIO breakout pins that `board.pins`
-    // also names (d21 == PC4, d15 == PC0). Discard them unread above in
-    // main() so this steal() is the only live Peri handle per physical pin.
-    let adc1 = unsafe { hal::peripherals::ADC1::steal() };
-    let knob1 = unsafe { hal::peripherals::PC4::steal() };
-    let knob2 = unsafe { hal::peripherals::PC0::steal() };
-    let mut knobs = Knobs::new(adc1, knob1, knob2);
-
+async fn knob_poll_task(knob_state: &'static KnobState, mut knobs: Knobs) {
     let mut ticker =
         embassy_time::Ticker::every(embassy_time::Duration::from_millis(POLL_INTERVAL_MS));
     let mut last_tick = embassy_time::Instant::now();
@@ -228,6 +306,22 @@ async fn main(spawner: embassy_executor::Spawner) {
     // Initialize shared knob state.
     let knob_state = KNOB_STATE.init(KnobState::new());
 
+    // Bring the knob ADC up here, before the audio interface starts. `Knobs::new` enables and
+    // calibrates the ADC with blocking waits of a millisecond or more; run inside the knob task
+    // it stalls the executor right after the SAI starts, longer than the DMA ring holds, and the
+    // first `read` reports `Overrun` (AUDIO_EXIT == 3), which ends `main` before a single block
+    // is processed.
+    //
+    // The Pod's knobs are wired to Seed GPIO breakout pins that `board.pins` also names
+    // (d21 == PC4, d15 == PC0). The tuple above discards them unread, so these steals are the
+    // only live Peri handles per physical pin.
+    let knobs = {
+        let adc1 = unsafe { hal::peripherals::ADC1::steal() };
+        let knob1 = unsafe { hal::peripherals::PC4::steal() };
+        let knob2 = unsafe { hal::peripherals::PC0::steal() };
+        Knobs::new(adc1, knob1, knob2)
+    };
+
     // Create processors — OnePoleLowPass (knob 1) → Gain (knob 2).
     let mut filter = OnePoleLowPass::default();
     let mut gain = Gain::default();
@@ -243,10 +337,13 @@ async fn main(spawner: embassy_executor::Spawner) {
         .await;
 
     // Start SAI TX/RX and transition to Running state
-    let mut interface = match interface.start_interface().await {
+    let interface = match interface.start_interface().await {
         Ok(iface) => iface,
         Err(e) => {
-            let _ = e; /* SAI init failed — halt */
+            AUDIO_EXIT.store(
+                0x10 | sai_error_code(e),
+                core::sync::atomic::Ordering::Relaxed,
+            ); /* SAI init failed — halt */
             #[allow(clippy::empty_loop)]
             loop {}
         }
@@ -264,61 +361,29 @@ async fn main(spawner: embassy_executor::Spawner) {
     asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
 
     // Spawn knob-polling task (~1 kHz interval).
-    spawner.spawn(knob_poll_task(knob_state).expect("failed to spawn knob task"));
+    spawner.spawn(knob_poll_task(knob_state, knobs).expect("failed to spawn knob task"));
 
-    // Enter the audio callback loop. Returns Result<Infallible, sai::Error>;
-    // Infallible can never be constructed, so this only exits on SAI hardware error.
-    // Run the console and LED blink alongside audio using nested selects.
+    // Start the audio callback on its own interrupt executor. Priority first, then `start`;
+    // P6 sits below the SAI DMA streams (P0) as in `rig`.
+    interrupt::SAI1.set_priority(Priority::P6);
+    let audio_spawner = AUDIO_EXECUTOR.start(interrupt::SAI1);
+    audio_spawner.spawn(
+        audio_task(interface, knob_state, filter, gain).expect("failed to spawn audio task"),
+    );
+
+    // Thread mode keeps what has no deadline: the console and the LED blink.
     #[cfg(feature = "log-usb")]
     let console_fut = asperitas_logging::usb::run();
     // No drain task exists without the console, and RTT needs no task to exist at all — the
-    // probe reads RAM behind our back. `pending()` stands in so the select tree below is written
+    // probe reads RAM behind our back. `pending()` stands in so the select below is written
     // once instead of twice: it never wakes, exactly like the drain task it replaces.
     #[cfg(not(feature = "log-usb"))]
     let console_fut = core::future::pending::<()>();
-    let audio_fut = interface.start_callback(|input, output| {
-        // Read latest knob positions under critical section.
-        let knobs = host_control::merge(cortex_m::interrupt::free(|_| knob_state.read()));
-
-        // Update processor params at block rate.
-        filter.set_params(&OnePoleLowPass::params_from_normalised(knobs[0]));
-        gain.set_params(&Gain::params_from_normalised(knobs[1]));
-
-        // Decode input buffer to stack frames.
-        let mut frames_in = [Frame::default(); BLOCK_LENGTH];
-        decode_block(input, &mut frames_in);
-
-        // Process through DSP chain: low-pass filter → gain.
-        let mut frames_out = [Frame::default(); BLOCK_LENGTH];
-        filter.process_block(&frames_in, &mut frames_out);
-
-        let mut frames_processed = [Frame::default(); BLOCK_LENGTH];
-        gain.process_block(&frames_out, &mut frames_processed);
-
-        // Encode processed frames back to output buffer.
-        encode_block(&frames_processed, output);
-    });
     let led_fut = asperitas_logging::led::blink_task();
 
-    // Run LED blink alongside the audio+console pair. The blink_task never returns,
-    // so the outer select always yields the inner result (audio or USB ending).
-    match embassy_futures::select::select(
-        async {
-            match embassy_futures::select::select(audio_fut, console_fut).await {
-                embassy_futures::select::Either::First(Ok(_)) => unreachable!(),
-                embassy_futures::select::Either::First(Err(e)) => {
-                    let _ = e;
-                }
-                embassy_futures::select::Either::Second(_) => unreachable!(),
-            }
-        },
-        led_fut,
-    )
-    .await
-    {
-        embassy_futures::select::Either::First(_) => {}
-        embassy_futures::select::Either::Second(_) => unreachable!(),
-    }
+    // Neither returns. If one does, the audio interrupt would keep playing with nothing
+    // reporting on it, so halt instead.
+    embassy_futures::select::select(console_fut, led_fut).await;
     #[allow(clippy::empty_loop)]
     loop {}
 }

@@ -1,11 +1,11 @@
 ---
 id: TASK-019.02
 title: Hear knobs changing the sound on hardware
-status: Blocked
+status: In Progress
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
-updated_date: '2026-10-09 10:55'
+updated_date: '2026-10-16 11:49'
 labels: []
 dependencies:
   - TASK-019.01
@@ -52,4 +52,6 @@ What stays here is what a number would only stand in for: whether the change has
 Depends on TASK-019.03 so measurements pass before anyone is asked to listen — there is no point spending ears on a mapping a script can already show is non-monotonic.
 
 2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
+
+2026-10-16: Owner is back at the bench; Blocked lifted. Board runs the bootloaded `main` (DFU to QSPI, flashed from this session). Passthrough verified Mac out -> Pod -> Mac mic: 1 kHz at -50.1 dBFS against -95.5 dBFS without the tone, knobs read ~1.0. Listening session starts with the owner at the Pod.
 <!-- SECTION:NOTES:END -->
