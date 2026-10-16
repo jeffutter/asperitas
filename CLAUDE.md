@@ -81,6 +81,13 @@ and other branches or remotes still need asking.
 <!-- BACKLOG.MD MCP GUIDELINES START -->
 <!-- backlog.md-instructions-version: 1.48.0 -->
 
+## Code comments
+
+Comments describe the current state of the code and why it is the way it is. They carry no ticket
+numbers, no dates, no measurement history and no narration of earlier versions ("was X until
+TASK-n", "measured on ..."): that belongs in the ticket notes, the commit message or a doc. Do not
+cite line numbers in other files, they go stale; name the function or module instead.
+
 <CRITICAL_INSTRUCTION>
 
 ## BACKLOG WORKFLOW INSTRUCTIONS

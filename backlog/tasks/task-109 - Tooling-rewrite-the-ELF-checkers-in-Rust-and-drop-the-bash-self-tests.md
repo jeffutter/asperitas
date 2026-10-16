@@ -8,7 +8,6 @@ created_date: '2026-10-16 18:13'
 labels:
   - review-2026-10
   - tooling
-  - needs-decision
 dependencies:
   - TASK-108
 priority: low
@@ -32,3 +31,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #1 Every existing rule R1-R6 and the provenance/staleness checks are enforced by the Rust tool, with unit tests replacing the bash self-tests
 - [ ] #2 The three self-test gates and the objdump/objcopy dependency are gone
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Owner is not sure this is needed; leave in Backlog. Reconsider only if the bash ELF checks cause trouble.
+<!-- SECTION:NOTES:END -->

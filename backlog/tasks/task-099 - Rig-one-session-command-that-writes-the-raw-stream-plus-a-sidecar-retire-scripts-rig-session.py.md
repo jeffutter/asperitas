@@ -3,7 +3,7 @@ id: TASK-099
 title: >-
   Rig: one session command that writes the raw stream plus a sidecar; retire
   scripts/rig-session.py
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
@@ -11,7 +11,6 @@ labels:
   - review-2026-10
   - rig
   - host
-  - needs-decision
 dependencies:
   - TASK-095
 priority: medium
@@ -36,3 +35,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #2 scripts/rig-session.py is deleted
 - [ ] #3 A bench run reproduces a TASK-019.03.04 style result (hardware recheck ticket)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Owner delegates the open questions: the session command owns the console side and takes an optional probe-reset flag; motion timing comes from the stream itself (device t_ms on the first CTLR OK SET) if that is enough, otherwise a sidecar.
+<!-- SECTION:NOTES:END -->

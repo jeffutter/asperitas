@@ -32,3 +32,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #2 Each processor has at least one non-default-parameter golden
 - [ ] #3 Golden cases run through the same entry point the CLI uses
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Owner asked why f32. Reason: 16-bit goldens at 1e-4 cannot see changes below ~-90 dB, e.g. a quiet resonator tail, and half the goldens are identity copies. Revisit when the resonator (M5) exists; leave in Backlog until then.
+<!-- SECTION:NOTES:END -->

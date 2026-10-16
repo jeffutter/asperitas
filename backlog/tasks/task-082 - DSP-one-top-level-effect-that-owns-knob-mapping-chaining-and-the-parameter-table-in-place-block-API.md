@@ -3,7 +3,7 @@ id: TASK-082
 title: >-
   DSP: one top-level effect that owns knob mapping, chaining and the parameter
   table; in-place block API
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:12'
@@ -11,7 +11,6 @@ labels:
   - review-2026-10
   - dsp
   - architecture
-  - needs-decision
 dependencies:
   - TASK-077
   - TASK-078
@@ -40,3 +39,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #3 Block processing is in place with no triple buffering in main.rs; max_block_us is not worse by more than a few us
 - [ ] #4 Hardware recheck is covered by the review hardware-recheck ticket
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Modulation (M6) is block-rate: the envelope follower and random walk set parameters once per audio block through each processor's existing smoother; no per-sample modulation inputs. The top-level effect has no soft-clip stage; the hard clamp at the codec boundary stays. Revisit by ear in M5.
+<!-- SECTION:NOTES:END -->

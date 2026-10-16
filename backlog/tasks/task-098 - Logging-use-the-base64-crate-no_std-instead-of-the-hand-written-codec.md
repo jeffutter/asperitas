@@ -1,14 +1,13 @@
 ---
 id: TASK-098
 title: 'Logging: use the base64 crate (no_std) instead of the hand-written codec'
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
 labels:
   - review-2026-10
   - logging
-  - needs-decision
 dependencies: []
 priority: low
 type: chore
@@ -30,3 +29,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #1 The codec and its equivalence tests are deleted; grammar and golden tests remain
 - [ ] #2 AUDIO/EXCDATA bytes are identical (rig capture re-run)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Adding base64 (default-features = false) as a firmware dependency is fine.
+<!-- SECTION:NOTES:END -->

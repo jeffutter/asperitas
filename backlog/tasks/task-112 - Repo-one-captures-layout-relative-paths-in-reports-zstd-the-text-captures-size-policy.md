@@ -3,14 +3,13 @@ id: TASK-112
 title: >-
   Repo: one captures layout, relative paths in reports, zstd the text captures,
   size policy
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
 labels:
   - review-2026-10
   - repo
-  - needs-decision
 dependencies: []
 priority: low
 type: chore
@@ -33,3 +32,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #1 One captures layout documented in the README; reports hold repo-relative capture paths
 - [ ] #2 Size policy decided and recorded
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Plain git is fine (not many captures expected). No LFS. Do the layout, repo-relative paths in reports, and zstd the text captures.
+<!-- SECTION:NOTES:END -->

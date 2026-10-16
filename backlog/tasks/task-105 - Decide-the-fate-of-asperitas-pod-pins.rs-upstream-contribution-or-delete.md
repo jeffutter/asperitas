@@ -1,14 +1,13 @@
 ---
 id: TASK-105
 title: Decide the fate of asperitas-pod pins.rs (upstream contribution or delete)
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
 labels:
   - review-2026-10
   - pod
-  - needs-decision
 dependencies: []
 priority: low
 type: chore
@@ -29,3 +28,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 <!-- AC:BEGIN -->
 - [ ] #1 Decision recorded and pins.rs deleted or relocated; daisy-pod.md matches
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Owner has no use for pins.rs (it was a possible upstream daisy-embassy contribution). Delete it and fix daisy-pod.md.
+<!-- SECTION:NOTES:END -->

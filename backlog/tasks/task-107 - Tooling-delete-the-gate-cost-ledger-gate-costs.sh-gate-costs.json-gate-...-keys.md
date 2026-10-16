@@ -3,14 +3,13 @@ id: TASK-107
 title: >-
   Tooling: delete the gate cost ledger (gate-costs.sh, gate-costs.json,
   {{gate:...}} keys)
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
 labels:
   - review-2026-10
   - tooling
-  - needs-decision
 dependencies: []
 priority: medium
 type: chore
@@ -33,3 +32,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #1 gate-costs.sh, docs/gate-costs.json and the key citations are gone; the commit tier is green
 - [ ] #2 Editing or adding a gate no longer requires a refresh step
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Gate timings do not need to be recorded anywhere; gates.sh already prints a time per gate and per tier. Delete the ledger.
+<!-- SECTION:NOTES:END -->

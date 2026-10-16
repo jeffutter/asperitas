@@ -3,14 +3,13 @@ id: TASK-092
 title: >-
   Logging: replace the 800-line lexer test and the unreachable Violation
   machinery
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
 labels:
   - review-2026-10
   - logging
-  - needs-decision
 dependencies: []
 priority: medium
 type: chore
@@ -34,3 +33,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #2 Violation machinery and its unreachable branches are deleted
 - [ ] #3 Release behaviour is unchanged
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Adding no-panic as a firmware dependency is fine. Delete the unreachable Violation machinery and the lexer test.
+<!-- SECTION:NOTES:END -->

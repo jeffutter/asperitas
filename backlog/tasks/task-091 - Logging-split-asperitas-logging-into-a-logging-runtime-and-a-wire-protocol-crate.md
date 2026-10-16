@@ -3,7 +3,7 @@ id: TASK-091
 title: >-
   Logging: split asperitas-logging into a logging runtime and a wire-protocol
   crate
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
@@ -11,7 +11,6 @@ labels:
   - review-2026-10
   - logging
   - architecture
-  - needs-decision
 dependencies: []
 priority: high
 type: chore
@@ -36,3 +35,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #2 All 240 logging tests still pass; firmware builds for every layout
 - [ ] #3 Hardware recheck ticket passes (rig capture, panictest, enumeration)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-10-16 owner decision: Names: `asperitas-wire` (pure no_std protocol: frame, dump grammar, control, excerpt layout/grammar, console bodies, capture geometry) and `asperitas-host` (std crate: BlockAssembler, dump::decode, parse_wav, install_frames, the dump_reassemble binary, shared capture loading). `asperitas-logging` keeps the runtime. replay.rs moves to firmware or a rig crate.
+<!-- SECTION:NOTES:END -->
