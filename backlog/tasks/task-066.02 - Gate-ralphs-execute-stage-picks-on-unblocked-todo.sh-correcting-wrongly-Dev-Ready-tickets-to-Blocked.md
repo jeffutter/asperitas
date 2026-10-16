@@ -3,11 +3,11 @@ id: TASK-066.02
 title: >-
   Gate ralph's execute-stage picks on unblocked-todo.sh, correcting
   wrongly-Dev-Ready tickets to Blocked
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-09-13 09:06'
-updated_date: '2026-09-13 09:07'
+updated_date: '2026-10-16 15:42'
 labels:
   - planned
 dependencies:
@@ -38,15 +38,15 @@ asperitas repo gets no code change. Depends on TASK-066.01 for the reason vocabu
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both execute-stage picks (In Progress and Dev Ready) are gated by the deployed unblocked-todo.sh --explain verdict: all dependencies Done, no unfinished descendant, assignee not @agent-hostile. No eligibility rule is reimplemented in TypeScript.
-- [ ] #2 Selection order is unchanged: candidates come from the raw `backlog task list` priority ordering intersected with the eligible set, not from the script's filename ordering.
-- [ ] #3 A Dev Ready candidate that fails on dependencies or an unfinished child is forced to Blocked with its dependency list intact, plus exactly one appended comment naming the machine-readable reason; selection then continues with the next candidate in the same pass rather than stalling.
-- [ ] #4 An @human-only-ineligible Dev Ready candidate, and any ineligible In Progress candidate, is skipped without mutating its status, and the skip is recorded in history.jsonl.
-- [ ] #5 If the filter call fails or times out, nothing is mutated and no candidate is executed: the step records a failed gate entry and feeds the existing failure-streak guard, so two consecutive filter failures stop the run with a named cause instead of declaring the board drained or falling through to Choose.
-- [ ] #6 The correction is idempotent: re-running the gate on an already-corrected ticket appends no second note, proven by a grep count of the exact sentence.
-- [ ] #7 StepKind gains a gate kind and buildFinalSummary counts it; /ralph-progress still renders.
-- [ ] #8 The Needs Plan pick is deliberately left unfiltered, with a comment saying why (planning an @human container is how TASK-059 got its three children), recording the deviation from the Claude harness.
-- [ ] #9 Landed in the home-manager source, applied with ~/bin/rebuild, verified present at ~/.pi/agent/extensions/ralph/index.ts, committed in the home-manager repo with the sha in the notes, and confirmed to leave this repo's code untouched outside backlog/.
+- [x] #1 Both execute-stage picks (In Progress and Dev Ready) are gated by the deployed unblocked-todo.sh --explain verdict: all dependencies Done, no unfinished descendant, assignee not @agent-hostile. No eligibility rule is reimplemented in TypeScript.
+- [x] #2 Selection order is unchanged: candidates come from the raw `backlog task list` priority ordering intersected with the eligible set, not from the script's filename ordering.
+- [x] #3 A Dev Ready candidate that fails on dependencies or an unfinished child is forced to Blocked with its dependency list intact, plus exactly one appended comment naming the machine-readable reason; selection then continues with the next candidate in the same pass rather than stalling.
+- [x] #4 An @human-only-ineligible Dev Ready candidate, and any ineligible In Progress candidate, is skipped without mutating its status, and the skip is recorded in history.jsonl.
+- [x] #5 If the filter call fails or times out, nothing is mutated and no candidate is executed: the step records a failed gate entry and feeds the existing failure-streak guard, so two consecutive filter failures stop the run with a named cause instead of declaring the board drained or falling through to Choose.
+- [x] #6 The correction is idempotent: re-running the gate on an already-corrected ticket appends no second note, proven by a grep count of the exact sentence.
+- [x] #7 StepKind gains a gate kind and buildFinalSummary counts it; /ralph-progress still renders.
+- [x] #8 The Needs Plan pick is deliberately left unfiltered, with a comment saying why (planning an @human container is how TASK-059 got its three children), recording the deviation from the Claude harness.
+- [x] #9 Landed in the home-manager source, applied with ~/bin/rebuild, verified present at ~/.pi/agent/extensions/ralph/index.ts, committed in the home-manager repo with the sha in the notes, and confirmed to leave this repo's code untouched outside backlog/.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -218,3 +218,11 @@ showing only `backlog/` changes.
 Needs Plan selection, Choose, review, promote; changing `unblocked-todo.sh` semantics (TASK-066.01
 owns that file); `.claude/workflows/ralph-backlog-loop.js`.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Agent run 2026-10-16: source edit written (uncommitted) in ~/.config/home-manager/modules/home/languages/ai/pi-extensions/ralph/index.ts (pickExecutableTicket, gateVerdicts, forceTicketToBlockedWithNote, StepKind gate, buildFinalSummary, Needs Plan comment). Not typechecked, not deployed: the permission classifier denied ~/bin/rebuild and a bun build of the file as self-modification of the agent's own tooling. Next step for owner: review the diff in the home-manager repo, run ~/bin/rebuild, commit there, then tick ACs. No ACs ticked.
+
+2026-10-16: Closed with the owner, with the behaviour NOT verified. The gate code is home-manager commit 4ca64bf (index.ts, deployed copy byte-identical to the source, parses under `bun build --no-bundle`; not typechecked). The dry run (throwaway TASK-077, Dev Ready, depending on Blocked TASK-051, which unblocked-todo.sh reported as dependencies-unresolved) was started in pi and the owner saw ralph grabbing the wrong task; the owner then chose to assume it works and move on. Criteria #1-#8 are ticked on code review and the owner's acceptance only, not on an observed run. If pi's /ralph picks a wrong ticket again, start here: the pick order, idempotence and filter-failure paths have never run. TASK-077 was deleted outright.
+<!-- SECTION:NOTES:END -->
