@@ -3,7 +3,7 @@ id: TASK-029
 title: >-
   HUMAN: Capture podtest detent ratio and confirm one increment per physical
   detent
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 00:27'
@@ -36,10 +36,10 @@ Can share one board session with TASK-027, which needs a fresh podtest capture f
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: a fresh podtest capture, taken with the podtest build that contains the TASK-024 fix and using the same protocol as the 2026-08-08 captures, is attached or summarized in this ticket
-- [ ] #2 HUMAN: ten deliberate clockwise detents produce a net +10 EncoderDelta and ten deliberate counter-clockwise detents produce a net -10, direction positive clockwise
-- [ ] #3 The observed per-detent transition-cluster sizes are recorded in this ticket's implementation notes as numbers, including whether any cluster registered fewer than four transitions — this is the evidence for whether the remainder-carrying accumulator or the rest-state full-step variant was the right call (see TASK-024's design constraint)
-- [ ] #4 Any detent counted short or long is filed as a new bug ticket with the timestamps from the capture, rather than checked off or patched from memory
+- [x] #1 HUMAN: a fresh podtest capture, taken with the podtest build that contains the TASK-024 fix and using the same protocol as the 2026-08-08 captures, is attached or summarized in this ticket
+- [x] #2 HUMAN: ten deliberate clockwise detents produce a net +10 EncoderDelta and ten deliberate counter-clockwise detents produce a net -10, direction positive clockwise
+- [x] #3 The observed per-detent transition-cluster sizes are recorded in this ticket's implementation notes as numbers, including whether any cluster registered fewer than four transitions — this is the evidence for whether the remainder-carrying accumulator or the rest-state full-step variant was the right call (see TASK-024's design constraint)
+- [x] #4 Any detent counted short or long is filed as a new bug ticket with the timestamps from the capture, rather than checked off or patched from memory
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -56,6 +56,8 @@ TASK-030 (self-verifying log records) has NOT landed, so these lines ride the sa
 2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
 
 2026-10-16: Blocked lifted at the owner's request; the owner is back at the bench. Back to To Do.
+
+2026-10-16: Closed with the owner. Capture `captures/task-018-04-controls-360s.txt` (360 s, bootloaded `podtest` at 02d99f9 plus later commits, rig `--max-drops 100000`; verdict `fail` only from pre-attach loss, `bad_frames=0`, device_dropped=684311 all before the capture window because the board ran unread for a long time). Owner turned 10 detents clockwise, 10 counter-clockwise, twice each: four runs of 10 `ENC` events, each exactly +1 or -1, nets +10, -10, +10, -10. Per detent the raw lines are the full four transitions (`01>11>10>00` clockwise, `10>11>01>00` counter-clockwise); no detent registered fewer than four. Two bursts chattered (8 raw lines for two detents, `10/00` flicker) and the decoder still counted one per detent. No short or long detent, so no bug ticket.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

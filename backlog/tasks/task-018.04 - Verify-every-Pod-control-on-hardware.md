@@ -1,7 +1,7 @@
 ---
 id: TASK-018.04
 title: Verify every Pod control on hardware
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
@@ -39,13 +39,13 @@ Also confirm the LED boundary held: LED 1 must still show its boot and panic sta
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: both knobs sweep smoothly across the full 0.0 to 1.0 range, reaching the endpoints at their physical stops
-- [ ] #2 HUMAN: a knob held still holds its value; the observed peak-to-peak jitter is recorded as a number in the implementation notes
-- [ ] #3 HUMAN: the encoder produces one increment per physical detent in both directions, clockwise positive
-- [ ] #4 HUMAN: the encoder click and both buttons each register exactly one event per press, with no double-fires
-- [ ] #5 HUMAN: LED 2 shows the expected colour for each channel combination, confirming the active-low drive
-- [ ] #6 HUMAN: LED 1 still shows its boot and panic stages — asperitas-pod has not disturbed asperitas-logging LED ownership
-- [ ] #7 Any correction to the pin map, the LED polarity, or the drive approach is written back into docs/reference/daisy-pod.md
+- [x] #1 HUMAN: both knobs sweep smoothly across the full 0.0 to 1.0 range, reaching the endpoints at their physical stops
+- [x] #2 HUMAN: a knob held still holds its value; the observed peak-to-peak jitter is recorded as a number in the implementation notes
+- [x] #3 HUMAN: the encoder produces one increment per physical detent in both directions, clockwise positive
+- [x] #4 HUMAN: the encoder click and both buttons each register exactly one event per press, with no double-fires
+- [x] #5 HUMAN: LED 2 shows the expected colour for each channel combination, confirming the active-low drive
+- [x] #6 HUMAN: LED 1 still shows its boot and panic stages — asperitas-pod has not disturbed asperitas-logging LED ownership
+- [x] #7 Any correction to the pin map, the LED polarity, or the drive approach is written back into docs/reference/daisy-pod.md
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -96,4 +96,6 @@ Consequence for this ticket's own evidence: the capture quoted above is trustwor
 2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
 
 2026-10-16: Blocked lifted at the owner's request; the owner is back at the bench. Back to To Do.
+
+2026-10-16: Closed with the owner using `captures/task-018-04-controls-360s.txt` and `captures/task-033-controls-270s.txt`. #1: both knobs reach 0 and 65535 on the raw 16-bit ADC; owner says they felt smooth, no scratch or jump. #2: the owner held the knobs at the clockwise stop; quietest 10 s hold peak-to-peak 7 counts (knob 1) and 5 counts (knob 2) of 65535 (about 0.01 percent). That is a hold at a stop, not mid-travel, which the owner accepted. #3: four runs of 10 detents, +10, -10, +10, -10, one `ENC` per detent, clockwise positive (see TASK-029). #4: 10 presses each of encoder click, button 1, button 2 in the 270 s capture, 10 press and 10 release records each, no double-fires (TASK-033). #5: the owner saw LED 2 cycle off, red, green, blue, yellow, cyan, magenta, white exactly as logged. #6: steady green on `podtest` (Running); after flashing `panictest` the owner saw solid red (Panicked, per led.rs). Limits: the pre-init stage is also steady red, so boot-colour order was not seen by eye, and a console capture of the panicked board hung, so there is no panic record. The owner accepted this. #7: no pin-map, polarity or drive correction was needed, so docs/reference/daisy-pod.md is unchanged.
 <!-- SECTION:NOTES:END -->
