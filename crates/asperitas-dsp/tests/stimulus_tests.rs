@@ -27,12 +27,12 @@ use asperitas_dsp::{
 const FS: u32 = 48_000;
 const TAU: f64 = core::f64::consts::TAU;
 
-/// The frame budget of a logging body (`asperitas-logging`'s `frame::MAX_BODY`). Hardcoded
+/// The frame budget of a logging body (`asperitas-wire`'s `frame::MAX_BODY`). Hardcoded
 /// because `asperitas-dsp` must not depend on logging to learn how big its own description may be.
 const MAX_BODY: usize = 200;
 
 /// What a `RIGGEN` record will actually carry of this description
-/// (`asperitas-logging`'s `console::RIGGEN_MAX_GEN_BYTES`), which is the tighter of the two
+/// (`asperitas-wire`'s `console::RIGGEN_MAX_GEN_BYTES`), which is the tighter of the two
 /// budgets and therefore the only one worth asserting against. Hardcoded for the same reason as
 /// `MAX_BODY`, and `rig.rs` checks it again at runtime against the same constant.
 const MAX_RIGGEN_PAYLOAD: usize = 160;

@@ -34,7 +34,7 @@ use static_cell::StaticCell;
 
 use crate::inbound::{InboundFeed, InboundRecord, INBOUND};
 use crate::spin_budget::{cycle_count, SpinBudget};
-use crate::{console, frame};
+use asperitas_wire::{console, frame};
 
 /// Maximum CDC-ACM packet size, in bytes.
 ///
@@ -392,7 +392,7 @@ pub type InboundReceiver = Receiver<'static, CriticalSectionRawMutex, InboundRec
 ///
 /// Every record is whole and CRC-checked; rejects and junk are counted in
 /// [`crate::inbound::INBOUND`], never delivered. The body means whatever the consumer
-/// decides; excerpt install parses it with `excerpt::parse_record`.
+/// decides; excerpt install parses it with `asperitas_wire::excerpt::parse_record`.
 pub fn enable_inbound() -> InboundReceiver {
     INBOUND_ENABLED.store(true, core::sync::atomic::Ordering::Release);
     INBOUND_CHANNEL.receiver()

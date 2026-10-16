@@ -1,0 +1,27 @@
+[package]
+name = "asperitas-wire"
+version = "0.1.0"
+edition = "2021"
+
+# The wire protocol between the device and the host: frame codec, console and control
+# grammars, audio-dump and excerpt formats, capture geometry. Pure `no_std` arithmetic on byte
+# slices, so the firmware, the host tools and the tests all link the same code. `log` is here
+# only for `Level`, the type `frame::encode` takes; nothing in this crate installs a logger.
+[dependencies]
+log = { version = "0.4", default-features = false }
+
+# Host-only test dependencies. `frame` is pure logic and must build and test with no
+# transport, so its tests pull embassy-sync in here rather than the module depending on it.
+# Dev-deps never reach the `firmware/` workspace.
+#
+# `base64` is the oracle for `dump`'s codec: the strict rules that make corruption visible are
+# only trustworthy because they were measured against the reference implementation, so the
+# reference belongs in the test suite and nowhere else - the device-side encoder is
+# hand-written and links nothing.
+[dev-dependencies]
+proptest = "1"
+embassy-sync = "0.6"
+base64 = "0.23"
+
+[lints]
+workspace = true

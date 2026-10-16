@@ -177,7 +177,7 @@ fn add(counter: &AtomicU32, n: u32) {
 ///
 /// Field order is normative (TASK-030 §3): `proto` first so a reader can handshake
 /// before trusting anything, then what produced the capture. `fw_version` is the
-/// `asperitas-logging` crate version, which is the version that ships the console — the
+/// `asperitas-wire` crate version, which is the version that ships the console — the
 /// firmware binaries have no separate release process.
 pub fn boot_body(
     out: &mut [u8; BODY_WINDOW],

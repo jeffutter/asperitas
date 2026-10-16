@@ -1,22 +1,22 @@
-//! Host suite for `asperitas_logging::excerpt`: slot layout arithmetic, the slot header, the WAV
+//! Host suite for `asperitas_wire::excerpt`: slot layout arithmetic, the slot header, the WAV
 //! gate and the EXCSTART/EXCDATA/EXCEND grammar.
 //!
-//! Run with: `cargo test -p asperitas-logging --test excerpt`
+//! Run with: `cargo test -p asperitas-wire --test excerpt`
 //!
 //! Layout numbers are pinned to literals written here, not recomputed from the module's own
 //! constants, so a change to the module cannot pass by agreeing with itself.
 
 use std::path::PathBuf;
 
-use asperitas_logging::dump::DecodeError;
-use asperitas_logging::excerpt::{
+use asperitas_wire::dump::DecodeError;
+use asperitas_wire::excerpt::{
     check_pcm_len, exc_data_body, exc_end_body, exc_start_body, parse_record, parse_wav, slot_base,
     slot_pcm_base, ExcRecord, HeaderError, LengthError, RecordError, SlotHeader, Tag, TagError,
     WavError, EXCERPT_AREA_END, EXCERPT_AREA_START, EXC_CHUNK_RAW, HEADER_LEN, MAX_ADDRESS,
     MAX_DATA_BODY_LEN, MAX_DATA_CHUNKS, MAX_START_BODY_LEN, PCM_CAPACITY, SECTOR, SLOT_COUNT,
     SLOT_SPAN, SLOT_STRIDE, TAG_MAX,
 };
-use asperitas_logging::frame::{crc16_ccitt, MAX_BODY};
+use asperitas_wire::frame::{crc16_ccitt, MAX_BODY};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -649,7 +649,7 @@ fn a_payload_over_the_chunk_size_is_refused() {
     // 129 bytes encode to the same 172 characters as 128, so the character count alone cannot
     // catch it; the decode bound has to.
     let mut b64 = [0u8; 172];
-    let n = asperitas_logging::dump::encode(&[7u8; EXC_CHUNK_RAW + 1], &mut b64).unwrap();
+    let n = asperitas_wire::dump::encode(&[7u8; EXC_CHUNK_RAW + 1], &mut b64).unwrap();
     let mut body = b"EXCDATA i=0000 b64=".to_vec();
     body.extend_from_slice(&b64[..n]);
     assert_eq!(

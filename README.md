@@ -241,8 +241,8 @@ Save the raw bytes, not a scrollback:
 
 ```bash
 cat /dev/ttyACM0 > capture.bin
-cargo run -p asperitas-logging --example console_decode -- capture.bin > clean.txt
-cat capture.bin | cargo run -p asperitas-logging --example console_decode
+cargo run -p asperitas-wire --example console_decode -- capture.bin > clean.txt
+cat capture.bin | cargo run -p asperitas-wire --example console_decode
 ```
 
 stdout carries the validated records, byte-identical to what the device sent — greppable, and re-feedable
@@ -369,7 +369,7 @@ clip into a slot (`0..13`) with a name of 1 to 16 characters of `[a-z0-9_]`, wit
 `rig` and its console visible on the host:
 
 ```bash
-cargo run -p asperitas-logging --example excerpt_stream -- \
+cargo run -p asperitas-wire --example excerpt_stream -- \
     audio/instruments/mandolin_single_note_soft.wav 0 mandolin_soft > /dev/cu.usbmodem*
 ```
 
@@ -389,7 +389,7 @@ loses whatever macOS had buffered, which was 19 blocks once.
 
 ```bash
 cat /dev/cu.usbmodem* > capture.bin        # leave running; interrupt after DUMPEND
-cargo run -p asperitas-logging --example console_decode -- capture.bin > clean.txt
+cargo run -p asperitas-wire --example console_decode -- capture.bin > clean.txt
 grep -E 'RIGCFG|CAPMAX|CAPSTAT|DUMPEND|STIMSTART|EXC(OK|FAIL|PLAY)' clean.txt
 ```
 
@@ -405,7 +405,7 @@ The reassembler turns `capture.bin` back into PCM and exits non-zero if any bloc
 its CRC:
 
 ```bash
-cargo run -p asperitas-logging --release --example dump_reassemble -- capture.bin --out capture.pcm
+cargo run -p asperitas-wire --release --example dump_reassemble -- capture.bin --out capture.pcm
 ```
 
 The PCM is headerless signed 16-bit little-endian, mono, 48 kHz. For a sweep or excerpt build, the

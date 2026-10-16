@@ -2,10 +2,10 @@
 //! for one QSPI excerpt slot, on stdout.
 //!
 //! ```sh
-//! cargo run -p asperitas-logging --example excerpt_stream -- clip.wav 3 guitar_a > stream.bin
+//! cargo run -p asperitas-wire --example excerpt_stream -- clip.wav 3 guitar_a > stream.bin
 //! cat stream.bin > /dev/cu.usbmodem…
 //! # or straight to the device:
-//! cargo run -p asperitas-logging --example excerpt_stream -- clip.wav 3 guitar_a > /dev/cu.usbmodem…
+//! cargo run -p asperitas-wire --example excerpt_stream -- clip.wav 3 guitar_a > /dev/cu.usbmodem…
 //! ```
 //!
 //! Arguments are `<wav> <slot> <name> [--seq0 N]`. The WAV must be PCM mono 48 kHz 16-bit;
@@ -25,9 +25,9 @@
 //! tested against. To check it end to end:
 //!
 //! ```sh
-//! cargo run -p asperitas-logging --example excerpt_stream -- \
-//!     crates/asperitas-logging/tests/golden/excerpt_ramp.wav 3 ramp1000 \
-//!   | cmp - crates/asperitas-logging/tests/golden/excerpt_stream.bin
+//! cargo run -p asperitas-wire --example excerpt_stream -- \
+//!     crates/asperitas-wire/tests/golden/excerpt_ramp.wav 3 ramp1000 \
+//!   | cmp - crates/asperitas-wire/tests/golden/excerpt_stream.bin
 //! ```
 //!
 //! Exit codes: `0` stream written, `2` bad arguments, unreadable or refused WAV, or a write error.
@@ -37,7 +37,7 @@ use std::fs;
 use std::io::{self, BufWriter, Write};
 use std::process::exit;
 
-use asperitas_logging::excerpt::{install_frames, parse_wav, Tag};
+use asperitas_wire::excerpt::{install_frames, parse_wav, Tag};
 
 fn main() {
     if let Err(message) = run(env::args().skip(1).collect()) {

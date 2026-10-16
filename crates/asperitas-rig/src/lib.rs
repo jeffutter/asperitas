@@ -1,14 +1,14 @@
 //! Host-side capture engine for the Asperitas framed console.
 //!
 //! [`capture`] reads bytes from any [`io::Read`], validates them through
-//! [`asperitas_logging::frame::Decoder`], and returns a [`Capture`]: the validated records
+//! [`asperitas_wire::frame::Decoder`], and returns a [`Capture`]: the validated records
 //! plus a [`Summary`] of everything the wire and the device reported. [`verdict`] turns a
 //! summary into pass or fail, and [`render`] writes a deterministic text artifact that can
 //! be committed and diffed.
 //!
-//! The loop mirrors `crates/asperitas-logging/examples/console_decode.rs` (about 40 lines
+//! The loop mirrors `crates/asperitas-wire/examples/console_decode.rs` (about 40 lines
 //! of chunking and the push/drain handshake). It is duplicated here deliberately: the
-//! example is a binary and exposing its loop from `asperitas-logging` would add host-only
+//! example is a binary and exposing its loop from `asperitas-wire` would add host-only
 //! `std` API to a firmware crate.
 //!
 //! # What fails a capture
@@ -32,7 +32,7 @@ pub mod control;
 use std::fmt::Write as _;
 use std::io::{self, Read};
 
-use asperitas_logging::frame::{Decoder, Record, MAX_FRAME};
+use asperitas_wire::frame::{Decoder, Record, MAX_FRAME};
 
 /// Bytes requested per read; larger than one frame so boundaries never align by luck.
 const CHUNK_BYTES: usize = 4096;
@@ -257,13 +257,13 @@ impl Accumulator {
 fn framed_len(r: &Record<'_>) -> usize {
     let mut buf = [0u8; MAX_FRAME];
     let level = match r.level {
-        b'W' => asperitas_logging::Level::Warn,
-        b'E' => asperitas_logging::Level::Error,
-        b'D' => asperitas_logging::Level::Debug,
-        b'T' => asperitas_logging::Level::Trace,
-        _ => asperitas_logging::Level::Info,
+        b'W' => asperitas_wire::Level::Warn,
+        b'E' => asperitas_wire::Level::Error,
+        b'D' => asperitas_wire::Level::Debug,
+        b'T' => asperitas_wire::Level::Trace,
+        _ => asperitas_wire::Level::Info,
     };
-    asperitas_logging::frame::encode(level, r.seq, r.t_ms, r.body, &mut buf).len
+    asperitas_wire::frame::encode(level, r.seq, r.t_ms, r.body, &mut buf).len
 }
 
 /// Parse `STATUS proto=1 ... dropped_full=N ...`; `None` for unknown proto or bad field.
@@ -365,12 +365,12 @@ pub fn render(capture: &Capture, policy: &Policy) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use asperitas_logging::frame::encode;
+    use asperitas_wire::frame::encode;
 
     fn frame(seq: u32, body: &str) -> Vec<u8> {
         let mut buf = [0u8; MAX_FRAME];
         let e = encode(
-            asperitas_logging::Level::Info,
+            asperitas_wire::Level::Info,
             seq,
             seq.wrapping_mul(10),
             body.as_bytes(),

@@ -25,7 +25,7 @@
 #       excerpt slots start at EXCERPT_AREA_START. The region the linker may fill and the image that
 #       came out must both end at or below that address. Both numbers are parsed, never restated:
 #       QSPI_APP_OFFSET from the `QSPI_APP_OFFSET = ` marker in firmware/memory-bootloaded.x, and
-#       EXCERPT_AREA_START from crates/asperitas-logging/src/excerpt.rs, which is where the slot layout
+#       EXCERPT_AREA_START from crates/asperitas-wire/src/excerpt.rs, which is where the slot layout
 #       is defined.
 #
 #   R6  A bootloaded image leaves at least MIN_SPARE bytes of its FLASH region unused. The region is
@@ -110,7 +110,7 @@ cd "$ROOT" || exit 2
 CARGO_CONFIG=$ROOT/firmware/.cargo/config.toml
 MEMORY_INTERNAL=$ROOT/firmware/memory-internal.x
 MEMORY_BOOTLOADED=$ROOT/firmware/memory-bootloaded.x
-EXCERPT_RS=$ROOT/crates/asperitas-logging/src/excerpt.rs
+EXCERPT_RS=$ROOT/crates/asperitas-wire/src/excerpt.rs
 
 # Smallest slack a bootloaded image may leave in its FLASH region (R6).
 MIN_SPARE=2048

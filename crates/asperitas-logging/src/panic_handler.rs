@@ -35,7 +35,7 @@ use core::panic::PanicInfo;
 use core::fmt::Write;
 
 #[cfg(any(feature = "log-usb", feature = "log-defmt"))]
-use crate::TruncWriter;
+use asperitas_wire::TruncWriter;
 
 /// Size of the panic message buffer, in bytes.
 ///

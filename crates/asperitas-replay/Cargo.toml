@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-asperitas-logging = { path = "../asperitas-logging", default-features = false }
+asperitas-wire = { path = "../asperitas-wire" }
 
 [dev-dependencies]
 proptest = "1"

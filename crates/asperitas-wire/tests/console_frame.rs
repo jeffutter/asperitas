@@ -1,6 +1,6 @@
 //! Adversarial suite for the self-verifying console frame codec.
 //!
-//! Run with: `cargo test -p asperitas-logging`
+//! Run with: `cargo test -p asperitas-wire`
 //!
 //! Nothing else in this repo proves that a corrupted capture cannot be mistaken for clean
 //! data, so this file is the deliverable rather than a formality: TASK-031's rig runner and
@@ -23,11 +23,11 @@
 
 use proptest::prelude::*;
 
-use asperitas_logging::frame::{
+use asperitas_wire::frame::{
     crc16_ccitt, encode, sanitize_byte, Decoder, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN,
     TRAILER_LEN,
 };
-use asperitas_logging::Level;
+use asperitas_wire::Level;
 
 // ---------------------------------------------------------------------------
 // Helpers

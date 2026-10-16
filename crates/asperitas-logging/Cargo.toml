@@ -19,6 +19,7 @@ log-usb = ["boot-led", "dep:embassy-usb", "dep:embassy-stm32", "dep:embassy-futu
 log-defmt = ["boot-led", "dep:defmt", "dep:embassy-stm32", "dep:embassy-time", "dep:static_cell"]
 
 [dependencies]
+asperitas-wire = { path = "../asperitas-wire" }
 log = { version = "0.4", default-features = false }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 
@@ -35,19 +36,13 @@ embassy-time = { version = "0.5", optional = true }
 static_cell = { version = "2", default-features = false, optional = true }
 embassy-sync = { version = "0.6", optional = true }
 
-# Host-only test dependencies. `frame` is pure logic and must build and test with
-# default features (no `log-usb`), so its tests pull embassy-sync in here rather
-# than the module depending on it. Dev-deps never reach the `firmware/` workspace,
-# which keeps `firmware/Cargo.lock` unchanged.
-#
-# `base64` joins them as the oracle for `dump`'s codec: the strict rules that make
-# corruption visible are only trustworthy because they were measured against the
-# reference implementation, so the reference belongs in the test suite and nowhere
-# else — the device-side encoder is hand-written and links nothing.
+# Host-only test dependencies. The commit-path arithmetic is pure logic and must build and
+# test with default features (no `log-usb`), so its tests pull embassy-sync in here rather than
+# the module depending on it. Dev-deps never reach the `firmware/` workspace, which keeps
+# `firmware/Cargo.lock` unchanged.
 [dev-dependencies]
 proptest = "1"
 embassy-sync = "0.6"
-base64 = "0.23"
 
 [lints]
 workspace = true

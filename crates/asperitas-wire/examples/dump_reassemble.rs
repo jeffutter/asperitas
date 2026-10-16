@@ -4,9 +4,9 @@
 //! Run it on a file, or pipe a capture through it:
 //!
 //! ```sh
-//! cargo run -p asperitas-logging --example dump_reassemble -- capture.bin --out capture.pcm
-//! cat capture.bin | cargo run -p asperitas-logging --example dump_reassemble --out live.pcm
-//! cargo run -p asperitas-logging --example dump_reassemble -- --selftest
+//! cargo run -p asperitas-wire --example dump_reassemble -- capture.bin --out capture.pcm
+//! cat capture.bin | cargo run -p asperitas-wire --example dump_reassemble --out live.pcm
+//! cargo run -p asperitas-wire --example dump_reassemble -- --selftest
 //! ```
 //!
 //! Bytes are read in 4 KiB pieces — larger than one frame on purpose, so record boundaries never
@@ -43,14 +43,12 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::process::exit;
 
-use asperitas_logging::dump::{
+use asperitas_wire::dump::{
     self, Abandoned, Action, BlockAssembler, Failure, Finish, Tally, AUDIO_HEADER_LEN, CHUNK_RAW,
     FULL_AUDIO_FRAME_LEN, MAX_CHUNKS_PER_BLOCK,
 };
-use asperitas_logging::frame::{
-    encode, Decoder, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
-};
-use asperitas_logging::Level;
+use asperitas_wire::frame::{encode, Decoder, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN};
+use asperitas_wire::Level;
 
 /// Bytes requested per read. Larger than [`MAX_FRAME`] on purpose: a reader that happens to align
 /// with record boundaries proves nothing about the decoder's boundaries.
@@ -406,7 +404,7 @@ fn note(body: &[u8]) {
 /// is fixed-width, the body arrives pre-sanitised, and the checksum is a function of the two, so this
 /// reproduces the frame byte for byte.
 fn reencoded_frame<'a>(
-    record: &asperitas_logging::frame::Record<'_>,
+    record: &asperitas_wire::frame::Record<'_>,
     buf: &'a mut [u8; MAX_FRAME],
 ) -> &'a [u8] {
     let encoded = encode(Level::Info, record.seq, record.t_ms, record.body, buf);
@@ -522,7 +520,7 @@ fn fail_with(code: i32, message: &str) -> ! {
 /// in [`main`], whose predicate is exactly the one these checks assert.
 mod selftest {
     use super::*;
-    use asperitas_logging::frame::crc16_ccitt;
+    use asperitas_wire::frame::crc16_ccitt;
 
     /// Chunks per generated block: two at full width plus a short tail, which exercises the
     /// padded-final-chunk path and the length arithmetic in one shape.

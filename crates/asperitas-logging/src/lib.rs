@@ -50,7 +50,7 @@
 //! chooses the timestamp: `log::Record`s go through `emit`, which reads the clock; whole
 //! wire-contract bodies the caller already rendered go through `emit_record`, which takes the
 //! timestamp as an argument; and bulk audio-dump chunks go through `try_emit_dump`, which also
-//! takes it and additionally applies [`dump::dump_fits`]'s headroom rule before spending a
+//! takes it and additionally applies [`asperitas_wire::dump::dump_fits`]'s headroom rule before spending a
 //! sequence number. The last two are named rather than linked, because both are
 //! `log-usb`-gated and neither exists to resolve in the default-feature docs.
 
@@ -58,6 +58,10 @@
 
 pub use log::{debug, error, info, trace, warn, Level, LevelFilter};
 
+// Only the `log-usb` record path calls into these; the doc links keep naming them in every
+// configuration.
+#[allow(unused_imports)]
+use asperitas_wire::{console, frame};
 use core::sync::atomic::{AtomicBool, Ordering};
 
 /// Has the logger been installed?
@@ -153,44 +157,6 @@ impl log::Log for FacadeLogger {
     fn flush(&self) {}
 }
 
-/// A `fmt::Write` that stops at the end of its buffer instead of overflowing it.
-///
-/// Log bodies may neither allocate nor panic, so running past the window has to be a
-/// quiet stop rather than an error path. A piece that does not fit at all returns
-/// [`core::fmt::Error`], which aborts the enclosing `write!` and leaves whatever already
-/// landed — a shortened record, which the encoder then reports on the wire as `trunc`.
-pub(crate) struct TruncWriter<'a> {
-    buf: &'a mut [u8],
-    pos: usize,
-}
-
-impl<'a> TruncWriter<'a> {
-    pub(crate) fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
-
-    /// Bytes written so far.
-    pub(crate) fn filled(&self) -> usize {
-        self.pos
-    }
-}
-
-impl core::fmt::Write for TruncWriter<'_> {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if s.is_empty() {
-            return Ok(());
-        }
-        let available = self.buf.len() - self.pos;
-        let len = s.len().min(available);
-        if len == 0 {
-            return Err(core::fmt::Error);
-        }
-        self.buf[self.pos..self.pos + len].copy_from_slice(&s.as_bytes()[..len]);
-        self.pos += len;
-        Ok(())
-    }
-}
-
 /// Install the facade logger as the global `log` backend.
 pub(crate) fn install_logger() {
     if LOGGER_INSTALLED.swap(true, Ordering::AcqRel) {
@@ -203,22 +169,10 @@ pub(crate) fn install_logger() {
 }
 
 // ---------------------------------------------------------------------------
-// Ungated modules — pure logic, no hardware types, host-testable by default
+// Ungated modules - pure logic, no hardware types, host-testable by default
 // ---------------------------------------------------------------------------
 
-pub mod frame;
-
-pub mod console;
-
-pub mod dump;
-
-pub mod capture;
-
-pub mod excerpt;
-
 pub mod inbound;
-
-pub mod control;
 
 // ---------------------------------------------------------------------------
 // Feature-gated modules
@@ -255,7 +209,7 @@ pub mod panic_handler;
 ///
 /// Deliberately **not** behind `log-usb`: it is a bare integer with no dependency on
 /// `embassy_sync`, and the host suite that proves the dump headroom rule
-/// (`tests/console_dump.rs`) has to sweep the same ring the device builds. Gating it would
+/// (`tests/dump_headroom.rs`) has to sweep the same ring the device builds. Gating it would
 /// force that test to restate 2048 as its own constant, where the two could disagree in
 /// silence. The static that does carry a type-level dependency, `LOG_PIPE`, stays gated.
 pub const LOG_PIPE_SIZE: usize = 2048;
@@ -339,7 +293,7 @@ impl Violation {
 
 /// Did the pipe refuse a frame the headroom rule had already admitted?
 ///
-/// Pure and ungated so the whole decision is decidable on the host, exactly as [`dump::dump_fits`]
+/// Pure and ungated so the whole decision is decidable on the host, exactly as [`asperitas_wire::dump::dump_fits`]
 /// is: the code that acts on the answer stays behind `log-usb` and cannot even link there. The four
 /// row is covered by `tests_under_the_record_lock_stay_panic_free` in this module — the crash itself
 /// is not host-observable, so the value is what gets asserted.
@@ -544,7 +498,7 @@ fn emit_log_record(record: &log::Record) {
 fn format_body(record: &log::Record, out: &mut [u8; console::BODY_WINDOW]) -> usize {
     use core::fmt::Write;
 
-    let mut w = TruncWriter::new(out);
+    let mut w = asperitas_wire::TruncWriter::new(out);
     let _ = core::write!(w, "{}", record.args());
     w.filled()
 }
@@ -580,7 +534,7 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 /// Commit one pre-built audio-dump body as a framed record, or refuse it whole.
 ///
 /// The only route by which dump traffic reaches [`LOG_PIPE`], and the only place
-/// [`dump::dump_fits`]'s headroom rule is acted on. Synchronous and non-blocking: it either
+/// [`asperitas_wire::dump::dump_fits`]'s headroom rule is acted on. Synchronous and non-blocking: it either
 /// commits or returns `false` having written nothing, so a caller on a timer can retry it
 /// without risking a deadlock in whatever context it runs (TASK-038.03 owns that retry
 /// loop, and keeps the dump task off the audio `InterruptExecutor`).
@@ -623,7 +577,7 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 ///
 /// `cargo test --workspace` builds this crate without `log-usb`, and on the host no
 /// `critical-section` implementation is registered, so this function does not merely fail to
-/// run there — it fails to *link*. What CI proves is the predicate ([`dump::dump_fits`],
+/// run there — it fails to *link*. What CI proves is the predicate ([`asperitas_wire::dump::dump_fits`],
 /// exhaustively, against a real `embassy_sync` ring: see `tests/console_dump.rs`) and the
 /// shape this function mirrors from `emit_at`. What only the firmware release build
 /// (`cd firmware && cargo build --release --features seed3`) proves is that the arrangement
@@ -633,7 +587,7 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 /// A body longer than [`frame::MAX_BODY`] is refused outright rather than shipped shortened:
 /// a chunk whose tail silently vanished reassembles into audio that measures wrong, and the
 /// block CRC catching it afterwards is not the same thing as not sending it. Every builder in
-/// [`dump`] writes into a `[u8; frame::MAX_BODY]` window, so reaching this branch is a caller
+/// [`asperitas_wire::dump`] writes into a `[u8; frame::MAX_BODY]` window, so reaching this branch is a caller
 /// bug — hence the debug assertion alongside the refusal. The check runs *before* the record
 /// lock is taken, so that assertion cannot fire with interrupts masked.
 #[cfg(feature = "log-usb")]
@@ -653,7 +607,7 @@ pub fn try_emit_dump(body: &[u8]) -> bool {
 
     commit_records(|bufs| {
         // The headroom rule, asked before anything is spent: no `seq`, no counter, no byte.
-        let admitted = dump::dump_fits(body.len(), LOG_PIPE.free_capacity());
+        let admitted = asperitas_wire::dump::dump_fits(body.len(), LOG_PIPE.free_capacity());
         if !admitted {
             return (frame::WriteOutcome::RefusedForSpace, Violation::NONE);
         }
@@ -726,7 +680,7 @@ mod tests {
     /// because no `critical-section` implementation is registered for the host target. So the
     /// `debug_assert!` that consumes a reported violation cannot be observed from CI at all — only
     /// the value it consumes can, which is why `commit_records` takes violations as data instead of
-    /// seeing callers raise them. This is the same split `dump::dump_fits` documents: the predicate
+    /// seeing callers raise them. This is the same split `asperitas_wire::dump::dump_fits` documents: the predicate
     /// is decidable here, the code acting on it stays on the device. What proves the crash still
     /// exists is `tests/commit_path_no_panic.rs`, which reads this file as text and fails if the
     /// post-lock `debug_assert!` is ever deleted.

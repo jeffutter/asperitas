@@ -15,9 +15,9 @@
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-#[cfg(feature = "log-usb")]
-use asperitas_logging::control::{VersionText, VERSION_MAX};
 use asperitas_pod::knob_override::KnobOverride;
+#[cfg(feature = "log-usb")]
+use asperitas_wire::control::{VersionText, VERSION_MAX};
 use cortex_m::interrupt::Mutex;
 
 /// Knobs the Pod exposes to the DSP: knob 1 and knob 2, ids 0 and 1.
@@ -56,17 +56,17 @@ fn version() -> VersionText {
 #[cfg(feature = "log-usb")]
 mod console {
     use super::*;
-    use asperitas_logging::control::{
+    use asperitas_logging::usb::{enable_inbound, InboundReceiver};
+    use asperitas_wire::control::{
         reset_reason_from_rsr, route, Command, ErrorCode, Reply, CONTROL,
     };
-    use asperitas_logging::usb::{enable_inbound, InboundReceiver};
 
     /// Time the console drain gets to ship the `OK RST` ack before the core resets. The drain is a
     /// separate task and a USB bulk packet goes out within a millisecond or two.
     const RESTART_FLUSH_MS: u64 = 20;
 
     fn send(reply: Reply) {
-        let mut body = [0u8; asperitas_logging::frame::MAX_BODY];
+        let mut body = [0u8; asperitas_wire::frame::MAX_BODY];
         let n = reply.encode(&mut body);
         let now_ms = embassy_time::Instant::now().as_millis() as u32;
         // Best effort by design; see the module docs.
@@ -124,7 +124,7 @@ mod console {
                 },
             );
             if restart {
-                send(Reply::Ok(asperitas_logging::control::Verb::Restart));
+                send(Reply::Ok(asperitas_wire::control::Verb::Restart));
                 embassy_time::Timer::after_millis(RESTART_FLUSH_MS).await;
                 cortex_m::peripheral::SCB::sys_reset();
             }

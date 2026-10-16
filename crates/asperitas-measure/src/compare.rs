@@ -20,8 +20,8 @@
 use std::fmt;
 
 use asperitas_dsp::replay_fx::{FxKind, ReplayFx};
-use asperitas_logging::excerpt::{parse_wav, WavError};
-use asperitas_logging::frame::crc16_ccitt;
+use asperitas_wire::excerpt::{parse_wav, WavError};
+use asperitas_wire::frame::crc16_ccitt;
 use serde::Serialize;
 
 use crate::align::{align, assert_stable, AlignError};

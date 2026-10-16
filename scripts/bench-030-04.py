@@ -188,7 +188,7 @@ def run_decode(session):
     out = os.path.join(session, "decoded.txt")
     err = os.path.join(session, "decode-summary.txt")
     with open(out, "wb") as o, open(err, "wb") as e:
-        subprocess.run(["cargo", "run", "-q", "-p", "asperitas-logging", "--example",
+        subprocess.run(["cargo", "run", "-q", "-p", "asperitas-wire", "--example",
                         "console_decode", "--", raw], stdout=o, stderr=e, cwd=ROOT)
     return out, err
 

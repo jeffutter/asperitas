@@ -1,21 +1,21 @@
 //! Host suite for excerpt install: the `install_frames` stream, the `Installer` state machine, the
 //! `EXCOK`/`EXCFAIL` bodies, and the pinned golden stream `examples/excerpt_stream.rs` emits.
 //!
-//! Run with: `cargo test -p asperitas-logging --test excerpt_install`
-//! Regenerate goldens with: `UPDATE_GOLDENS=1 cargo test -p asperitas-logging --test excerpt_install`
+//! Run with: `cargo test -p asperitas-wire --test excerpt_install`
+//! Regenerate goldens with: `UPDATE_GOLDENS=1 cargo test -p asperitas-wire --test excerpt_install`
 //!
 //! A golden diff means the wire changed. Regenerate only when that change is intended, because
 //! a device flashed before the change will refuse the new stream.
 
 use std::path::PathBuf;
 
-use asperitas_logging::excerpt::{
+use asperitas_wire::excerpt::{
     exc_data_body, exc_end_body, exc_fail_body, exc_ok_body, exc_start_body, install_frames,
     parse_record, parse_wav, slot_base, slot_pcm_base, Action, ExcRecord, Failure, Installer,
     RecordError, SlotHeader, Tag, Verdict, Why, EXC_CHUNK_RAW, MAX_FAIL_BODY_LEN, MAX_OK_BODY_LEN,
     PCM_CAPACITY, SECTOR,
 };
-use asperitas_logging::frame::{crc16_ccitt, Decoder, MAX_BODY};
+use asperitas_wire::frame::{crc16_ccitt, Decoder, MAX_BODY};
 use proptest::prelude::*;
 
 const SLOT: u8 = 3;
@@ -864,7 +864,7 @@ fn install_frames_refuses_bad_arguments_before_emitting_anything() {
 }
 
 const GOLDEN_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden");
-const REGENERATE: &str = "UPDATE_GOLDENS=1 cargo test -p asperitas-logging --test excerpt_install";
+const REGENERATE: &str = "UPDATE_GOLDENS=1 cargo test -p asperitas-wire --test excerpt_install";
 
 /// Compare `actual` with the golden file `name`, or overwrite it when `UPDATE_GOLDENS` is set.
 fn check_golden(name: &str, actual: &[u8]) {

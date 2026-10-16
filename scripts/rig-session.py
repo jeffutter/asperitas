@@ -6,7 +6,7 @@ reader, send CTL FX on attach, wait for the capture to arm, run a timed CTL SET 
   rig-session.py soak  OUT FX_F FX_V MAX_S        (env SNAP=<knob> adds two snaps; SNAPS=none removes them)
   rig-session.py hold  OUT FX_F FX_V SET_V MAX_S  (FX then one SET before the capture arms)
 
-Frames come from the `ctl_frame` example (build it first: `cargo build -p asperitas-logging --example
+Frames come from the `ctl_frame` example (build it first: `cargo build -p asperitas-wire --example
 ctl_frame`), so the bytes are the ones the device parses. The soak ramp is a triangle that starts and
 ends at the base value 0x8000, because a REL (or a first SET away from the base) snaps the parameter
 and a snap trips the discontinuity detector whatever the smoothing. Env: ASPERITAS_CONSOLE (default

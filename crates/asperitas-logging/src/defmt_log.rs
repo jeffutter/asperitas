@@ -88,7 +88,7 @@
 
 use log::Level;
 
-use crate::console;
+use asperitas_wire::console;
 
 /// defmt-rtt 1.3.0's ring size: its `build.rs` defaults `BUF_SIZE` to 1024 and honours
 /// `DEFMT_RTT_BUFFER_SIZE`, which nothing in this workspace reads.

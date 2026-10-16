@@ -7,7 +7,7 @@
 //!
 //! # Why this module is not behind `log-usb`
 //!
-//! Same reason as [`crate::frame`] and [`crate::console`]: everything here is arithmetic on a
+//! Same reason as [`asperitas_wire::frame`] and [`asperitas_wire::console`]: everything here is arithmetic on a
 //! [`Decoder`] and a few atomics, so the default-feature `cargo test --workspace` that CI runs
 //! can prove the lossless feed loop on the host. Only the endpoint read and the channel live in
 //! the gated `usb.rs`.
@@ -39,11 +39,11 @@
 //! consumer (`excerpt::parse_record` today) does that. TASK-032 (host control) can reuse all of
 //! it unchanged: [`InboundFeed`], [`InboundRecord`], [`INBOUND`]'s counters and `usb.rs`'s
 //! channel are transport, not install policy. TASK-032 added the dispatcher that routes records by verb to
-//! more than one consumer; it lives in [`crate::control`] and reads [`InboundRecord`] unchanged.
+//! more than one consumer; it lives in [`asperitas_wire::control`] and reads [`InboundRecord`] unchanged.
 //!
 //! # Counters
 //!
-//! [`INBOUND`] is separate from [`crate::console::CONSOLE`] and nothing here changes `STATUS`:
+//! [`INBOUND`] is separate from [`asperitas_wire::console::CONSOLE`] and nothing here changes `STATUS`:
 //! its field set is a contract TASK-031 parses, and inbound traffic only exists in binaries
 //! that opt in. A consumer that wants these numbers on the wire reports them in its own
 //! records. Like the console counters they are cumulative since boot and saturate rather than
@@ -51,52 +51,8 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::frame::{Decoder, Record, Stats, MAX_BODY};
-
-// ---------------------------------------------------------------------------
-// Owned record
-// ---------------------------------------------------------------------------
-
-/// One validated host-to-device record, owned so it can cross a channel.
-///
-/// [`Record`] borrows the decoder's queue and dies at the next push, which is why the feed
-/// copies each one out. 212 bytes; `Copy` because a channel moves it by value anyway.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InboundRecord {
-    /// Wire letter: `I`, `W`, `E`, `D` or `T`.
-    pub level: u8,
-    /// Sequence number as the host transmitted it.
-    pub seq: u32,
-    /// Milliseconds field as the host transmitted it.
-    pub t_ms: u32,
-    len: u8,
-    body: [u8; MAX_BODY],
-}
-
-// A body length must fit `len`; MAX_BODY is 200 today. Fails the build, not a capture.
-const _: () = assert!(MAX_BODY <= u8::MAX as usize);
-
-impl InboundRecord {
-    /// Copy a decoder record out of the decoder's queue.
-    pub fn from_record(record: &Record<'_>) -> Self {
-        let mut body = [0u8; MAX_BODY];
-        // The decoder never delivers more than MAX_BODY bytes of body.
-        let n = record.body.len().min(MAX_BODY);
-        body[..n].copy_from_slice(&record.body[..n]);
-        Self {
-            level: record.level,
-            seq: record.seq,
-            t_ms: record.t_ms,
-            len: n as u8,
-            body,
-        }
-    }
-
-    /// The record body exactly as it arrived (already sanitised by the wire format).
-    pub fn body(&self) -> &[u8] {
-        &self.body[..self.len as usize]
-    }
-}
+use asperitas_wire::frame::{Decoder, Stats};
+pub use asperitas_wire::inbound::InboundRecord;
 
 // ---------------------------------------------------------------------------
 // Counters
@@ -120,7 +76,7 @@ pub struct InboundCounters {
 }
 
 /// Cumulative inbound counters. `Relaxed` throughout, for the same reason as
-/// [`crate::console::ConsoleStats`]: single core, snapshotted, ordering nothing.
+/// [`asperitas_wire::console::ConsoleStats`]: single core, snapshotted, ordering nothing.
 #[derive(Debug, Default)]
 pub struct InboundStats {
     records: AtomicU32,

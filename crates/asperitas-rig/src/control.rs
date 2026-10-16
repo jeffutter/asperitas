@@ -1,7 +1,7 @@
 //! Host side of the device control channel: send [`Command`]s as ordinary v1 frames on the
 //! same port the rig captures from, and match replies in the stream.
 //!
-//! Grammar and codec live in [`asperitas_logging::control`]; nothing about the wire is
+//! Grammar and codec live in [`asperitas_wire::control`]; nothing about the wire is
 //! restated here. Everything is generic over `Read + Write` so tests drive it with an
 //! in-memory fake and `main.rs` only opens the port.
 //!
@@ -18,9 +18,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use asperitas_logging::control::{parse_reply, BodyBuf, Command, ErrorCode, Reply, Verb};
-use asperitas_logging::frame::{encode, Decoder, MAX_FRAME};
-use asperitas_logging::Level;
+use asperitas_wire::control::{parse_reply, BodyBuf, Command, ErrorCode, Reply, Verb};
+use asperitas_wire::frame::{encode, Decoder, MAX_FRAME};
+use asperitas_wire::Level;
 
 use crate::cli::{report, Deadline, Outcome};
 use crate::{capture, Policy};
@@ -79,7 +79,7 @@ impl ControlError {
 
 /// Wrap a command in a v1 frame. Host frames carry the command counter as `seq` and no clock.
 pub fn frame_command(cmd: Command, seq: u32, out: &mut [u8; MAX_FRAME]) -> usize {
-    let mut body: BodyBuf = [0; asperitas_logging::frame::MAX_BODY];
+    let mut body: BodyBuf = [0; asperitas_wire::frame::MAX_BODY];
     let n = cmd.encode(&mut body);
     encode(Level::Info, seq, 0, &body[..n], out).len
 }
@@ -479,8 +479,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use asperitas_logging::control::{parse_command, ReasonText, VersionText};
-    use asperitas_logging::frame::MAX_BODY;
+    use asperitas_wire::control::{parse_command, ReasonText, VersionText};
+    use asperitas_wire::frame::MAX_BODY;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
 

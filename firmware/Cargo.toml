@@ -121,6 +121,7 @@ daisy-embassy = { git = "https://github.com/daisy-embassy/daisy-embassy", branch
 embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
 embassy-stm32 = { version = "0.6.0", features = ["stm32h750ib", "memory-x", "exti"] }
 asperitas-logging = { path = "../crates/asperitas-logging", default-features = false }
+asperitas-wire = { path = "../crates/asperitas-wire" }
 asperitas-replay = { path = "../crates/asperitas-replay" }
 # Major 1, matching daisy-embassy / embassy-stm32. Was "0.3", and the wire format is versioned per
 # major while probe-rs decodes the ELF against it, so 1.x is a correctness requirement here rather

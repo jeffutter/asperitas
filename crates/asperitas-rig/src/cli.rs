@@ -169,13 +169,13 @@ pub fn run<R: Read>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use asperitas_logging::frame::{encode, MAX_FRAME};
+    use asperitas_wire::frame::{encode, MAX_FRAME};
     use std::time::Duration;
 
     fn frame(seq: u32, body: &str) -> Vec<u8> {
         let mut buf = [0u8; MAX_FRAME];
         let e = encode(
-            asperitas_logging::Level::Info,
+            asperitas_wire::Level::Info,
             seq,
             seq * 10,
             body.as_bytes(),

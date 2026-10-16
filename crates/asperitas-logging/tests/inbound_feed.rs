@@ -10,9 +10,9 @@
 
 use std::collections::VecDeque;
 
-use asperitas_logging::frame::{encode, MAX_BODY, MAX_FRAME};
 use asperitas_logging::inbound::{InboundCounters, InboundFeed, InboundRecord, InboundStats};
-use asperitas_logging::Level;
+use asperitas_wire::frame::{encode, MAX_BODY, MAX_FRAME};
+use asperitas_wire::Level;
 use proptest::prelude::*;
 
 /// A bounded stand-in for the embassy channel.

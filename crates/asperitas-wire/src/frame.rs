@@ -605,8 +605,8 @@ pub const RECORD_SLOTS: usize = 8;
 /// # Example
 ///
 /// ```
-/// use asperitas_logging::frame::{encode, Decoder, MAX_FRAME};
-/// use asperitas_logging::Level;
+/// use asperitas_wire::frame::{encode, Decoder, MAX_FRAME};
+/// use asperitas_wire::Level;
 ///
 /// let mut buf = [0u8; MAX_FRAME];
 /// let len = encode(Level::Info, 0x42, 4567, b"ENC +1", &mut buf).len;

@@ -83,7 +83,7 @@ it cannot prove:
 
 ```sh
 zstd -dc audio/captures/<name>.console.zst \
-  | cargo run -p asperitas-logging --release --example dump_reassemble -- --out capture.pcm
+  | cargo run -p asperitas-wire --release --example dump_reassemble -- --out capture.pcm
 ```
 
 | File | Run | Result |

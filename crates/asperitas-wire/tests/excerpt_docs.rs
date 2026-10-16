@@ -2,9 +2,9 @@
 //! in QSPI") must quote the `excerpt` module's constants. The module owns the numbers; this test
 //! fails when the doc is left behind.
 //!
-//! Run with: `cargo test -p asperitas-logging --test excerpt_docs`
+//! Run with: `cargo test -p asperitas-wire --test excerpt_docs`
 
-use asperitas_logging::excerpt::{
+use asperitas_wire::excerpt::{
     slot_base, BOOTLOADER_END, EXCERPT_AREA_START, EXC_CHUNK_RAW, HEADER_LEN, PCM_CAPACITY,
     RESERVED_SECTOR_START, SLOT_COUNT, SLOT_STRIDE,
 };
@@ -52,7 +52,7 @@ fn layout_table_quotes_the_module_constants() {
         assert!(
             doc.contains(needle.as_str()),
             "docs/reference/daisy-seed3.md section 'Instrument excerpts in QSPI' no longer \
-             contains {needle:?}; update the table to match crates/asperitas-logging/src/excerpt.rs"
+             contains {needle:?}; update the table to match crates/asperitas-wire/src/excerpt.rs"
         );
     }
 }

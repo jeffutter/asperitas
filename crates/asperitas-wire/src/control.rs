@@ -601,7 +601,6 @@ mod tests {
     use super::*;
     use crate::excerpt;
     use crate::frame::{encode, Decoder, MAX_FRAME};
-    use crate::inbound::{InboundFeed, InboundStats};
     use log::Level;
     use proptest::prelude::*;
 
@@ -673,13 +672,7 @@ mod tests {
         fn command_survives_the_frame_path(c in command()) {
             let mut b = [0u8; MAX_BODY];
             let n = c.encode(&mut b);
-            let mut f = [0u8; MAX_FRAME];
-            let len = encode(Level::Info, 1, 2, &b[..n], &mut f).len;
-            let stats = InboundStats::new();
-            let mut feed = InboundFeed::new(&stats);
-            let mut got = None;
-            feed.feed(&f[..len], |r| { got = Some(*r); true });
-            let rec = got.unwrap();
+            let rec = inbound(&b[..n]);
             prop_assert_eq!(dispatch(&rec), Routed::Control(Ok(c)));
         }
 

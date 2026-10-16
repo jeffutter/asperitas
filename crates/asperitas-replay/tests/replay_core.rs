@@ -7,11 +7,11 @@
 //! poison pattern into the claimed half before the real data, so a callback that ever read a half
 //! still being filled would hand out poison and fail the sample comparison, not just the CRC.
 
-use asperitas_logging::frame::crc16_ccitt;
 use asperitas_replay::{
     transition_ok, Block, HalfState, PassReport, ReplayCore, StartError, BLOCK_BYTES,
     BLOCK_SAMPLES, HALF_BYTES,
 };
+use asperitas_wire::frame::crc16_ccitt;
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------

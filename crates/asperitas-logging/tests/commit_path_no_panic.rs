@@ -36,9 +36,9 @@
 use std::collections::BTreeSet;
 
 const LIB_RS: &str = include_str!("../src/lib.rs");
-const FRAME_RS: &str = include_str!("../src/frame.rs");
-const CONSOLE_RS: &str = include_str!("../src/console.rs");
-const DUMP_RS: &str = include_str!("../src/dump.rs");
+const FRAME_RS: &str = include_str!("../../asperitas-wire/src/frame.rs");
+const CONSOLE_RS: &str = include_str!("../../asperitas-wire/src/console.rs");
+const DUMP_RS: &str = include_str!("../../asperitas-wire/src/dump.rs");
 
 /// One source file, carried as its masked copy.
 struct Src {

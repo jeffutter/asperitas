@@ -4,8 +4,8 @@
 //! Run it on a file, or pipe a capture through it:
 //!
 //! ```sh
-//! cargo run -p asperitas-logging --example console_decode -- capture.bin > clean.txt
-//! cat capture.bin | cargo run -p asperitas-logging --example console_decode
+//! cargo run -p asperitas-wire --example console_decode -- capture.bin > clean.txt
+//! cat capture.bin | cargo run -p asperitas-wire --example console_decode
 //! ```
 //!
 //! Bytes are read in 4 KiB pieces — deliberately larger than one frame, so record
@@ -33,8 +33,8 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::process::exit;
 
-use asperitas_logging::frame::{encode, Decoder, Record, Stats, MAX_FRAME};
-use asperitas_logging::Level;
+use asperitas_wire::frame::{encode, Decoder, Record, Stats, MAX_FRAME};
+use asperitas_wire::Level;
 
 /// Bytes requested per read. Larger than [`MAX_FRAME`] on purpose: a reader that happens
 /// to align with record boundaries proves nothing about the decoder's boundaries.

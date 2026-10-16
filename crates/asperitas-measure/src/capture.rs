@@ -1,6 +1,6 @@
 //! Load a rig capture from the framed console stream and refuse anything not fully proved.
 //!
-//! The reassembly loop deliberately mirrors `asperitas-logging`'s `dump_reassemble` example (as
+//! The reassembly loop deliberately mirrors `asperitas-wire`'s `dump_reassemble` example (as
 //! `asperitas-rig` does) instead of exposing a `std` API from the firmware-shared crate. The
 //! strictness is the same: a bad frame, a discarded byte, a refused or abandoned block, or a
 //! malformed dump record is an error. A short sample vector that looks fine is the failure this
@@ -11,8 +11,8 @@ use std::fs::File;
 use std::io::{self, BufReader, Read};
 use std::path::Path;
 
-use asperitas_logging::dump::{Action, BlockAssembler, CHUNK_RAW, MAX_CHUNKS_PER_BLOCK};
-use asperitas_logging::frame::Decoder;
+use asperitas_wire::dump::{Action, BlockAssembler, CHUNK_RAW, MAX_CHUNKS_PER_BLOCK};
+use asperitas_wire::frame::Decoder;
 
 /// Bytes requested per read. Larger than one frame so record boundaries never align by luck.
 const CHUNK_BYTES: usize = 4096;
@@ -180,9 +180,9 @@ impl Capture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use asperitas_logging::dump::audio_record;
-    use asperitas_logging::frame::MAX_FRAME;
-    use asperitas_logging::Level;
+    use asperitas_wire::dump::audio_record;
+    use asperitas_wire::frame::MAX_FRAME;
+    use asperitas_wire::Level;
 
     const FIXTURE: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -224,7 +224,7 @@ mod tests {
         let raw: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
         let mut wire = Vec::new();
         for index in 0..CHUNKS {
-            let mut body = [0u8; asperitas_logging::frame::MAX_BODY];
+            let mut body = [0u8; asperitas_wire::frame::MAX_BODY];
             let mut fb = [0u8; MAX_FRAME];
             let start = index as usize * CHUNK_RAW;
             let e = audio_record(
@@ -244,16 +244,16 @@ mod tests {
                 wire.extend_from_slice(&fb[..e.len]);
             }
         }
-        let mut body = [0u8; asperitas_logging::frame::MAX_BODY];
+        let mut body = [0u8; asperitas_wire::frame::MAX_BODY];
         let mut fb = [0u8; MAX_FRAME];
-        let e = asperitas_logging::dump::audend_record(
+        let e = asperitas_wire::dump::audend_record(
             Level::Info,
             *seq,
             *seq * 4,
             id,
             CHUNKS,
             raw.len() as u32,
-            asperitas_logging::frame::crc16_ccitt(&raw),
+            asperitas_wire::frame::crc16_ccitt(&raw),
             &mut body,
             &mut fb,
         )

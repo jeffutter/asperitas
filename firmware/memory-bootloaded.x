@@ -19,7 +19,7 @@
  *
  * QSPI budget. The image is stored from QSPI offset 0x40000 (the bootloader occupies the first
  * 0x40000 bytes of the part). Excerpt slots start at QSPI offset 0x100000
- * (`asperitas_logging::excerpt::EXCERPT_AREA_START`, TASK-038.04.01), so the image must end below
+ * (`asperitas_wire::excerpt::EXCERPT_AREA_START`, TASK-038.04.01), so the image must end below
  * it. FLASH LENGTH is what bounds the image, and `scripts/check-image-load-addresses.sh` fails if
  * QSPI_APP_OFFSET + LENGTH reaches that constant. It parses both from this file and the Rust source;
  * the offset is stated once, on the marker line below.

@@ -2,9 +2,9 @@
 //! sending to `rig` by hand.
 //!
 //! ```sh
-//! cargo run -q -p asperitas-logging --example ctl_frame -- 01 0xC000 > fx.frame
-//! cargo run -q -p asperitas-logging --example ctl_frame -- set 00 0x8000 > set.frame
-//! cargo run -q -p asperitas-logging --example ctl_frame -- rel 00 > rel.frame
+//! cargo run -q -p asperitas-wire --example ctl_frame -- 01 0xC000 > fx.frame
+//! cargo run -q -p asperitas-wire --example ctl_frame -- set 00 0x8000 > set.frame
+//! cargo run -q -p asperitas-wire --example ctl_frame -- rel 00 > rel.frame
 //! cat fx.frame > /dev/cu.usbmodem...
 //! ```
 //!
@@ -26,9 +26,9 @@ use std::env;
 use std::io::{self, Write};
 use std::process::exit;
 
-use asperitas_logging::control::{BodyBuf, Command};
-use asperitas_logging::frame::{encode, MAX_BODY, MAX_FRAME};
-use asperitas_logging::Level;
+use asperitas_wire::control::{BodyBuf, Command};
+use asperitas_wire::frame::{encode, MAX_BODY, MAX_FRAME};
+use asperitas_wire::Level;
 
 fn hex(arg: &str) -> Option<u32> {
     u32::from_str_radix(arg.trim_start_matches("0x"), 16).ok()

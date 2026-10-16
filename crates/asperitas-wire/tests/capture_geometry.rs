@@ -1,6 +1,6 @@
-//! Derivation suite for the capture-ring geometry in `asperitas_logging::capture`.
+//! Derivation suite for the capture-ring geometry in `asperitas_wire::capture`.
 //!
-//! Run with: `cargo test -p asperitas-logging`
+//! Run with: `cargo test -p asperitas-wire`
 //!
 //! The ring and the console stream describe the same capture, and until this file nothing proved it:
 //! `dump` owned the wire grammar, the ring's shape lived in prose, and the pair happened to be
@@ -26,15 +26,15 @@
 //! Style follows `tests/console_frame.rs`: helper docs, section banners over one idea each, and
 //! third-person indicative test names.
 
-use asperitas_logging::capture::{self, BlockState};
-use asperitas_logging::dump::{
+use asperitas_wire::capture::{self, BlockState};
+use asperitas_wire::dump::{
     self, AUDIO_HEADER_LEN, CHUNK_RAW, FULL_AUDIO_FRAME_LEN, MAX_AUDEND_BODY_LEN, MAX_BLOCK_BYTES,
     MAX_CHUNKS_PER_BLOCK,
 };
-use asperitas_logging::frame::{
+use asperitas_wire::frame::{
     crc16_ccitt, crc16_ccitt_update, CRC16_INITIAL, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
 };
-use asperitas_logging::Level;
+use asperitas_wire::Level;
 
 // ---------------------------------------------------------------------------
 // Helpers

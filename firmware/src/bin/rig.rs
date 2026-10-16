@@ -41,8 +41,9 @@ use asperitas_dsp::stimulus::PulseTrain;
 use asperitas_dsp::stimulus::Sine;
 use asperitas_dsp::stimulus::Stimulus;
 use asperitas_firmware::audio::{self, measure_time_base, AudioProcessor, TimeBase, BLOCK_LENGTH};
-use asperitas_logging::capture::{self, BlockState};
-use asperitas_logging::{console, error, info};
+use asperitas_logging::{error, info};
+use asperitas_wire::capture::{self, BlockState};
+use asperitas_wire::console;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use cortex_m::peripheral::{DWT, NVIC};
 use daisy_embassy::audio::{AudioConfig, Fs};
@@ -926,7 +927,7 @@ async fn send_dump_body(body: &[u8], tally: &mut DumpTally) {
 /// wire is the sequence number, so a host can tell this run's blocks apart from a previous one's.
 #[cfg(feature = "log-usb")]
 async fn dump_ring(ring: Ring, first: u32, end: u32) {
-    use asperitas_logging::{dump, frame};
+    use asperitas_wire::{dump, frame};
 
     let chunks = capture::chunks_per_block() as u16;
     let mut tally = DumpTally::default();
@@ -1013,12 +1014,12 @@ async fn dump_ring(_ring: Ring, first: u32, end: u32) {
 // Excerpt install
 // ---------------------------------------------------------------------------
 //
-// The host streams `EXCSTART` / `EXCDATA` / `EXCEND` records (`asperitas_logging::excerpt`) over the
+// The host streams `EXCSTART` / `EXCDATA` / `EXCEND` records (`asperitas_wire::excerpt`) over the
 // CDC OUT endpoint; `usb::inbound()` hands them over whole and CRC-checked; `excerpt::Installer` turns
 // them into flash actions; the task below performs each action and nothing else. Every protocol
 // decision - ordering, short and overrun chunks, the stream CRC, when a sector is full, whether the
 // readback earns an `EXCOK` - is the installer's, and is covered by its host suite
-// (`crates/asperitas-logging/tests/excerpt_install.rs`, including `dropping_any_frame_never_verifies`
+// (`crates/asperitas-wire/tests/excerpt_install.rs`, including `dropping_any_frame_never_verifies`
 // for truncation and the CRC-mismatch verdict tests for corruption). This side adds only flash I/O,
 // the capture gate and the reporting, so a truncated or corrupted upload reaches `EXCOK` here exactly
 // when it does there: never.
@@ -1079,7 +1080,7 @@ static FLASH: Mutex<ThreadModeRawMutex, Option<RigFlash>> = Mutex::new(None);
 
 /// Sector size as a `usize`, for array lengths. The installer lends sectors as `[u8; SECTOR]`.
 #[cfg(feature = "log-usb")]
-const SECTOR_BYTES: usize = asperitas_logging::excerpt::SECTOR as usize;
+const SECTOR_BYTES: usize = asperitas_wire::excerpt::SECTOR as usize;
 
 /// Erase or rewrite one whole sector of `slot`: erase when `data` is `None`, erase then program
 /// `data` otherwise. The only place this binary erases or writes QSPI.
@@ -1096,7 +1097,7 @@ async fn rewrite_sector(
     address: u32,
     data: Option<&[u8; SECTOR_BYTES]>,
 ) {
-    use asperitas_logging::excerpt::{slot_base, SECTOR, SLOT_SPAN};
+    use asperitas_wire::excerpt::{slot_base, SECTOR, SLOT_SPAN};
     let base = slot_base(slot);
     assert!(
         base.is_some_and(|base| address.is_multiple_of(SECTOR)
@@ -1120,8 +1121,8 @@ async fn readback_crc(
     bytes: u32,
     scratch: &mut [u8; SECTOR_BYTES],
 ) -> (u16, u32) {
-    use asperitas_logging::excerpt::{slot_base, SLOT_SPAN};
-    use asperitas_logging::frame::{crc16_ccitt_update, CRC16_INITIAL};
+    use asperitas_wire::excerpt::{slot_base, SLOT_SPAN};
+    use asperitas_wire::frame::{crc16_ccitt_update, CRC16_INITIAL};
     assert!(
         slot_base(slot).is_some_and(|base| address >= base && address + bytes <= base + SLOT_SPAN),
         "rig: flash readback outside its slot"
@@ -1152,9 +1153,9 @@ fn flash_of<'g>(
 
 /// Report a failed install as `EXCFAIL`.
 #[cfg(feature = "log-usb")]
-fn emit_exc_fail(failure: &asperitas_logging::excerpt::Failure) {
-    let mut body = [0u8; asperitas_logging::frame::MAX_BODY];
-    let n = asperitas_logging::excerpt::exc_fail_body(failure, &mut body);
+fn emit_exc_fail(failure: &asperitas_wire::excerpt::Failure) {
+    let mut body = [0u8; asperitas_wire::frame::MAX_BODY];
+    let n = asperitas_wire::excerpt::exc_fail_body(failure, &mut body);
     emit_console(&body[..n]);
 }
 
@@ -1164,7 +1165,7 @@ fn emit_exc_fail(failure: &asperitas_logging::excerpt::Failure) {
 /// and answered by `route`.
 #[cfg(feature = "log-usb")]
 fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
-    use asperitas_logging::control::{route, ErrorCode, Reply, CONTROL};
+    use asperitas_wire::control::{route, ErrorCode, Reply, CONTROL};
     let mut reply = None;
     let rejected = route(
         record,
@@ -1172,7 +1173,7 @@ fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
         |_| {},
         |cmd| {
             reply = Some(match cmd {
-                asperitas_logging::control::Command::ReplayFx { fx, value } => {
+                asperitas_wire::control::Command::ReplayFx { fx, value } => {
                     // Changing the effect mid-capture would make the recording unrepeatable.
                     if CAPTURE_ACTIVE.load(Ordering::Acquire) {
                         Reply::Error(ErrorCode::Busy)
@@ -1184,14 +1185,14 @@ fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
                 }
                 // Allowed mid-capture, unlike `FX`: the effect kind and base value stay fixed
                 // while the override moves the parameter, which is what a sweep is.
-                asperitas_logging::control::Command::OverrideSet { knob, value } => {
+                asperitas_wire::control::Command::OverrideSet { knob, value } => {
                     if fx_ctl::override_set(knob, value) {
                         Reply::Ok(cmd.verb())
                     } else {
                         Reply::Error(ErrorCode::BadKnob)
                     }
                 }
-                asperitas_logging::control::Command::OverrideRelease { knob } => {
+                asperitas_wire::control::Command::OverrideRelease { knob } => {
                     if fx_ctl::override_release(knob) {
                         Reply::Ok(cmd.verb())
                     } else {
@@ -1203,7 +1204,7 @@ fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
         },
     );
     if let Some(r) = reply.or(rejected) {
-        let mut body = [0u8; asperitas_logging::frame::MAX_BODY];
+        let mut body = [0u8; asperitas_wire::frame::MAX_BODY];
         let n = r.encode(&mut body);
         emit_console(&body[..n]);
     }
@@ -1219,7 +1220,7 @@ fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
 /// `main`'s statically allocated task, not on the stack.
 #[cfg(feature = "log-usb")]
 async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
-    use asperitas_logging::excerpt::{
+    use asperitas_wire::excerpt::{
         exc_ok_body, parse_record, Action, ExcRecord, Installer, RecordError, Verdict, Why,
         HEADER_LEN,
     };
@@ -1232,7 +1233,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
     loop {
         let record = inbound.receive().await;
         let body = record.body();
-        if body.starts_with(asperitas_logging::control::CMD_PREFIX) {
+        if body.starts_with(asperitas_wire::control::CMD_PREFIX) {
             handle_control(&record);
             continue;
         }
@@ -1300,7 +1301,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
                         rewrite_sector(flash, slot, address, Some(&scratch)).await;
                         drop(guard);
                         info!("rig: excerpt slot {slot} installed and verified");
-                        let mut out = [0u8; asperitas_logging::frame::MAX_BODY];
+                        let mut out = [0u8; asperitas_wire::frame::MAX_BODY];
                         let n = exc_ok_body(&header, &mut out);
                         emit_console(&out[..n]);
                     }
@@ -1491,12 +1492,13 @@ mod excerpt_play {
     use super::{emit_console, flash_of, FLASH};
     use asperitas_dsp::processor::{Frame, Processor};
     use asperitas_dsp::stimulus::Stimulus;
-    use asperitas_logging::excerpt::{self, SlotHeader, HEADER_LEN};
-    use asperitas_logging::{console, error, info};
+    use asperitas_logging::{error, info};
     use asperitas_replay::{
         FillClaim, PassReport, ReplayCore, ASSUMED_SCHEDULING_LATENCY_MICROS, BLOCK_SAMPLES,
         BYTES_PER_SAMPLE,
     };
+    use asperitas_wire::console;
+    use asperitas_wire::excerpt::{self, SlotHeader, HEADER_LEN};
     use core::fmt::Write as _;
     use cortex_m::peripheral::SCB;
 
@@ -1920,10 +1922,10 @@ fn emit_descriptors(generator: &ActiveGenerator, time_base: TimeBase) {
 
     let cfg = console::RigConfig {
         lane: MONO_LANE,
-        blocks: asperitas_logging::capture::RING_BLOCKS as u32,
-        block_bytes: asperitas_logging::capture::RING_BLOCK_BYTES as u32,
-        bytes_per_s: asperitas_logging::capture::BYTES_PER_SECOND as u32,
-        capsec_us: asperitas_logging::capture::ring_duration_micros() as u32,
+        blocks: asperitas_wire::capture::RING_BLOCKS as u32,
+        block_bytes: asperitas_wire::capture::RING_BLOCK_BYTES as u32,
+        bytes_per_s: asperitas_wire::capture::BYTES_PER_SECOND as u32,
+        capsec_us: asperitas_wire::capture::ring_duration_micros() as u32,
         window_s: CAPTURE_SECONDS as u32,
         cpu_hz: time_base.cpu_hz,
         icache: cortex_m::peripheral::SCB::icache_enabled(),
