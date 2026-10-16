@@ -267,7 +267,7 @@ gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-
 # skipped that way is precisely the decoration that would read green while the drift lives.
 #
 # What it adds to the tier, from three consecutive `commit` runs on this tree: 0.464 s / 0.457 s / 0.457 s. gate-costs:exempt reason="the three samples behind one published figure, which is keyed below"
-# About a tenth of what the tier itself costs at ~14 s {{tier:commit}} - a tenth of pre-commit spent to make
+# About a tenth of what the tier itself costs at ~13 s {{tier:commit}} - a tenth of pre-commit spent to make
 # eight files' worth of cost figures impossible to get wrong, which is what the ledger is for. It publishes
 # 0.53 s {{gate:gate-costs-current}} warm, and that is the figure anything else here quotes.
 #
@@ -333,7 +333,7 @@ gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/ch
 # cannot prove is the limit every fixture has -- that the linker emits anything like these files -- and
 # the push-tier gate over six linked ELFs stays the backstop for that, which is why both exist rather
 # than one. Fifth here on the same cheapest-first rule as the two above: compiles nothing, reads no
-# artifact, writes nothing under firmware/target/. Measured 0.99 s {{gate:load-addresses-selftest}} warm,
+# artifact, writes nothing under firmware/target/. Measured ~1 s {{gate:load-addresses-selftest}} warm,
 # nearly all of it in the five child processes and their objdumps at ~29 ms {{component:objdump-invocation}}
 # each. Eight deliberate mutations each turned at least one case red and left the
 # rest green: trim dropped, zero-size counted, empty Type read as loaded, unknown Type word downgraded to
@@ -385,8 +385,13 @@ gate push dump-reassemble-selftest "=== dump_reassemble --selftest ===" \
 gate push cargo-doc "=== cargo doc (workspace) ===" \
   env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
+# asperitas-measure is excluded here and only here. It depends on serde and serde_json, which turn on
+# serde's `std` feature, and --all-features unifies that with asperitas-logging's `log-usb` -> embassy-usb
+# -> ssmarshal, a no_std crate whose Error does not implement std::error::Error, so it stops compiling
+# (E0277 on serde::de::Error). The crate has no features of its own, so its all-features build is its
+# default build, which the `cargo-doc` gate above already covers: nothing is lost by the exclusion.
 gate push cargo-doc-all-features "=== cargo doc (workspace, all features) ===" \
-  env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
+  env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude asperitas-measure --no-deps --all-features
 
 # rig's non-default stimulus generators and its shortened capture window. Exactly one generator links
 # per image (rig.rs rejects two at compile time), so the sweep and the pulse train are code no other
@@ -474,7 +479,7 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 #
 # `push` tier and placed here because pre-commit builds no firmware, so the ELFs it reads may not exist
 # at all -- and inventing a skip path for that is the blind spot TASK-062 had to remove from elf-check.
-# Measured 0.88 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
+# Measured 0.87 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
 # processes, six objdumps at ~29 ms {{component:objdump-invocation}} each and six objcopies at
 # ~31 ms {{component:objcopy-invocation}}. Its parser's own assertions are a separate commit-tier gate,
 # `=== load-addresses --selftest ===`, placed with the other selftests ahead of every cargo invocation --
@@ -483,7 +488,7 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 gate push image-load-addresses "=== image load addresses ===" bash scripts/check-image-load-addresses.sh
 
 # Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses
-# their artifacts: ~1 s {{gate:firmware-clippy}} and 0.99 s {{gate:firmware-clippy-rtt}} when nothing has changed
+# their artifacts: ~1 s {{gate:firmware-clippy}} and 0.84 s {{gate:firmware-clippy-rtt}} when nothing has changed
 # since the last lint, several times that directly after a build, and tens of seconds in a fresh target
 # dir. --bins is the whole package over there (no lib target, six entries under src/bin/), and
 # --all-targets is unusable on a no_std target with no test harness to link. firmware/ is a second
@@ -514,7 +519,7 @@ gate commit rig-stim-excerpt-clippy-rtt "=== firmware clippy (rig, stim-excerpt,
 gate push cargo-test "=== cargo test ===" cargo test --workspace
 
 # THE ONE DELIBERATELY CI-ONLY GATE, and it is priced rather than merely absent (TASK-061 AC #3).
-# ~83 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
+# ~154 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
 # flag -- more than every other push-tier gate combined. Its compile-time half DOES run in the push tier,
 # as the pod-hw clippy above, so what stays remote is runtime coverage of pod-hw code paths. Accepted
 # because CI is the authority for that coverage, TASK-018.01's fixup made the same split on purpose
