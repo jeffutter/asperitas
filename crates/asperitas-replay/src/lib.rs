@@ -1,7 +1,9 @@
+#![no_std]
+
 //! Replay staging core: an internal-RAM ping-pong between a QSPI refill task and the audio
 //! callback, with the underrun policy and the DAC-path CRC that make one replay pass reportable.
 //!
-//! The rig plays an excerpt stored in QSPI flash (`crate::excerpt`). The audio callback has about
+//! The rig plays an excerpt stored in QSPI flash ([`asperitas_logging::excerpt`]). The audio callback has about
 //! 590 us of its 666 us block budget to spare and must never wait on flash, so the samples reach it
 //! through two halves of a staging buffer: a thread-mode task reads the next stretch of the
 //! excerpt into whichever half is idle (`Flash::read_async` over MDMA, wired in TASK-038.04.03.02)
@@ -35,10 +37,10 @@
 //!
 //! # What the CRC says, and what it does not
 //!
-//! [`PassReport::crc16`] is CRC-16/CCITT-FALSE ([`crate::frame::crc16_ccitt`]) over exactly the
+//! [`PassReport::crc16`] is CRC-16/CCITT-FALSE ([`asperitas_logging::frame::crc16_ccitt`]) over exactly the
 //! little-endian `i16` samples [`ReplayCore::take_block`] handed out from the source: inserted
 //! silence and the zero padding after the last sample are excluded. After a pass it equals the slot
-//! header's PCM CRC ([`crate::excerpt`]) and the host's CRC of the WAV data chunk. It proves the
+//! header's PCM CRC ([[`asperitas_logging::excerpt`]]) and the host's CRC of the WAV data chunk. It proves the
 //! bytes reached the DAC encoder intact and in order. It says nothing about what comes back through
 //! the codec and the cable; that is TASK-035's measurement, not this one.
 //!
@@ -50,15 +52,15 @@
 //! assumed, and TASK-038.09's bench reading is what replaces them. If a measured figure degrades
 //! the margin, the assert is where [`HALF_BYTES`] has to change.
 //!
-//! Durations carry explicit widths with `u64` intermediates for the reason `crate::capture`'s
+//! Durations carry explicit widths with `u64` intermediates for the reason [`asperitas_logging::capture`]'s
 //! module docs record: const evaluation happens in the target's 32-bit `usize`.
 
 use core::cell::UnsafeCell;
 use core::ops::Range;
 use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 
-use crate::capture;
-use crate::frame::{crc16_ccitt_update, CRC16_INITIAL};
+use asperitas_logging::capture;
+use asperitas_logging::frame::{crc16_ccitt_update, CRC16_INITIAL};
 
 // ---------------------------------------------------------------------------
 // Geometry
@@ -70,7 +72,7 @@ use crate::frame::{crc16_ccitt_update, CRC16_INITIAL};
 /// replay buffer cannot disagree about the callback they both serve.
 pub const BLOCK_SAMPLES: usize = capture::FRAMES_PER_CALLBACK;
 
-/// Bytes per replayed sample: mono `i16`, the excerpt format `crate::excerpt` stores.
+/// Bytes per replayed sample: mono `i16`, the excerpt format [`asperitas_logging::excerpt`] stores.
 pub const BYTES_PER_SAMPLE: usize = 2;
 
 /// Source bytes one callback block consumes: 64.

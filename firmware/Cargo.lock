@@ -55,6 +55,7 @@ dependencies = [
  "asperitas-dsp",
  "asperitas-logging",
  "asperitas-pod",
+ "asperitas-replay",
  "cortex-m",
  "cortex-m-rt",
  "daisy-embassy",
@@ -89,6 +90,13 @@ version = "0.1.0"
 dependencies = [
  "embassy-stm32",
  "embassy-time",
+]
+
+[[package]]
+name = "asperitas-replay"
+version = "0.1.0"
+dependencies = [
+ "asperitas-logging",
 ]
 
 [[package]]

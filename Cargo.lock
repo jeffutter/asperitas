@@ -149,6 +149,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "asperitas-replay"
+version = "0.1.0"
+dependencies = [
+ "asperitas-logging",
+ "proptest",
+]
+
+[[package]]
 name = "asperitas-rig"
 version = "0.1.0"
 dependencies = [

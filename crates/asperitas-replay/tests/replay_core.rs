@@ -1,6 +1,6 @@
-//! Host suite for the replay staging core in `asperitas_logging::replay`.
+//! Host suite for the replay staging core in `asperitas_replay`.
 //!
-//! Run with: `cargo test -p asperitas-logging`
+//! Run with: `cargo test -p asperitas-replay`
 //!
 //! The oracle throughout is `frame::crc16_ccitt` over the source bytes and the source samples
 //! themselves: the core's CRC is never compared against its own arithmetic. Every fill writes a
@@ -8,7 +8,7 @@
 //! still being filled would hand out poison and fail the sample comparison, not just the CRC.
 
 use asperitas_logging::frame::crc16_ccitt;
-use asperitas_logging::replay::{
+use asperitas_replay::{
     transition_ok, Block, HalfState, PassReport, ReplayCore, StartError, BLOCK_BYTES,
     BLOCK_SAMPLES, HALF_BYTES,
 };
@@ -335,7 +335,7 @@ proptest! {
         let mut underrun_blocks = 0;
         let expected = samples_of(&src);
         let mut checked = 0;
-        let finish_claim = |claim: Option<asperitas_logging::replay::FillClaim<'_>>| {
+        let finish_claim = |claim: Option<asperitas_replay::FillClaim<'_>>| {
             if let Some(mut c) = claim {
                 let range = c.source();
                 c.buffer().copy_from_slice(&src[range.start as usize..range.end as usize]);

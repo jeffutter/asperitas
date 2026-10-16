@@ -611,7 +611,7 @@ pub fn dumpend_body(d: &DumpSummary, out: &mut [u8; BODY_WINDOW]) -> usize {
 /// # What `crc16` covers
 ///
 /// The CRC-16/CCITT-FALSE of the samples the audio callback handed to the DAC encoder, in order
-/// (`crate::replay`). `want` is the CRC the slot header stored when the excerpt was installed, which
+/// (`asperitas_replay`). `want` is the CRC the slot header stored when the excerpt was installed, which
 /// the install verified against the host's. Equal CRCs with `clean=1` say the QSPI-to-DAC-encoder
 /// path delivered the excerpt intact and unbroken. They say **nothing** about the codec, the analog
 /// stage or the cable: what comes back through them is the capture's business (TASK-035 AC #4).

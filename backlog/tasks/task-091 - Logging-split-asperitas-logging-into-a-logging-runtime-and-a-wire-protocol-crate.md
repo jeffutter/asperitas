@@ -3,15 +3,18 @@ id: TASK-091
 title: >-
   Logging: split asperitas-logging into a logging runtime and a wire-protocol
   crate
-status: To Do
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-16 20:38'
 labels:
   - review-2026-10
   - logging
   - architecture
-dependencies: []
+  - planned
+dependencies:
+  - TASK-091.04
 priority: high
 type: chore
 ordinal: 193800
@@ -35,6 +38,13 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #2 All 240 logging tests still pass; firmware builds for every layout
 - [ ] #3 Hardware recheck ticket passes (rig capture, panictest, enumeration)
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against 19b50f6
+Umbrella ticket; all work is delegated. Order: TASK-091.01 (replay out) -> TASK-091.02 (asperitas-wire) -> TASK-091.03 (asperitas-host) -> TASK-091.04 (docs/scripts). Each non-trivial child needs its own planning pass. Final: workspace tests (240 logging tests redistributed across crates), firmware builds for every layout, then hardware recheck TASK-120 (@human) covers rig capture, panictest, enumeration. Risks: control<->inbound coupling, crate-private TruncWriter, firmware/ workspace Cargo.lock changes.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

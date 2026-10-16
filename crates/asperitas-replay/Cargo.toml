@@ -1,0 +1,13 @@
+[package]
+name = "asperitas-replay"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+asperitas-logging = { path = "../asperitas-logging", default-features = false }
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

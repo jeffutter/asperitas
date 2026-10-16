@@ -1322,7 +1322,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 // ---------------------------------------------------------------------------
 //
 // `stim-excerpt` plays a slot installed by the section above. The audio callback never touches QSPI:
-// it pops 32-sample blocks from `asperitas_logging::replay::ReplayCore`, a two-half ping-pong in
+// it pops 32-sample blocks from `asperitas_replay::ReplayCore`, a two-half ping-pong in
 // internal RAM whose accounting (which side may touch which half, the underrun policy, the CRC) is
 // host-tested in that crate. Everything here is the part a host cannot test: the flash read that fills
 // a half, the cache argument, and the reporting.
@@ -1404,7 +1404,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 //
 // ### What EXCPLAY's CRC says
 //
-// It is the CRC of the samples handed to the DAC encoder (`replay::PassReport::crc16`). With `want`
+// It is the CRC of the samples handed to the DAC encoder (`asperitas_replay::PassReport::crc16`). With `want`
 // (the stored header CRC) and `clean=1` it says QSPI-to-encoder delivered the excerpt intact and
 // unbroken. It says nothing about the codec, the analog path or the cable (TASK-035 AC #4).
 // ---------------------------------------------------------------------------
@@ -1492,11 +1492,11 @@ mod excerpt_play {
     use asperitas_dsp::processor::{Frame, Processor};
     use asperitas_dsp::stimulus::Stimulus;
     use asperitas_logging::excerpt::{self, SlotHeader, HEADER_LEN};
-    use asperitas_logging::replay::{
+    use asperitas_logging::{console, error, info};
+    use asperitas_replay::{
         FillClaim, PassReport, ReplayCore, ASSUMED_SCHEDULING_LATENCY_MICROS, BLOCK_SAMPLES,
         BYTES_PER_SAMPLE,
     };
-    use asperitas_logging::{console, error, info};
     use core::fmt::Write as _;
     use cortex_m::peripheral::SCB;
 
