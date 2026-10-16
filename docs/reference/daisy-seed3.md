@@ -406,10 +406,10 @@ The Seed3 exposes SWD/JTAG pads. The 10-pin connector pinout is identical to ear
 Seeds — including **pin 10 being nRESET**, whose net is traced later in this section; there
 are additional pads matching the 14-pin ST-LINK-V3MINIE, present only for mechanical alignment — **the
 extra pins are not wired up**. Whether the 10-pin footprint is physically reachable with the Seed seated
-in the Pod is unmeasured; TASK-037 records the attachment method actually used.
+in the Pod: it is. A pin header soldered onto the 14-pad footprint (centre 10 pins active) lets the
+Seed seat in the Pod with the probe attached.
 
-The probe for this bench is an ST-Link V3 MINIE. As of 2026-09-10 no probe has been attached to
-this board at all, which is what TASK-037 exists to change.
+The probe for this bench is an ST-Link V3 MINIE (firmware V3J15M7), attached and measured on this board.
 
 **Pad layout and cable orientation.** The 14 pads are two rows of seven, and a straight-through
 1:1 14-pin ribbon (STDC14 on the probe end) is correct: pin n on the probe goes to pad n on the
@@ -462,25 +462,24 @@ its `examine-end` hook cleared reads and writes memory reliably. `defmt` over RT
 the trace clock. For probe-rs, `firmware/asperitas-h750.yaml` is the stock `STM32H750IB` entry
 (internal-flash algorithm only) renamed `ASPERITAS_H750IB`, which falls outside the
 `STM32H7` prefix match and so gets the default ARM sequence. The `probe-*` Makefile targets use it
-through `--chip-description-path`, so the `--chip STM32H750IBKx` strings elsewhere in this document
-now read `--chip ASPERITAS_H750IB`. Measured: `probe-rs read b32 0x08000000 4 --chip
+through `--chip-description-path`, and every probe command in this document names that chip. Measured: `probe-rs read b32 0x08000000 4 --chip
 ASPERITAS_H750IB --chip-description-path firmware/asperitas-h750.yaml --protocol swd` returns the
-vector table on a freshly power-cycled board without wedging the port. Since measured
-(TASK-037): flashing with it, RTT, and `--connect-under-reset`, the last only with the
-probe-rs-from-main described under *Under reset* below. Because that sequence never sets `DBGMCU_CR`, firmware
+vector table on a freshly power-cycled board without wedging the port. Flashing with it, RTT and
+`--connect-under-reset` are also verified on this board, the last only with the probe-rs-from-main
+described under *Under reset* below. Because that sequence never sets `DBGMCU_CR`, firmware
 that sleeps in WFI must set the debug-in-sleep bits itself. `Failed to read component information at 0xe000e000` while attached means the core
 was not accessible (held in reset or a stuck debug port), not a wiring fault.
 
 The probe does not power the board: with the Seed unpowered, `VAPP` read 0.58 V and attach failed.
 
 **What is and isn't established here.** The commands below are copied from `make -n` output in
-`firmware/`, the flag semantics from `probe-rs` 0.32.0's own `--help`, the target behaviour
-from `defmt-rtt` 1.3.0 source, and the chip entry from `probe-rs chip info` — all of which are
-host-side facts, checkable without a board. What has *not* been established is anything about
-this board: attach time, flash time, log throughput, whether a real panic decodes to a
-backtrace. Those are TASK-037's measurements and live in its notes. The one board fact that
-changed the tooling, why `--connect-under-reset` failed and how the flake fixes it, is under
-*Under reset* below.
+`firmware/`, the flag semantics from `probe-rs` 0.32.0's own `--help` and the target behaviour
+from `defmt-rtt` 1.3.0 source. Measured on this board: attach 0.085 s plain and 0.21 s under reset,
+flash 3.55-3.68 s, RTT about 3000 records/s (about 65 KiB/s) without loss, and a forced panic
+decoding to a 17-frame backtrace when the session is stopped with Ctrl+C and
+`--always-print-stacktrace`. Not measured: under-reset straight after a power cycle, and how
+`--speed` affects throughput. The one board fact that changed the tooling, why
+`--connect-under-reset` failed and how the flake fixes it, is under *Under reset* below.
 
 ```bash
 cd firmware
@@ -493,8 +492,8 @@ Expanded (`make -n probe-flash probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1
 
 ```
 cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
-probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --connect-under-reset --verify && probe-rs reset --chip STM32H750IBKx --non-interactive --connect-under-reset
-probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive
+probe-rs download target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --connect-under-reset --verify && probe-rs reset --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --connect-under-reset
+probe-rs attach target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive
 ```
 
 There are two more targets. `probe-run` flashes and then stays attached to stream; `probe-rtt-list`
@@ -512,11 +511,12 @@ decoder that is not your sources mislabels live output into something that looks
 `runner` in `.cargo/config.toml`, even though upstream daisy-embassy ships one: a runner lets
 `cargo run` in a script, or an editor action, silently reach for the probe.
 
-`--chip STM32H750IBKx` is the exact string, verified host-side against the pinned toolchain:
-`probe-rs chip info STM32H750IBKx` reports NVM `0x08000000..0x08020000` (128 KiB) and AXI SRAM
-`0x24000000..0x24080000` (512 KiB), which matches `firmware/memory-internal.x` (re-run 2026-09-12 against
-probe-rs-tools 0.32.0). Bare `STM32H750IB`
-resolves too; use the full string so it reads as the same part `memory-internal.x` describes.
+`--chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml` is the exact pair (the Makefile's
+`CHIP` and `CHIP_DESC`). The entry is the stock `STM32H750IB` description renamed, so
+`probe-rs chip info ASPERITAS_H750IB --chip-description-path firmware/asperitas-h750.yaml` reports the same
+NVM `0x08000000..0x08020000` (128 KiB) and AXI SRAM `0x24000000..0x24080000` (512 KiB), which matches
+`firmware/memory-internal.x`. Do not use the stock `STM32H750IBKx` or `STM32H750IB` names for attach:
+both match the `STM32H7` prefix and wedge the port.
 
 **Why the probe path takes the ELF and DFU takes `$(BINARY).bin`.** `probe-rs` decodes `defmt`
 frames from the ELF's `.defmt` section and its symbol table, and unwinds with its DWARF. Flash
@@ -573,7 +573,7 @@ built artifacts rather than at the bench:
 
   ```bash
   cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt" \
-    && probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --list-rtt
+    && probe-rs attach target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --list-rtt
   ```
 
   Expect only `Error: No connected probes were found.` Anything else about DWARF is a profile
@@ -614,9 +614,9 @@ attachment from the mode bits alone - its own comment reads "we assume that a ho
 are in blocking-mode. this is what probe-run does." - so a host that set `BLOCK_IF_FULL` and then
 vanished leaves the target writing as though someone were still draining, and `Channel::flush`
 (`channel.rs:139-149`) returns early only when the mode says non-blocking. Whether probe-rs restores
-the flags on detach is **not verified here**, upstream or at the bench, and this section claims
-neither direction; TASK-037 is where to measure it, by attaching, streaming, killing the reader, and
-reading `_SEGGER_RTT.up_channel.flags` afterwards. Of the two levers below, only the target-side one
+the flags on detach is **not measured**, upstream or at the bench, and this section claims
+neither direction; the way to measure it is to attach, stream, kill the reader, and
+read `_SEGGER_RTT.up_channel.flags` afterwards. Of the two levers below, only the target-side one
 reaches this regime: there is no host left to hand `--rtt-channel-mode` to.
 
 If the host is going to be slow on purpose (a laptop resuming, a pipe into `grep` that isn't
@@ -690,7 +690,7 @@ Two erase-and-debug details that are cheap to state and expensive to rediscover:
 **The D-cache is the other way to lose the control block, and it is armed by a future change, not
 by anything today.** `_SEGGER_RTT` lands wherever the linker puts `.data`: measured at
 `0x24000008` (48 bytes) in a `log-defmt` release image, the first words of AXI SRAM — the same
-`0x24000000..0x24080000` region probe-rs's own `STM32H750IBKx` entry reports and `memory-internal.x`
+`0x24000000..0x24080000` region probe-rs's `STM32H750IB` entry reports and `memory-internal.x`
 describes. Enable the Cortex-M7 D-cache over that region and the host stops seeing what the core
 wrote: the core's writes live in the cache until they're evicted, while the debug port reads go to
 the memory system and never consult the cache. Either the `SEGGER RTT` magic string isn't there yet,
@@ -759,8 +759,7 @@ One trap on the option people reach for first, hand-moving the block to DTCM: a 
 placed naively outside DTCM drags `__ebss` across an unmapped gap and bus-faults before `main`, which
 passes simulation and fails only on silicon - daisy-rs documents exactly this on the same H750 in
 `docs/memory-placement.md`, including that Renode backs the gap and so "passes". Discoverability is
-not the constraint on any of these routes: `probe-rs chip info STM32H750IBKx` (run 2026-09-12;
-command above) lists DTCM `0x20000000..0x20020000` among the RAM regions, so a relocated block stays
+not the constraint on any of these routes: `probe-rs chip info ASPERITAS_H750IB --chip-description-path firmware/asperitas-h750.yaml` (command above) lists DTCM `0x20000000..0x20020000` among the RAM regions, so a relocated block stays
 findable without an auto-search scan.
 
 So "it is linker work, not a config bit" understates it. Against SEGGER's list, linker work is
@@ -842,13 +841,13 @@ Expanded (`make -n probe-flash UNDER_RESET=0 FEATURES="seed3 log-defmt" NO_DEFAU
 
 ```
 cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
-probe-rs download target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive  --verify && probe-rs reset --chip STM32H750IBKx --non-interactive
+probe-rs download target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive  --verify && probe-rs reset --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive
 ```
 
 `UNDER_RESET=0` drops the flag from `probe-flash` and `probe-run` only; the default expansion is
 unchanged. Other options stay open: `PROBE_EXTRA="--speed 1000"` slows the SWD clock, and
 `make probe-log` sidesteps the question entirely by attaching to an already-flashed board with no
-reset at all. TASK-037 records which of those worked here.
+reset at all. Under reset works here with the flake's probe-rs, so `UNDER_RESET=0` is a fallback, not the default.
 
 **What actually hangs off nRESET.** The question that decides how much the paragraph above matters to
 this board is whether the Seed drives nRESET through a reset supervisor or a logic buffer, or just a
@@ -910,7 +909,7 @@ numbers, how to capture output with no TTY, which levers exist when programming 
 how to name one probe when the bench has several, and which command is cheap enough to run first.
 All of it below was measured against the pinned `probe-rs-tools` 0.32.0 **with nothing
 attached to the bench**, so every line is reproducible here without hardware. None of it is a claim
-about this board; that stays TASK-037's.
+about this board; the board measurements are in the section above.
 
 **No prompts, ever.** Every probe recipe passes `--non-interactive` ("Disable interactive probe
 selection", env `PROBE_RS_NON_INTERACTIVE`). Without it, probe-rs asks the terminal which probe to
@@ -985,7 +984,7 @@ make probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 \
 Expanded (`make -n probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 PROBE_EXTRA="--no-timestamps --log-format oneline --target-output-file defmt=out.txt"`, again with the `elf-check` lines that guard `probe-log` left out):
 
 ```
-probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --no-timestamps --log-format oneline --target-output-file defmt=out.txt
+probe-rs attach target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --no-timestamps --log-format oneline --target-output-file defmt=out.txt
 ```
 
 `--target-output-file <channel>=<path>` writes probe-rs's *formatted* output for one channel to a

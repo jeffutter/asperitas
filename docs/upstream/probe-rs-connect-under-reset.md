@@ -1,6 +1,6 @@
 # probe-rs `--connect-under-reset` never halts a Cortex-M whose DHCSR.C_DEBUGEN is clear
 
-Status: root cause found and a fix verified on the bench, 2026-10-07. Not reported upstream yet.
+Status: resolved. Root cause found and a fix verified on the bench, 2026-10-07; merged upstream as [probe-rs PR #4441](https://github.com/probe-rs/probe-rs/pull/4441) on 2026-10-11. The flake builds probe-rs from main until a release carries it.
 Everything below is measured on one board and one probe unless marked otherwise.
 
 ## Summary
@@ -130,7 +130,7 @@ Cortex-M only.
 On this board, writing `DBGMCU_CR.TRACECLKEN` (bit 20) kills the debug port until the Seed's USB-C is
 unplugged and replugged. probe-rs's STM32H7 `debug_device_unlock` sets all the debug bits in one write
 (`0x0070003F`) on every connect, selected by `chip.name.starts_with("STM32H7")`, so any
-`--chip STM32H750IBKx` attach wedges the port. OpenOCD's `stm32h7x.cfg` `examine-end` hook does the
+`--chip STM32H750IBKx` attach (the stock entry) wedges the port. OpenOCD's `stm32h7x.cfg` `examine-end` hook does the
 same write and fails the same way (`STLINK_SWD_DP_ERROR` on that write; writes of `0x00600000` and
 `0x3F` succeed; writing `0x00100000` alone to `0x5C001004` on a fresh board reproduces it). The cause
 is unknown. The renamed chip entry works around it, and that rename is why this board always hit the

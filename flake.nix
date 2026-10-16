@@ -88,10 +88,10 @@
                 # --- Embedded tooling ---
                 pkgs.dfu-util # probe-free flashing over Seed3 USB-C
                 # ELF-based flashing, RTT + defmt logging; drives the `probe-*`
-                # targets in firmware/Makefile. Lock pins probe-rs-tools 0.32.0.
+                # targets in firmware/Makefile.
                 # No udev rules here: this flake ships devShells only, and Darwin
                 # needs no rule for an ST-Link (the Linux caveat lives in README).
-                # Built from probe-rs main (see probeRs above): stock 0.32.0 arms vector
+                # Built from probe-rs main at 5214b96 (see probeRs above): stock 0.32.0 arms vector
                 # catch without C_DEBUGEN, so --connect-under-reset runs past it.
                 pkgs.cargo-binutils # objcopy to produce raw .bin for DFU
 

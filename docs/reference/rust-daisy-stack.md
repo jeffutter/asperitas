@@ -98,22 +98,19 @@ the same configuration as this project — confirmed:
 ## Toolchain
 
 - Target: `thumbv7em-none-eabihf` (Cortex-M7F, hard float)
-- `probe-rs` / `cargo-flash` — **0.32.0**, pinned by the flake (`pkgs.probe-rs-tools`), checked
-  against that version on 2026-09-10. Flashes over an ST-Link and streams `defmt`/RTT; drives the
-  `probe-*` targets in `firmware/Makefile`. Takes the release **ELF** plus `--chip STM32H750IBKx`,
+- `probe-rs` / `cargo-flash` — built by the flake from **probe-rs main** (commit `5214b96`,
+  `0.32.0-unstable-2026-10-11`); nixpkgs' 0.32.0 is not used. Flashes over an ST-Link and streams `defmt`/RTT; drives the
+  `probe-*` targets in `firmware/Makefile`. Takes the release **ELF** plus `--chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml`,
   not the `.bin` that `dfu-util` uses, because frames and backtraces decode from the ELF's
   `.defmt` section and DWARF. That DWARF has to be full debug info for locations: at `false`, `1`
   or `line-tables-only` it decodes a `defmt` stream with no file or line attached and prints
   "Insufficient DWARF info; compile your program with `debug = 2` to enable location info.", so
   `firmware/Cargo.toml` ships `debug = 2` (measured 2026-09-12; the warning precedes probe
   discovery, which is why one boardless `probe-rs attach … --non-interactive --list-rtt` is the
-  check). Verified host-side only otherwise: command expansion, the chip entry via
-  `probe-rs chip info`, and flag values via `--help`. **The flake builds probe-rs-tools from
-  probe-rs main** (commit `5214b96`, the merge of upstream PR #4441): stock 0.32.0 never halts a
+  check). Verified on the bench: attach, flashing, RTT and `--connect-under-reset`. **Why main:** upstream PR #4441 is merged there; stock 0.32.0 never halts a
   Cortex-M under `--connect-under-reset` unless an earlier session left `DHCSR.C_DEBUGEN` set,
   and on this board's renamed chip entry that means it always fails. Switch back to nixpkgs'
-  `probe-rs-tools` once a release containing #4441 reaches the pinned nixpkgs. Bench measurements are
-  TASK-037's. Commands and caveats:
+  `probe-rs-tools` once a release containing #4441 reaches the pinned nixpkgs. Commands and caveats:
   [daisy-seed3.md](./daisy-seed3.md#flashing-and-logging-over-an-st-link-probe)
 - `dfu-util` — probe-free flashing over the Seed3's USB-C; see
   [daisy-seed3.md](./daisy-seed3.md#flashing-the-seed3)

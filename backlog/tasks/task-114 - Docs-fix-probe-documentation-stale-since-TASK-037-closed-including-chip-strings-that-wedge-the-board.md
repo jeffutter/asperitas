@@ -3,13 +3,13 @@ id: TASK-114
 title: >-
   Docs: fix probe documentation stale since TASK-037 closed, including chip
   strings that wedge the board
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-16 22:25'
 labels:
-  - review-2026-10
-  - docs
+  - planned
 dependencies: []
 priority: high
 type: chore
@@ -28,6 +28,24 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No document says the probe is unverified or uses the stock STM32H750IBKx chip entry for this board
-- [ ] #2 Version, patch and upstream-status statements agree with flake.nix and the merged PR
+- [x] #1 No document says the probe is unverified or uses the stock STM32H750IBKx chip entry for this board
+- [x] #2 Version, patch and upstream-status statements agree with flake.nix and the merged PR
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+README already clean after the README rebuild (no stale probe text). Edited CLAUDE.md, daisy-seed3.md, rust-daisy-stack.md, upstream write-up (marked resolved, PR #4441), flake.nix comments, doc-001 patch reference. All chip strings now ASPERITAS_H750IB plus --chip-description-path.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Probe docs corrected in place: chip strings, verified-on-bench status, probe-rs main 5214b96 references, upstream write-up marked resolved by PR #4441.
+<!-- SECTION:FINAL_SUMMARY:END -->
