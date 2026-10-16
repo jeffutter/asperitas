@@ -1203,8 +1203,40 @@ internal-flash layout is `firmware/memory-internal.x` and stays the default.
   bootloaded app is not available through those targets.
 - **The 128 KB wall:** the single-sector limit above no longer applies to bootloaded builds. The image
   budget there is 480K, and the install-path `rig` leaves about 347 KB.
-- **Unverified:** booting `main` and `rig` from this layout is not proven on hardware until
-  TASK-038.04.07.04.
+- **Booted from this layout:** `rig` (TASK-038.04.07.04) and `main` (below, TASK-076). Both enumerate the
+  console.
+
+### main's console in the bootloaded layout (measured, TASK-076)
+
+- **Symptom (2026-10-15):** `main` flashed to `0x90040000` ran its audio loop but the Mac never listed
+  "Asperitas Debug Console". Probe reads: CFSR/HFSR 0 (no fault), `LED_STATE` = Running, USB33RDY set, OTG_FS
+  `GCCFG` powered, `DCTL` 0 (not soft-disconnected), `DSTS` `SUSPSTS=1` (the bus saw a reset, then nothing).
+  The peripheral was attached; nothing serviced it.
+- **Cause:** `main` polled the SAI callback on the thread executor beside the knob task's blocking ADC
+  reads and `usb::run()`. The callback has about 1.3 ms per DMA half-transfer; `main` lost that race at boot
+  (`AUDIO_EXIT == 3`, `Overrun`), the audio loop ended, and the halt that followed left `usb::run()` never
+  polled, so the host's SETUP requests went unanswered. The core is not faulted in that state, which is why
+  the register reads looked healthy. `rig` was unaffected because it already ran audio on its own
+  `InterruptExecutor`. The `AUDIO_EXIT == 3` reading is from the fix commit's measurement; the pre-fix image
+  was not re-flashed to re-capture it for this ticket.
+- **Fix:** commit `9d01511` moved the callback to an `InterruptExecutor` on SAI1 (P6, below the SAI DMA
+  streams) as `rig` does, and brought the knob ADC up before the interface starts.
+- **Verified 2026-10-16:** with bootloaded `main` on the board, `asperitas-rig query --device
+  /dev/cu.usbmodem101` answered `fw=0.1.0+02d99f9 reset_reason=software`; `override --knob 0 --value 0.5`
+  got `set_acks=1 rel_acks=1 device_errors=0`. `rig` has no inbound channel, so a reply to `CTL` proves the
+  running image is `main`. macOS lists "Asperitas Debug Console".
+- **Guard:** `scripts/check-main-audio-executor.sh` (push-tier gate `main-audio-executor`) fails if `main.rs`
+  loses the interrupt executor, its SAI1 vector or start, or calls `start_callback` outside `audio_task`.
+  It is a source check: enumeration needs a board.
+
+Binaries run on a board, by layout (only runs this repo has evidence for):
+
+| Binary | Internal layout | Bootloaded layout |
+|---|---|---|
+| `main` | enumerates (TASK-030.04) | enumerates after `9d01511` (this section); did not before |
+| `rig` | n/a, does not fit with the install path | enumerates (TASK-038.04.07.04) |
+| `ledtest` | not recorded here | ran (bootloader trial above) |
+| `podtest` | host control verified (TASK-033.01) | not run |
 
 ### Rejected routes for freeing internal flash (measured, TASK-038.04.07)
 

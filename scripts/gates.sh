@@ -409,6 +409,11 @@ gate push cargo-doc-all-features "=== cargo doc (workspace, all features) ===" \
 # builds around it.
 gate push bootloaded-builds "=== firmware bootloaded layout builds ===" scripts/check-bootloaded-builds.sh
 
+# TASK-076: main's audio callback stays on its own interrupt executor. On the thread executor it starved
+# usb::run() and the console never enumerated in the bootloaded layout. Source-level, so it runs without
+# a board; no build, so it does not disturb ordering rule 1.
+gate push main-audio-executor "=== main audio callback on interrupt executor ===" scripts/check-main-audio-executor.sh
+
 gate push rig-stim-ess-build "=== firmware rig build (stim-ess) ===" -C firmware \
   env ASPERITAS_LAYOUT=bootloaded cargo build --release --features seed3,stim-ess --bin rig
 
