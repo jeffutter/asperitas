@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@agent'
 created_date: '2026-09-13 08:09'
-updated_date: '2026-09-13 09:14'
+updated_date: '2026-10-16 16:35'
 labels:
   - planned
 dependencies:
@@ -156,6 +156,12 @@ status --porcelain` showing nothing outside `backlog/`.
 What `unblocked-todo.sh` considers ready (`.01` adds reporting only), Choose/review/promote logic, and
 `.claude/workflows/ralph-backlog-loop.js`.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+TASK-066.03 demonstration (2026-10-16, weaker fallback: gate driven directly, runLoop wiring not exercised because print-mode /ralph crashed in postStatusMessage). Refused id: container with open child (fixture TASK-044, depends on TASK-043). Status forced: Blocked, dependencies unchanged. Verbatim note: "ralph: planning marked this Dev Ready, but it fails the eligibility check (reason: container-children-open), so it was forced to Blocked so Execute never receives it. It should be re-checked once that clears." The @human leaf was held unmutated and the @agent leaf picked in the same pass; second pass left the note count at 1. Citation correction: .claude/workflows/ralph-backlog-loop.js:215-232 (verifyAndCorrectPrompt) is a post-plan verify reached from the Plan branch at l.472, not a pre-execute guard; its real Execute-side protections are the humanOnly filter (l.338-358) and the blocked-reverted backstop (l.363-379). So pi gate is stricter than the Claude loop, not merely equal.
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 
