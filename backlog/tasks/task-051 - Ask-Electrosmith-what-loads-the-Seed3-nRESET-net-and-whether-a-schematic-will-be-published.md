@@ -3,7 +3,7 @@ id: TASK-051
 title: >-
   Ask Electrosmith what loads the Seed3 nRESET net, and whether a schematic will
   be published
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-11 00:34'
@@ -47,3 +47,8 @@ Hardware topic. Precedent for a yes: "Seed Rev7 Schematic Is Now Live!", topic 4
 - [ ] #1 HUMAN: An Electrosmith reply states what hangs off the Seed3 nRESET net - supervisor or buffer part number, or pull-up/button/capacitor values - or states plainly that no schematic will be published; the reply is quoted verbatim in this ticket's notes with its URL.
 - [ ] #2 HUMAN: docs/reference/daisy-seed3.md's nRESET section says whether the TASK-050 inference held or broke, with the same confidence limits as the rest of the probe section, and the search log's gap list is updated to match.
 <!-- AC:END -->
+
+## Implementation Notes
+
+2026-10-16: Set to Blocked at the owner's request. Waiting on the owner to post the question to Electro-Smith, which is low priority: `probe-rs reset --connect-under-reset` against chip ASPERITAS_H750IB has worked on this Seed3 every time it was used (flashing `main`, `rig` and `podtest` via DFU plus a probe reset), so the nRESET question is not blocking anything. The Seed3 datasheet PDF was re-checked and carries no reset content (see docs/reference/seed3-schematic-search-log.md). Return to To Do when the owner is ready to post.
+
