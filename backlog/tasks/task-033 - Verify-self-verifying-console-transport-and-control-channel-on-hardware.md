@@ -1,7 +1,7 @@
 ---
 id: TASK-033
 title: Verify self-verifying console transport and control channel on hardware
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 01:25'
@@ -29,8 +29,8 @@ This needs one person at the bench once. Flashing still requires holding BOOT an
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: the encoder click and both buttons are pressed several times each during a TASK-031 runner capture of at least 240 s, and every press and release appears in the decoded output - this reproduces the specific loss that ate two button presses in TASK-018.04's capture
-- [ ] #2 HUMAN: if any criterion fails, a bug ticket is filed with the offending timestamps instead of checking the box
+- [x] #1 HUMAN: the encoder click and both buttons are pressed several times each during a TASK-031 runner capture of at least 240 s, and every press and release appears in the decoded output - this reproduces the specific loss that ate two button presses in TASK-018.04's capture
+- [x] #2 HUMAN: if any criterion fails, a bug ticket is filed with the offending timestamps instead of checking the box
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -41,4 +41,6 @@ This needs one person at the bench once. Flashing still requires holding BOOT an
 2026-10-09: Block lifted. A plain probe flash is recoverable with the debugger, provided the project's probe tooling is used (chip description ASPERITAS_H750IB, never a stock --chip STM32H7 attach, which can leave the debug port dead until the USB-C is replugged). Boot-path changes (bootloader install, bootloaded layout) stay Blocked.
 
 2026-10-09: Split. The runner capture, integrity check, restart over the control channel and corruption-rate numbers moved to TASK-033.01 (@agent). What stays here is pressing the controls during a capture.
+
+2026-10-16: Closed with the owner. Bootloaded `podtest` (fw 0.1.0+02d99f9) flashed over DFU, 270 s capture through the rig (`captures/task-033-controls-270s.txt`, `--max-drops 100000`). The owner pressed the encoder click, button 1 and button 2 ten times each, about 1 s apart: the decoded output has 10 press and 10 release records for each control, none missing or extra. #1 agreed live. #2: nothing in the criterion failed; the rig verdict was `fail` (discarded_bytes=44, one gap of 296 records at t=13.5-16.4 s, device_dropped=1576), all before the first press at ~36 s, and matches the pre-attach loss TASK-073 explains (the device ran unread after the flash). No bug ticket filed for that reason, agreed with the owner.
 <!-- SECTION:NOTES:END -->
