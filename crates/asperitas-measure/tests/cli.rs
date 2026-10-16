@@ -82,3 +82,32 @@ fn missing_file_and_bad_usage_are_errors() {
         Some(2)
     );
 }
+
+#[test]
+fn sweep_mode_rejects_bad_usage_and_reports_short_capture() {
+    let cap = root("audio/captures/2026-10-13-rig-10s-reset1.console.zst");
+    // Missing kind, bad range and mixing with --stimulus are usage errors (exit 2).
+    for args in [
+        vec!["analyze", &cap, "--sweep", "0:1"],
+        vec!["analyze", &cap, "--sweep", "0:2", "--sweep-kind", "gain"],
+        vec![
+            "analyze",
+            &cap,
+            "--sweep",
+            "0:1",
+            "--sweep-kind",
+            "gain",
+            "--stimulus",
+            "sine",
+        ],
+        vec!["analyze", &cap, "--sweep-kind", "gain"],
+    ] {
+        assert_eq!(run(&args).status.code(), Some(2), "{args:?}");
+    }
+    // A steady sine has no response to the knob: a failed verdict (exit 1) with a JSON report.
+    let o = run(&["analyze", &cap, "--sweep", "0:1", "--sweep-kind", "gain"]);
+    assert_eq!(o.status.code(), Some(1));
+    let j = json(&o);
+    assert_eq!(j["pass"], false);
+    assert_eq!(j["response"]["direction"], "none");
+}

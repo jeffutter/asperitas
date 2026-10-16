@@ -169,3 +169,52 @@ pub const COMPARE_RESIDUAL_RMS_DB: f64 = -25.0;
 /// Origin: TASK-035.05, set from the `mand_soft` replay fixture: residual peak
 /// -21.5 dB (803 LSB at sample 1502, the attack), so -15 dB leaves 6.5 dB of margin.
 pub const COMPARE_RESIDUAL_PEAK_DB: f64 = -15.0;
+
+/// Number of equal parameter-value buckets a knob sweep is divided into for the response curve.
+///
+/// Origin: TASK-019.03.02. The rig sweeps at 20 SET/s, so on a 10 s sweep each bucket is 0.5 s and
+/// 10 `SET`s; 20 buckets resolve a plateau a tenth of the travel wide while leaving each
+/// bucket enough samples to average the response of music.
+pub const SWEEP_BUCKETS: usize = 20;
+
+/// Fraction of each bucket's time span discarded at both ends before measuring it. Covers the
+/// smoothing settle after the bucket's first `SET` and the unrecorded offset between the capture's
+/// start and the first `SET` (`--sweep-start-s` is an estimate): the central half of a 0.5 s
+/// bucket stays valid for an offset error of up to 125 ms.
+///
+/// Origin: TASK-019.03.02.
+pub const SWEEP_BUCKET_TRIM: f64 = 0.25;
+
+/// Fewest samples a bucket's trimmed window may hold; a shorter sweep is a failed verdict, not a
+/// measurement. 10 ms at 48 kHz.
+///
+/// Origin: TASK-019.03.02.
+pub const SWEEP_MIN_WINDOW_SAMPLES: usize = 480;
+
+/// Smallest total end-to-end response change, dB, for a sweep to count as having a direction. Less
+/// than this the knob moved the sound by no more than level wander in the source.
+///
+/// Origin: TASK-019.03.02, set from the synthetic fixtures in `sweep.rs`, whose healthy curves span
+/// 24 dB.
+pub const SWEEP_MIN_SPAN_DB: f64 = 6.0;
+
+/// Largest allowed fall of the response against the sweep direction, dB, measured from the running
+/// best so far (so a slow drift backwards counts, not just one step). Bucket levels of music wander
+/// by the dynamics of the passage; this is that allowance.
+///
+/// Origin: TASK-019.03.02, set from the synthetic fixtures: ripple of 0.4 dB RMS on a healthy
+/// curve stays under 1.0 dB, a 3 dB reversal sits above it with 3x margin. Revisit with the first
+/// real capture in TASK-019.03.04.
+pub const SWEEP_MONOTONIC_TOL_DB: f64 = 1.0;
+
+/// A bucket-to-bucket response change smaller than this, dB, is "no change".
+///
+/// Origin: TASK-019.03.02, set from the synthetic fixtures: a healthy 24 dB sweep over
+/// [`SWEEP_BUCKETS`] moves about 1.3 dB per bucket; 0.5 dB sits below that and above ripple.
+pub const SWEEP_FLAT_EPS_DB: f64 = 0.5;
+
+/// Consecutive "no change" bucket steps that make a flat region (a dead zone or plateau). Three
+/// steps span four buckets, a fifth of the travel.
+///
+/// Origin: TASK-019.03.02.
+pub const SWEEP_FLAT_MIN_STEPS: usize = 3;

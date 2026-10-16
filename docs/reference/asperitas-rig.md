@@ -197,7 +197,21 @@ the two, and reports metrics as one JSON document on stdout. Every numeric limit
 cargo run -p asperitas-measure --release -- analyze <capture.console.zst> [--stimulus sine|sweep|pulse]
 cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav
 cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav --fx gain --fx-value 43690
+cargo run -p asperitas-measure --release -- analyze <sweep.console.zst> --sweep 0:1 --sweep-kind gain|lowpass [--sweep-start-s S] [--sweep-duration-s D]
 ```
+
+`--sweep FROM:TO` judges a capture taken under `asperitas-rig override --sweep FROM:TO` (knob
+levels 0..1). The capture is split into 20 equal slices of the knob travel (the rig's `SET`
+schedule is linear in time), each trimmed at both ends, and the response per slice is measured:
+block RMS for `gain`, RMS of the first difference (a high-band level that follows the cutoff) for
+`lowpass`. The report lists the curve against knob value, `direction`, `span_db`, `monotonic` and
+`max_reversal_db`, and `flat_regions`. It fails when the response does not rise with the knob by
+at least the minimum span, falls back by more than the monotonic tolerance, or holds still for a
+run of slices (a plateau or dead zone). The capture records neither the first `SET` nor the
+sweep length, so pass `--sweep-start-s` (default 0) and `--sweep-duration-s` (default: the rest of
+the capture, which includes the rig's final ack grace, so give the rig's `--duration` when known).
+Limits are the `SWEEP_*` constants in `thresholds.rs`, to be revisited with the first real capture
+(TASK-019.03.04).
 
 Exit codes match `asperitas-rig`: **0** pass, **1** failed verdict (the JSON lists `failures`,
 each also on stderr), **2** usage, load or I/O error. The default stimulus is the sine. Only the
