@@ -242,3 +242,24 @@ or hiss, while moving or held still, and that behaviour survives a power cycle.
 - **Half-plugged input jack:** in one session the output was audible on the Pod headphone jack only
   with the input cable half inserted. Two cables behaved the same; a fully seated cable worked
   fine in the later session. The cause (jack or cable) was not found. Seat plugs fully.
+
+## Both output jacks in use: the channels mix (observed, cause unknown)
+
+Observed 2026-10-16 (TASK-059.03, owner at the bench), with `main` running and the Mac feeding the Pod input.
+
+- **Use one output jack at a time when judging left versus right.** With headphones in *either* the
+  Pod's headphone out *or* its line out (never both), a right-only source came out the right side only
+  and a left-only source came out the left side only.
+- **With both output jacks plugged, a one-channel signal came out of both sides.** The codec was not at
+  fault: with a right-only source the SAI buffers read RX left -79.7 dBFS, RX right -26.2 dBFS, and TX
+  left -79.3 dBFS, TX right -28.8 dBFS (`/tmp/rxlevel.py`-style `probe-rs read` of `0x30000000` and
+  `0x30000200`). Whatever mixes the sides sits after the codec output, in the jack or output stage. The
+  mechanism is not known; it was not measured with a scope.
+- **It likely explains the earlier half-plug oddity**, where the output was only audible when a second
+  cable was partly inserted. Expect a signal on only one channel to look like a stereo signal as soon as
+  a second output jack, or the permanent loopback cable's output end, is connected. Unplug the other
+  output before a left/right check, and before trusting a hard-panned listening test.
+- **Does not contradict the loopback measurement** in *Self-loopback channel mapping*: that run used the
+  output-to-input cable only, with nothing else on the output jacks.
+- **Buffer addresses:** in the bootloaded layout the SAI DMA buffers read at `0x30000000` (RX) and
+  `0x30000200` (TX), not the `0x240021b8` address TASK-059.01 planned for the non-bootloaded layout.

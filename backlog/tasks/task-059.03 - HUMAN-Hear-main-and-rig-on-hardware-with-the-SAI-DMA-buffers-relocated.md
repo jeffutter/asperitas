@@ -1,7 +1,7 @@
 ---
 id: TASK-059.03
 title: 'HUMAN: Hear main and rig on hardware with the SAI DMA buffers relocated'
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-13 06:57'
@@ -68,12 +68,12 @@ time you are at the bench, flash with it and note that you did.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: `blinky` built from the post-TASK-059.01 tree is flashed over DFU and reaches steady green, confirming the new link layout does not fault before `main`. Record the first four bytes of the image you flashed as well, since that is the same reading taken from the host side.
-- [ ] #2 HUMAN: `main` is flashed and driven from a line-level source. Audio is audible at the Pod output, continuous and unbroken, with no clicks, dropouts or pitch artefacts, and knobs 1 and 2 audibly change filter cutoff and level - which is what proves the callback is running end to end rather than emitting whatever happens to be in the buffer.
-- [ ] #3 HUMAN: left and right are not swapped, established through the output (mono source, or a source panned hard one way) rather than assumed. Note which channel carried it.
-- [ ] #4 HUMAN: `rig` is flashed with `FEATURES="seed3"` and its stimulus is audible at the Pod output by something other than the device itself - a monitor, or a phone recording you keep. Its console shows `BOOT`, one `RIGCFG` record reading `icache=0 dcache=0`, and `STATUS` records whose `sent=` advances with `dropped_full=0`. Paste the actual counter values, decoded offline with `cargo run -p asperitas-logging --example console_decode` if the console was captured to a file.
-- [ ] #5 HUMAN: criteria 2 and 4 are repeated across at least two resets or power cycles. The relocation moves every `.bss` object down 0x400, and a boot-order-dependent fault or a stale-buffer effect would show up intermittently rather than on the first try.
-- [ ] #6 HUMAN: anything that sounded wrong, and any criterion you could not judge at the bench, is recorded in this ticket's notes with what you observed - and where something is wrong, a bug ticket is filed carrying the recording position or counter readings, rather than this criterion being checked.
+- [x] #1 HUMAN: `blinky` built from the post-TASK-059.01 tree is flashed over DFU and reaches steady green, confirming the new link layout does not fault before `main`. Record the first four bytes of the image you flashed as well, since that is the same reading taken from the host side.
+- [x] #2 HUMAN: `main` is flashed and driven from a line-level source. Audio is audible at the Pod output, continuous and unbroken, with no clicks, dropouts or pitch artefacts, and knobs 1 and 2 audibly change filter cutoff and level - which is what proves the callback is running end to end rather than emitting whatever happens to be in the buffer.
+- [x] #3 HUMAN: left and right are not swapped, established through the output (mono source, or a source panned hard one way) rather than assumed. Note which channel carried it.
+- [x] #4 HUMAN: `rig` is flashed with `FEATURES="seed3"` and its stimulus is audible at the Pod output by something other than the device itself - a monitor, or a phone recording you keep. Its console shows `BOOT`, one `RIGCFG` record reading `icache=0 dcache=0`, and `STATUS` records whose `sent=` advances with `dropped_full=0`. Paste the actual counter values, decoded offline with `cargo run -p asperitas-logging --example console_decode` if the console was captured to a file.
+- [x] #5 HUMAN: criteria 2 and 4 are repeated across at least two resets or power cycles. The relocation moves every `.bss` object down 0x400, and a boot-order-dependent fault or a stale-buffer effect would show up intermittently rather than on the first try.
+- [x] #6 HUMAN: anything that sounded wrong, and any criterion you could not judge at the bench, is recorded in this ticket's notes with what you observed - and where something is wrong, a bug ticket is filed carrying the recording position or counter readings, rather than this criterion being checked.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -117,4 +117,12 @@ A runbook, not a design. Take the numbers as you go; the notes are the deliverab
 2026-10-09: Split. Digital checks (blinky boot, rig stimulus through the loop, counters, repeated resets) moved to TASK-059.04 (@agent), which this ticket now depends on. Remaining here: steady-green LED, hearing main, left/right by ear. Still Blocked while the owner is away from the bench.
 
 2026-10-16: Blocked lifted at the owner's request; the owner is back at the bench. Back to To Do.
+
+2026-10-16: Closed with the owner at the bench; each criterion agreed live. Numbers and observations, not pass/fail:
+- #1: `blinky` built from the current tree and flashed over DFU (bootloaded layout), LED 1 steady green ("green solid"). First four bytes of `blinky-bootloaded.bin`: `00 00 02 20` = initial SP 0x20020000. File sha256 starts 0311fa4476541fa5.
+- #2: `main` heard through the Pod earlier the same day (continuous, knob 1 changing the low-pass, knob 2 the level, no clicks), survived an unplug and restore of power. Driven from the Mac headphone path rather than a true line-level source (output 50 to 80 percent). SAI RX/TX buffers sit at 0x30000000 and 0x30000200 in the bootloaded layout, not the 0x240021b8 this ticket planned for the non-bootloaded one.
+- #3: left-only source came out the left side only and right-only came out the right side only, with one output jack in use. SAI buffers with a right-only source: RX left -79.7 dBFS, RX right -26.2 dBFS; TX left -79.3, TX right -28.8. Not swapped. With both output jacks plugged, a one-channel signal came out of both sides; documented in docs/reference/daisy-pod.md and CLAUDE.md.
+- #4: `rig` (bootloaded, FEATURES seed3) tone heard continuous at 1 kHz. Console (`captures/task-059-03-rig-run1.txt`, `-run2.txt`, `-run3.txt`): `RIGCFG ... lane=L ... icache=0 dcache=0` (runs 1 and 3; lost at attach in run 2), `RIGGEN sine 1000 Hz -20 dBFS`, `STATUS sent=10` rising to 34 (run 1, 12 s) and to 40 (runs 2 and 3, 15 s), `dropped_full=0`, `CAPSTAT overrun=0 audio_exit=0 max_block_us=44-46`. Limit: the `BOOT` record (and for run 2 `RIGCFG`) was gone before the host attached, the attach effect from TASK-073; rig verdict was `fail` only on 14 to 117 discarded bytes at attach, `bad_frames=0`.
+- #5: `rig` reset three times over the probe, tone back each time, counters clean each time; `main` also survived a power cycle and a probe reset.
+- #6: findings written to docs/reference/daisy-pod.md. No sound defect found, so no bug ticket.
 <!-- SECTION:NOTES:END -->

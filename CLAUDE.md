@@ -22,7 +22,9 @@ code.
 - **[docs/reference/daisy-pod.md](docs/reference/daisy-pod.md)** — Pod control pin map
   (knobs, encoder, buttons, RGB LEDs), libDaisy's defaults, and the fact that **Pod
   audio I/O is line level, not hi-Z instrument level** — a gain-staging trap that reads
-  as a DSP bug.
+  as a DSP bug. Also: **plugging both output jacks (headphone out and line out) mixes the
+  channels**, so a one-channel signal comes out of both sides; use one output at a time for
+  left/right checks.
 - **[docs/reference/asperitas-rig.md](docs/reference/asperitas-rig.md)** — host capture runner
   for the framed USB console: flags, exit codes (0 pass, 1 failed verdict, 2 error), the
   artifact format, and the convention of committing artifacts with hardware verification

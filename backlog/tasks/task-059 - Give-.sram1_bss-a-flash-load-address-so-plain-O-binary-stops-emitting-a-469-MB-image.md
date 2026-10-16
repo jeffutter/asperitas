@@ -3,7 +3,7 @@ id: TASK-059
 title: >-
   Place .sram1_bss as a NOLOAD section so plain -O binary stops emitting a 469
   MB image
-status: Blocked
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-12 21:26'
@@ -85,7 +85,7 @@ Out of scope: the docs (TASK-057) and the docs gate (TASK-058).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Parent umbrella: TASK-059.01, TASK-059.02 and TASK-059.03 are all Done. The substantive criteria this ticket carried before planning live in those subtasks - the link-map confirmation, the size table and the deletion of the `--only-section` keep-list in .01, the regression gate in .02, and every board-touching criterion in .03.
+- [x] #1 Parent umbrella: TASK-059.01, TASK-059.02 and TASK-059.03 are all Done. The substantive criteria this ticket carried before planning live in those subtasks - the link-map confirmation, the size table and the deletion of the `--only-section` keep-list in .01, the regression gate in .02, and every board-touching criterion in .03.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -237,6 +237,8 @@ extension's execute stage selects it with `findFirstByStatus(cwd, "Dev Ready")`
 the unfinished-child hold-back that `unblocked-todo.sh` implements. The Claude workflow in
 `.claude/workflows/ralph-backlog-loop.js:219-227` does check readiness and forces such a ticket
 back to Blocked; the pi extension has no equivalent. Filed as TASK-066.
+
+2026-10-16: Closed with the owner once TASK-059.03 closed; its subtasks .01 to .04 are all Done.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
