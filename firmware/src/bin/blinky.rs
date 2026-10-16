@@ -7,57 +7,7 @@ use asperitas_logging::info;
 use daisy_embassy::hal::{bind_interrupts, peripherals, usb};
 use daisy_embassy::DaisyBoard;
 
-// Re-export the panic handler from asperitas-logging.
-#[panic_handler]
-fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-    asperitas_logging::panic_handler::handle_panic(info)
-}
-
-// Provide _defmt_panic symbol required by embassy-stm32 / embassy-usb's
-// internal defmt usage (defmt 1.x). This is NOT the Rust panic handler;
-// it fires only when a defmt formatter encounters an unrecoverable error.
-// No `bkpt()`: with no debug probe attached it escalates to a HardFault
-// instead of halting, turning a diagnostic into a silent lockup.
-// Stays compiled in under `log-defmt` too: `_defmt_panic` is its own symbol (defmt
-// src/export/mod.rs) that defmt-rtt does *not* provide, so dropping this would break linking of
-// every `defmt::assert!` in embassy-stm32. It is unrelated to the `#[panic_handler]` above.
-#[defmt::panic_handler]
-fn defmt_panic_handler() -> ! {
-    loop {
-        cortex_m::asm::nop();
-    }
-}
-
-// The defmt logger. Exactly one of these two is compiled in, and both are load-bearing: they
-// supply `_defmt_write`, `_defmt_acquire`, `_defmt_release` and `_defmt_flush`, the symbols every
-// defmt frame inside embassy-stm32 and daisy-embassy resolves against. Drop either half and the
-// link fails on binaries that contain no defmt call of their own.
-//
-// With a probe wired, `defmt-rtt` fills its RTT ring and probe-rs reads it. Without one there is
-// nobody to scan RAM, so the stub discards every byte — silent, but still required.
-#[cfg(feature = "log-defmt")]
-use defmt_rtt as _;
-
-// No-op defmt logger.
-//
-// NOTE: This block must live in each binary crate, not in a shared lib.
-// `#[defmt::global_logger]` is a proc-macro that emits linker symbols only
-// when expanded inside the final binary crate; placing it in a lib crate
-// causes dead-code elimination to drop the struct (and its generated
-// symbols) because nothing references `Logger` by name.
-#[cfg(not(feature = "log-defmt"))]
-#[defmt::global_logger]
-struct Logger;
-
-#[cfg(not(feature = "log-defmt"))]
-unsafe impl defmt::Logger for Logger {
-    fn acquire() {}
-    unsafe fn release() {}
-    unsafe fn flush() {}
-    unsafe fn write(data: &[u8]) {
-        let _ = data;
-    }
-}
+use asperitas_firmware as _;
 
 bind_interrupts!(pub struct UsbIrqs {
     OTG_FS => usb::InterruptHandler<peripherals::USB_OTG_FS>;

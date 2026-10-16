@@ -75,13 +75,8 @@ fn defmt_panic_handler() -> ! {
 #[cfg(feature = "log-defmt")]
 use defmt_rtt as _;
 
-// No-op defmt logger.
-//
-// NOTE: This block must live in each binary crate, not in a shared lib.
-// `#[defmt::global_logger]` is a proc-macro that emits linker symbols only
-// when expanded inside the final binary crate; placing it in a lib crate
-// causes dead-code elimination to drop the struct (and its generated
-// symbols) because nothing references `Logger` by name.
+// No-op defmt logger. This binary does not link `asperitas_firmware` (see that crate's docs), so
+// it carries its own copy of the logger.
 #[cfg(not(feature = "log-defmt"))]
 #[defmt::global_logger]
 struct Logger;

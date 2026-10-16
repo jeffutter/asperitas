@@ -3,15 +3,20 @@ id: TASK-085
 title: >-
   Firmware: add a package lib with one audio module, shared panic/logger
   preamble and host-control glue
-status: To Do
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-16 20:00'
 labels:
   - review-2026-10
   - firmware
   - architecture
-dependencies: []
+  - planned
+dependencies:
+  - TASK-085.01
+  - TASK-085.02
+  - TASK-085.03
 priority: high
 type: chore
 ordinal: 187800
@@ -35,3 +40,10 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #4 #[path] imports and the blanket allow(dead_code) are gone
 - [ ] #5 scripts/check-main-audio-executor.sh is deleted or reduced because the guarantee holds by construction
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against ec0d387
+Umbrella ticket. Work splits into three sub-tickets: .01 lib target + shared panic/logger preamble (with link experiment), .02 host_control into lib (needs .01), .03 audio module (needs .01). Order: .01, then .02 and .03. Parent has no direct work; closes when children are Done. ACs 3 (panictest on hardware) is confirmed in TASK-120. Final check: CI firmware builds (default and no-default-features seed3 log-defmt) link, gates pass.
+<!-- SECTION:PLAN:END -->
