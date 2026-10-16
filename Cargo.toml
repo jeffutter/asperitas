@@ -10,3 +10,17 @@ resolver = "2"
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
+
+# Host tests decode zstd fixtures and run FFTs; at opt-level 0 that dominates the run. Only the
+# crates doing that work are optimised, so overflow checks and debug assertions stay on and the
+# rest of the workspace keeps fast debug builds. `firmware/` is a separate workspace and unaffected.
+[profile.dev.package.rustfft]
+opt-level = 3
+[profile.dev.package.ruzstd]
+opt-level = 3
+[profile.dev.package.asperitas-measure]
+opt-level = 3
+[profile.dev.package.asperitas-dsp]
+opt-level = 3
+[profile.dev.package.asperitas-logging]
+opt-level = 3

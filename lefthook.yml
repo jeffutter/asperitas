@@ -46,7 +46,7 @@
 # And `parallel` starts every cargo job at once and loses fail-fast.
 #
 # Any check that runs in one tier and not another is an exception written down with its price at the
-# gate itself in scripts/gates.sh - currently one: the `pod-hw` test, ci-only.
+# gate itself in scripts/gates.sh - currently one: the `pod-hw` crate test, ci-only.
 #
 # No `forward_stderr:` key here, though every command carried one until TASK-061 asked whether it
 # does anything. It does not: the key exists in no lefthook release - absent from the 2.1.10 this

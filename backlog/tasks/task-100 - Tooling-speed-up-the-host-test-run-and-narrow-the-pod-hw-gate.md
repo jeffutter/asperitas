@@ -1,13 +1,15 @@
 ---
 id: TASK-100
 title: 'Tooling: speed up the host test run and narrow the pod-hw gate'
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-16 22:13'
 labels:
   - review-2026-10
   - tooling
+  - planned
 dependencies: []
 priority: high
 type: chore
@@ -26,7 +28,25 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 cargo test --workspace wall time is measured before and after and recorded in the ticket
-- [ ] #2 The pod-hw gate no longer re-runs the whole workspace
-- [ ] #3 gates.sh push tier is green
+- [x] #1 cargo test --workspace wall time is measured before and after and recorded in the ticket
+- [x] #2 The pod-hw gate no longer re-runs the whole workspace
+- [x] #3 gates.sh push tier is green
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the commit carrying Task-Id TASK-100. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Measured cargo test --workspace (nix develop .#default, warm): 188 s before, 137 s after the dev-profile opt-level=3 entries (rustfft, ruzstd, asperitas-measure, asperitas-dsp, asperitas-logging). cargo-test-pod-hw now runs cargo test -p asperitas-pod --features pod-hw (stays in ci tier); ledger refreshed. Push tier green: 34 gates, 117.2 s. Removed false '~91 commits ahead' claims from gates.sh, doc-001, ci.yml and rewrote the pod-hw gate comment.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added dev-profile opt-level=3 for the FFT/zstd-heavy crates (workspace test 188 s -> 137 s), narrowed the pod-hw gate to its own crate, corrected stale comments and refreshed the gate-cost ledger; push tier green.
+<!-- SECTION:FINAL_SUMMARY:END -->

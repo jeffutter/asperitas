@@ -45,8 +45,7 @@
 # rest of this file may not restate one is written once in doc-001, "Who owns each number".
 # One figure per gate even where two call sites used to quote different
 # ones, and it is always the observation from the tier that publishes the gate. Runner-side figures
-# belong to TASK-052 and TASK-063: main sits ~91 commits ahead of origin/main and ci.yml has no
-# workflow_dispatch, so no agent can observe a runner.
+# belong to TASK-052 and TASK-063: ci.yml has no workflow_dispatch, so no agent can observe a runner.
 #
 # Adding a check: add one `gate` line in the position you want it to run, with the tier that should
 # start running it and a stable key. Nothing else in the repo names checks.
@@ -267,9 +266,9 @@ gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-
 # skipped that way is precisely the decoration that would read green while the drift lives.
 #
 # What it adds to the tier, from three consecutive `commit` runs on this tree: 0.464 s / 0.457 s / 0.457 s. gate-costs:exempt reason="the three samples behind one published figure, which is keyed below"
-# About a tenth of what the tier itself costs at ~20 s {{tier:commit}} - a tenth of pre-commit spent to make
+# About a tenth of what the tier itself costs at ~18 s {{tier:commit}} - a tenth of pre-commit spent to make
 # eight files' worth of cost figures impossible to get wrong, which is what the ledger is for. It publishes
-# 0.68 s {{gate:gate-costs-current}} warm, and that is the figure anything else here quotes.
+# 0.54 s {{gate:gate-costs-current}} warm, and that is the figure anything else here quotes.
 #
 # Adding this line invalidated its own measurement set, and not in a way a person could fix by running
 # the recorder. A new gate can only be priced by a tier run that contains it, and on that first run it is
@@ -474,7 +473,7 @@ gate push firmware-cross-compile-rtt "=== firmware cross-compile (RTT-only, log-
 # re-points the very path this gate is auditing -- even the cheap rebuild, a cfg switch that finishes by
 # re-uplifting the cached hardlink instead of relinking -- so the check would grade its own side effect
 # instead of the pair. Asking with NO_DEFAULT=1 also keeps `cargo metadata` out of it entirely: that
-# derivation only runs when defaults are on. Measured 0.11 s {{gate:firmware-elf-provenance}} warm, as the
+# derivation only runs when defaults are on. Measured 0.10 s {{gate:firmware-elf-provenance}} warm, as the
 # `push` tier pays it.
 #
 # `push` tier and placed where it is because it asserts something only the pair above can make true.
@@ -493,7 +492,7 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 #
 # `push` tier and placed here because pre-commit builds no firmware, so the ELFs it reads may not exist
 # at all -- and inventing a skip path for that is the blind spot TASK-062 had to remove from elf-check.
-# Measured 0.99 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
+# Measured 0.86 s {{gate:image-load-addresses}} warm inside the `push` run that publishes it: twelve child
 # processes, six objdumps at ~29 ms {{component:objdump-invocation}} each and six objcopies at
 # ~31 ms {{component:objcopy-invocation}}. Its parser's own assertions are a separate commit-tier gate,
 # `=== load-addresses --selftest ===`, placed with the other selftests ahead of every cargo invocation --
@@ -502,7 +501,7 @@ gate push firmware-elf-provenance "=== firmware ELF cfg provenance ===" \
 gate push image-load-addresses "=== image load addresses ===" bash scripts/check-image-load-addresses.sh
 
 # Lint the same two cfg sets the two builds above just compiled, placed after them so clippy reuses
-# their artifacts: ~2 s {{gate:firmware-clippy}} and 0.89 s {{gate:firmware-clippy-rtt}} when nothing has changed
+# their artifacts: ~1 s {{gate:firmware-clippy}} and 0.89 s {{gate:firmware-clippy-rtt}} when nothing has changed
 # since the last lint, several times that directly after a build, and tens of seconds in a fresh target
 # dir. --bins is the whole package over there (no lib target, six entries under src/bin/), and
 # --all-targets is unusable on a no_std target with no test harness to link. firmware/ is a second
@@ -532,16 +531,10 @@ gate commit rig-stim-excerpt-clippy-rtt "=== firmware clippy (rig, stim-excerpt,
 
 gate push cargo-test "=== cargo test ===" cargo test --workspace
 
-# THE ONE DELIBERATELY CI-ONLY GATE, and it is priced rather than merely absent (TASK-061 AC #3).
-# ~191 s {{gate:cargo-test-pod-hw}} local warm to re-run the whole host suite under one non-default feature
-# flag -- more than every other push-tier gate combined. Its compile-time half DOES run in the push tier,
-# as the pod-hw clippy above, so what stays remote is runtime coverage of pod-hw code paths. Accepted
-# because CI is the authority for that coverage, TASK-018.01's fixup made the same split on purpose
-# (commit c44b9c1), and the loop that writes most commits here never pushes: pre-commit is where its
-# work gets gated. Reopen condition, stated as a condition: if pushes become routine, or the
-# autonomous loop starts pushing, re-measure and reconsider. Until then this exclusion is a
-# decision with a price attached, not an oversight.
-gate ci cargo-test-pod-hw "=== cargo test (asperitas-pod pod-hw feature) ===" cargo test --workspace --features asperitas-pod/pod-hw
+# The pod-hw feature adds no tests of its own and no other crate depends on asperitas-pod, so this
+# gate runs only that crate's suite under the feature. Compile coverage of the pod-hw code paths is
+# the pod-hw clippy gate in the push tier; this one adds runtime coverage on CI.
+gate ci cargo-test-pod-hw "=== cargo test (asperitas-pod pod-hw feature) ===" cargo test -p asperitas-pod --features pod-hw
 
 if [[ $MODE == list ]]; then
   printf '\ncounts: commit %d, push %d, ci %d\n' "$N_COMMIT" "$N_PUSH" "$N_CI"
