@@ -1079,7 +1079,7 @@ Measured 2026-10-07: after `make probe-flash` (`probe-rs download --reset`), `DE
 pass, but nothing was measured. A RESET-button boot of the same image reported 65-70 / 667, and so
 did a run under `probe-rs run`, which stays attached. So cycle-counter figures are only valid after a
 button reset or a power cycle, or with the probe still attached. A probe memory read also halts the
-core long enough to overrun the SAI ring (`audio_exit` went to 2), so never read memory during a
+core long enough to overrun the SAI ring (`audio_exit` went to 3), so never read memory during a
 capture.
 
 ## Host control channel (firmware wiring)

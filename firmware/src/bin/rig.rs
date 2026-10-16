@@ -9,8 +9,8 @@
 //! 1. `cortex_m::Peripherals::take()` is claimed, because rig owns DWT's cycle counter and
 //!    measures durations with it (a duration measured against a counter nobody enabled reads
 //!    zero and looks like a fast device).
-//! 2. The audio future runs on an interrupt-mode executor woken by SAI1, not on the thread
-//!    executor's select tree, so its latency has a bound rather than a hope.
+//! 2. The audio future runs on the shared audio module's interrupt-mode executor woken by SAI1,
+//!    not on the thread executor's select tree, so its latency has a bound rather than a hope.
 //! 3. The DSP chain is a stimulus generator chosen by cargo feature, and the input frame never
 //!    reaches it: rig measures the box, not the instrument plugged into it. A generator that plays
 //!    once (the sweep) is held silent until the capture's first callback, so the recording holds it
@@ -40,16 +40,17 @@ use asperitas_dsp::stimulus::PulseTrain;
 #[cfg(not(any(feature = "stim-ess", feature = "stim-pulse", feature = "stim-excerpt")))]
 use asperitas_dsp::stimulus::Sine;
 use asperitas_dsp::stimulus::Stimulus;
+use asperitas_firmware::audio::{self, measure_time_base, AudioProcessor, TimeBase, BLOCK_LENGTH};
 use asperitas_logging::capture::{self, BlockState};
 use asperitas_logging::{console, error, info};
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use cortex_m::peripheral::{DWT, NVIC};
-use daisy_embassy::audio::{AudioConfig, Fs, Interface, Running, BLOCK_LENGTH};
+use daisy_embassy::audio::{AudioConfig, Fs};
 use daisy_embassy::hal::interrupt;
 use daisy_embassy::hal::interrupt::{InterruptExt, Priority};
 use daisy_embassy::hal::{bind_interrupts, dma, peripherals, qspi, usb};
 use daisy_embassy::{hal, new_daisy_board, DaisyBoard};
-use embassy_executor::{InterruptExecutor, Spawner};
+use embassy_executor::Spawner;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 use static_cell::StaticCell;
@@ -188,47 +189,8 @@ const _: () = assert!(
 /// Storage for the one generator instance.
 static GENERATOR: StaticCell<ActiveGenerator> = StaticCell::new();
 
-// ---------------------------------------------------------------------------
-// Audio executor
-// ---------------------------------------------------------------------------
-
-/// Executor that owns the audio callback, driven by the SAI1 interrupt.
-///
-/// `InterruptExecutor::new()` is `const`, so a plain `static` is enough to give `start()` the
-/// `&'static self` it wants; no `StaticCell` dance is needed for a value that can be built in
-/// a `static` initializer.
-static AUDIO_EXECUTOR: InterruptExecutor = InterruptExecutor::new();
-
-/// The SAI1 vector: poll the audio executor.
-///
-/// Hand-written, and that is the only form available. `bind_interrupts!` and `#[interrupt]` may
-/// not both name a vector - the macro expands to `#[export_name = "SAI1"] fn __SAI1() {}`, so
-/// binding SAI1 anywhere *and* defining this function is a duplicate-symbol link error. Nothing
-/// binds SAI1 today: daisy-embassy's `AudioIrqs` binds only `DMA1_STREAM0`/`STREAM1` for
-/// `DMA1_CH0`/`CH1` (`src/audio.rs:26-29`), and embassy-stm32's SAI driver binds only DMA lines,
-/// so the vector is free and this definition is legal. Do not "tidy" it into a
-/// `bind_interrupts!` block. The shape is upstream's: `examples/looper.rs:27-31` (this static and
-/// vector) and `:132-134` (priority, `start`, spawn), daisy-embassy at the pinned `ca9bcc9`.
-#[interrupt]
-unsafe fn SAI1() {
-    // Safety: called from the SAI1 handler and nowhere else, and only after `start()` has
-    // initialised the executor - `start()` is what unmasks this vector, so no SAI1 interrupt can
-    // reach here before then.
-    unsafe { AUDIO_EXECUTOR.on_interrupt() }
-}
-
-/// Convert processed stereo frames back to u32 codec samples.
-///
-/// Values are clamped to [-1.0, 1.0] and scaled to 32-bit signed range. Copied from `main.rs`;
-/// its `decode_block` sibling is absent here because rig ignores the input frame.
-fn encode_block(input: &[Frame; BLOCK_LENGTH], output: &mut [u32]) {
-    for (frame, words) in input.iter().zip(output.chunks_exact_mut(2)) {
-        let left = (frame[0].clamp(-1.0, 1.0) * i32::MAX as f32) as i32 as u32;
-        let right = (frame[1].clamp(-1.0, 1.0) * i32::MAX as f32) as i32 as u32;
-        words[0] = left;
-        words[1] = right;
-    }
-}
+// The SAI1 vector that drives the shared audio executor.
+asperitas_firmware::audio_sai1_vector!();
 
 /// Emit one wire-contract body to the framed console, stamped with the clock as it is now.
 ///
@@ -536,8 +498,6 @@ static FILLING: AtomicBool = AtomicBool::new(false);
 static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 /// Set by the first audio callback.
 static AUDIO_STARTED: AtomicBool = AtomicBool::new(false);
-/// `CAPSTAT`'s `audio_exit`: 0 running, 1 `start_interface` failed, 2 `start_callback` failed.
-static AUDIO_EXIT: AtomicU32 = AtomicU32::new(0);
 /// Longest callback and longest gap between callback starts, in raw DWT cycles. Converted to
 /// microseconds only when reported, with the time base boot settled on.
 static MAX_BLOCK_CYCLES: AtomicU32 = AtomicU32::new(0);
@@ -714,7 +674,7 @@ fn capture_status(time_base: TimeBase) -> console::CaptureStatus {
         overrun: OVERRUN.load(Ordering::Relaxed),
         max_block_us: cycles_to_us(MAX_BLOCK_CYCLES.load(Ordering::Relaxed), time_base),
         worst_gap_us: cycles_to_us(WORST_GAP_CYCLES.load(Ordering::Relaxed), time_base),
-        audio_exit: AUDIO_EXIT.load(Ordering::Relaxed),
+        audio_exit: audio::AUDIO_EXIT.load(Ordering::Relaxed),
         dumped: DUMPED.load(Ordering::Relaxed),
         dropped_full: console::CONSOLE.snapshot().dropped_full,
     }
@@ -813,7 +773,7 @@ fn judge_capture(time_base: TimeBase, first_block: u32) {
 ///
 /// Says nothing rather than something wrong: no `STIMSTART` when the stimulus never started (the
 /// window captured nothing) or started somewhere the window does not contain, which the start rule
-/// in `audio_task` makes unreachable and this reports rather than trusts.
+/// in the audio callback makes unreachable and this reports rather than trusts.
 fn report_stimulus_start(first_block: u32, end_block: u32, samples: u32) {
     if !STIM_STARTED.load(Ordering::Acquire) {
         error!("rig: the one-shot stimulus never started; no STIMSTART");
@@ -879,7 +839,7 @@ fn report_stimulus_start(first_block: u32, end_block: u32, samples: u32) {
 /// Run the timeline above once, then idle. `one_shot` is the stimulus's `one_shot_samples`.
 async fn run_capture(ring: Ring, time_base: TimeBase, one_shot: Option<u32>) {
     while !AUDIO_STARTED.load(Ordering::Relaxed) {
-        if AUDIO_EXIT.load(Ordering::Relaxed) != 0 {
+        if audio::AUDIO_EXIT.load(Ordering::Relaxed) != 0 {
             error!("rig: audio never started; nothing to capture");
             return;
         }
@@ -1845,13 +1805,12 @@ async fn halt_unplayable(why: console::PlayRefusal) -> ! {
     loop {}
 }
 
-/// The audio callback, running on [`AUDIO_EXECUTOR`] at SAI1's priority.
+/// The audio callback, run by the shared audio executor at SAI1's priority.
 ///
-/// `generator` is a sole `&'static mut`: the only other handle was consumed by the move through
-/// `spawn`, so the callback needs no lock. That is deliberate - the alternative, reaching the
-/// generator through `cortex_m::interrupt::free`, puts a PRIMASK critical section on the
-/// highest-rate path in the firmware, where the whole point of the interrupt executor is to
-/// avoid one.
+/// `generator` is a sole `&'static mut`, so the callback needs no lock. That is deliberate - the
+/// alternative, reaching the generator through `cortex_m::interrupt::free`, puts a PRIMASK
+/// critical section on the highest-rate path in the firmware, where the whole point of the
+/// interrupt executor is to avoid one.
 ///
 /// ### Timer-slot budget: 6 named users of 8 slots, and none of them here
 ///
@@ -1868,79 +1827,82 @@ async fn halt_unplayable(why: console::PlayRefusal) -> ! {
 /// as a mistimed `CAPSTAT` rather than an error. Count a new timer against the six above, and a
 /// new *task* with a timer against the eight.
 ///
-/// This task takes none of them: after `start_callback` is awaited there is nothing left to
+/// The audio task takes none of them: after `start_callback` is awaited there is nothing left to
 /// await, which is the requirement rather than an observation. A task that awaited between blocks
 /// would be re-spawned through the pender and turn the deterministic wake (SAI1 fired) into a
 /// queueing delay.
-#[embassy_executor::task]
-async fn audio_task(
-    mut interface: Interface<'static, Running>,
+struct RigAudio {
     generator: &'static mut ActiveGenerator,
-    ring: Ring,
-) {
-    // Silence handed to the generator because `Processor` is shaped for effects: `tick` takes an
-    // input frame and these sources discard it. The codec's input goes to the capture ring only,
-    // never to the generator or the output.
-    let frames_in = [Frame::default(); BLOCK_LENGTH];
-    // Silence until the generator plays. A one-shot generator is held back until the capture's
-    // first callback: started at boot, it would be two seconds (ARM_DELAY_MS) through before the
-    // recording began, and the analysis needs it whole. A periodic one plays from the first
-    // callback, because any stretch of it is as good as any other.
-    let mut frames_out = [Frame::default(); BLOCK_LENGTH];
-    let mut playing = generator.one_shot_samples().is_none();
-    // The `FX` generation this task last applied (see `fx_ctl::render`).
-    let mut fx_seen = 0u32;
-    let mut producer = Producer {
-        ring,
-        callbacks_in_block: 0,
-        last_entry: None,
-    };
+    producer: Producer,
+    /// Silence handed to the generator because `Processor` is shaped for effects: `tick` takes an
+    /// input frame and these sources discard it. The codec's input goes to the capture ring only,
+    /// never to the generator or the output.
+    frames_in: [Frame; BLOCK_LENGTH],
+    /// Silence until the generator plays. A one-shot generator is held back until the capture's
+    /// first callback: started at boot, it would be two seconds (ARM_DELAY_MS) through before the
+    /// recording began, and the analysis needs it whole. A periodic one plays from the first
+    /// callback, because any stretch of it is as good as any other.
+    frames_out: [Frame; BLOCK_LENGTH],
+    playing: bool,
+    /// The `FX` generation last applied (see `fx_ctl::render`).
+    fx_seen: u32,
+}
 
-    let outcome = interface
-        .start_callback(|input, output| {
-            // Entry time first, exit time last, so `max_block_us` prices everything the callback
-            // does, capture included.
-            let entry = DWT::cycle_count();
-
-            // Capture what came back first: the input lane, after the self-loopback cable. Before
-            // the render, because whether this callback was captured is what starts a one-shot
-            // generator. The order costs nothing: the output buffer is not played until the DMA
-            // reaches it next period, whichever half of the callback fills it.
-            let captured = producer.on_callback(entry, input);
-            if let (false, Some(at)) = (playing, captured) {
-                // This callback's output is the stimulus's first sample, and its input is being
-                // captured at `at`. Written before the release that publishes it.
-                generator.reset();
-                STIM_BLOCK.store(at.block, Ordering::Relaxed);
-                STIM_CALLBACK.store(at.callback as u32, Ordering::Relaxed);
-                STIM_STARTED.store(true, Ordering::Release);
-                playing = true;
-            }
-
-            // Render site, mirroring `main.rs`: stimulus -> [processor slot] -> encode_block.
-            // The processor slot is empty by design and is where a measured effect will hang.
-            if playing {
-                fx_ctl::render(generator, &mut fx_seen, &frames_in, &mut frames_out);
-            }
-            encode_block(&frames_out, output);
-            producer.finish(entry);
-        })
-        .await;
-
-    // Reached only if SAI errors: `start_callback` returns `Result<Infallible, sai::Error>`, and
-    // the `Ok` arm cannot be constructed.
-    match outcome {
-        Ok(never) => match never {},
-        Err(_) => {
-            AUDIO_EXIT.store(2, Ordering::Relaxed);
-            error!("rig: audio callback stopped with an SAI error");
+impl RigAudio {
+    fn new(generator: &'static mut ActiveGenerator, ring: Ring) -> Self {
+        let playing = generator.one_shot_samples().is_none();
+        Self {
+            generator,
+            producer: Producer {
+                ring,
+                callbacks_in_block: 0,
+                last_entry: None,
+            },
+            frames_in: [Frame::default(); BLOCK_LENGTH],
+            frames_out: [Frame::default(); BLOCK_LENGTH],
+            playing,
+            fx_seen: 0,
         }
     }
-    // Return rather than halt. Nothing awaits after `start_callback`, so the task simply ends and
-    // the audio executor idles; thread mode keeps running, and `CAPSTAT` then says
-    // `audio_exit=2` once a second. Spinning here instead would block every priority below P6 -
-    // thread mode included - and the one record that explains the silence would never be sent.
 }
+
+impl AudioProcessor for RigAudio {
+    fn process(&mut self, input: &[u32], output: &mut [u32]) {
+        // Entry time first, exit time last, so `max_block_us` prices everything the callback
+        // does, capture included.
+        let entry = DWT::cycle_count();
+
+        // Capture what came back first: the input lane, after the self-loopback cable. Before
+        // the render, because whether this callback was captured is what starts a one-shot
+        // generator. The order costs nothing: the output buffer is not played until the DMA
+        // reaches it next period, whichever half of the callback fills it.
+        let captured = self.producer.on_callback(entry, input);
+        if let (false, Some(at)) = (self.playing, captured) {
+            // This callback's output is the stimulus's first sample, and its input is being
+            // captured at `at`. Written before the release that publishes it.
+            self.generator.reset();
+            STIM_BLOCK.store(at.block, Ordering::Relaxed);
+            STIM_CALLBACK.store(at.callback as u32, Ordering::Relaxed);
+            STIM_STARTED.store(true, Ordering::Release);
+            self.playing = true;
+        }
+
+        // Render site, mirroring `main.rs`: stimulus -> [processor slot] -> encode_block.
+        // The processor slot is empty by design and is where a measured effect will hang.
+        if self.playing {
+            fx_ctl::render(
+                self.generator,
+                &mut self.fx_seen,
+                &self.frames_in,
+                &mut self.frames_out,
+            );
+        }
+        audio::encode_block(&self.frames_out, output);
+        self.producer.finish(entry);
+    }
+}
+
+static RIG_AUDIO: StaticCell<RigAudio> = StaticCell::new();
 
 /// Emit the two description records - exactly one `RIGCFG`, then exactly one `RIGGEN`.
 ///
@@ -1998,140 +1960,8 @@ fn emit_descriptors(generator: &ActiveGenerator, time_base: TimeBase) {
 }
 
 // ---------------------------------------------------------------------------
-// Boot: cycle counter and clock
+// Boot
 // ---------------------------------------------------------------------------
-
-/// DEMCR, the register `DCB::enable_trace()` sets TRCENA in.
-///
-/// cortex-m gives `DCB` a writer and no reader, so proving TRCENA took requires going at the
-/// address directly. One volatile read of a control register; nothing aliases it.
-const DEMCR: usize = 0xE000_EDFC;
-const DEMCR_TRCENA: u32 = 1 << 24;
-
-/// Length of the calibration window, and the tolerance beyond which the measured clock wins.
-const CALIBRATION_MS: u64 = 200;
-const CALIBRATION_TOLERANCE_PCT: u64 = 1;
-
-/// Whether TRCENA is set, read from the hardware rather than inferred from the call that set it.
-fn trace_enabled() -> bool {
-    // Safety: DEMCR is a memory-mapped control register present on every Cortex-M7, and reading
-    // it has no side effects.
-    unsafe { core::ptr::read_volatile(DEMCR as *const u32) & DEMCR_TRCENA != 0 }
-}
-
-/// What rig divides cycle counts by, and how it knows.
-#[derive(Clone, Copy)]
-struct TimeBase {
-    /// Core clock in Hz that rig converts with.
-    cpu_hz: u32,
-    /// Whole cycles per microsecond, rounded to nearest.
-    ///
-    /// What every reported duration is divided by (`cycles_to_us`); carried here from the one place
-    /// that knows how the clock was settled rather than recomputed at each call site.
-    cycles_per_us: u32,
-}
-
-/// Enable DWT's cycle counter, prove it counts, and settle on a cycles-per-microsecond.
-///
-/// Returns `None` when the counter cannot be made to run. Callers must treat that as fatal:
-/// every duration rig reports is a cycle delta, and against a counter that stays at zero they
-/// all read as zero, which is indistinguishable from a device fast enough to not matter.
-///
-/// `declared_hz` is the figure the clock tree computed from `default_rcc()`'s dividers. It agrees
-/// with the datasheet maximum rather than with anything measured, and `rcc::clocks()` reports the
-/// same derived number, so agreement between the two below is consistency, not confirmation.
-async fn measure_time_base(
-    cp: &mut cortex_m::peripheral::Peripherals,
-    declared_hz: Option<u32>,
-) -> Option<TimeBase> {
-    if !cortex_m::peripheral::DWT::has_cycle_counter() {
-        error!("rig: this core has no DWT cycle counter; refusing to report durations");
-        return None;
-    }
-
-    cp.DCB.enable_trace(); // DEMCR.TRCENA: the CM7 may ignore CYCCNTENA without it.
-    cortex_m::peripheral::DWT::unlock(); // LAR: the H7 locks the DWT after power-on.
-    cp.DWT.enable_cycle_counter();
-    // `PERIOD` is left alone on purpose: writing it switches the unit from a cycle counter to a
-    // cycle *count* comparator, which would silently rescale every delta taken afterwards.
-
-    // Readback of both enables, then liveness. The readback alone would pass on a counter that
-    // accepted the enable bit and never advanced, so sample twice around a busy delay.
-    let trcena = trace_enabled();
-    let cyccntena = cortex_m::peripheral::DWT::cycle_counter_enabled();
-    let before = cortex_m::peripheral::DWT::cycle_count();
-    cortex_m::asm::delay(1000);
-    let after = cortex_m::peripheral::DWT::cycle_count();
-
-    if !(trcena && cyccntena) || before == after {
-        error!(
-            "rig: cycle counter unavailable (TRCENA={} CYCCNTENA={} count {} -> {})",
-            u8::from(trcena),
-            u8::from(cyccntena),
-            before,
-            after
-        );
-        return None;
-    }
-
-    // Independent cross-check: count cycles across a window the timer driver defines. If DWT were
-    // frozen at some other rate - or fed a clock nobody intended - this is what notices.
-    let start = embassy_time::Instant::now();
-    let cal_before = cortex_m::peripheral::DWT::cycle_count();
-    embassy_time::Timer::after_millis(CALIBRATION_MS).await;
-    let elapsed_us = start.elapsed().as_micros();
-    // Wrapping, because CYCCNT is 32 bits and wraps every 8.947 s at 480 MHz. A 200 ms window
-    // cannot wrap; the subtraction is written so that it stays correct if this window grows.
-    let cycles = cortex_m::peripheral::DWT::cycle_count().wrapping_sub(cal_before) as u64;
-    if elapsed_us == 0 || cycles == 0 {
-        error!("rig: calibration window produced nothing (us={elapsed_us}, cycles={cycles})");
-        return None;
-    }
-    let measured_hz = (cycles * 1_000_000 / elapsed_us) as u32;
-
-    // Publish the declared figure when the tree can state it in whole megahertz and the two agree
-    // within a percent; otherwise fall back to the measurement and say so.
-    //
-    // Declared wins when it can, because the measurement is quantised by the tick rate
-    // (`tick-hz-32_768`, one tick per 30.517 us). Over 200 ms that is +/- 0.015 %, which is
-    // enough to throw away a digit of a 480 MHz quotient - 479 rather than 480, a 0.2 % error
-    // paid on every duration rig reports, against a gate that only starts caring at 1 %.
-    let declared_whole_mhz = declared_hz.filter(|hz| *hz % 1_000_000 == 0);
-    let within_tolerance = |declared: u32| {
-        u64::from(measured_hz)
-            .max(u64::from(declared))
-            .saturating_sub(u64::from(measured_hz).min(u64::from(declared)))
-            * 100
-            <= u64::from(declared) * CALIBRATION_TOLERANCE_PCT
-    };
-
-    let (cpu_hz, why) = match declared_whole_mhz {
-        Some(declared) if within_tolerance(declared) => (declared, "declared, cross-checked"),
-        Some(declared) => {
-            error!(
-                "rig: measured clock {measured_hz} Hz disagrees with declared {declared} Hz by over {CALIBRATION_TOLERANCE_PCT}%; using the measurement"
-            );
-            (measured_hz, "measured")
-        }
-        None => {
-            info!("rig: declared clock unusable ({declared_hz:?}); using the measurement");
-            (measured_hz, "measured")
-        }
-    };
-
-    info!(
-        "rig: time base {cpu_hz} Hz ({why}); declared {:?}, measured {measured_hz}; cycles/us {}; TRCENA={} CYCCNTENA={}",
-        declared_hz,
-        (u64::from(cpu_hz) + 500_000) / 1_000_000,
-        u8::from(trcena),
-        u8::from(cyccntena),
-    );
-
-    Some(TimeBase {
-        cpu_hz,
-        cycles_per_us: ((u64::from(cpu_hz) + 500_000) / 1_000_000) as u32,
-    })
-}
 
 /// Stop rig in a state a person can see with no probe and no host attached.
 fn boot_halt() -> ! {
@@ -2253,32 +2083,15 @@ async fn main(_spawner: Spawner) {
         .prepare_interface(AudioConfig { fs: RIG_FS })
         .await;
 
-    // Start SAI TX/RX and transition to Running state. A failure here does not halt: thread mode
-    // still runs, and `CAPSTAT`'s `audio_exit=1` is the record that says why nothing is captured.
-    // The LED says it too, for a bench with no host attached.
-    let interface = match interface.start_interface().await {
-        Ok(iface) => {
-            info!("Audio interface ready");
-            Some(iface)
-        }
-        Err(_) => {
-            error!("rig: SAI interface failed to start");
-            AUDIO_EXIT.store(1, Ordering::Relaxed);
-            None
-        }
-    };
-
     // Linger on the pre-init red so it can actually be seen. Everything above this point takes a
     // few milliseconds, so without the delay red -> green reads as "always green" and the two
     // stages can't be distinguished by eye.
     #[cfg(feature = "slow-boot")]
     embassy_time::Timer::after_secs(3).await;
 
-    asperitas_logging::led::set_global_state(if interface.is_some() {
-        asperitas_logging::led::LedState::Running
-    } else {
-        asperitas_logging::led::LedState::Panicked
-    });
+    // Running now; `audio::start` moves the LED to Panicked and records the reason in
+    // `audio::AUDIO_EXIT` (which `CAPSTAT` reports) if the interface then fails to start.
+    asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Running);
 
     // Say what is about to play, and what the ring can hold, once, before anything plays it.
     emit_descriptors(generator, time_base);
@@ -2286,23 +2099,18 @@ async fn main(_spawner: Spawner) {
     // Read before the generator moves into the audio task: the timeline needs it to check the fit.
     let one_shot = generator.one_shot_samples();
 
-    // Priority first, then `start`. `InterruptExecutor::start()` documents that the priority must
-    // be set before it and MUST NOT be touched after; setting it later is not merely late, it is
-    // undefined, because the executor's pend-from-software assumes the vector's slot is final.
-    //
     // P6 sits below the SAI DMA streams and the embassy-time driver (TIM5), which is the whole
     // argument that the callback can run without a critical section: the transfers it depends on
     // finish ahead of it rather than underneath it. The DMA side is P0 because `Config::default()`
     // ships `dma_interrupt_priority: Priority::P0` (embassy-stm32 0.6.0 `src/lib.rs:362`), and the
     // direction is required, not incidental: the DMA ISR is what pends SAI1, so it must outrank
-    // the executor it wakes. The numbers are logged below as a reading of the NVIC, not as a
-    // restatement of this comment.
-    if let Some(interface) = interface {
-        interrupt::SAI1.set_priority(Priority::P6);
-        let audio_spawner = AUDIO_EXECUTOR.start(interrupt::SAI1);
-        audio_spawner
-            .spawn(audio_task(interface, generator, ring).expect("failed to spawn audio task"));
-    }
+    // the executor it wakes. `audio::start` sets the priority; the numbers are logged below as a
+    // reading of the NVIC, not as a restatement of this comment.
+    //
+    // Descriptors went out above because rendering them on the first SAI1 interrupt is what the
+    // `emit_descriptors` comment rules out.
+    let audio_processor = RIG_AUDIO.init(RigAudio::new(generator, ring));
+    audio::start(interface, audio_processor).await;
 
     // Effective NVIC priorities, read back after the vector was unmasked. Lower numbers win on
     // Cortex-M (P0 is the highest, seven implemented bits, no subpriority on this part), so the
