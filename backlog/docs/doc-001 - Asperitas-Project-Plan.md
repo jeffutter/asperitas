@@ -274,7 +274,6 @@ dump-reassemble-selftest    | push   | -   | yes | yes | 0.42 s  | === dump_reas
 cargo-doc                   | push   | -   | yes | yes | 0.12 s  | === cargo doc (workspace) ===
 cargo-doc-all-features      | push   | -   | yes | yes | ~5 s    | === cargo doc (workspace, all features) ===
 bootloaded-builds           | push   | -   | yes | yes | ~12 s   | === firmware bootloaded layout builds ===
-main-audio-executor         | push   | -   | yes | yes | 0.02 s  | === main audio callback on interrupt executor ===
 rig-stim-ess-build          | push   | -   | yes | yes | 0.14 s  | === firmware rig build (stim-ess) ===
 rig-stim-pulse-build        | push   | -   | yes | yes | 0.13 s  | === firmware rig build (stim-pulse) ===
 rig-sine-unsmoothed-build   | push   | -   | yes | yes | ~1 s    | === firmware rig build (sine, unsmoothed-params) ===
@@ -294,7 +293,7 @@ rig-stim-excerpt-clippy     | commit | yes | yes | yes | 0.78 s  | === firmware 
 rig-stim-excerpt-clippy-rtt | commit | yes | yes | yes | 0.74 s  | === firmware clippy (rig, stim-excerpt, RTT-only) ===
 cargo-test                  | push   | -   | yes | yes | ~178 s  | === cargo test ===
 cargo-test-pod-hw           | ci     | -   | -   | yes | ~179 s  | === cargo test (asperitas-pod pod-hw feature) ===
-counts: commit 17, push 35, ci 36
+counts: commit 17, push 34, ci 35
 ```
 <!-- END GENERATED: gate-matrix -->
 

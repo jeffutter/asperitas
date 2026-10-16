@@ -7,6 +7,7 @@
 //! singleton and the USB pipe, so it carries its own panic handler that does nothing but stop.
 #![no_std]
 
+pub mod audio;
 pub mod host_control;
 
 /// Hand every panic to the shared handler, which latches the LED and flushes what it can over

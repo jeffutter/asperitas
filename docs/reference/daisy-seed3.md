@@ -1224,9 +1224,10 @@ internal-flash layout is `firmware/memory-internal.x` and stays the default.
   /dev/cu.usbmodem101` answered `fw=0.1.0+02d99f9 reset_reason=software`; `override --knob 0 --value 0.5`
   got `set_acks=1 rel_acks=1 device_errors=0`. `rig` has no inbound channel, so a reply to `CTL` proves the
   running image is `main`. macOS lists "Asperitas Debug Console".
-- **Guard:** `scripts/check-main-audio-executor.sh` (push-tier gate `main-audio-executor`) fails if `main.rs`
-  loses the interrupt executor, its SAI1 vector or start, or calls `start_callback` outside `audio_task`.
-  It is a source check: enumeration needs a board.
+- **Where it lives now:** the interrupt executor, its SAI1 vector, `encode_block` and the start/exit policy exist
+  once, in the lib's `audio` module (`firmware/src/audio.rs`); `main` supplies only a processor to `audio::start`.
+  If the interface fails to start, `start` records `AUDIO_EXIT`, sets the LED to `Panicked` and returns, so the
+  console keeps being served.
 
 Binaries run on a board, by layout (only runs this repo has evidence for):
 

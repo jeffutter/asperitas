@@ -224,16 +224,6 @@
       "min_tier": "push"
     },
     {
-      "banner": "=== main audio callback on interrupt executor ===",
-      "command_sha256": "29fd1c98c324625f79791b942d84e0563d78547d70dec672b09e260ccb55b86b",
-      "cost": {
-        "ci": 0.02,
-        "push": 0.02
-      },
-      "key": "main-audio-executor",
-      "min_tier": "push"
-    },
-    {
       "banner": "=== firmware rig build (stim-ess) ===",
       "command_sha256": "7a9f6e17b522ecb13cd6c408df74d698d61e35308594d42719aff11a5f29f98b",
       "cost": {
@@ -441,7 +431,7 @@
   "schema": 1,
   "tiers": {
     "ci": {
-      "gates": 36,
+      "gates": 35,
       "seconds": 387.96299999999997
     },
     "commit": {
@@ -449,7 +439,7 @@
       "seconds": 12.367
     },
     "push": {
-      "gates": 35,
+      "gates": 34,
       "seconds": 214.454
     }
   }
