@@ -5,7 +5,7 @@ status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-09 01:27'
-updated_date: '2026-10-16 01:01'
+updated_date: '2026-10-16 03:28'
 labels:
   - planned
 dependencies:
@@ -65,4 +65,6 @@ Loopback evidence from TASK-038.05 (2026-10-07/08), the measured baseline this t
 - Timing: max_block_us 72 of 666, worst_gap_us 714 of 832; dump 69.4 s for 300 s (414.9 kB/s PCM).
 - Summary table: README 'Measurement rig'. Full analysis: TASK-038.05 notes. Setup: docs/reference/daisy-pod.md 'Self-loopback channel mapping (measured)'.
 - Caveats: the ESS build misses its first 2 s (20-112 Hz) until TASK-038.08 lands. Timing figures are only valid after a RESET-button boot, not straight after a probe flash.
+
+2026-10-15: bench evidence for TASK-019.03.04 is in commit 2c3bb45 (audio/captures/2026-10-15-rig-{sweep,soak,hold}-*.console.zst, captures/task-019-03-04-*.json, docs/reference/asperitas-rig.md 'Measured on the board'). Gain and low-pass sweeps pass; the 300 s triangle soak passes; the unsmoothed build fires the step detector on the same snap schedule where the smoothed build does not; device agrees with asperitas-cli on the mandolin excerpt at held settings through SET. Awaiting the owner's sign-off on TASK-019.03.04.
 <!-- SECTION:NOTES:END -->
