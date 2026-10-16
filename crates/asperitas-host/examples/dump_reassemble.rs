@@ -4,9 +4,9 @@
 //! Run it on a file, or pipe a capture through it:
 //!
 //! ```sh
-//! cargo run -p asperitas-wire --example dump_reassemble -- capture.bin --out capture.pcm
-//! cat capture.bin | cargo run -p asperitas-wire --example dump_reassemble --out live.pcm
-//! cargo run -p asperitas-wire --example dump_reassemble -- --selftest
+//! cargo run -p asperitas-host --example dump_reassemble -- capture.bin --out capture.pcm
+//! cat capture.bin | cargo run -p asperitas-host --example dump_reassemble --out live.pcm
+//! cargo run -p asperitas-host --example dump_reassemble -- --selftest
 //! ```
 //!
 //! Bytes are read in 4 KiB pieces — larger than one frame on purpose, so record boundaries never
@@ -17,7 +17,7 @@
 //!
 //! # How this differs from `console_decode`, and why
 //!
-//! [`console_decode`](../examples/console_decode.rs) prints validated records to stdout and always
+//! [`console_decode`](../../asperitas-wire/examples/console_decode.rs) prints validated records to stdout and always
 //! exits 0 on a readable capture, because deciding whether a capture passed is a human call. This
 //! tool cannot keep either convention, and the divergence is deliberate rather than an oversight for
 //! someone to "fix":
@@ -32,8 +32,8 @@
 //!   unexamined one. A rig that gates on this tool needs a code that means *no*, so reporting-only
 //!   semantics would make every scripted measurement vacuously green.
 //!
-//! What is copied unchanged from `console_decode`: the chunked read/push/drain handshake, tolerance
-//! of a closed output file, and the accounting law — every byte offered is either inside a validated
+//! What is shared with `console_decode`'s conventions: the chunked read/push/drain handshake (here
+//! `asperitas_host::stream::pump`), tolerance of a closed output file, and the accounting law — every byte offered is either inside a validated
 //! record, charged to `discarded_bytes`, or still buffered. That law is printed rather than merely
 //! obeyed, because the counters mean nothing unless the bytes they describe are all present somewhere
 //! in the report.
@@ -43,16 +43,13 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::process::exit;
 
+use asperitas_host::assemble::{Abandoned, Action, BlockAssembler, Failure, Finish, Tally};
+use asperitas_host::stream::pump;
 use asperitas_wire::dump::{
-    self, Abandoned, Action, BlockAssembler, Failure, Finish, Tally, AUDIO_HEADER_LEN, CHUNK_RAW,
-    FULL_AUDIO_FRAME_LEN, MAX_CHUNKS_PER_BLOCK,
+    self, AUDIO_HEADER_LEN, CHUNK_RAW, FULL_AUDIO_FRAME_LEN, MAX_CHUNKS_PER_BLOCK,
 };
 use asperitas_wire::frame::{encode, Decoder, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN};
 use asperitas_wire::Level;
-
-/// Bytes requested per read. Larger than [`MAX_FRAME`] on purpose: a reader that happens to align
-/// with record boundaries proves nothing about the decoder's boundaries.
-const CHUNK_BYTES: usize = 4096;
 
 /// Staging room for one maximum-size block: every chunk the `n` field can name, at full width.
 ///
@@ -269,58 +266,28 @@ fn consume(input: &mut dyn Read, sink: &mut WriteOrDiscard<'_>) -> Summary {
     let mut decoder = Decoder::new();
     let mut staging = vec![0u8; STAGING_BYTES];
     let mut assembler = BlockAssembler::new(&mut staging);
-    let mut chunk = [0u8; CHUNK_BYTES];
     let mut frame_buf = [0u8; MAX_FRAME];
-
     let mut got = Assembled::default();
-    let mut pushed: u64 = 0;
-    let mut unread = false;
 
-    loop {
-        let filled = match input.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => {
-                eprintln!("dump_reassemble: read failed: {e}");
-                unread = true;
-                break;
-            }
-        };
-
-        // `push` takes only what the decoder can currently hold, so the rest of the chunk waits here
-        // until the records inside it have been consumed. That handshake is what makes this loop
-        // lossless however long the read.
-        let mut offset = 0usize;
-        while offset < filled {
-            let before = offset;
-            offset += decoder.push(&chunk[offset..filled]);
-            drain(&mut decoder, &mut assembler, sink, &mut frame_buf, &mut got);
-            if offset == before {
-                // Unreachable while `next_record` is being drained: freeing a queue slot always lets
-                // `push` take more input. Reported, not assumed.
-                eprintln!("dump_reassemble: decoder took no further bytes; stopping early");
-                unread = true;
-                break;
-            }
+    let pumped = pump(input, &mut decoder, |record| {
+        handle(record, &mut assembler, sink, &mut frame_buf, &mut got)
+    });
+    let unread = match pumped.error {
+        Some(e) => {
+            eprintln!("dump_reassemble: read failed: {e}");
+            true
         }
-        // Count what the decoder actually took. Bytes still waiting in this chunk when we stopped
-        // early were never offered, so they belong to no counter.
-        pushed += offset as u64;
-    }
+        None => false,
+    };
 
-    // Required before reading the counters: whatever is still undecided has nowhere to come from, so
-    // it becomes discarded bytes rather than an invisible remainder. The assembler's matching call
-    // reports the block whose tail the stream never delivered.
-    decoder.finish();
-    drain(&mut decoder, &mut assembler, sink, &mut frame_buf, &mut got);
+    // The assembler's finish reports the block whose tail the stream never delivered.
     let Finish { tally, abandoned } = assembler.finish();
     if let Some(abandoned) = abandoned {
         got.abandoned.push(abandoned);
     }
 
     Summary {
-        pushed,
+        pushed: pumped.pushed,
         framed_bytes: got.framed_bytes,
         stats: decoder.stats(),
         buffered: decoder.buffered(),
@@ -344,21 +311,17 @@ struct Assembled {
     pcm_offset: u64,
 }
 
-/// Hand every queued record to the assembler, charging each one's wire cost and writing out any block
-/// it just finished.
-///
-/// One function rather than a copy at each call site: the read loop and the drain after
-/// [`Decoder::finish`] must agree about what a completion means, or a record still queued when a read
-/// gave up would lose its samples without saying so.
-fn drain(
-    decoder: &mut Decoder,
+/// Hand one record to the assembler, charging its wire cost and writing out any block it just
+/// finished.
+fn handle(
+    record: &asperitas_wire::frame::Record<'_>,
     assembler: &mut BlockAssembler<'_>,
     sink: &mut WriteOrDiscard<'_>,
     frame_buf: &mut [u8; MAX_FRAME],
     got: &mut Assembled,
 ) {
-    while let Some(record) = decoder.next_record() {
-        got.framed_bytes += reencoded_frame(&record, frame_buf).len() as u64;
+    {
+        got.framed_bytes += reencoded_frame(record, frame_buf).len() as u64;
         let actions = assembler.accept(record.body);
         // The body borrow ends with the record, so the assembler's PCM slice and the next record never
         // coexist: copy out whatever a completion promises before asking for anything else.

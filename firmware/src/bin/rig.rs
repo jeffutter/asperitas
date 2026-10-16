@@ -1019,7 +1019,7 @@ async fn dump_ring(_ring: Ring, first: u32, end: u32) {
 // them into flash actions; the task below performs each action and nothing else. Every protocol
 // decision - ordering, short and overrun chunks, the stream CRC, when a sector is full, whether the
 // readback earns an `EXCOK` - is the installer's, and is covered by its host suite
-// (`crates/asperitas-wire/tests/excerpt_install.rs`, including `dropping_any_frame_never_verifies`
+// (`crates/asperitas-host/tests/excerpt_install.rs`, including `dropping_any_frame_never_verifies`
 // for truncation and the CRC-mismatch verdict tests for corruption). This side adds only flash I/O,
 // the capture gate and the reporting, so a truncated or corrupted upload reaches `EXCOK` here exactly
 // when it does there: never.

@@ -20,7 +20,7 @@
 use std::fmt;
 
 use asperitas_dsp::replay_fx::{FxKind, ReplayFx};
-use asperitas_wire::excerpt::{parse_wav, WavError};
+use asperitas_host::excerpt::{parse_wav, WavError};
 use asperitas_wire::frame::crc16_ccitt;
 use serde::Serialize;
 

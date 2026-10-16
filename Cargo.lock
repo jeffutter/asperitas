@@ -111,6 +111,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "asperitas-host"
+version = "0.1.0"
+dependencies = [
+ "asperitas-wire",
+ "proptest",
+ "ruzstd",
+]
+
+[[package]]
 name = "asperitas-logging"
 version = "0.1.0"
 dependencies = [
@@ -132,9 +141,9 @@ name = "asperitas-measure"
 version = "0.1.0"
 dependencies = [
  "asperitas-dsp",
+ "asperitas-host",
  "asperitas-wire",
  "rustfft",
- "ruzstd",
  "serde",
  "serde_json",
 ]
@@ -160,6 +169,7 @@ dependencies = [
 name = "asperitas-rig"
 version = "0.1.0"
 dependencies = [
+ "asperitas-host",
  "asperitas-wire",
  "clap",
  "serialport",

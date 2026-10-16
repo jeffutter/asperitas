@@ -1,9 +1,8 @@
-//! Installing an excerpt: the host turns a PCM buffer into framed records, the device turns those
-//! records back into whole flash sectors, and a readback decides whether the slot is trusted.
+//! Installing an excerpt on the device: turning framed records back into whole flash sectors, and a
+//! readback deciding whether the slot is trusted.
 //!
-//! Both halves live here so the wire cannot drift between them. [`install_frames`] is the only
-//! code that emits an install stream - `examples/excerpt_stream.rs` wraps it, the tests drive it -
-//! and [`Installer`] is the only code that consumes one.
+//! `asperitas_host::excerpt::install_frames` is the only code that emits an install stream and
+//! [`Installer`] the only code that consumes one, so the wire cannot drift between them.
 //!
 //! # The device half is a state machine with no I/O
 //!
@@ -59,65 +58,14 @@
 //! `EXCSTART`. An `EXCSTART` in any state begins a fresh install and abandons whatever was open;
 //! the abandoned slot's header was already invalidated by its own `EXCSTART`, so it reads blank.
 
-use log::Level;
-
 use super::{
-    exc_data_body, exc_end_body, exc_start_body, parse_record, slot_base, slot_pcm_base, ExcRecord,
-    RecordError, SlotHeader, Tag, EXC_CHUNK_RAW, HEADER_LEN, SECTOR,
+    parse_record, slot_base, slot_pcm_base, ExcRecord, RecordError, SlotHeader, Tag, EXC_CHUNK_RAW,
+    HEADER_LEN, SECTOR,
 };
 use crate::dump::{put, put_decimal, put_hex};
-use crate::frame::{crc16_ccitt, crc16_ccitt_update, encode, CRC16_INITIAL, MAX_BODY, MAX_FRAME};
+use crate::frame::{crc16_ccitt_update, CRC16_INITIAL, MAX_BODY};
 
 const SECTOR_BYTES: usize = SECTOR as usize;
-
-// ---------------------------------------------------------------------------
-// Host side: the frame stream
-// ---------------------------------------------------------------------------
-
-/// Level every install frame carries. The device's inbound path ignores the level; a fixed one
-/// keeps the stream byte-for-byte reproducible.
-pub const INSTALL_LEVEL: Level = Level::Info;
-
-/// Emit the whole install stream for `pcm` into `slot` under `name`: `EXCSTART`, one `EXCDATA`
-/// per [`EXC_CHUNK_RAW`] bytes with `i` counting from 0, then `EXCEND`.
-///
-/// Each frame goes to `sink` whole, one call per frame, from a stack buffer: no allocation, no
-/// clock. Sequence numbers count up from `seq0` and every frame carries `t_ms`, both from the
-/// caller, so the same arguments always produce the same bytes. Returns the next unused sequence
-/// number.
-///
-/// The arguments are checked before anything is emitted, so on `Err` the sink was never called.
-pub fn install_frames<F: FnMut(&[u8])>(
-    slot: u8,
-    name: &Tag,
-    pcm: &[u8],
-    seq0: u32,
-    t_ms: u32,
-    mut sink: F,
-) -> Result<u32, RecordError> {
-    let bytes = u32::try_from(pcm.len())
-        .map_err(|_| RecordError::Length(super::LengthError::OverCapacity { bytes: u32::MAX }))?;
-    let mut body = [0u8; MAX_BODY];
-    let mut frame = [0u8; MAX_FRAME];
-    let mut seq = seq0;
-    let mut emit = |body: &[u8], seq: &mut u32| {
-        let len = encode(INSTALL_LEVEL, *seq, t_ms, body, &mut frame).len;
-        sink(&frame[..len]);
-        *seq = seq.wrapping_add(1);
-    };
-
-    let start_len = exc_start_body(slot, name, bytes, crc16_ccitt(pcm), &mut body)?;
-    emit(&body[..start_len], &mut seq);
-    for (index, chunk) in pcm.chunks(EXC_CHUNK_RAW).enumerate() {
-        // Cannot fail: check_pcm_len above bounded pcm by PCM_CAPACITY, so every index is below
-        // MAX_DATA_CHUNKS and every chunk is 1..=EXC_CHUNK_RAW bytes.
-        let data_len = exc_data_body(index as u16, chunk, &mut body)?;
-        emit(&body[..data_len], &mut seq);
-    }
-    let end_len = exc_end_body(&mut body);
-    emit(&body[..end_len], &mut seq);
-    Ok(seq)
-}
 
 // ---------------------------------------------------------------------------
 // Device side: the installer

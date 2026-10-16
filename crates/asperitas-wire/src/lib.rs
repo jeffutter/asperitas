@@ -6,12 +6,13 @@
 //! - [`console`] - the device-to-host record bodies (boot, status, capture and rig records)
 //! - [`dump`] - the audio-dump grammar and its strict base64 codec
 //! - [`capture`] - the capture-ring geometry the dump and the rig price themselves against
-//! - [`excerpt`] - the excerpt slot layout, install grammar and WAV parsing
+//! - [`excerpt`] - the excerpt slot layout, install grammar and the device-side installer
 //! - [`control`] - the host-to-device `CTL` command and `CTLR` reply grammar
 //! - [`inbound`] - the owned record a validated host-to-device frame becomes
 //!
 //! The device-side runtime that ships these bytes (USB, the log ring, counters in statics)
-//! lives in `asperitas-wire`, which depends on this crate and not the other way round.
+//! lives in `asperitas-logging`, which depends on this crate and not the other way round. The
+//! host-only halves - block assembly, WAV parsing, the install stream - live in `asperitas-host`.
 
 #![no_std]
 

@@ -1,0 +1,18 @@
+[package]
+name = "asperitas-host"
+version = "0.1.0"
+edition = "2021"
+
+# Host-only half of the wire protocol: everything that reads what the device sent or prepares what
+# the host sends, and so has no reason to be `no_std` or allocation-free. It depends on
+# `asperitas-wire` for the grammar and never the other way round, so the firmware links none of it.
+[dependencies]
+asperitas-wire = { path = "../asperitas-wire" }
+# Pure-Rust zstd decoder: no C toolchain needed to build the host tooling.
+ruzstd = "0.8.2"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints]
+workspace = true

@@ -32,10 +32,8 @@ pub mod control;
 use std::fmt::Write as _;
 use std::io::{self, Read};
 
+use asperitas_host::stream::pump;
 use asperitas_wire::frame::{Decoder, Record, MAX_FRAME};
-
-/// Bytes requested per read; larger than one frame so boundaries never align by luck.
-const CHUNK_BYTES: usize = 4096;
 
 /// One validated record, owned.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,35 +145,10 @@ impl Verdict {
 ///
 /// Returns `Err` if the read fails partway (the partial capture is discarded rather than
 /// reported as complete).
-pub fn capture<R: Read>(mut reader: R) -> io::Result<Capture> {
+pub fn capture<R: Read>(reader: R) -> io::Result<Capture> {
     let mut decoder = Decoder::new();
     let mut acc = Accumulator::default();
-    let mut chunk = [0u8; CHUNK_BYTES];
-    let mut pushed: u64 = 0;
-
-    loop {
-        let filled = match reader.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e),
-        };
-        // `push` takes only what the decoder can hold; drain between pushes so the
-        // remainder of the chunk is never lost.
-        let mut offset = 0usize;
-        while offset < filled {
-            let taken = decoder.push(&chunk[offset..filled]);
-            drain(&mut decoder, &mut acc);
-            if taken == 0 {
-                return Err(io::Error::other("decoder made no progress"));
-            }
-            offset += taken;
-        }
-        pushed += filled as u64;
-    }
-
-    decoder.finish();
-    drain(&mut decoder, &mut acc);
+    let pushed = pump(reader, &mut decoder, |record| acc.observe(record)).into_result()?;
 
     let stats = decoder.stats();
     let accounted = acc.framed_bytes + stats.discarded_bytes + decoder.buffered() as u64;
@@ -204,12 +177,6 @@ struct Accumulator {
     any_status: bool,
     dropped_total: u64,
     dropped_this_boot: u64,
-}
-
-fn drain(decoder: &mut Decoder, acc: &mut Accumulator) {
-    while let Some(r) = decoder.next_record() {
-        acc.observe(&r);
-    }
 }
 
 impl Accumulator {

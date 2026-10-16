@@ -1,12 +1,13 @@
-//! Instrument excerpts in QSPI flash: where they live, how a slot describes itself, which WAV files
-//! may become one, and the console records that carry one from the host to the device.
+//! Instrument excerpts in QSPI flash: where they live, how a slot describes itself, the WAV format an
+//! excerpt must have, and the console records that carry one from the host to the device.
 //!
 //! Everything here is byte arithmetic with no hardware type in sight, so the decisions that would
 //! otherwise be discovered at the bench - a write that erases its neighbour, a header that reads as
 //! valid on blank flash, a WAV that is stereo or 44.1 kHz, a record body one byte over the frame
-//! budget - are settled on the host. The install stream and state machine ([`install_frames`],
-//! [`Installer`], in `excerpt/install.rs`) and the device's flash task (TASK-038.04.05) consume
-//! this module; none restates a number it owns.
+//! budget - are settled on the host. The install state machine ([`Installer`], in
+//! `excerpt/install.rs`) and the device's flash task (TASK-038.04.05) consume
+//! this module, as does `asperitas-host`, which parses WAV files and emits the install stream; none
+//! restates a number it owns.
 //!
 //! # Why this module is not behind `log-usb`
 //!
@@ -84,8 +85,8 @@ use crate::frame::{check_decimal_fits, check_hex_width, crc16_ccitt, MAX_BODY};
 
 mod install;
 pub use install::{
-    exc_fail_body, exc_ok_body, install_frames, Action, Failure, Installer, Verdict, Why,
-    INSTALL_LEVEL, MAX_FAIL_BODY_LEN, MAX_OK_BODY_LEN,
+    exc_fail_body, exc_ok_body, Action, Failure, Installer, Verdict, Why, MAX_FAIL_BODY_LEN,
+    MAX_OK_BODY_LEN,
 };
 
 // ---------------------------------------------------------------------------
@@ -362,136 +363,6 @@ impl SlotHeader {
 
 /// The only sample rate an excerpt may have: the codec's.
 pub const WAV_SAMPLE_RATE: u32 = 48_000;
-
-/// Why a file cannot become an excerpt. Anything other than PCM mono 48 kHz 16-bit is refused
-/// rather than converted: resampling or downmixing here would make the replay CRC describe audio
-/// the host file does not contain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WavError {
-    NotRiff,
-    NotWave,
-    /// The RIFF size, a chunk header, or a chunk body runs past the end of the input.
-    Truncated,
-    /// A `data` chunk appeared before any `fmt ` chunk, so its samples have no declared shape.
-    DataBeforeFmt,
-    /// No `data` chunk.
-    MissingData,
-    /// `fmt ` is shorter than the 16 bytes PCM needs.
-    FmtTooShort {
-        len: u32,
-    },
-    FormatTag {
-        tag: u16,
-    },
-    Channels {
-        channels: u16,
-    },
-    SampleRate {
-        rate: u32,
-    },
-    BitsPerSample {
-        bits: u16,
-    },
-    /// `block_align` or `byte_rate` disagree with mono 16-bit at 48 kHz.
-    Inconsistent,
-    EmptyData,
-    OddData {
-        len: u32,
-    },
-}
-
-fn le16(raw: &[u8], at: usize) -> u16 {
-    u16::from_le_bytes([raw[at], raw[at + 1]])
-}
-
-fn le32(raw: &[u8], at: usize) -> u32 {
-    u32::from_le_bytes([raw[at], raw[at + 1], raw[at + 2], raw[at + 3]])
-}
-
-/// Return the PCM bytes of the first `data` chunk of a mono 48 kHz 16-bit PCM WAV.
-///
-/// Chunks are walked rather than assumed to sit at the canonical 44-byte offsets: `LIST`, `fact`
-/// and anything else unknown are skipped, honouring the RIFF rule that odd-sized chunks carry a
-/// pad byte. The walk is bounded by the RIFF size, which must itself fit the input.
-pub fn parse_wav(raw: &[u8]) -> Result<&[u8], WavError> {
-    if raw.len() < 12 || raw[0..4] != *b"RIFF" {
-        return Err(WavError::NotRiff);
-    }
-    if raw[8..12] != *b"WAVE" {
-        return Err(WavError::NotWave);
-    }
-    let riff_end = (le32(raw, 4) as usize)
-        .checked_add(8)
-        .ok_or(WavError::Truncated)?;
-    let raw = raw.get(..riff_end).ok_or(WavError::Truncated)?;
-
-    let mut at = 12usize;
-    let mut fmt_seen = false;
-    loop {
-        if at == raw.len() {
-            return Err(WavError::MissingData);
-        }
-        let header = raw.get(at..at + 8).ok_or(WavError::Truncated)?;
-        let id = &header[0..4];
-        let len = le32(header, 4);
-        let body_at = at + 8;
-        let body = raw
-            .get(
-                body_at
-                    ..body_at
-                        .checked_add(len as usize)
-                        .ok_or(WavError::Truncated)?,
-            )
-            .ok_or(WavError::Truncated)?;
-
-        if id == b"fmt " {
-            if len < 16 {
-                return Err(WavError::FmtTooShort { len });
-            }
-            let tag = le16(body, 0);
-            let channels = le16(body, 2);
-            let rate = le32(body, 4);
-            let byte_rate = le32(body, 8);
-            let block_align = le16(body, 12);
-            let bits = le16(body, 14);
-            if tag != 1 {
-                return Err(WavError::FormatTag { tag });
-            }
-            if channels != 1 {
-                return Err(WavError::Channels { channels });
-            }
-            if rate != WAV_SAMPLE_RATE {
-                return Err(WavError::SampleRate { rate });
-            }
-            if bits != 16 {
-                return Err(WavError::BitsPerSample { bits });
-            }
-            if block_align != 2 || byte_rate != WAV_SAMPLE_RATE * 2 {
-                return Err(WavError::Inconsistent);
-            }
-            fmt_seen = true;
-        } else if id == b"data" {
-            if !fmt_seen {
-                return Err(WavError::DataBeforeFmt);
-            }
-            if len == 0 {
-                return Err(WavError::EmptyData);
-            }
-            if !len.is_multiple_of(2) {
-                return Err(WavError::OddData { len });
-            }
-            return Ok(body);
-        }
-
-        // Odd-sized chunks are followed by one pad byte. The final chunk may omit it in files
-        // written by careless tools; landing one past the end is then reported as truncation of a
-        // chunk header rather than accepted.
-        at = body_at + len as usize + (len as usize & 1);
-        if at > raw.len() {
-            return Err(WavError::Truncated);
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Record grammar

@@ -984,7 +984,7 @@ fn find_crlf(buf: &[u8]) -> Option<usize> {
 /// Lowercase hex only: uppercase is not in the grammar, and accepting it would widen
 /// what counts as a valid record beyond what the encoder can produce.
 ///
-/// Crate-visible because `dump::BlockAssembler` parses the same grammar on the receiving side — a
+/// Crate-visible because `dump::BodyReader` parses the same grammar on the receiving side — a
 /// second spelling of "valid hex" there is how an encoder and an assembler drift apart.
 pub(crate) fn parse_hex(digits: &[u8]) -> Option<u32> {
     let mut value: u32 = 0;

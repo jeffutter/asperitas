@@ -369,7 +369,7 @@ clip into a slot (`0..13`) with a name of 1 to 16 characters of `[a-z0-9_]`, wit
 `rig` and its console visible on the host:
 
 ```bash
-cargo run -p asperitas-wire --example excerpt_stream -- \
+cargo run -p asperitas-host --example excerpt_stream -- \
     audio/instruments/mandolin_single_note_soft.wav 0 mandolin_soft > /dev/cu.usbmodem*
 ```
 
@@ -405,7 +405,7 @@ The reassembler turns `capture.bin` back into PCM and exits non-zero if any bloc
 its CRC:
 
 ```bash
-cargo run -p asperitas-wire --release --example dump_reassemble -- capture.bin --out capture.pcm
+cargo run -p asperitas-host --release --example dump_reassemble -- capture.bin --out capture.pcm
 ```
 
 The PCM is headerless signed 16-bit little-endian, mono, 48 kHz. For a sweep or excerpt build, the
