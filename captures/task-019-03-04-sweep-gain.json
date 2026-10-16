@@ -1,0 +1,102 @@
+{
+  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-sweep-gain.console.zst",
+  "failures": [],
+  "pass": true,
+  "response": {
+    "curve": [
+      {
+        "response_db": -81.52871435800039,
+        "value": 0.025
+      },
+      {
+        "response_db": -77.98604868388132,
+        "value": 0.075
+      },
+      {
+        "response_db": -74.4457298247425,
+        "value": 0.125
+      },
+      {
+        "response_db": -70.88101156002553,
+        "value": 0.175
+      },
+      {
+        "response_db": -67.28793314907135,
+        "value": 0.225
+      },
+      {
+        "response_db": -63.69529667843429,
+        "value": 0.275
+      },
+      {
+        "response_db": -60.09476907459251,
+        "value": 0.325
+      },
+      {
+        "response_db": -56.497913153941745,
+        "value": 0.375
+      },
+      {
+        "response_db": -52.89678037781065,
+        "value": 0.425
+      },
+      {
+        "response_db": -49.298870384030494,
+        "value": 0.475
+      },
+      {
+        "response_db": -45.69831413087519,
+        "value": 0.525
+      },
+      {
+        "response_db": -42.10257272507442,
+        "value": 0.575
+      },
+      {
+        "response_db": -38.500435950452776,
+        "value": 0.625
+      },
+      {
+        "response_db": -34.89996783338547,
+        "value": 0.675
+      },
+      {
+        "response_db": -31.297809113119843,
+        "value": 0.725
+      },
+      {
+        "response_db": -27.697415235573683,
+        "value": 0.775
+      },
+      {
+        "response_db": -24.098110182070208,
+        "value": 0.825
+      },
+      {
+        "response_db": -20.493097967323855,
+        "value": 0.875
+      },
+      {
+        "response_db": -16.89408829309434,
+        "value": 0.925
+      },
+      {
+        "response_db": -13.29794424457571,
+        "value": 0.975
+      }
+    ],
+    "direction": "rising",
+    "expected_direction": "rising",
+    "flat_regions": [],
+    "kind": "gain",
+    "max_reversal_db": 0.0,
+    "monotonic": true,
+    "span_db": 68.23077011342468
+  },
+  "sweep": {
+    "duration_s": 30.0,
+    "from": 0.0,
+    "start_s": 4.9,
+    "to": 1.0
+  }
+}

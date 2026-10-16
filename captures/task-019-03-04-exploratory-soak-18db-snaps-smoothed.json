@@ -1,0 +1,116 @@
+{
+  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-soak.console.zst",
+  "expected_failure_observed": true,
+  "failures": [
+    "92 discontinuity candidate(s): 64 inside parameter motion, 0 outside, 28 unattributed",
+    "1 parameter step(s): 1 inside parameter motion, 0 outside, 0 unattributed"
+  ],
+  "pass": false,
+  "result": {
+    "discontinuities": {
+      "count": 92,
+      "inside_motion": 64,
+      "outside_motion": 0,
+      "times_s": [
+        90.89977083333333,
+        90.9048125,
+        90.90508333333334,
+        90.91352083333334,
+        90.91525,
+        90.91560416666667,
+        90.92204166666667,
+        90.9225625,
+        90.92316666666666,
+        90.92664583333334,
+        90.92710416666667,
+        90.92758333333333,
+        90.9280625,
+        90.92854166666666,
+        90.93060416666667,
+        90.94,
+        90.95,
+        90.96,
+        91.4,
+        91.40495833333334,
+        91.40520833333333,
+        91.41404166666666,
+        91.41516666666666,
+        91.41558333333333,
+        91.42254166666666,
+        91.4230625,
+        91.42616666666666,
+        91.42660416666666,
+        91.42708333333333,
+        91.42754166666667,
+        91.4305625,
+        91.43110416666667,
+        91.4316875,
+        91.43866666666666,
+        91.43914583333333,
+        91.439625,
+        91.44,
+        91.45,
+        91.46,
+        170.89,
+        170.915125,
+        170.92302083333334,
+        170.9235625,
+        170.92566666666667,
+        170.92610416666668,
+        170.9265625,
+        170.93054166666667,
+        170.93104166666666,
+        170.9315625,
+        170.93208333333334,
+        170.93764583333333,
+        170.938125,
+        170.93860416666666,
+        170.93908333333334,
+        170.9395625,
+        170.95,
+        170.96,
+        171.4,
+        171.42402083333334,
+        171.42514583333335,
+        171.4330625,
+        171.43366666666665,
+        171.436125,
+        171.43658333333335
+      ],
+      "unattributed": 28
+    },
+    "duration_s": 300.032,
+    "failures": [
+      "92 discontinuity candidate(s): 64 inside parameter motion, 0 outside, 28 unattributed",
+      "1 parameter step(s): 1 inside parameter motion, 0 outside, 0 unattributed"
+    ],
+    "max_discontinuity_jump_lsb": 4942.626065577996,
+    "max_param_step_db": 6.32847642327711,
+    "motion_window": {
+      "end_s": 261.9,
+      "start_s": 9.9
+    },
+    "param_steps": {
+      "count": 1,
+      "inside_motion": 1,
+      "outside_motion": 0,
+      "times_s": [
+        90.901
+      ],
+      "unattributed": 0
+    },
+    "silence": {
+      "count": 0,
+      "inside_motion": 0,
+      "outside_motion": 0,
+      "times_s": [],
+      "unattributed": 0
+    }
+  },
+  "soak": {
+    "duration_s": 250.0,
+    "from": 0.5,
+    "start_s": 10.9,
+    "to": 0.95
+  }
+}

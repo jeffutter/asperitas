@@ -1,0 +1,24 @@
+{
+  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-hold-gain-p6.console.zst",
+  "comparison": {
+    "dc_lsb": 1.3410205604204644,
+    "delay_samples": 81,
+    "gain_deviation_db": -0.023025806100896606,
+    "loop_gain_db": -0.4330258061008966,
+    "reference_peak_lsb": 19076.4929977828,
+    "reference_rms_lsb": 1812.1588059898158,
+    "residual_peak_at": 1535,
+    "residual_peak_db": -21.780407775924292,
+    "residual_peak_lsb": 1554.0970951257414,
+    "residual_rms_db": -30.652747902149535,
+    "residual_rms_lsb": 53.15680365188747,
+    "samples": 144000
+  },
+  "excerpt": "audio/instruments/mandolin_single_note_soft.wav",
+  "failures": [],
+  "fx": {
+    "code": 1,
+    "value": 60074
+  },
+  "pass": true
+}

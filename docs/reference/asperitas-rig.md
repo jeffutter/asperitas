@@ -144,8 +144,8 @@ codec input, as before. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR 
   stimulus build with the console (`log-usb`); the RTT-only builds have no console to send them on.
 - **Timing (excerpt).** The pass is held until the capture's first callback, `ARM_DELAY_MS` (2 s) after audio
   starts. Send `FX` in that window, i.e. right after the console attaches. The `rig` host
-  subcommand for this is not written yet; `cargo run -p asperitas-logging --example ctl_frame -- <fx hex> <value hex>` prints the
-  framed command to send, and a session script that sends it the moment the console attaches (about 3.7 s after a probe reset) lands inside the window.
+  subcommand for this is not written yet; `cargo run -p asperitas-logging --example ctl_frame -- <fx hex> <value hex>` (or `set <knob> <value>` / `rel <knob>`) prints the
+  framed command to send, and `scripts/rig-session.py` runs the whole sequence, and a session script that sends it the moment the console attaches (about 3.7 s after a probe reset) lands inside the window.
 - **CRC.** The effect runs after the block is taken, so `EXCPLAY`'s CRC still describes the raw
   stored samples and cannot detect the effect.
 - **Applied at the next block** after the reply; the processor starts from a clean state with no
@@ -251,6 +251,42 @@ alignment stability only. `--excerpt` instead compares an excerpt replay with th
 | `spurs` | Largest non-fundamental FFT peaks, in dBc. | Worst above -80 dBc. |
 | `param_steps` | 1 ms block-RMS changes over 5 dB (an unsmoothed parameter change). | Any event. |
 | `comparison` (`--excerpt`, optional `--fx`) | Residual of the replay against the reference after alignment, gain fit and DC removal. | Residual RMS above -25 dB or peak above -15 dB relative to the reference, or loop gain off baseline. |
+
+### Measured on the board (TASK-019.03.04)
+
+All on `rig` in the bootloaded layout, each run started by `scripts/rig-session.py` (probe reset, a fresh `BOOT`
+record, `CTL FX` on attach, then a `SET` schedule at 20 per second ending in `REL`), console held by that one
+reader, 2026-10-15. Captures are `audio/captures/2026-10-15-rig-{sweep,soak,hold}-*.console.zst`, reports
+`captures/task-019-03-04-*.json`. The sweep start is `arm_ms` (the median of `t_ms - (delivered + 0.5) * 341.3` over
+the `CAPSTAT` rows) against the first `CTLR OK SET` reply's `t_ms`; it was 4.90 s into the capture.
+
+| Run | Build | Result |
+|---|---|---|
+| Gain sweep 0 to 1 over 30 s | sine, 45 s window | pass: rising, monotonic, no flat region, span 68.2 dB, 3.6 dB per bucket as 72 dB over 20 buckets predicts |
+| Low-pass sweep 0 to 1 over 30 s | pulse train, 45 s window | pass: rising, monotonic, no flat region, span 36.9 dB; buckets 1 to 3 (knob 0.025 to 0.125) all read -84.3 dB, the measurement floor, which is under the 3-step flat limit but is a dead zone the pulse train cannot see into |
+| Soak, 300 s, triangle 0.50 to 0.95 to 0.50 over 250 s, 5001 `SET` | sine, smoothed | pass: no silence, no discontinuity (largest jump 6.9 LSB against 8), no step (largest 0.016 dB per ms) |
+| Soak with two +0.12 snaps (+8.6 dB) | sine, smoothed | step detector: 0 events, largest 2.1 dB per ms; discontinuity detector: 72 candidates, all at the two snaps |
+| Same schedule | sine, `unsmoothed-params` | step detector: 4 events at 90.9, 91.4, 170.9, 171.4 s (the snap edges), largest 8.65 dB per ms; `analyze --soak --expect-fail` exits 0 |
+| Held gain +6 dB and low-pass 2 kHz through `SET` on the mandolin excerpt | `stim-excerpt` | pass against `asperitas-cli`: loop gain within 0.03 dB of the model, residual RMS -30.7 and -32.9 dB, delay 81 samples |
+
+Callback cost on the sine path with the effect on and the knob moving every 50 ms: `max_block_us` 52, `worst_gap_us`
+696, no overruns, no drops; 47 without the effect. The pulse-train build reads 88.
+
+What the runs taught, for whoever plans the next one:
+
+- **A `REL`, or a first `SET` away from the base value, is a snap.** Releasing returns the parameter to the `FX` value, so
+  a ramp that ends elsewhere drops by up to 32 dB at the `REL`. The first soak attempt did exactly that and the
+  discontinuity detector flagged it (19 events at 260.99 to 261.06 s); the 250 s ramp itself was clean. Run a triangle that
+  starts and ends at the base value.
+- **A snap is flagged by the discontinuity detector whatever the smoothing.** The gain fit follows over 10 ms, and a
+  smoothed 8.6 dB snap still moves faster than that (72 candidates, all at the snaps). It is the step detector that separates
+  smoothed from unsmoothed: 2.1 dB per ms against 8.65. An 18 dB snap (+0.25 knob) defeats the smoothing even for the step
+  detector (6.3 dB per ms, over the 5 dB limit); that capture's report is `captures/task-019-03-04-exploratory-soak-18db-snaps-smoothed.json`.
+- **A low-pass sweep needs a broadband stimulus.** On the 1 kHz sine the first-difference level is flat once the cutoff passes
+  1 kHz, so use the pulse train for it. The gain sweep and the soak use the sine.
+- **Sweep and soak need the sweep start and duration.** `analyze` cannot recover them from the capture, so derive the start as
+  above.
+- No threshold was changed to make any of these pass.
 
 ### Blind spots
 

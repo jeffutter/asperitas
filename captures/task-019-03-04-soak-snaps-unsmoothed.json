@@ -1,0 +1,121 @@
+{
+  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-soak-tri-snap-unsmoothed.console.zst",
+  "detector_failures": [
+    "209 discontinuity candidate(s): 64 inside parameter motion, 0 outside, 145 unattributed",
+    "4 parameter step(s): 4 inside parameter motion, 0 outside, 0 unattributed"
+  ],
+  "expect_failure": true,
+  "expected_failure_observed": true,
+  "failures": [],
+  "pass": true,
+  "result": {
+    "discontinuities": {
+      "count": 209,
+      "inside_motion": 64,
+      "outside_motion": 0,
+      "times_s": [
+        90.9,
+        91.3,
+        91.4,
+        122.2,
+        122.55,
+        124.75,
+        124.95,
+        125.55,
+        125.65,
+        126.0,
+        126.45,
+        126.55,
+        127.1,
+        127.35,
+        127.6,
+        127.71,
+        127.9,
+        127.95,
+        128.05,
+        128.1,
+        128.9,
+        128.95102083333333,
+        129.05302083333333,
+        129.1,
+        129.2,
+        129.55,
+        129.6,
+        129.8,
+        129.85502083333333,
+        129.9,
+        130.15,
+        130.8,
+        130.9,
+        130.95,
+        131.10502083333333,
+        131.15,
+        131.65,
+        131.9,
+        132.0,
+        132.06,
+        132.15,
+        132.25,
+        132.3,
+        132.55,
+        132.6,
+        132.65,
+        132.80702083333333,
+        132.81,
+        132.85,
+        132.9,
+        132.95635416666667,
+        133.0,
+        133.05,
+        133.1,
+        133.20702083333333,
+        133.21,
+        133.30502083333334,
+        133.36702083333333,
+        133.5,
+        133.60302083333335,
+        133.81,
+        133.85302083333335,
+        133.9,
+        133.95
+      ],
+      "unattributed": 145
+    },
+    "duration_s": 300.032,
+    "failures": [
+      "209 discontinuity candidate(s): 64 inside parameter motion, 0 outside, 145 unattributed",
+      "4 parameter step(s): 4 inside parameter motion, 0 outside, 0 unattributed"
+    ],
+    "max_discontinuity_jump_lsb": 3649.0231626438062,
+    "max_param_step_db": 8.649562959531337,
+    "motion_window": {
+      "end_s": 261.9,
+      "start_s": 9.9
+    },
+    "param_steps": {
+      "count": 4,
+      "inside_motion": 4,
+      "outside_motion": 0,
+      "times_s": [
+        90.905,
+        91.409,
+        170.898,
+        171.398
+      ],
+      "unattributed": 0
+    },
+    "silence": {
+      "count": 0,
+      "inside_motion": 0,
+      "outside_motion": 0,
+      "times_s": [],
+      "unattributed": 0
+    }
+  },
+  "soak": {
+    "duration_s": 250.0,
+    "from": 0.5,
+    "start_s": 10.9,
+    "to": 0.95
+  }
+}

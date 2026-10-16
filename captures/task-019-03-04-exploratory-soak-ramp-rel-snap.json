@@ -1,0 +1,67 @@
+{
+  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-soak-ramp.console.zst",
+  "expected_failure_observed": false,
+  "failures": [
+    "19 discontinuity candidate(s): 19 inside parameter motion, 0 outside, 0 unattributed"
+  ],
+  "pass": false,
+  "result": {
+    "discontinuities": {
+      "count": 19,
+      "inside_motion": 19,
+      "outside_motion": 0,
+      "times_s": [
+        260.99,
+        260.99902083333336,
+        261.01514583333335,
+        261.02304166666664,
+        261.02360416666664,
+        261.0256875,
+        261.02610416666664,
+        261.0265625,
+        261.0305416666667,
+        261.0310625,
+        261.03158333333334,
+        261.03210416666667,
+        261.0377291666667,
+        261.03816666666665,
+        261.038625,
+        261.0391041666667,
+        261.0395833333333,
+        261.05,
+        261.06
+      ],
+      "unattributed": 0
+    },
+    "duration_s": 300.032,
+    "failures": [
+      "19 discontinuity candidate(s): 19 inside parameter motion, 0 outside, 0 unattributed"
+    ],
+    "max_discontinuity_jump_lsb": 3167.363752429941,
+    "max_param_step_db": 1.6886519016690054,
+    "motion_window": {
+      "end_s": 261.9,
+      "start_s": 9.9
+    },
+    "param_steps": {
+      "count": 0,
+      "inside_motion": 0,
+      "outside_motion": 0,
+      "times_s": [],
+      "unattributed": 0
+    },
+    "silence": {
+      "count": 0,
+      "inside_motion": 0,
+      "outside_motion": 0,
+      "times_s": [],
+      "unattributed": 0
+    }
+  },
+  "soak": {
+    "duration_s": 250.0,
+    "from": 0.5,
+    "start_s": 10.9,
+    "to": 0.95
+  }
+}

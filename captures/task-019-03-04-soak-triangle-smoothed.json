@@ -1,0 +1,43 @@
+{
+  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-soak-tri.console.zst",
+  "expected_failure_observed": false,
+  "failures": [],
+  "pass": true,
+  "result": {
+    "discontinuities": {
+      "count": 0,
+      "inside_motion": 0,
+      "outside_motion": 0,
+      "times_s": [],
+      "unattributed": 0
+    },
+    "duration_s": 300.032,
+    "failures": [],
+    "max_discontinuity_jump_lsb": 6.940988030058179,
+    "max_param_step_db": 0.015827157276759644,
+    "motion_window": {
+      "end_s": 261.9,
+      "start_s": 9.9
+    },
+    "param_steps": {
+      "count": 0,
+      "inside_motion": 0,
+      "outside_motion": 0,
+      "times_s": [],
+      "unattributed": 0
+    },
+    "silence": {
+      "count": 0,
+      "inside_motion": 0,
+      "outside_motion": 0,
+      "times_s": [],
+      "unattributed": 0
+    }
+  },
+  "soak": {
+    "duration_s": 250.0,
+    "from": 0.5,
+    "start_s": 10.9,
+    "to": 0.95
+  }
+}
