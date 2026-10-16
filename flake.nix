@@ -7,20 +7,36 @@
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+    }:
     let
-      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
 
-      forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f {
-        inherit system;
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [ rust-overlay.overlays.default ];
-        };
-      });
+      forAllSystems =
+        f:
+        nixpkgs.lib.genAttrs systems (
+          system:
+          f {
+            inherit system;
+            pkgs = import nixpkgs {
+              inherit system;
+              overlays = [ rust-overlay.overlays.default ];
+            };
+          }
+        );
     in
     {
-      devShells = forAllSystems ({ pkgs, ... }:
+      devShells = forAllSystems (
+        { pkgs, ... }:
         let
           # One toolchain covering host and embedded target. `override` folds
           # the thumbv7em-none-eabihf std into the same sysroot as rustc and
@@ -30,7 +46,11 @@
           # llvm-tools-preview supplies the llvm-objcopy that cargo-binutils wraps.
           rustToolchain = pkgs.rust-bin.stable.latest.default.override {
             targets = [ "thumbv7em-none-eabihf" ];
-            extensions = [ "rust-src" "rust-analyzer" "llvm-tools-preview" ];
+            extensions = [
+              "rust-src"
+              "rust-analyzer"
+              "llvm-tools-preview"
+            ];
           };
 
           # probe-rs main at the merge of PR #4441 (enable halting debug in the Cortex-M reset
@@ -58,47 +78,51 @@
           # shell, TASK-072) and no CI gate uses. Every other package, the toolchain above and the
           # shellHook come from this one definition, so `rustc -vV`, the rust-cache key and the
           # elf-check provenance cannot differ between the two.
-          mkDevShell = { withProbe }: pkgs.mkShell {
-            packages = [
-              # --- Rust toolchain (rustc, cargo, clippy, rustfmt + the above) ---
-              rustToolchain
+          mkDevShell =
+            { withProbe }:
+            pkgs.mkShell {
+              packages = [
+                # --- Rust toolchain (rustc, cargo, clippy, rustfmt + the above) ---
+                rustToolchain
 
-              # --- Embedded tooling ---
-              pkgs.dfu-util              # probe-free flashing over Seed3 USB-C
-              # ELF-based flashing, RTT + defmt logging; drives the `probe-*`
-              # targets in firmware/Makefile. Lock pins probe-rs-tools 0.32.0.
-              # No udev rules here: this flake ships devShells only, and Darwin
-              # needs no rule for an ST-Link (the Linux caveat lives in README).
-              # Built from probe-rs main (see probeRs above): stock 0.32.0 arms vector
-              # catch without C_DEBUGEN, so --connect-under-reset runs past it.
-              pkgs.cargo-binutils        # objcopy to produce raw .bin for DFU
+                # --- Embedded tooling ---
+                pkgs.dfu-util # probe-free flashing over Seed3 USB-C
+                # ELF-based flashing, RTT + defmt logging; drives the `probe-*`
+                # targets in firmware/Makefile. Lock pins probe-rs-tools 0.32.0.
+                # No udev rules here: this flake ships devShells only, and Darwin
+                # needs no rule for an ST-Link (the Linux caveat lives in README).
+                # Built from probe-rs main (see probeRs above): stock 0.32.0 arms vector
+                # catch without C_DEBUGEN, so --connect-under-reset runs past it.
+                pkgs.cargo-binutils # objcopy to produce raw .bin for DFU
 
-              pkgs.pkg-config
+                pkgs.pkg-config
 
-              # --- General tooling ---
-              pkgs.lefthook              # git hooks
-              pkgs.yq-go                 # mikefarah/yq-go (NOT Python yq)
-              pkgs.jq                    # JSON processing for backlog scripts
-            ]
-            ++ pkgs.lib.optionals withProbe [
-              probeRs
-            ]
-            # Host audio backend. On Linux cpal talks to ALSA and needs the
-            # library + its .pc file at build time. On Darwin it uses the
-            # CoreAudio/AudioToolbox frameworks, which the standard stdenv
-            # already provides — nothing extra to add here.
-            ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
-              pkgs.alsa-lib
-            ];
+                # --- General tooling ---
+                pkgs.lefthook # git hooks
+                pkgs.yq-go # mikefarah/yq-go (NOT Python yq)
+                pkgs.jq # JSON processing for backlog scripts
+                pkgs.sox
+              ]
+              ++ pkgs.lib.optionals withProbe [
+                probeRs
+              ]
+              # Host audio backend. On Linux cpal talks to ALSA and needs the
+              # library + its .pc file at build time. On Darwin it uses the
+              # CoreAudio/AudioToolbox frameworks, which the standard stdenv
+              # already provides — nothing extra to add here.
+              ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+                pkgs.alsa-lib
+              ];
 
-            shellHook = ''
-              lefthook install >&2
-            '';
-          };
+              shellHook = ''
+                lefthook install >&2
+              '';
+            };
         in
         {
           default = mkDevShell { withProbe = true; };
           ci = mkDevShell { withProbe = false; };
-        });
+        }
+      );
     };
 }
