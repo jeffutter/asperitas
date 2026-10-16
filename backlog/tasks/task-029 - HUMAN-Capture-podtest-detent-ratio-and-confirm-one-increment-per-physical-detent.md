@@ -3,7 +3,7 @@ id: TASK-029
 title: >-
   HUMAN: Capture podtest detent ratio and confirm one increment per physical
   detent
-status: Blocked
+status: To Do
 assignee:
   - '@human'
 created_date: '2026-09-09 00:27'
@@ -54,6 +54,8 @@ TASK-029.01 landed: podtest now emits '[podtest] t=<ms> ENCRAW AB=<bits>' once p
 TASK-030 (self-verifying log records) has NOT landed, so these lines ride the same USB CDC path that lost ~8.8% of the 2026-08-08 capture's lines. A dropped line inside a burst is indistinguishable from a transition that never happened, so do not read one run's cluster length as final: turn each direction at least twice and compare the runs, and record the comparison here. If the runs disagree, the capture lost lines -- report it rather than concluding the ratio or cluster shape, and mention it so TASK-029.01's fallback (drop the ENCRAW timestamp, or coalesce a burst into one line per cluster) can be taken.
 
 2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
+
+2026-10-16: Blocked lifted at the owner's request; the owner is back at the bench. Back to To Do.
 <!-- SECTION:NOTES:END -->
 
 ## Comments

@@ -1,7 +1,7 @@
 ---
 id: TASK-018.04
 title: Verify every Pod control on hardware
-status: Blocked
+status: To Do
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
@@ -94,4 +94,6 @@ Together these explain why ~1226 of 13968 lines were unreadable and why the loss
 Consequence for this ticket's own evidence: the capture quoted above is trustworthy for what it does contain, but its counts are lower bounds. A re-capture through the fixed transport is worth doing before treating 13968 lines and zero drop counters as the last word.
 
 2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
+
+2026-10-16: Blocked lifted at the owner's request; the owner is back at the bench. Back to To Do.
 <!-- SECTION:NOTES:END -->
