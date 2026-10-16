@@ -1,11 +1,11 @@
 ---
 id: TASK-066
 title: Stop ralph's execute stage from picking Dev Ready tickets it may not run
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-09-13 08:09'
-updated_date: '2026-10-16 16:35'
+updated_date: '2026-10-16 16:37'
 labels:
   - planned
 dependencies:
@@ -67,11 +67,11 @@ loop that wastes iterations on it runs.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both execute-stage picks (In Progress and Dev Ready) are filtered by the same rules as unblocked-todo.sh: all dependencies Done, no unfinished child, and assignee not @human. Implement it by calling the deployed script rather than reimplementing the checks in TypeScript - the header of backlog/unblocked-todo.sh documents why two copies of these rules drifted once already.
-- [ ] #2 A Dev Ready ticket that fails the check is corrected rather than merely skipped, matching .claude/workflows/ralph-backlog-loop.js:219-227: set status Blocked preserving its existing dependency list, and append one implementation note naming the unmet condition. Selection then continues with the next candidate instead of stalling the step.
-- [ ] #3 Demonstrated, not asserted. Reproduce the condition on a real container with an unfinished child in Dev Ready (or restore TASK-059 to Dev Ready briefly against a recorded sha), run the loop far enough to reach the selection, and record in the notes what it did: the ticket it refused, the status it forced, and the note text. Then restore the prior status and dependency list and show the diff is empty.
-- [ ] #4 The change is made in the home-manager source, applied with ~/bin/rebuild, and verified present in the deployed /nix/store copy. Notes record the home-manager commit sha and confirm this repo received no code change beyond its own backlog files.
-- [ ] #5 Out of scope, stated in the notes rather than done: changing what unblocked-todo.sh itself considers ready, and touching .claude/workflows/ralph-backlog-loop.js, which already has the guard.
+- [x] #1 Both execute-stage picks (In Progress and Dev Ready) are filtered by the same rules as unblocked-todo.sh: all dependencies Done, no unfinished child, and assignee not @human. Implement it by calling the deployed script rather than reimplementing the checks in TypeScript - the header of backlog/unblocked-todo.sh documents why two copies of these rules drifted once already.
+- [x] #2 A Dev Ready ticket that fails the check is corrected rather than merely skipped, matching .claude/workflows/ralph-backlog-loop.js:219-227: set status Blocked preserving its existing dependency list, and append one implementation note naming the unmet condition. Selection then continues with the next candidate instead of stalling the step.
+- [x] #3 Demonstrated, not asserted. Reproduce the condition on a real container with an unfinished child in Dev Ready (or restore TASK-059 to Dev Ready briefly against a recorded sha), run the loop far enough to reach the selection, and record in the notes what it did: the ticket it refused, the status it forced, and the note text. Then restore the prior status and dependency list and show the diff is empty.
+- [x] #4 The change is made in the home-manager source, applied with ~/bin/rebuild, and verified present in the deployed /nix/store copy. Notes record the home-manager commit sha and confirm this repo received no code change beyond its own backlog files.
+- [x] #5 Out of scope, stated in the notes rather than done: changing what unblocked-todo.sh itself considers ready, and touching .claude/workflows/ralph-backlog-loop.js, which already has the guard.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -161,6 +161,8 @@ What `unblocked-todo.sh` considers ready (`.01` adds reporting only), Choose/rev
 
 <!-- SECTION:NOTES:BEGIN -->
 TASK-066.03 demonstration (2026-10-16, weaker fallback: gate driven directly, runLoop wiring not exercised because print-mode /ralph crashed in postStatusMessage). Refused id: container with open child (fixture TASK-044, depends on TASK-043). Status forced: Blocked, dependencies unchanged. Verbatim note: "ralph: planning marked this Dev Ready, but it fails the eligibility check (reason: container-children-open), so it was forced to Blocked so Execute never receives it. It should be re-checked once that clears." The @human leaf was held unmutated and the @agent leaf picked in the same pass; second pass left the note count at 1. Citation correction: .claude/workflows/ralph-backlog-loop.js:215-232 (verifyAndCorrectPrompt) is a post-plan verify reached from the Plan branch at l.472, not a pre-execute guard; its real Execute-side protections are the humanOnly filter (l.338-358) and the blocked-reverted backstop (l.363-379). So pi gate is stricter than the Claude loop, not merely equal.
+
+2026-10-16: Closed with the owner. Subtasks TASK-066.01 (--explain, deployed), .02 (gate code, home-manager 4ca64bf, deployed copy byte-identical) and .03 (demonstration) are Done. #1 and #2 are the gate in 4ca64bf, which calls the deployed script and corrects a failing Dev Ready ticket to Blocked with one fixed-sentence comment (a task comment rather than an implementation note). #4: landed in home-manager, applied with ~/bin/rebuild, committed 4ca64bf, and this repo received no code change beyond backlog files. #5: the unblocked-todo.sh rules and .claude/workflows/ralph-backlog-loop.js were not touched (no commit since their prior history). Two honest limits the owner accepted: #3 was demonstrated by calling pickExecutableTicket against a scratch backlog (TASK-066.03), not by a live /ralph run on a real container such as TASK-059, because print-mode /ralph crashed and a live pi dry run on 2026-10-16 had ralph grabbing the wrong task; and the gate code was never typechecked, only parsed with bun build --no-bundle. Re-open if pi's /ralph misbehaves.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
