@@ -1,11 +1,11 @@
 ---
 id: TASK-019.03
 title: Verify knob-driven behaviour objectively through the Pod self-loopback
-status: Blocked
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-09 01:27'
-updated_date: '2026-10-16 03:28'
+updated_date: '2026-10-16 03:36'
 labels:
   - planned
 dependencies:
@@ -32,12 +32,12 @@ Host override must enter upstream of smoothing, per TASK-032's constraint, or th
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 With a stimulus excerpt replayed from QSPI by TASK-038 and its return captured, each mapped parameter is swept under host control across its full range and the measured response moves monotonically in the intended direction, with no flat regions.
-- [ ] #2 A continuous run of at least five minutes shows no silence dropouts and no discontinuity candidates above threshold, including while parameters are moving.
-- [ ] #3 The step-artifact detector reports nothing for the shipped smoothing and does report for an intentionally unsmoothed build, so the clean result is known to be evidence rather than an insensitive test.
-- [ ] #4 Device-through-loopback output agrees with asperitas-cli output within the tolerance defined by TASK-035 on at least one named excerpt, and on more where the QSPI budget allows — the count is bounded by flash shared with the firmware image, not by patience.
-- [ ] #5 Capture artifacts and metric summaries are committed and referenced from this ticket, per the standard that a measurement is the evidence and a successful build is not.
-- [ ] #6 Any disagreement found is filed as its own bug ticket rather than resolved by loosening a threshold.
+- [x] #1 With a stimulus excerpt replayed from QSPI by TASK-038 and its return captured, each mapped parameter is swept under host control across its full range and the measured response moves monotonically in the intended direction, with no flat regions.
+- [x] #2 A continuous run of at least five minutes shows no silence dropouts and no discontinuity candidates above threshold, including while parameters are moving.
+- [x] #3 The step-artifact detector reports nothing for the shipped smoothing and does report for an intentionally unsmoothed build, so the clean result is known to be evidence rather than an insensitive test.
+- [x] #4 Device-through-loopback output agrees with asperitas-cli output within the tolerance defined by TASK-035 on at least one named excerpt, and on more where the QSPI budget allows — the count is bounded by flash shared with the firmware image, not by patience.
+- [x] #5 Capture artifacts and metric summaries are committed and referenced from this ticket, per the standard that a measurement is the evidence and a successful build is not.
+- [x] #6 Any disagreement found is filed as its own bug ticket rather than resolved by loosening a threshold.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -67,4 +67,6 @@ Loopback evidence from TASK-038.05 (2026-10-07/08), the measured baseline this t
 - Caveats: the ESS build misses its first 2 s (20-112 Hz) until TASK-038.08 lands. Timing figures are only valid after a RESET-button boot, not straight after a probe flash.
 
 2026-10-15: bench evidence for TASK-019.03.04 is in commit 2c3bb45 (audio/captures/2026-10-15-rig-{sweep,soak,hold}-*.console.zst, captures/task-019-03-04-*.json, docs/reference/asperitas-rig.md 'Measured on the board'). Gain and low-pass sweeps pass; the 300 s triangle soak passes; the unsmoothed build fires the step detector on the same snap schedule where the smoothed build does not; device agrees with asperitas-cli on the mandolin excerpt at held settings through SET. Awaiting the owner's sign-off on TASK-019.03.04.
+
+2026-10-15: closed with the owner, who agreed all six criteria were met after TASK-019.03.04 was signed off. Children Done: .01 live override and unsmoothed build, .02 sweep analysis, .03 soak analysis, .04 bench run, .05 effect after any stimulus generator (added when .04 found the effect existed only on the one-shot excerpt replay). AC mapping: #1 sweeps for gain (sine) and low-pass (pulse train) pass monotonic, no flat region; wording note: the criterion names an excerpt replayed from QSPI, but the sweeps need a steady tone, so they ran on the sine and pulse train by agreement, and the excerpt was used for the held-setting comparisons; #2 300 s triangle soak with 5001 SET frames, no silence, no discontinuity, no step; #3 step detector 0 events on the smoothed build and 4 on the unsmoothed build on an identical snap schedule; #4 mandolin_single_note_soft agrees with asperitas-cli at held gain +6 dB and low-pass 2 kHz through SET, and at three FX settings in TASK-035.07.03; #5 evidence in 2c3bb45; #6 no disagreement found, none filed, no threshold changed.
 <!-- SECTION:NOTES:END -->
