@@ -5,6 +5,7 @@ status: Backlog
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-16 19:36'
 labels:
   - review-2026-10
   - firmware
@@ -30,3 +31,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 <!-- AC:BEGIN -->
 - [ ] #1 Decision recorded; features either documented rig-only or replaced by CTL verbs, with the gate matrix updated
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner decision 2026-10-16: dropped for now, archived in case it is useful later.
+<!-- SECTION:NOTES:END -->

@@ -1,10 +1,11 @@
 ---
 id: TASK-084
 title: 'DSP: move stimulus, fx_chain and replay_fx out of asperitas-dsp'
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-16 19:36'
 labels:
   - review-2026-10
   - dsp
@@ -34,3 +35,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #2 The CLI sweep and rig sweep share one implementation
 - [ ] #3 .text of the rig images is re-measured and recorded
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Owner decision 2026-10-16: move them to keep the DSP crate clean.
+<!-- SECTION:NOTES:END -->

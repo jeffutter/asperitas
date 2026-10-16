@@ -1,10 +1,11 @@
 ---
 id: TASK-083
 title: 'DSP: goldens as f32 WAV with near-bit-exact comparison and non-default params'
-status: Backlog
+status: To Do
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:12'
+updated_date: '2026-10-16 19:36'
 labels:
   - review-2026-10
   - dsp
@@ -37,4 +38,6 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-16 owner decision: Owner asked why f32. Reason: 16-bit goldens at 1e-4 cannot see changes below ~-90 dB, e.g. a quiet resonator tail, and half the goldens are identity copies. Revisit when the resonator (M5) exists; leave in Backlog until then.
+
+Owner decision 2026-10-16: do it now, not at M5.
 <!-- SECTION:NOTES:END -->
