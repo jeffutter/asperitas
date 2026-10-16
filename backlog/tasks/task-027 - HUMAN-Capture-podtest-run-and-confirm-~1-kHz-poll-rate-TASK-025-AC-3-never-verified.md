@@ -3,7 +3,7 @@ id: TASK-027
 title: >-
   HUMAN: Capture podtest run and confirm ~1 kHz poll rate (TASK-025 AC #3 never
   verified)
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-09 05:08'
@@ -31,7 +31,7 @@ Correct axis: per this project's CLAUDE.md, "If a criterion says HUMAN:, no amou
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both subtasks are done: TASK-027.01 (flash podtest and leave the bench rigged for scripted capture) and TASK-027.02 (measure the achieved poll rate and check for catch-up bursts from a scripted capture).
+- [x] #1 Both subtasks are done: TASK-027.01 (flash podtest and leave the bench rigged for scripted capture) and TASK-027.02 (measure the achieved poll rate and check for catch-up bursts from a scripted capture).
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -42,4 +42,6 @@ Restructured 2026-09-09 into an umbrella with two subtasks. The original four cr
 This ticket stays @human under the parent-inherits-strictest rule and cannot close until TASK-027.01 does. The measurement criteria themselves no longer ask a person to do arithmetic.
 
 2026-10-15 measurement (TASK-027.02): captures/task-027-02-podtest-knob.txt, 250 s via asperitas-rig (bad_frames=0, accounting_ok=true, 25360 records, one leading gap seq 0x25->0x1bb with device_dropped=405 and 49 discarded bytes from pre-attach, so rig verdict=fail on discarded_bytes only; stats use records after the gap). Knob interval from body t= over 24828 deltas (scripts/knob-interval.py): median 10.0 ms, mean 10.071, p5 10, p95 11, min 10, max 11, stdev 0.257 ms (1 ms quantisation). No deltas <=2 ms, no stalls >20 ms, so no catch-up bursts. Controls assumed untouched. Consistent with true 1 kHz poll rate.
+
+2026-10-16: Closed with the owner. A second, independent measurement from the TASK-033 session (captures/task-033-controls-270s.txt, 270 s, encoder and buttons in use): 26814 knob deltas, median 10.0 ms, mean 10.071, stdev 0.257, p5 10, p95 11, no delta <=2 ms, none >20 ms (scripts/knob-interval.py). It agrees with the 2026-10-15 number, so the ~1 kHz claim is hardware-verified; the owner agreed.
 <!-- SECTION:NOTES:END -->
