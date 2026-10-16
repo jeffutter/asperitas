@@ -29,6 +29,17 @@ impl FxKind {
     }
 }
 
+impl FxKind {
+    /// The name `describe()` reports for a non-bypass effect.
+    pub fn name(self) -> &'static str {
+        match self {
+            FxKind::Bypass => "bypass",
+            FxKind::Gain => "gain",
+            FxKind::LowPass => "lowpass",
+        }
+    }
+}
+
 /// The replay effect. Default is bypass.
 pub struct ReplayFx {
     kind: FxKind,

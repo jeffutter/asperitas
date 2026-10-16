@@ -259,40 +259,41 @@ what is on disk and fails the commit tier on any difference:
 key                         | min    | com | psh | ci | cost    | gate
 ----------------------------+--------+-----+-----+----+---------+---------------------------------------
 gate-definition-parses      | commit | yes | yes | yes | 0.01 s  | === gate definition parses ===
-docs-artifact-names         | commit | yes | yes | yes | 0.29 s  | === docs artifact names ===
-gate-costs-current          | commit | yes | yes | yes | 0.53 s  | === gate costs current ===
+docs-artifact-names         | commit | yes | yes | yes | 0.28 s  | === docs artifact names ===
+gate-costs-current          | commit | yes | yes | yes | 0.52 s  | === gate costs current ===
 elf-provenance-selftest     | commit | yes | yes | yes | ~1 s    | === elf-provenance --selftest ===
 elf-staleness-selftest      | commit | yes | yes | yes | ~3 s    | === elf-staleness --selftest ===
-load-addresses-selftest     | commit | yes | yes | yes | 0.99 s  | === load-addresses --selftest ===
-cargo-fmt                   | commit | yes | yes | yes | 0.27 s  | === cargo fmt ===
+load-addresses-selftest     | commit | yes | yes | yes | 0.97 s  | === load-addresses --selftest ===
+cargo-fmt                   | commit | yes | yes | yes | 0.26 s  | === cargo fmt ===
 cargo-fmt-firmware          | commit | yes | yes | yes | 0.41 s  | === cargo fmt (firmware workspace) ===
-cargo-clippy                | commit | yes | yes | yes | ~2 s    | === cargo clippy ===
-cargo-clippy-log-usb        | commit | yes | yes | yes | 0.25 s  | === cargo clippy (asperitas-logging log-usb) ===
+cargo-clippy                | commit | yes | yes | yes | ~1 s    | === cargo clippy ===
+cargo-clippy-log-usb        | commit | yes | yes | yes | 0.21 s  | === cargo clippy (asperitas-logging log-usb) ===
 cargo-clippy-log-defmt      | commit | yes | yes | yes | 0.20 s  | === cargo clippy (asperitas-logging log-defmt) ===
-clippy-pod-hw               | push   | -   | yes | yes | 0.94 s  | === cargo clippy (asperitas-pod pod-hw feature) ===
-dump-reassemble-selftest    | push   | -   | yes | yes | 0.51 s  | === dump_reassemble --selftest ===
-cargo-doc                   | push   | -   | yes | yes | ~10 s   | === cargo doc (workspace) ===
+clippy-pod-hw               | push   | -   | yes | yes | 0.89 s  | === cargo clippy (asperitas-pod pod-hw feature) ===
+dump-reassemble-selftest    | push   | -   | yes | yes | 0.42 s  | === dump_reassemble --selftest ===
+cargo-doc                   | push   | -   | yes | yes | 0.12 s  | === cargo doc (workspace) ===
 cargo-doc-all-features      | push   | -   | yes | yes | ~5 s    | === cargo doc (workspace, all features) ===
-bootloaded-builds           | push   | -   | yes | yes | ~14 s   | === firmware bootloaded layout builds ===
+bootloaded-builds           | push   | -   | yes | yes | ~12 s   | === firmware bootloaded layout builds ===
 rig-stim-ess-build          | push   | -   | yes | yes | 0.14 s  | === firmware rig build (stim-ess) ===
 rig-stim-pulse-build        | push   | -   | yes | yes | 0.13 s  | === firmware rig build (stim-pulse) ===
-rig-stim-excerpt-rtt-build  | push   | -   | yes | yes | 0.13 s  | === firmware rig build (stim-excerpt, RTT-only) ===
-rig-stim-excerpt-unsmoothed-build | push   | -   | yes | yes | 0.13 s  | === firmware rig build (stim-excerpt, unsmoothed-params) ===
+rig-sine-unsmoothed-build   | push   | -   | yes | yes | ~1 s    | === firmware rig build (sine, unsmoothed-params) ===
+rig-stim-excerpt-rtt-build  | push   | -   | yes | yes | ~1 s    | === firmware rig build (stim-excerpt, RTT-only) ===
+rig-stim-excerpt-unsmoothed-build | push   | -   | yes | yes | ~1 s    | === firmware rig build (stim-excerpt, unsmoothed-params) ===
 rig-window-override-build   | push   | -   | yes | yes | 0.86 s  | === firmware rig build (shortened capture window) ===
-rig-ring-fill-build         | push   | -   | yes | yes | 0.86 s  | === firmware rig build (ring-fill capture window) ===
+rig-ring-fill-build         | push   | -   | yes | yes | 0.88 s  | === firmware rig build (ring-fill capture window) ===
 firmware-cross-compile      | push   | -   | yes | yes | ~1 s    | === firmware cross-compile ===
 firmware-cross-compile-rtt  | push   | -   | yes | yes | ~1 s    | === firmware cross-compile (RTT-only, log-defmt) ===
 firmware-elf-provenance     | push   | -   | yes | yes | 0.10 s  | === firmware ELF cfg provenance ===
 image-load-addresses        | push   | -   | yes | yes | 0.86 s  | === image load addresses ===
-firmware-clippy             | commit | yes | yes | yes | ~2 s    | === firmware clippy (all bins) ===
-firmware-clippy-rtt         | commit | yes | yes | yes | ~1 s    | === firmware clippy (all bins, RTT-only, log-defmt) ===
-rig-stim-ess-clippy         | commit | yes | yes | yes | ~1 s    | === firmware clippy (rig, stim-ess) ===
-rig-stim-pulse-clippy       | commit | yes | yes | yes | ~1 s    | === firmware clippy (rig, stim-pulse) ===
-rig-stim-excerpt-clippy     | commit | yes | yes | yes | ~1 s    | === firmware clippy (rig, stim-excerpt) ===
-rig-stim-excerpt-clippy-rtt | commit | yes | yes | yes | ~1 s    | === firmware clippy (rig, stim-excerpt, RTT-only) ===
-cargo-test                  | push   | -   | yes | yes | ~143 s  | === cargo test ===
-cargo-test-pod-hw           | ci     | -   | -   | yes | ~138 s  | === cargo test (asperitas-pod pod-hw feature) ===
-counts: commit 17, push 33, ci 34
+firmware-clippy             | commit | yes | yes | yes | 0.80 s  | === firmware clippy (all bins) ===
+firmware-clippy-rtt         | commit | yes | yes | yes | 0.76 s  | === firmware clippy (all bins, RTT-only, log-defmt) ===
+rig-stim-ess-clippy         | commit | yes | yes | yes | 0.77 s  | === firmware clippy (rig, stim-ess) ===
+rig-stim-pulse-clippy       | commit | yes | yes | yes | 0.78 s  | === firmware clippy (rig, stim-pulse) ===
+rig-stim-excerpt-clippy     | commit | yes | yes | yes | 0.78 s  | === firmware clippy (rig, stim-excerpt) ===
+rig-stim-excerpt-clippy-rtt | commit | yes | yes | yes | 0.74 s  | === firmware clippy (rig, stim-excerpt, RTT-only) ===
+cargo-test                  | push   | -   | yes | yes | ~178 s  | === cargo test ===
+cargo-test-pod-hw           | ci     | -   | -   | yes | ~179 s  | === cargo test (asperitas-pod pod-hw feature) ===
+counts: commit 17, push 34, ci 35
 ```
 <!-- END GENERATED: gate-matrix -->
 
@@ -317,7 +318,7 @@ Every figure in that block, and every figure quoted anywhere else in this repo, 
   figure where the key sits, so a priced argument keeps its number while the numeral itself stays in one
   file.
 - **`scripts/gate-costs.sh --check` is what keeps the citations true.** It runs as the third gate of the
-  commit tier, ahead of every cargo invocation, at 0.53 s {{gate:gate-costs-current}} warm. It renders each
+  commit tier, ahead of every cargo invocation, at 0.52 s {{gate:gate-costs-current}} warm. It renders each
   guarded file into a temp copy and compares bytes against the file on disk, so a stale figure and a
   hand-typed one are one finding rather than two rules, and it fails when a gate has no ledger entry, when
   an entry names no live gate, or when a gate's command digest stopped matching the command that runs. It
@@ -336,12 +337,12 @@ The approximation policy is stated once because it covers every row above: one w
 machine, measured 2026-09-16 2026-10-08 2026-10-15 2026-10-16 {{meta:measured}} on aarch64-darwin inside `nix develop .#default`. The last digit is
 noise, and a cold cache or a background Spotlight scan moves any figure here by tens of percent. What the
 ledger's per-gate command digests buy is the claim that each number was taken against the command that runs
-today, not that it repeats to three figures. The tier totals are **commit ~16 s {{tier:commit}}**, **push
-~187 s {{tier:push}}**, **ci ~306 s {{tier:ci}}**; the two `cargo test` invocations are ~143 s {{gate:cargo-test}} and
-~138 s {{gate:cargo-test-pod-hw}}, which together are most of that `ci` total.
+today, not that it repeats to three figures. The tier totals are **commit ~12 s {{tier:commit}}**, **push
+~214 s {{tier:push}}**, **ci ~388 s {{tier:ci}}**; the two `cargo test` invocations are ~178 s {{gate:cargo-test}} and
+~179 s {{gate:cargo-test-pod-hw}}, which together are most of that `ci` total.
 
 Three selftest gates run ahead of every cargo invocation, at ~1 s {{gate:elf-provenance-selftest}},
-~3 s {{gate:elf-staleness-selftest}} and 0.99 s {{gate:load-addresses-selftest}}:
+~3 s {{gate:elf-staleness-selftest}} and 0.97 s {{gate:load-addresses-selftest}}:
 `=== elf-provenance --selftest
 ===`, `=== elf-staleness --selftest ===` (TASK-056) and `=== load-addresses --selftest ===` (TASK-068).
 All three sit there because they compile nothing and read no artifact, which is what cheapest-first does
@@ -356,7 +357,7 @@ each at its figure are stated in the three scripts' own headers:
 - the staleness checker, ~3 s {{gate:elf-staleness-selftest}}: one `make` per case against a fixture tree, with
   the compiler and the
   provenance clause both stubbed;
-- the load-address checker, 0.99 s {{gate:load-addresses-selftest}}: seventeen cases, of which only five
+- the load-address checker, 0.97 s {{gate:load-addresses-selftest}}: seventeen cases, of which only five
   re-execute the script as a child
   process, because even the cheapest such child pays ~70 ms {{component:selftest-child-invocation}} for a fresh
   interpreter and its objdump, against a subshell that costs nothing measurable, and the exit code is
@@ -416,7 +417,7 @@ names no checks at all; `.github/ci-steps.sh`, the intermediate fix, is gone, an
 file needed is now the first gate in the script.
 
 Exactly one gate lives in the `ci` tier alone: `cargo test --workspace --features
-asperitas-pod/pod-hw`, ~138 s {{gate:cargo-test-pod-hw}} local warm - more than every push-tier gate combined
+asperitas-pod/pod-hw`, ~179 s {{gate:cargo-test-pod-hw}} local warm - more than every push-tier gate combined
 - re-running the host
 suite under one non-default feature flag whose compile-time half (`clippy --features
 asperitas-pod/pod-hw`) does run on push. Priced and argued at its own gate in `scripts/gates.sh`,

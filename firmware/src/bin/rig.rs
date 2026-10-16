@@ -31,6 +31,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see build.rs
 
+use asperitas_dsp::fx_chain::FxChain;
 use asperitas_dsp::processor::{Frame, Processor};
 #[cfg(feature = "stim-ess")]
 use asperitas_dsp::stimulus::ExponentialSweep;
@@ -180,13 +181,30 @@ const _: () = assert!(
 /// no stimulus feature at all. Mutual exclusion above is what makes leaving `stim-sine` out of
 /// that condition correct rather than a subtle wrong-build generator.
 #[cfg(feature = "stim-ess")]
-type ActiveGenerator = ExponentialSweep;
+type BareGenerator = ExponentialSweep;
 #[cfg(feature = "stim-pulse")]
-type ActiveGenerator = PulseTrain;
+type BareGenerator = PulseTrain;
 #[cfg(feature = "stim-excerpt")]
-type ActiveGenerator = ExcerptPlayer;
+type BareGenerator = ExcerptPlayer;
 #[cfg(not(any(feature = "stim-ess", feature = "stim-pulse", feature = "stim-excerpt")))]
-type ActiveGenerator = Sine;
+type BareGenerator = Sine;
+
+/// What the audio task holds: the generator, then the replay effect (`CTL FX`), on every build.
+/// With no `FX` sent the effect is bypass and the output is bit-identical to the bare generator
+/// (`asperitas_dsp::fx_chain`).
+type ActiveGenerator = FxChain<BareGenerator>;
+
+/// The chain around `gen`: shipped smoothing, or none under `unsmoothed-params`.
+fn chain_of(gen: BareGenerator) -> ActiveGenerator {
+    #[cfg(feature = "unsmoothed-params")]
+    {
+        FxChain::new_unsmoothed(gen)
+    }
+    #[cfg(not(feature = "unsmoothed-params"))]
+    {
+        FxChain::new(gen)
+    }
+}
 
 /// Sample rate rig renders at, derived from the capture format rather than restated beside it.
 ///
@@ -1241,8 +1259,8 @@ fn emit_exc_fail(failure: &asperitas_logging::excerpt::Failure) {
     emit_console(&body[..n]);
 }
 
-/// Answer one `CTL` record. The rig serves exactly one control verb, `FX` (replay effect, see
-/// "Replay effect" below); every other verb gets `unknown-verb`, as before this channel existed
+/// Answer one `CTL` record. The rig serves the replay-effect verbs `FX`, `SET` and `REL` on every
+/// build (see "Replay effect" below); every other verb gets `unknown-verb`, as before this channel existed
 /// it was ignored, and a host that waits for an answer is better told. Parse failures are counted
 /// and answered by `route`.
 #[cfg(feature = "log-usb")]
@@ -1255,12 +1273,11 @@ fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
         |_| {},
         |cmd| {
             reply = Some(match cmd {
-                #[cfg(feature = "stim-excerpt")]
                 asperitas_logging::control::Command::ReplayFx { fx, value } => {
                     // Changing the effect mid-capture would make the recording unrepeatable.
                     if CAPTURE_ACTIVE.load(Ordering::Acquire) {
                         Reply::Error(ErrorCode::Busy)
-                    } else if excerpt_play::select_fx(fx, value) {
+                    } else if fx_ctl::select_fx(fx, value) {
                         Reply::Ok(cmd.verb())
                     } else {
                         Reply::Error(ErrorCode::BadValue)
@@ -1268,17 +1285,15 @@ fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
                 }
                 // Allowed mid-capture, unlike `FX`: the effect kind and base value stay fixed
                 // while the override moves the parameter, which is what a sweep is.
-                #[cfg(feature = "stim-excerpt")]
                 asperitas_logging::control::Command::OverrideSet { knob, value } => {
-                    if excerpt_play::override_set(knob, value) {
+                    if fx_ctl::override_set(knob, value) {
                         Reply::Ok(cmd.verb())
                     } else {
                         Reply::Error(ErrorCode::BadKnob)
                     }
                 }
-                #[cfg(feature = "stim-excerpt")]
                 asperitas_logging::control::Command::OverrideRelease { knob } => {
-                    if excerpt_play::override_release(knob) {
+                    if fx_ctl::override_release(knob) {
                         Reply::Ok(cmd.verb())
                     } else {
                         Reply::Error(ErrorCode::BadKnob)
@@ -1493,11 +1508,89 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 // It is the CRC of the samples handed to the DAC encoder (`replay::PassReport::crc16`). With `want`
 // (the stored header CRC) and `clean=1` it says QSPI-to-encoder delivered the excerpt intact and
 // unbroken. It says nothing about the codec, the analog path or the cable (TASK-035 AC #4).
+// ---------------------------------------------------------------------------
+// Replay effect control (every build)
+// ---------------------------------------------------------------------------
+
+/// The host's handle on the effect stage that follows the generator. Compiled on every build, not
+/// only `stim-excerpt`: the sine, sweep and pulse builds run the same stage (TASK-019.03.05).
+mod fx_ctl {
+    use asperitas_dsp::fx_chain::FxChain;
+    use asperitas_dsp::processor::{Frame, Processor};
+    use asperitas_pod::knob_override::KnobOverride;
+    use core::cell::{Cell, RefCell};
+    use core::sync::atomic::{AtomicU32, Ordering};
+    use cortex_m::interrupt::Mutex;
+
+    /// The pending effect selection `(kind code, value)` and a counter the callback compares with the
+    /// one it last applied, so the common case is a single relaxed atomic load.
+    static FX_REQUEST: Mutex<Cell<(u8, u16)>> = Mutex::new(Cell::new((0, 0)));
+    static FX_GENERATION: AtomicU32 = AtomicU32::new(0);
+
+    /// Request effect `code` at `value`. `false` for an unknown code, changing nothing.
+    #[cfg(feature = "log-usb")]
+    pub fn select_fx(code: u8, value: u16) -> bool {
+        if asperitas_dsp::replay_fx::FxKind::from_code(code).is_none() {
+            return false;
+        }
+        cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).set((code, value)));
+        FX_GENERATION.fetch_add(1, Ordering::Release);
+        true
+    }
+
+    /// The host's override of the effect parameter (knob 0). One knob: the effect has one parameter.
+    static KNOB: Mutex<RefCell<KnobOverride<1>>> = Mutex::new(RefCell::new(KnobOverride::new()));
+
+    /// Override knob `knob` with the wire value `value` (`0..=65535` spans `0.0..=1.0`). `false`
+    /// for a knob other than 0.
+    #[cfg(feature = "log-usb")]
+    pub fn override_set(knob: u8, value: u16) -> bool {
+        let v = f32::from(value) / f32::from(u16::MAX);
+        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().set(usize::from(knob), v))
+    }
+
+    /// Return knob `knob` to the `FX` value. `false` for a knob other than 0.
+    #[cfg(feature = "log-usb")]
+    pub fn override_release(knob: u8) -> bool {
+        if knob != 0 {
+            return false;
+        }
+        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().release(0));
+        true
+    }
+
+    /// Render one block: the generator, then the effect, applying a pending `FX` first.
+    ///
+    /// `fx_seen` is the generation this stage last applied. The callback's cost beyond the bare
+    /// generator is one relaxed atomic load in bypass; with an effect selected it adds 32 effect
+    /// ticks per block, measured at `max_block_us` 19 against 15 (2026-10-15, replay), well inside
+    /// the roughly 590 us of 666 us headroom. No await, no flash access, no allocation; the
+    /// critical sections are a handful of cycles and only run when a request is pending or an
+    /// effect is selected.
+    pub fn render<G: Processor>(
+        chain: &mut FxChain<G>,
+        fx_seen: &mut u32,
+        input: &[Frame],
+        output: &mut [Frame],
+    ) {
+        let generation = FX_GENERATION.load(Ordering::Acquire);
+        if generation != *fx_seen {
+            *fx_seen = generation;
+            let (code, value) = cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).get());
+            chain.select(code, value);
+        }
+        chain.process_block_with(input, output, |base| {
+            // Upstream of smoothing, as `main` does.
+            let [knob] = cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow().merge([base]));
+            knob
+        });
+    }
+}
+
 #[cfg(feature = "stim-excerpt")]
 mod excerpt_play {
     use super::{emit_console, flash_of, FLASH};
     use asperitas_dsp::processor::{Frame, Processor};
-    use asperitas_dsp::replay_fx::{FxKind, ReplayFx};
     use asperitas_dsp::stimulus::Stimulus;
     use asperitas_logging::excerpt::{self, SlotHeader, HEADER_LEN};
     use asperitas_logging::replay::{
@@ -1505,11 +1598,7 @@ mod excerpt_play {
         BYTES_PER_SAMPLE,
     };
     use asperitas_logging::{console, error, info};
-    use asperitas_pod::knob_override::KnobOverride;
-    use core::cell::{Cell, RefCell};
     use core::fmt::Write as _;
-    use core::sync::atomic::{AtomicU32, Ordering};
-    use cortex_m::interrupt::Mutex;
     use cortex_m::peripheral::SCB;
 
     /// The slot this build plays: `ASP_RIG_EXCERPT_SLOT` when set, otherwise 0.
@@ -1590,55 +1679,6 @@ mod excerpt_play {
         REPLAY.finish().is_none()
     }
 
-    /// The pending effect selection `(kind code, value)` and a counter the callback compares with the
-    /// one it last applied, so the common case is a single relaxed atomic load.
-    static FX_REQUEST: Mutex<Cell<(u8, u16)>> = Mutex::new(Cell::new((0, 0)));
-    static FX_GENERATION: AtomicU32 = AtomicU32::new(0);
-
-    /// Request effect `code` at `value`. `false` for an unknown code, changing nothing.
-    #[cfg(feature = "log-usb")]
-    pub fn select_fx(code: u8, value: u16) -> bool {
-        if FxKind::from_code(code).is_none() {
-            return false;
-        }
-        cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).set((code, value)));
-        FX_GENERATION.fetch_add(1, Ordering::Release);
-        true
-    }
-
-    /// The host's override of the effect parameter (knob 0). One knob: the effect has one parameter.
-    static KNOB: Mutex<RefCell<KnobOverride<1>>> = Mutex::new(RefCell::new(KnobOverride::new()));
-
-    /// Override knob `knob` with the wire value `value` (`0..=65535` spans `0.0..=1.0`). `false`
-    /// for a knob other than 0.
-    #[cfg(feature = "log-usb")]
-    pub fn override_set(knob: u8, value: u16) -> bool {
-        let v = f32::from(value) / f32::from(u16::MAX);
-        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().set(usize::from(knob), v))
-    }
-
-    /// Return knob `knob` to the `FX` value. `false` for a knob other than 0.
-    #[cfg(feature = "log-usb")]
-    pub fn override_release(knob: u8) -> bool {
-        if knob != 0 {
-            return false;
-        }
-        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().release(0));
-        true
-    }
-
-    /// The effect's constructor: shipped smoothing, or none under `unsmoothed-params`.
-    fn new_fx() -> ReplayFx {
-        #[cfg(feature = "unsmoothed-params")]
-        {
-            ReplayFx::new_unsmoothed()
-        }
-        #[cfg(not(feature = "unsmoothed-params"))]
-        {
-            ReplayFx::new()
-        }
-    }
-
     /// One cache line, aligned like one, for the header read's destination.
     #[repr(align(32))]
     struct Line([u8; 32]);
@@ -1699,12 +1739,7 @@ mod excerpt_play {
         while let Some(claim) = REPLAY.claim_fill() {
             fill_half(scb, claim).await;
         }
-        Ok(ExcerptPlayer {
-            header,
-            fx: new_fx(),
-            fx_seen: 0,
-            base: 0.0,
-        })
+        Ok(ExcerptPlayer { header })
     }
 
     /// Refill halves as the callback drains them; after the pass, report it once.
@@ -1750,10 +1785,6 @@ mod excerpt_play {
     /// The generator the audio task holds: a thin front for the shared [`REPLAY`] core.
     pub struct ExcerptPlayer {
         header: SlotHeader,
-        fx: ReplayFx,
-        fx_seen: u32,
-        /// The `FX` value, normalised: the pot reading the override replaces.
-        base: f32,
     }
 
     impl ExcerptPlayer {
@@ -1790,22 +1821,6 @@ mod excerpt_play {
                 let value = f32::from(sample) / 32768.0;
                 *frame = [value, value];
             }
-            let generation = FX_GENERATION.load(Ordering::Acquire);
-            if generation != self.fx_seen {
-                self.fx_seen = generation;
-                let (code, value) = cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).get());
-                if let Some(kind) = FxKind::from_code(code) {
-                    self.base = f32::from(value) / f32::from(u16::MAX);
-                    self.fx.select(kind, self.base);
-                }
-            }
-            // Upstream of smoothing, as `main` does; a no-op when the value is unchanged.
-            if self.fx.kind() != FxKind::Bypass {
-                let [knob] =
-                    cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow().merge([self.base]));
-                self.fx.set_knob(knob);
-            }
-            self.fx.process(output);
         }
     }
 
@@ -1934,6 +1949,8 @@ async fn audio_task(
     // callback, because any stretch of it is as good as any other.
     let mut frames_out = [Frame::default(); BLOCK_LENGTH];
     let mut playing = generator.one_shot_samples().is_none();
+    // The `FX` generation this task last applied (see `fx_ctl::render`).
+    let mut fx_seen = 0u32;
     let mut producer = Producer {
         ring,
         callbacks_in_block: 0,
@@ -1964,7 +1981,7 @@ async fn audio_task(
             // Render site, mirroring `main.rs`: stimulus -> [processor slot] -> encode_block.
             // The processor slot is empty by design and is where a measured effect will hang.
             if playing {
-                generator.process_block(&frames_in, &mut frames_out);
+                fx_ctl::render(generator, &mut fx_seen, &frames_in, &mut frames_out);
             }
             encode_block(&frames_out, output);
             producer.finish(entry);
@@ -2286,9 +2303,9 @@ async fn main(_spawner: Spawner) {
     #[cfg(feature = "stim-excerpt")]
     let want_crc = player.want_crc16();
     #[cfg(feature = "stim-excerpt")]
-    let generator = GENERATOR.init(player);
+    let generator = GENERATOR.init(chain_of(player));
     #[cfg(not(feature = "stim-excerpt"))]
-    let generator = GENERATOR.init(ActiveGenerator::default());
+    let generator = GENERATOR.init(chain_of(BareGenerator::default()));
     generator.set_sample_rate(SAMPLE_RATE_HZ);
 
     // Prepare the audio interface (SAI + codec init + DMA buffers)

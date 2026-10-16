@@ -3,12 +3,14 @@ id: TASK-019.03.05
 title: >-
   Run rig's replay effect after any stimulus generator (sine first), so the knob
   sweep and soak analyses have a steady tone to judge
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 01:57'
+updated_date: '2026-10-16 02:26'
 labels:
   - task
+  - planned
 dependencies: []
 references:
   - firmware/src/bin/rig.rs
@@ -32,10 +34,28 @@ Constraints to carry through: (1) with no `FX` sent (bypass, the default) every 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 rig builds with the replay effect applied after the sine generator (default features plus whatever new feature or cfg the design needs): `CTL FX` is accepted before the capture arms, answered `CTLR OK FX`, and `CTL SET k=00` / `CTL REL k=00` are accepted live during an armed capture; knob 1 and above still answer `bad-knob`
-- [ ] #2 With no `FX` sent, the sine build's output is bit-identical to the build before this change (a host test over the pure processing path pins this, and the existing sine, sweep and pulse CI builds are unchanged), so the TASK-034/TASK-038.05 baseline and `asperitas-measure analyze` on the 2026-10-07 sine capture are untouched
-- [ ] #3 The stimulus-then-effect chain is a host-testable unit in asperitas-dsp or asperitas-logging (not only in rig.rs): tests cover bypass identity, a gain and a low-pass setting on a sine, and a live knob change, with no board attached
-- [ ] #4 `unsmoothed-params` builds the sine+effect path without smoothing, and a host test shows the soak step detector fires on the unsmoothed chain and not on the smoothed one, using the same asperitas-measure detector TASK-019.03.03 ships
-- [ ] #5 The excerpt replay path still works unchanged: the existing excerpt host tests and the TASK-035.07 comparison tests pass, and its `CTL FX` behaviour (accepted before arm, `busy` after) is the same
-- [ ] #6 RIGGEN or describe() names the active effect, CI and scripts/gates.sh build the new combinations (default and unsmoothed) and clippy is clean, the callback cost added is estimated in a comment against the headroom, and docs/reference/asperitas-rig.md states which builds accept which verbs; no bench claim is made (TASK-019.03.04 owns the hardware run)
+- [x] #1 rig builds with the replay effect applied after the sine generator (default features plus whatever new feature or cfg the design needs): `CTL FX` is accepted before the capture arms, answered `CTLR OK FX`, and `CTL SET k=00` / `CTL REL k=00` are accepted live during an armed capture; knob 1 and above still answer `bad-knob`
+- [x] #2 With no `FX` sent, the sine build's output is bit-identical to the build before this change (a host test over the pure processing path pins this, and the existing sine, sweep and pulse CI builds are unchanged), so the TASK-034/TASK-038.05 baseline and `asperitas-measure analyze` on the 2026-10-07 sine capture are untouched
+- [x] #3 The stimulus-then-effect chain is a host-testable unit in asperitas-dsp or asperitas-logging (not only in rig.rs): tests cover bypass identity, a gain and a low-pass setting on a sine, and a live knob change, with no board attached
+- [x] #4 `unsmoothed-params` builds the sine+effect path without smoothing, and a host test shows the soak step detector fires on the unsmoothed chain and not on the smoothed one, using the same asperitas-measure detector TASK-019.03.03 ships
+- [x] #5 The excerpt replay path still works unchanged: the existing excerpt host tests and the TASK-035.07 comparison tests pass, and its `CTL FX` behaviour (accepted before arm, `busy` after) is the same
+- [x] #6 RIGGEN or describe() names the active effect, CI and scripts/gates.sh build the new combinations (default and unsmoothed) and clippy is clean, the callback cost added is estimated in a comment against the headroom, and docs/reference/asperitas-rig.md states which builds accept which verbs; no bench claim is made (TASK-019.03.04 owns the hardware run)
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by 07a6e1f. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added asperitas_dsp::fx_chain::FxChain<G> (generator then ReplayFx; bypass never touches the buffer, bit-identical to bare generator, tested). rig.rs: ActiveGenerator = FxChain<BareGenerator> on every build; FX/SET/REL statics and handlers moved out of excerpt_play into fx_ctl (all builds); handle_control no longer cfg-gated on stim-excerpt; ExcerptPlayer lost its own effect fields and is wrapped like any generator, so FX accepted-before-arm / busy-after is the same code path. unsmoothed-params picks FxChain::new_unsmoothed for every generator. Soak step-detector host test (asperitas-measure soak.rs) drives FxChain<Sine> through judge_soak: unsmoothed trips param_steps and expected_failure_observed, smoothed has 0. RIGGEN limitation: it is emitted once at boot before any FX can arrive, so on the device it reads bare; describe() appends ' fx=<name>' for hosts and later re-description (bypass is byte-identical). Documented in asperitas-rig.md. Added gate rig-sine-unsmoothed-build (CI runs gates.sh), refreshed docs/gate-costs.json. Also fixed two private intra-doc links in soak.rs that were failing the workspace doc gate. No bench claim; TASK-019.03.04 owns hardware.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The replay effect is now a stage after every stimulus generator (sine, sweep, pulse, excerpt) via FxChain in asperitas-dsp, with CTL FX/SET/REL served on all console builds, bypass bit-identical, unsmoothed-params honoured on the sine path, host tests for chain behaviour and the soak step detector, new CI/gates build for sine+unsmoothed, docs updated. Compiles and clippy/doc/tests clean; not exercised on hardware.
+<!-- SECTION:FINAL_SUMMARY:END -->

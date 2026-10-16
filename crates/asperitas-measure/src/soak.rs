@@ -9,7 +9,7 @@
 //! hardware or the host.
 //!
 //! The discontinuity detector refits the loop gain every
-//! [`thresholds::SOAK_GAIN_FIT_BLOCK_SAMPLES`] samples (see [`GainFit::Tracking`]), because a
+//! `thresholds::SOAK_GAIN_FIT_BLOCK_SAMPLES` samples (see `GainFit::Tracking`), because a
 //! swept gain makes the fixed-gain model of [`crate::metrics`] drift away from the capture. A
 //! sweep toward silence legitimately produces silence runs, so sweep ranges must stay above the
 //! silence floor ([`thresholds::SILENCE_LSB`]). Positions lists are capped by their detectors, but
@@ -284,6 +284,58 @@ mod tests {
         // The sensitivity pair of the test above: same schedule, smoothing on.
         let r = judge_soak(&capture(coarse, false), &sine(), &spec()).unwrap();
         assert_eq!(r.param_steps.count, 0, "{r:#?}");
+    }
+
+    /// The rig's sine path: `FxChain<Sine>` with gain selected, the knob following `coarse` at 20
+    /// `SET`/s through the live override, exactly as the firmware callback drives it.
+    fn chain_capture(smoothed: bool) -> Capture {
+        use asperitas_dsp::fx_chain::FxChain;
+        use asperitas_dsp::stimulus::Sine;
+        let n = RATE * SECONDS;
+        let mut sine = Sine::default();
+        sine.set_sample_rate(RATE as f32);
+        let mut chain = if smoothed {
+            FxChain::new(sine)
+        } else {
+            FxChain::new_unsmoothed(sine)
+        };
+        // Selected at the schedule's starting level, so the first block is not itself a step.
+        chain.select(
+            1,
+            ((coarse(0.0) + 60.0) / 72.0 * f32::from(u16::MAX)).round() as u16,
+        );
+        chain.reset();
+        let silence = [[0.0f32; 2]; 32];
+        let mut samples = Vec::with_capacity(n);
+        let mut knob = 0.0f32;
+        let mut block = 0usize;
+        while samples.len() < n {
+            // 20 SET/s, quantised to whole 32-sample callbacks as the rig's are.
+            if (block * 32) % SET_EVERY < 32 {
+                let t = (block * 32) as f32 / RATE as f32;
+                // Map coarse()'s dB plateaus back to the knob: gain_db = -60 + 72 * knob.
+                knob = (coarse(t) + 60.0) / 72.0;
+            }
+            let mut out = [[0.0f32; 2]; 32];
+            chain.process_block_with(&silence, &mut out, |_| knob);
+            samples.extend(out.iter().map(|f| (f[0] * 32768.0).round() as i16));
+            block += 1;
+        }
+        samples.truncate(n);
+        Capture {
+            samples,
+            sample_rate_hz: RATE as u32,
+            blocks: 0,
+        }
+    }
+
+    #[test]
+    fn rig_sine_chain_unsmoothed_trips_the_step_detector_and_smoothed_does_not() {
+        let step = judge_soak(&chain_capture(false), &sine(), &spec()).unwrap();
+        assert!(step.param_steps.count >= 4, "{step:#?}");
+        assert!(step.expected_failure_observed(), "{step:#?}");
+        let smooth = judge_soak(&chain_capture(true), &sine(), &spec()).unwrap();
+        assert_eq!(smooth.param_steps.count, 0, "{smooth:#?}");
     }
 
     #[test]

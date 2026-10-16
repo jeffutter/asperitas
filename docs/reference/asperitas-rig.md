@@ -119,8 +119,10 @@ Verified on the host with a fake transport, and on hardware 2026-10-15 (TASK-033
 
 ### Replay effect (`CTL FX`)
 
-The `rig` firmware built with `stim-excerpt` can run an `asperitas-dsp` processor over the replayed
-excerpt. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
+Every `rig` build runs an `asperitas-dsp` processor after its stimulus generator (TASK-019.03.05): the
+sine (the default), `stim-ess`, `stim-pulse` and the `stim-excerpt` replay all carry the same stage,
+`asperitas_dsp::fx_chain::FxChain`. Generator first, effect second, then the encoder; the capture is of the
+codec input, as before. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
 
 | `f` | effect | `v` (`0x0000..=0xFFFF` spans knob `0.0..=1.0`) |
 |-----|--------|------------------------------------------------|
@@ -128,13 +130,19 @@ excerpt. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
 | `01` | gain | `Gain::params_from_normalised`: -60 dB to +12 dB |
 | `02` | one-pole low-pass | `OnePoleLowPass::params_from_normalised`: 20 Hz to 20 kHz, log taper |
 
+- **Sine and the other periodic generators.** They run from the first callback, so `FX` is accepted
+  any time before the capture arms and the effect is in place for the whole capture; `SET`/`REL` move it
+  live. A one-shot generator (the excerpt) is the only one with the arm-window timing below.
+- **`RIGGEN`.** It is emitted once at boot, before any `FX` can arrive, so it names the effect only if
+  the generator's `describe()` is asked later; on the device it reads as the bare generator. Record the
+  `FX` you sent with the capture (`analyze --fx`).
 - **Default is bit-exact.** Bypass touches no sample, so captures taken without sending `FX`
   are unchanged from before the control existed. Sending `f=00` returns to that state.
 - **Replies.** `CTLR ERR bad-value` for an unknown `f`; `CTLR ERR busy` once a capture is armed
   (a change mid-capture would make the recording unrepeatable); `CTLR ERR unknown-verb` for any
-  other `CTL` verb, which this binary does not serve. Without `stim-excerpt` every `FX` is
-  `unknown-verb`.
-- **Timing.** The pass is held until the capture's first callback, `ARM_DELAY_MS` (2 s) after audio
+  other `CTL` verb, which this binary does not serve. `FX`, `SET` and `REL` are served by every
+  stimulus build with the console (`log-usb`); the RTT-only builds have no console to send them on.
+- **Timing (excerpt).** The pass is held until the capture's first callback, `ARM_DELAY_MS` (2 s) after audio
   starts. Send `FX` in that window, i.e. right after the console attaches. The `rig` host
   subcommand for this is not written yet; `cargo run -p asperitas-logging --example ctl_frame -- <fx hex> <value hex>` prints the
   framed command to send, and a session script that sends it the moment the console attaches (about 3.7 s after a probe reset) lands inside the window.
@@ -149,8 +157,8 @@ excerpt. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
   smoothing, as `main` does; bypass ignores it. Callback cost, an estimate only: a critical section
   and a compare per block, plus one `set_params` (a `powf`, and an `expf` for the low-pass) when
   the value moved, order of 1-3 us against the 666 us period. The measurement is TASK-019.03.04.
-- **`unsmoothed-params` feature.** `--features seed3,stim-excerpt,unsmoothed-params` builds the
-  effect without smoothing, so an override steps the parameter on the next sample. It exists only
+- **`unsmoothed-params` feature.** `--features seed3,unsmoothed-params` (sine) or
+  `--features seed3,stim-excerpt,unsmoothed-params` (excerpt) builds the effect without smoothing, so an override steps the parameter on the next sample. It exists only
   to prove the discontinuity detector can see a step; never use it for ordinary captures.
 
 To judge a capture taken with a `CTL FX` selection, pass the same wire values to `analyze`:
