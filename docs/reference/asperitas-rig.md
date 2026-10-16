@@ -311,3 +311,220 @@ What the runs taught, for whoever plans the next one:
    `crates/asperitas-measure/tests/cli.rs` (or the module tests) naming it.
 4. If a limit has to move, change `thresholds.rs` and update its "Origin" note with the capture
    and ticket that justify the new value.
+
+## Measurement rig firmware
+
+`rig` plays a stimulus out of the Pod, records what comes back through a cable from the Pod's
+output jack to its input jack into external SDRAM, then dumps the recording over the framed USB
+console. It decides start and end itself: 2 s after audio starts it arms, captures for the build's
+window (300 s by default), dumps, and idles until RESET.
+
+Pick the stimulus by the question. Exactly one stimulus feature goes in the image; the default is the sine.
+
+| Question | Build | Why |
+|---|---|---|
+| What is the loop gain and its noise floor? | `seed3` (sine) or `seed3 stim-pulse` | A steady tone is easy to difference against; the pulse train adds timing edges. |
+| What is the frequency response? | `seed3 stim-ess` | The exponential sweep covers the band once; it starts at the first captured callback. |
+| How does the loop treat real material? | `seed3 stim-excerpt` | Plays an installed instrument clip once, from the first captured callback. Needs the bootloaded layout. |
+
+Only the first two are available from a plain internal-flash image. Records the build prints at boot
+(`RIGCFG`, `RIGGEN`, `CAPMAX`) say what it was configured to do; their field-by-field grammar is in
+`daisy-seed3.md`, *Rig record grammar*.
+
+```bash
+cd firmware
+make probe-flash BINARY=rig FEATURES=seed3                    # sine, -20 dBFS, 1 kHz
+make probe-flash BINARY=rig FEATURES="seed3 stim-ess"         # exponential sweep, starts at arm
+ASP_RIG_CAPTURE_SECONDS=30 make probe-flash BINARY=rig FEATURES=seed3   # shorter window
+ASP_RIG_CAPTURE_SECONDS=ring make probe-flash BINARY=rig FEATURES=seed3 # until the ring is full, ~349.5 s
+# then tap RESET: a probe flash stops the cycle counter, and timing would read 0
+```
+
+The sine and pulse train play from boot. The sweep plays once, so `rig` holds it silent until the
+first captured callback and starts it there: the capture holds the whole sweep, and a
+`STIMSTART first_block=<n> offset=<samples>` record after the window says where in the reassembled
+PCM playback began (0 by construction; the echo arrives one loop latency later). The gate line
+`rig: gate stimulus samples a..b inside the N-sample capture` says whether the window held all of it.
+
+`stim-excerpt` plays an excerpt installed into QSPI instead of a computed waveform, once, from the
+first captured callback like the sweep. `ASP_RIG_EXCERPT_SLOT=<n>` picks the slot at build time (default 0;
+a value outside `0..=13` fails the build). The staging ping-pong is read from QSPI by a thread-mode task and
+the callback never touches flash. After one full pass `rig` sends one
+`EXCPLAY proto=1 slot=<n> bytes=<n> crc16=<hex> want=<hex> underruns=<n> clean=<0|1>` record. `crc16` covers
+only the samples handed to the DAC encoder, and `want` is the CRC stored at install: equal CRCs with
+`clean=1` say the QSPI-to-encoder path delivered the excerpt intact, and say nothing about the codec or
+the cable. A slot that is blank or holds no valid header makes `rig` send
+`EXCPLAYFAIL proto=1 slot=<n> why=<empty|invalid>`, show red and start no audio. An excerpt install is refused
+until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootloaded`); The committed excerpt captures under `audio/captures/` are the evidence.
+
+### Installing an excerpt
+
+An excerpt is mono 48 kHz 16-bit WAV (the corpus in `audio/instruments/` already is). Flash the
+bootloaded layout once (`make flash LAYOUT=bootloaded`, see `daisy-seed3.md`, *Flashing the bootloaded app, and the probe*), then stream the
+clip into a slot (`0..=13`, 14 slots) with a name of 1 to 16 characters of `[a-z0-9_]`, with the board running
+`rig` and its console visible on the host:
+
+```bash
+cargo run -p asperitas-host --example excerpt_stream -- \
+    audio/instruments/mandolin_single_note_soft.wav 0 mandolin_soft > /dev/cu.usbmodem*
+```
+
+The tool writes frames and exits 0 without knowing whether they worked. The device reads every byte back
+from flash and sends `EXCOK name=... bytes=... crc16=...` or `EXCFAIL got=... want=...` on the console;
+that record is the only verdict, so capture the console while you install (next section). Installing
+erases the slot's sectors, and erase dominates the time: the datasheet bound is about 22.5 s for a
+288 kB clip and the one reading is 5.82 s (derived upper bound versus one measurement, 2026-10-15). An
+install is refused until the replay pass of a `stim-excerpt` build has completed. Layout, costs and
+the `EXC*` grammar: `daisy-seed3.md`, *Instrument excerpts in QSPI*.
+
+### Capturing the console
+
+Hold the console open with **one** reader for the whole run, started before the board boots or before
+you tap RESET so `BOOT` is in the file. Save raw bytes, not scrollback. A reader restarted mid-dump
+loses whatever macOS had buffered, which was 19 blocks once.
+
+```bash
+cat /dev/cu.usbmodem* > capture.bin        # leave running; interrupt after DUMPEND
+cargo run -p asperitas-wire --example console_decode -- capture.bin > clean.txt
+grep -E 'RIGCFG|CAPMAX|CAPSTAT|DUMPEND|STIMSTART|EXC(OK|FAIL|PLAY)' clean.txt
+```
+
+Judge the run from the records, not from the audio. `DUMPEND` ends the dump and carries
+`dropped_full` and `refused`; a nonzero `dropped_full` before the dump started is the host attaching late
+and does not matter, one during the dump does. `CAPSTAT` carries `overrun`, `max_block_us` and
+`worst_gap_us`. For a fixed-length evidence capture with a verdict, `asperitas-rig capture` does the same
+job and is described above.
+
+### Reassembling a dump
+
+The reassembler turns `capture.bin` back into PCM and exits non-zero if any block is incomplete or fails
+its CRC:
+
+```bash
+cargo run -p asperitas-host --release --example dump_reassemble -- capture.bin --out capture.pcm
+```
+
+The PCM is headerless signed 16-bit little-endian, mono, 48 kHz. For a sweep or excerpt build, the
+`STIMSTART` record gives `offset`, the sample index in this PCM where playback began; the echo arrives
+one loop latency later.
+
+### Where artifacts go
+
+Compress the raw console bytes and commit them with the ticket whose evidence they are, under
+`audio/captures/<date>-rig-<what>.console.zst`; the reassembled PCM is derived and need not be kept. Keep
+`clean.txt` out of the repository unless a ticket quotes it. Record in the ticket which build produced the
+capture (features, `ASP_RIG_*` variables, layout), since `RIGCFG` and `RIGGEN` in the capture say it only
+for the stimulus and window.
+
+### Which numbers are readings
+
+Arithmetic, readings and estimates are labelled as such in `daisy-seed3.md`, *Capture
+budgets (SDRAM)*. In short: ring size, seconds, base64 efficiency (0.568) and about 169 kB/s of wire per
+second of capture are derived; callback cost, the 60-69 s dump of 300 s, and the 5.82 s install are
+readings; the full-speed USB ceiling and sustained FMC write throughput are not measured.
+
+### Observed on the bench
+
+| Quantity | Reading | Source |
+|---|---|---|
+| Callback cost, worst | 72 us of a 666 us period | 300 s run, `max_block_us` |
+| Callback spacing, worst | 714 us (limit 832) | 300 s run, `worst_gap_us` |
+| Blocks delivered / expected | 879 / 879, 0 overruns | 300 s run |
+| Callback cost, worst, bootloaded layout | 47 us of a 666 us period (internal flash: 72 us) | 300 s run from QSPI behind the Daisy bootloader, 2026-10-15, `max_block_us` |
+| Callback spacing, worst, bootloaded layout | 692 us (limit 832; internal flash: 714 us) | same run, `worst_gap_us` |
+| Blocks delivered / expected, bootloaded layout | 879 / 879, 0 overruns, `audio_exit=0` | same run |
+| Dump of 300 s of audio, bootloaded layout | 60.2 s (internal flash: 69.4 s); 879 blocks, 28,803,072 PCM bytes, every block proved | `DUMPEND elapsed_ms=60232` |
+| Ring filled to the last block | 1024 / 1024 blocks in 349.536 s on the device clock (349.626 s on the host, arm record to close record); 1 overrun ended it, 0 blocks overwritten | ring-fill run, 2026-10-13 |
+| Dump of 300 s of audio | 69.4 s; 414.9 kB/s PCM, 731.7 kB/s on the wire | `DUMPEND elapsed_ms=69421` |
+| Log loss during capture and dump | 0 | `dropped_full=0` throughout |
+| Loop gain at -20 dBFS, 1 kHz | -0.41 dB | returned peak -20.41 dBFS |
+| Loop flatness, 150 Hz-11 kHz | +/-0.03 dB | ESS capture RMS envelope |
+| Noise + distortion after removing the tone | 0.35 LSB RMS (~76 dB SNR, at the 16-bit floor) | 30 s sine |
+| Channel mapping | straight (L to L, R to R), no crosstalk above the floor | three one-channel runs |
+
+The 300 s capture is archived as `audio/captures/2026-10-07-rig-sine-300s.console.zst`. The
+analysis behind every row is in the notes of the ticket that took the reading, and the loopback setup is in
+`daisy-pod.md`. The bootloaded 300 s run is archived as `audio/captures/2026-10-15-rig-sine-300s-bootloaded.console.zst`; its 36 `dropped_full` all fall before the host attached (t=1.2 s to 27 s), none during the dump. The ring-fill run is archived as
+`audio/captures/2026-10-13-rig-ring-fill-349s.console.zst`.
+
+To judge a capture, see *Analysis: `asperitas-measure`* above.
+
+## Debugging without a probe
+
+No ST-Link? You still have two channels:
+
+1. **USB CDC-ACM serial** — the firmware enumerates as a serial device after booting. Connect with `screen /dev/ttyACM0 115200` (or your terminal program of choice) to see log output. The baud rate in that command is decorative — CDC-ACM has no UART to configure, and neither this firmware nor embassy-usb applies the host's line coding to the hardware.
+2. **Pod RGB LEDs** — the firmware uses LED colour to indicate boot stage: red = pre-init, green = running, red = panicked. Check `daisy-pod.md` for the pin map and polarity notes.
+
+Red means both "starting up" and "panicked", which is unambiguous in context — a panic
+follows green — but see `slow-boot` below if you need to watch the boot stages closely.
+
+Every line on that serial channel carries its own framing: `~<level> <seq> <t_ms> <body>*<crc>`.
+It stays readable by eye and greppable in a raw capture — that legibility is why the protocol is
+printable ASCII rather than COBS. The first line off a fresh boot is `BOOT proto=1 …`. `STATUS …`
+appears at most once a second and only when a counter moved, so a quiet stream usually means nothing
+changed rather than nothing working. Grammar, checksum parameters and what each loss counter means:
+`daisy-seed3.md` → *Console protocol v1*.
+
+### Watching the boot stages
+
+Normal boot reaches green in milliseconds, so red → green is a single flicker. The
+`slow-boot` feature holds the pre-init stage for ~3 s:
+
+```bash
+make flash-all FEATURES="seed3 slow-boot"
+```
+
+Bring-up only — don't leave it enabled.
+
+### Checking the panic path
+
+A panic reports through both channels, and `src/bin/panictest.rs` panics on purpose so
+you can confirm it:
+
+```bash
+make flash-all BINARY=panictest
+screen /dev/cu.usbmodem<N> 115200     # attach within the 10 s countdown
+```
+
+Expect green with `panictest: panicking in N...` counting down, then steady red plus the panic line.
+Both now travel framed, so the countdown reads `~I <seq> <t_ms> panictest: panicking in N...*<crc>` and
+the last line reads `~E <seq> <t_ms> PANIC: <msg> at src/bin/panictest.rs:L:C*<crc>`; the stage table in
+`src/bin/panictest.rs` is the copy to read. Framing changes the bytes, not the argument below: the
+countdown and the panic line travel by *different* mechanisms — the countdown goes through the log
+pipe, while the panic line is pushed straight to the endpoint because the executor is dead by then — so
+countdown text with no `PANIC:` line is a real failure, not a missed message.
+
+### Reading a saved capture
+
+Save the raw bytes, not a scrollback:
+
+```bash
+cat /dev/ttyACM0 > capture.bin
+cargo run -p asperitas-wire --example console_decode -- capture.bin > clean.txt
+cat capture.bin | cargo run -p asperitas-wire --example console_decode
+```
+
+stdout carries the validated records, byte-identical to what the device sent — greppable, and re-feedable
+into the same program. stderr carries the integrity counters
+(`records=… bad_frames=… resyncs=… discarded_bytes=…`), a byte-accounting line proving every pushed byte
+is in one category or the other, and a `seq continuity` line with `gaps=` and
+`first_gap=<from8>-><to8>`. The split is the point: the counters say what the wire did to the bytes,
+the sequence summary says whether any bytes are missing, and a CRC cannot answer the second question.
+The tool **exits 0 whatever the capture contains** — it reports, and deciding whether a capture passed is
+the job of `asperitas-rig capture`'s verdict. A gap immediately after a `BOOT` record is a restart, not loss.
+
+### If the board looks completely dead
+
+A dark Pod LED means the fault is *before* `led::init` — that call lights red on its way
+out, so anything after it has a lit LED regardless of whether the executor ever runs.
+`src/bin/ledtest.rs` narrows it down further:
+
+```bash
+make flash-all BINARY=ledtest
+```
+
+It depends on nothing but clock init, board init, and three GPIO pins — no USB, no
+logging, no LED singleton, not even the polarity constant — and cycles the RGB channels so
+that *something* visibly changes under either polarity. Any motion means the core is
+running and the fault is downstream; a dark LED through the whole cycle means it isn't.

@@ -2,185 +2,76 @@
 
 A musically-interactive audio effect for acoustic and clean electric instruments, built in Rust for the Electro-Smith Daisy Seed3 in a Daisy Pod.
 
-Target instruments: mandolin, octave mandolin, upright bass, bass guitar, jazz guitar. Inspired by Chase Bliss Mood — effects that observe and react to playing dynamics rather than applying static processing.
+Target instruments: mandolin, octave mandolin, upright bass, bass guitar, jazz guitar. Inspired by Chase Bliss Mood - effects that observe and react to playing dynamics rather than applying static processing.
 
-## Architecture
+## Layout
 
 ```
 asperitas/
-├── firmware/          # Embedded firmware (Seed3 binary)
-│   ├── src/bin/       # Binaries (main, blinky, ledtest, panictest)
-│   ├── Makefile       # Build + DFU flash targets
-│   ├── memory-internal.x    # Linker layout, internal flash (default)
-│   └── memory-bootloaded.x  # Linker layout, stock Daisy bootloader (QSPI image run from AXI SRAM)
-├── crates/
-│   ├── asperitas-dsp/     # Core DSP logic (hardware-independent)
-│   ├── asperitas-cli/     # Offline WAV-in/WAV-out CLI + golden-file tests
-│   └── asperitas-logging/ # Log facade (USB CDC on device, stderr on host)
-└── docs/reference/  # Hardware reference docs
+├── firmware/            # Embedded firmware (separate workspace, thumbv7em-none-eabihf)
+│   ├── src/bin/         # main, blinky, ledtest, panictest, podtest, rig
+│   ├── Makefile         # Build, DFU flash and probe targets
+│   └── memory-*.x       # Linker layouts: internal flash (default), bootloaded (QSPI image run from AXI SRAM)
+├── crates/              # Host workspace members
+│   ├── asperitas-dsp/       # Core DSP (hardware-independent, no Daisy or Embassy)
+│   ├── asperitas-cli/       # Offline WAV-in/WAV-out CLI (process, generate) and golden-file tests
+│   ├── asperitas-wire/      # no_std console and control wire protocol, device and host sides
+│   ├── asperitas-replay/    # Replay core shared by firmware and host
+│   ├── asperitas-logging/   # Device log facade (USB console, defmt, panic handler)
+│   ├── asperitas-pod/       # Pod control surface drivers (knobs, encoder, LEDs)
+│   ├── asperitas-host/      # Host tooling for the wire protocol (dump reassembly, excerpt install)
+│   ├── asperitas-rig/       # Capture runner for the framed console, with a pass/fail verdict
+│   └── asperitas-measure/   # Analysis of rig loopback captures
+├── audio/               # Instrument corpus, golden WAVs, committed hardware captures (see audio/README.md)
+├── scripts/             # Gate, provenance and bench scripts
+├── docs/reference/      # Hardware and tooling reference docs
+├── docs/upstream/       # Notes prepared for upstream projects
+└── backlog/             # Tickets (Backlog.md)
 ```
 
-The key design principle: **DSP logic is decoupled from hardware.** The `asperitas-dsp` crate has no dependency on Daisy or Embassy — it compiles on your laptop so you can iterate on sound without flashing anything. Only when the effect sounds right does it get wired into `firmware/`.
+The key design principle: **DSP logic is decoupled from hardware.** `asperitas-dsp` compiles on your laptop so you can iterate on sound without flashing anything. Only when the effect sounds right does it get wired into `firmware/`.
 
-## Prerequisites
+## Dev shell
 
-- **Nix** — the dev shell provides the entire toolchain (Rust, embedded target, dfu-util, cargo-binutils, ALSA). No manual installs needed.
-- **Daisy Seed3 in a Daisy Pod** — the hardware this runs on.
-- **USB-C cable** — for both flashing and power.
-
-Start the dev shell from the project root:
+Nix provides the whole toolchain (Rust, embedded target, dfu-util, cargo-binutils, probe-rs). Start it from the project root:
 
 ```bash
 nix develop .
 ```
 
-This gives you `rustc`, `cargo`, `dfu-util`, `cargo-binutils`, `probe-rs`, and everything else. See `flake.nix` for details.
+You also need a Daisy Seed3 in a Daisy Pod and a USB-C cable for flashing and power. The Pod's jacks are line level, not hi-Z instrument level: feed it from a DI box or interface.
 
-## Quick Start
+## Blinky (confirm the board works)
 
-### 1. Blinky (confirm the board works)
+Put the board in DFU mode (hold BOOT, tap RESET, release BOOT), then:
 
 ```bash
 cd firmware
 make flash-all BINARY=blinky
 ```
 
-This builds `src/bin/blinky.rs`, flashes it over DFU, and starts it automatically — no
-RESET tap needed.
+Blinky drives **Pod LED 1**: red for a flicker during pre-init, then steady green once USB is up. A running board enumerates as a CDC serial device (`ls /dev/tty.usbmodem*` on macOS). `BINARY` defaults to `main`, so a bare `make flash-all` flashes the main firmware.
 
-**What you should see:** blinky drives **Pod LED 1** (the RGB LED on D20/D19/D18 =
-PC1/PA6/PA7) — *not* the Seed's onboard user LED, which it never touches. The LED is
-**red** during the pre-init window, then goes **steady green** once USB is up. Boot takes
-milliseconds, so in practice the red is a flicker and you'll see steady green almost
-immediately. A steady LED is success, not a hang.
+DFU mode is not sticky, the `dfu-util: Error during download get_status` line is expected, and the `LAYOUT=bootloaded` flow, probe flashing and RTT logging are all covered in [`docs/reference/daisy-seed3.md`](docs/reference/daisy-seed3.md). For a dead-looking board, the panic path and reading console captures, see [`docs/reference/asperitas-rig.md`](docs/reference/asperitas-rig.md).
 
-The LED-independent check is USB: a running board enumerates as a CDC serial device, so
-`ls /dev/tty.usbmodem*` (macOS) or `lsusb` should show it as a serial device rather than
-"STM32 bootloader".
+## DSP iteration loop
 
-LED polarity is settled — the Pod's LEDs are **active-low**, verified on hardware, and
-`LED_ACTIVE_LOW = true` in `crates/asperitas-logging/src/led.rs` is correct. If colours
-read as their complement (cyan where you expect red), your board differs from the one
-characterised in `docs/reference/daisy-pod.md`.
-
-### If the board looks completely dead
-
-A dark Pod LED means the fault is *before* `led::init` — that call lights red on its way
-out, so anything after it has a lit LED regardless of whether the executor ever runs.
-`src/bin/ledtest.rs` narrows it down further:
-
-```bash
-make flash-all BINARY=ledtest
-```
-
-It depends on nothing but clock init, board init, and three GPIO pins — no USB, no
-logging, no LED singleton, not even the polarity constant — and cycles the RGB channels so
-that *something* visibly changes under either polarity. Any motion means the core is
-running and the fault is downstream; a dark LED through the whole cycle means it isn't.
-
-### 2. Flash the main firmware
-
-```bash
-cd firmware
-make flash-all
-```
-
-`BINARY` defaults to `main`, so `make flash-all` with no override builds and flashes
-`src/bin/main.rs`. To do it in two steps — for example to build now and flash once the
-board is in DFU mode:
-
-```bash
-make build   # produces main.bin
-make flash   # flashes main.bin via DFU
-```
-
-Each target names the image after the binary it came from, so if you override `BINARY` for one
-line, override it on the other. A bare `make flash` programs whatever `$(BINARY).bin` was built
-last, which on this project means it can quietly program the application instead of the test binary
-you just compiled. `docs/reference/daisy-seed3.md` (*Build and flash blinky*) has the worked example.
-
-### Entering DFU Mode
-
-1. Hold **BOOT**
-2. Tap **RESET**
-3. Release **BOOT**
-
-Verify the board enumerates: `dfu-util --list` inside the dev shell prints a `Found DFU:` line per
-device, and `lsusb` shows "STMicroelectronics STM32 bootloader" if you run it outside the shell
-(the flake ships no usbutils).
-
-**DFU mode is not sticky.** Once a flashed app boots, the bootloader is gone — you must
-repeat the button dance before *every* flash. Running `make flash` against a board
-that's busy running your app fails with `No DFU capable USB device available`.
-
-### Leaving DFU Mode
-
-Automatic. `make flash` passes `:leave`, so the bootloader jumps straight to the
-application.
-
-You will still see `dfu-util: Error during download get_status` on a completely
-successful flash. That's expected and harmless: the jump tears down the USB connection
-the pending status request was travelling on, so nothing is left to answer it. The
-Makefile ignores dfu-util's exit code and keys on its `File downloaded successfully`
-marker instead — it prints `Flashed and started` on success and `FLASH FAILED` on a real
-error, so trust that line rather than the dfu-util noise above it.
-
-If the app doesn't start, power-cycle the USB-C cable.
-
-### Bootloaded layout (`LAYOUT=bootloaded`)
-
-`rig` with the excerpt install path no longer fits the 128 KB internal flash, so every binary
-can also be built for the stock Daisy bootloader. The image runs from AXI SRAM and is stored in
-QSPI at `0x90040000`:
-
-```bash
-cd firmware
-make flash-all LAYOUT=bootloaded BINARY=rig   # builds rig-bootloaded.bin, DFUs it to 0x90040000
-```
-
-- The bootloader is installed once (`docs/reference/daisy-seed3.md`, *The stock Daisy bootloader
-  on Seed3*). After that no BOOT button is needed: it shows its DFU interface for about 2 s after
-  any reset, so tap RESET and run `make flash LAYOUT=bootloaded` straight away (`dfu-util -w` waits).
-- `make flash` without `LAYOUT` still writes `$(BINARY).bin` to `0x08000000` and **overwrites the
-  bootloader** if it is installed. Pass `LAYOUT=bootloaded` for every app flash on a bootloaded board.
-- `probe-flash` and `probe-run` refuse a bootloaded ELF (AXI SRAM does not survive a reset). The
-  probe can still reset the board into the bootloader's DFU window.
-- Booting `main` and `rig` from this layout, and `rig`'s callback timing there, are not yet verified
-  on hardware (TASK-038.04.07.04). `ledtest` is the only app proven so far.
-
-## Developing DSP Logic
-
-Iterate on your laptop — no flashing required until you're ready to test on hardware.
-
-### Live desktop testing
-
-Plug an instrument into your audio interface, then run the CLI:
-
-```bash
-cargo run --bin asperitas-cli -- live --processor <name>
-```
-
-This uses `cpal` for real-time audio I/O. Tweak parameters in code, rerun — no flash cycle.
-
-### Offline batch processing
-
-Process a recorded WAV file through the effect:
+No flashing required. Process a recorded WAV through the effect (mono or stereo in, stereo out):
 
 ```bash
 cargo run --bin asperitas-cli -- process recording.wav processed.wav \
   --processor filter --params cutoff_hz=800
 ```
 
-Useful for comparing parameter sets on the same source material without re-playing. Mono
-or stereo input is accepted; output is always stereo.
+Generate a synthetic signal (`impulse`, `sweep` or `pluck`):
 
-`audio/instruments/` holds a corpus of real mandolin and octave-mandolin recordings to run
-against — soft and hard plucks, fast runs, and chords. See [`audio/README.md`](audio/README.md),
-which also explains why those clips must not be individually normalized.
+```bash
+cargo run --bin asperitas-cli -- generate -o pluck.wav -t pluck -d 2.0
+```
 
-### Golden-file regression tests
+`audio/instruments/` holds real mandolin and octave-mandolin recordings to run against; [`audio/README.md`](audio/README.md) explains why those clips must not be individually normalized.
 
-Freeze a known-good output WAV, then assert future changes don't silently alter it:
+Golden-file regression tests freeze a known-good output:
 
 ```bash
 cargo test                                      # includes golden comparisons within float tolerance
@@ -189,303 +80,20 @@ UPDATE_GOLDENS=1 cargo test -p asperitas-cli    # regenerate, deliberately opt-i
 
 A golden diff means *listen to this before accepting it*, not *run the update command*.
 
-## Debugging
-
-No ST-Link? You still have two channels:
-
-1. **USB CDC-ACM serial** — the firmware enumerates as a serial device after booting. Connect with `screen /dev/ttyACM0 115200` (or your terminal program of choice) to see log output. The baud rate in that command is decorative — CDC-ACM has no UART to configure, and neither this firmware nor embassy-usb applies the host's line coding to the hardware.
-2. **Pod RGB LEDs** — the firmware uses LED colour to indicate boot stage: red = pre-init, green = running, red = panicked. Check `docs/reference/daisy-pod.md` for the pin map and polarity notes.
-
-Red means both "starting up" and "panicked", which is unambiguous in context — a panic
-follows green — but see `slow-boot` below if you need to watch the boot stages closely.
-
-Every line on that serial channel carries its own framing: `~<level> <seq> <t_ms> <body>*<crc>`.
-It stays readable by eye and greppable in a raw capture — that legibility is why the protocol is
-printable ASCII rather than COBS. The first line off a fresh boot is `BOOT proto=1 …`. `STATUS …`
-appears at most once a second and only when a counter moved, so a quiet stream usually means nothing
-changed rather than nothing working. Grammar, checksum parameters and what each loss counter means:
-`docs/reference/daisy-seed3.md` → *Console protocol v1*.
-
-### Watching the boot stages
-
-Normal boot reaches green in milliseconds, so red → green is a single flicker. The
-`slow-boot` feature holds the pre-init stage for ~3 s:
+## Building
 
 ```bash
-make flash-all FEATURES="seed3 slow-boot"
+cargo build --workspace                              # host crates
+cd firmware && cargo build --release --features seed3   # firmware
 ```
 
-Bring-up only — don't leave it enabled.
+Hardware status, measurements and open questions live in the tickets under `backlog/`, not here.
 
-### Checking the panic path
+## Reference
 
-A panic reports through both channels, and `src/bin/panictest.rs` panics on purpose so
-you can confirm it:
-
-```bash
-make flash-all BINARY=panictest
-screen /dev/cu.usbmodem<N> 115200     # attach within the 10 s countdown
-```
-
-Expect green with `panictest: panicking in N...` counting down, then steady red plus the panic line.
-Both now travel framed, so the countdown reads `~I <seq> <t_ms> panictest: panicking in N...*<crc>` and
-the last line reads `~E <seq> <t_ms> PANIC: <msg> at src/bin/panictest.rs:L:C*<crc>`; the stage table in
-`src/bin/panictest.rs` is the copy to read. Framing changes the bytes, not the argument below: the
-countdown and the panic line travel by *different* mechanisms — the countdown goes through the log
-pipe, while the panic line is pushed straight to the endpoint because the executor is dead by then — so
-countdown text with no `PANIC:` line is a real failure, not a missed message.
-
-### Reading a saved capture
-
-Save the raw bytes, not a scrollback:
-
-```bash
-cat /dev/ttyACM0 > capture.bin
-cargo run -p asperitas-wire --example console_decode -- capture.bin > clean.txt
-cat capture.bin | cargo run -p asperitas-wire --example console_decode
-```
-
-stdout carries the validated records, byte-identical to what the device sent — greppable, and re-feedable
-into the same program. stderr carries the integrity counters
-(`records=… bad_frames=… resyncs=… discarded_bytes=…`), a byte-accounting line proving every pushed byte
-is in one category or the other, and a `seq continuity` line with `gaps=` and
-`first_gap=<from8>-><to8>`. The split is the point: the counters say what the wire did to the bytes,
-the sequence summary says whether any bytes are missing, and a CRC cannot answer the second question.
-The tool **exits 0 whatever the capture contains** — it reports, and deciding whether a capture passed is
-TASK-031's job. A gap immediately after a `BOOT` record is a restart, not loss.
-
-### Flashing and logging over an ST-Link probe
-
-The software side is in place: `make probe-*` targets, `probe-rs` 0.32.0 from the flake, and a
-release profile at `debug = 2` - the only DWARF level probe-rs reads log locations out of. What
-has *not* happened is a probe talking to this board — TASK-037 makes the first attachment and
-records timings. Treat these commands as ready, not proven.
-
-```bash
-cd firmware
-DEFMT_LOG=info make probe-flash FEATURES="seed3 log-defmt" NO_DEFAULT=1  # build, program, verify read-back, reset, exit
-make probe-log        # attach and stream RTT; no reflash, no reset
-make probe-rtt-list   # read the RTT control block, print the channel table, exit; the cheapest bench question
-```
-
-All three drive the release **ELF**, never the DFU `.bin`: `probe-rs` decodes `defmt` frames from the
-ELF's `.defmt` section and unwinds with its DWARF, so the host's copy has to be the one that
-built what's running. Locations are the part that asks for more DWARF than symbols do - at
-`false`, `1` or `line-tables-only` it decodes the stream anyway and prints
-``Insufficient DWARF info; compile your program with `debug = 2` to enable location info.``
-without naming a file or a line. The warning lands before probe discovery, so the level is
-checkable with no board attached:
-
-```bash
-cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt" \
-  && probe-rs attach target/thumbv7em-none-eabihf/release/main --chip STM32H750IBKx --non-interactive --list-rtt
-```
-
-Expect `Error: No connected probes were found.` and nothing above it. Any DWARF complaint means
-`[profile.release] debug` has dropped below `2`; `firmware/Cargo.toml` carries the measured cost
-of each level. The chip string (`--chip STM32H750IBKx`) is in the Makefile.
-`DEFMT_LOG=info` is load-bearing rather than decorative: unset, defmt compiles every non-ERROR
-call to nothing and a silent channel looks exactly like a dead probe.
-
-`probe-log` and `probe-rtt-list` compile nothing and *refuse to run* unless the ELF in front of them
-is the one you mean. They ask it which logging path was compiled in, read from a `.asp.prov` note
-section that `firmware/build.rs` stamps into every ELF with the exact feature set behind it, and
-refuse when that is not the set you asked to flash with; then they hash every input that goes into the
-ELF and refuse if those are not the bytes `make build-elf` recorded beside it. Either way a decoder
-from the wrong build mislabels live output rather than failing loudly, and neither test asks a
-timestamp -- a `git checkout` refreshes mtimes over an unchanged tree, which is how the older version
-of that second test spent its credibility. Both messages print the one command that fixes them, which
-is a forced relink (`touch src/bin/<binary>.rs && make build-elf ...`), and the older advice they
-replaced does not: deleting the top-level ELF and rebuilding makes cargo hardlink the same bytes back
-up without linking anything. Flash the current build with `make probe-run` when either fires.
-
-`docs/reference/daisy-seed3.md` has the rest — why the probe path takes the ELF, what RTT does
-when no host is attached versus when the host stalls, and the rule that follows from that:
-**nothing logs from the audio callback.**
-
-**Permissions are Linux-only here.** `probe-rs` talks to the ST-Link over `/dev/bus/usb/*`, not
-`/dev/ttyACM*`, so being able to reach a serial or DFU device doesn't imply this works. On Linux
-the bench needs the udev rules — they ship inside `probe-rs-tools` as
-`etc/udev/rules.d/69-probe-rs.rules`, and a NixOS host installs them with
-
-```nix
-services.udev.packages = [ pkgs.probe-rs-tools ];
-```
-
-Any other Linux, install that file the way your distro does. macOS needs nothing.
-
-## Measurement rig
-
-`rig` plays a stimulus out of the Pod, records what comes back through a cable from the Pod's
-output jack to its input jack into external SDRAM, then dumps the recording over the framed USB
-console. It decides start and end itself: 2 s after audio starts it arms, captures for the build's
-window (300 s by default), dumps, and idles until RESET.
-
-Pick the stimulus by the question. Exactly one stimulus feature goes in the image; the default is the sine.
-
-| Question | Build | Why |
-|---|---|---|
-| What is the loop gain and its noise floor? | `seed3` (sine) or `seed3 stim-pulse` | A steady tone is easy to difference against; the pulse train adds timing edges. |
-| What is the frequency response? | `seed3 stim-ess` | The exponential sweep covers the band once; it starts at the first captured callback. |
-| How does the loop treat real material? | `seed3 stim-excerpt` | Plays an installed instrument clip once, from the first captured callback. Needs the bootloaded layout. |
-
-Only the first two are available from a plain internal-flash image. Records the build prints at boot
-(`RIGCFG`, `RIGGEN`, `CAPMAX`) say what it was configured to do; their field-by-field grammar is in
-`docs/reference/daisy-seed3.md`, *Rig record grammar*.
-
-```bash
-cd firmware
-make probe-flash BINARY=rig FEATURES=seed3                    # sine, -20 dBFS, 1 kHz
-make probe-flash BINARY=rig FEATURES="seed3 stim-ess"         # exponential sweep, starts at arm
-ASP_RIG_CAPTURE_SECONDS=30 make probe-flash BINARY=rig FEATURES=seed3   # shorter window
-ASP_RIG_CAPTURE_SECONDS=ring make probe-flash BINARY=rig FEATURES=seed3 # until the ring is full, ~349.5 s
-# then tap RESET: a probe flash stops the cycle counter, and timing would read 0
-```
-
-The sine and pulse train play from boot. The sweep plays once, so `rig` holds it silent until the
-first captured callback and starts it there: the capture holds the whole sweep, and a
-`STIMSTART first_block=<n> offset=<samples>` record after the window says where in the reassembled
-PCM playback began (0 by construction; the echo arrives one loop latency later). The gate line
-`rig: gate stimulus samples a..b inside the N-sample capture` says whether the window held all of it.
-
-`stim-excerpt` plays an excerpt installed into QSPI instead of a computed waveform, once, from the
-first captured callback like the sweep. `ASP_RIG_EXCERPT_SLOT=<n>` picks the slot at build time (default 0;
-a value outside `0..14` fails the build). The staging ping-pong is read from QSPI by a thread-mode task and
-the callback never touches flash. After one full pass `rig` sends one
-`EXCPLAY proto=1 slot=<n> bytes=<n> crc16=<hex> want=<hex> underruns=<n> clean=<0|1>` record. `crc16` covers
-only the samples handed to the DAC encoder, and `want` is the CRC stored at install: equal CRCs with
-`clean=1` say the QSPI-to-encoder path delivered the excerpt intact, and say nothing about the codec or
-the cable. A slot that is blank or holds no valid header makes `rig` send
-`EXCPLAYFAIL proto=1 slot=<n> why=<empty|invalid>`, show red and start no audio. An excerpt install is refused
-until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootloaded`); exercised on a board
-2026-10-15 (TASK-038.09): `mandolin_single_note_soft` installed in slot 0 (`EXCOK`, 5.82 s) and replayed with
-`EXCPLAY crc16=15fd want=15fd underruns=0 clean=1`.
-
-### Installing an excerpt
-
-An excerpt is mono 48 kHz 16-bit WAV (the corpus in `audio/instruments/` already is). Flash the
-bootloaded layout once (`make flash LAYOUT=bootloaded`, see *Bootloaded layout* above), then stream the
-clip into a slot (`0..13`) with a name of 1 to 16 characters of `[a-z0-9_]`, with the board running
-`rig` and its console visible on the host:
-
-```bash
-cargo run -p asperitas-host --example excerpt_stream -- \
-    audio/instruments/mandolin_single_note_soft.wav 0 mandolin_soft > /dev/cu.usbmodem*
-```
-
-The tool writes frames and exits 0 without knowing whether they worked. The device reads every byte back
-from flash and sends `EXCOK name=... bytes=... crc16=...` or `EXCFAIL got=... want=...` on the console;
-that record is the only verdict, so capture the console while you install (next section). Installing
-erases the slot's sectors, and erase dominates the time: the datasheet bound is about 22.5 s for a
-288 kB clip and the one reading is 5.82 s (derived upper bound versus one measurement, 2026-10-15). An
-install is refused until the replay pass of a `stim-excerpt` build has completed. Layout, costs and
-the `EXC*` grammar: `docs/reference/daisy-seed3.md`, *Instrument excerpts in QSPI*.
-
-### Capturing the console
-
-Hold the console open with **one** reader for the whole run, started before the board boots or before
-you tap RESET so `BOOT` is in the file. Save raw bytes, not scrollback. A reader restarted mid-dump
-loses whatever macOS had buffered, which was 19 blocks once.
-
-```bash
-cat /dev/cu.usbmodem* > capture.bin        # leave running; interrupt after DUMPEND
-cargo run -p asperitas-wire --example console_decode -- capture.bin > clean.txt
-grep -E 'RIGCFG|CAPMAX|CAPSTAT|DUMPEND|STIMSTART|EXC(OK|FAIL|PLAY)' clean.txt
-```
-
-Judge the run from the records, not from the audio. `DUMPEND` ends the dump and carries
-`dropped_full` and `refused`; a nonzero `dropped_full` before the dump started is the host attaching late
-and does not matter, one during the dump does. `CAPSTAT` carries `overrun`, `max_block_us` and
-`worst_gap_us`. For a fixed-length evidence capture with a verdict, `asperitas-rig capture` does the same
-job and is described in `docs/reference/asperitas-rig.md`.
-
-### Reassembling a dump
-
-The reassembler turns `capture.bin` back into PCM and exits non-zero if any block is incomplete or fails
-its CRC:
-
-```bash
-cargo run -p asperitas-host --release --example dump_reassemble -- capture.bin --out capture.pcm
-```
-
-The PCM is headerless signed 16-bit little-endian, mono, 48 kHz. For a sweep or excerpt build, the
-`STIMSTART` record gives `offset`, the sample index in this PCM where playback began; the echo arrives
-one loop latency later.
-
-### Where artifacts go
-
-Compress the raw console bytes and commit them with the ticket whose evidence they are, under
-`audio/captures/<date>-rig-<what>.console.zst`; the reassembled PCM is derived and need not be kept. Keep
-`clean.txt` out of the repository unless a ticket quotes it. Record in the ticket which build produced the
-capture (features, `ASP_RIG_*` variables, layout), since `RIGCFG` and `RIGGEN` in the capture say it only
-for the stimulus and window.
-
-### Which numbers are readings
-
-Arithmetic, readings and estimates are labelled as such in `docs/reference/daisy-seed3.md`, *Capture
-budgets (SDRAM)*. In short: ring size, seconds, base64 efficiency (0.568) and about 169 kB/s of wire per
-second of capture are derived; callback cost, the 60-69 s dump of 300 s, and the 5.82 s install are
-readings; the full-speed USB ceiling and sustained FMC write throughput are not measured.
-
-### Observed on the bench (2026-10-07/08)
-
-| Quantity | Reading | Source |
-|---|---|---|
-| Callback cost, worst | 72 us of a 666 us period | 300 s run, `max_block_us` |
-| Callback spacing, worst | 714 us (limit 832) | 300 s run, `worst_gap_us` |
-| Blocks delivered / expected | 879 / 879, 0 overruns | 300 s run |
-| Callback cost, worst, bootloaded layout | 47 us of a 666 us period (internal flash: 72 us) | 300 s run from QSPI behind the Daisy bootloader, 2026-10-15, `max_block_us` |
-| Callback spacing, worst, bootloaded layout | 692 us (limit 832; internal flash: 714 us) | same run, `worst_gap_us` |
-| Blocks delivered / expected, bootloaded layout | 879 / 879, 0 overruns, `audio_exit=0` | same run |
-| Dump of 300 s of audio, bootloaded layout | 60.2 s (internal flash: 69.4 s); 879 blocks, 28,803,072 PCM bytes, every block proved | `DUMPEND elapsed_ms=60232` |
-| Ring filled to the last block | 1024 / 1024 blocks in 349.536 s on the device clock (349.626 s on the host, arm record to close record); 1 overrun ended it, 0 blocks overwritten | ring-fill run, 2026-10-13 |
-| Dump of 300 s of audio | 69.4 s; 414.9 kB/s PCM, 731.7 kB/s on the wire | `DUMPEND elapsed_ms=69421` |
-| Log loss during capture and dump | 0 | `dropped_full=0` throughout |
-| Loop gain at -20 dBFS, 1 kHz | -0.41 dB | returned peak -20.41 dBFS |
-| Loop flatness, 150 Hz-11 kHz | +/-0.03 dB | ESS capture RMS envelope |
-| Noise + distortion after removing the tone | 0.35 LSB RMS (~76 dB SNR, at the 16-bit floor) | 30 s sine |
-| Channel mapping | straight (L to L, R to R), no crosstalk above the floor | three one-channel runs |
-
-The 300 s capture is archived as `audio/captures/2026-10-07-rig-sine-300s.console.zst`. The
-analysis behind every row is in TASK-038.05's notes, and the loopback setup is in
-`docs/reference/daisy-pod.md`. The bootloaded 300 s run is archived as `audio/captures/2026-10-15-rig-sine-300s-bootloaded.console.zst`; its 36 `dropped_full` all fall before the host attached (t=1.2 s to 27 s), none during the dump. The ring-fill run is archived as
-`audio/captures/2026-10-13-rig-ring-fill-349s.console.zst`. Not yet measured: a sweep captured from its first sample (built in TASK-038.08, not yet run on the bench), and excerpt replay (TASK-038.04).
-
-To judge a capture, run `cargo run -p asperitas-measure --release -- analyze <capture.console.zst>`
-(add `--excerpt <clip.wav>` for an excerpt replay). It prints metrics as JSON and exits 0 pass,
-1 failed verdict, 2 error. Usage, metric definitions, blind spots and the fixture workflow are in
-`docs/reference/asperitas-rig.md`.
-
-## Important Hardware Gotchas
-
-### Pod audio is line level
-
-The Daisy Pod's 3.5 mm jacks are **line level**, not hi-Z instrument level. Plugging a passive pickup or piezo directly in will produce thin, noisy, low-level audio that reads like a DSP bug. Feed the Pod from a DI box, preamp, or audio interface during development.
-
-### Block size is 32 samples
-
-`daisy-embassy` hardcodes `BLOCK_LENGTH = 32` (not libDaisy's default of 48). This is fixed unless you patch the vendored fork. For most effects this is fine; it matters more for tight feedback/delay paths where latency is critical.
-
-### Codec is hardware-strapped
-
-The TAC5242 codec on Seed3 is configured by board straps, not I²C registers. Firmware only configures the SAI peripheral — there is no codec init sequence to port. See `docs/reference/daisy-seed3.md` for SAI details.
-
-## Reference Documentation
-
-- **`docs/reference/daisy-seed3.md`** — Seed3 hardware, SAI config, DFU flashing, why libDaisy C++ isn't an option yet
-- **`docs/reference/daisy-pod.md`** — Pod pin map, controls, line-level audio warning
-- **`docs/reference/rust-daisy-stack.md`** — Crate landscape, daisy-embassy status, DSP library options
-
-## Building for Other Targets
-
-The workspace has two halves:
-
-```bash
-# Host crates (can cross-compile anywhere)
-cargo build -p asperitas-cli -p asperitas-dsp
-
-# Firmware (embedded target)
-cd firmware && cargo build --release --features seed3
-```
-
-Firmware target: `thumbv7em-none-eabihf` (Cortex-M7F, hard float). Binary size must stay under 128 KB (internal flash limit for DFU without the Daisy bootloader).
+- [`docs/reference/daisy-seed3.md`](docs/reference/daisy-seed3.md) - Seed3 hardware, SAI config, DFU and probe flashing, console protocol, capture budgets
+- [`docs/reference/daisy-pod.md`](docs/reference/daisy-pod.md) - Pod pin map, controls, line-level audio warning
+- [`docs/reference/asperitas-rig.md`](docs/reference/asperitas-rig.md) - `rig` firmware workflow, capture runner, analysis, console debugging
+- [`docs/reference/rust-daisy-stack.md`](docs/reference/rust-daisy-stack.md) - Crate landscape, daisy-embassy status, DSP library options
+- [`docs/reference/seed3-schematic-search-log.md`](docs/reference/seed3-schematic-search-log.md) - Record of the Seed3 schematic search
+- [`docs/upstream/`](docs/upstream/) - Notes prepared for upstream projects

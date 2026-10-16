@@ -1,13 +1,15 @@
 ---
 id: TASK-113
 title: 'Docs: make README.md match reality and stop duplicating the reference docs'
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-16 22:18'
 labels:
   - review-2026-10
   - docs
+  - planned
 dependencies: []
 priority: high
 type: chore
@@ -26,6 +28,24 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 README commands all run as written; the layout tree matches git ls-files
-- [ ] #2 No status sentences that a ticket owns; the duplicated sections are removed or point at the reference docs
+- [x] #1 README commands all run as written; the layout tree matches git ls-files
+- [x] #2 No status sentences that a ticket owns; the duplicated sections are removed or point at the reference docs
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by af7ba12. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+README rebuilt to 99 lines from git ls-files (9 crates, 6 firmware bins, audio/, scripts/, docs/upstream, backlog). Live section removed, generate documented, ticket-owned status sentences dropped, slot range written 0..=13 (SLOT_COUNT=14) in the rig doc. DFU/probe sections removed (already in daisy-seed3.md); rig workflow, bench readings table, console debugging and dead-board/ledtest/panic-path moved into docs/reference/asperitas-rig.md. Verified process and generate commands run; check-doc-artifact-names.sh passes.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+README.md cut from 491 to 99 lines and corrected; rig workflow and console debugging moved into docs/reference/asperitas-rig.md.
+<!-- SECTION:FINAL_SUMMARY:END -->
