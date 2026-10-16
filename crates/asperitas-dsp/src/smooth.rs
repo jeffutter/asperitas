@@ -5,6 +5,24 @@
 
 use libm::expf as exp;
 
+/// Magnitudes below this are flushed to zero. It is far below any audible level (-600 dB
+/// relative to full scale) and far above the subnormal range, so exponential tails reach exactly
+/// zero without depending on the host's flush-to-zero flags.
+const FLUSH_THRESHOLD: f32 = 1e-30;
+
+/// Replace a non-finite or near-zero value with `0.0`.
+///
+/// Applied to input samples and to recursive state so a NaN or infinity cannot persist in a
+/// feedback path and decaying tails never linger in the subnormal range.
+#[inline]
+pub(crate) fn sanitize(x: f32) -> f32 {
+    if x.is_finite() && x.abs() >= FLUSH_THRESHOLD {
+        x
+    } else {
+        0.0
+    }
+}
+
 /// Exponential smoother for a single floating-point value.
 ///
 /// Derived from a time constant (milliseconds): the value reaches ~63 % of a step change
@@ -32,13 +50,18 @@ impl Smoother {
     }
 
     /// Update the target value. Call this whenever the parameter changes.
+    ///
+    /// A non-finite value is ignored, so the previous target stays in force rather than
+    /// poisoning the smoothed value.
     pub fn set_target(&mut self, val: f32) {
-        self.target = val;
+        if val.is_finite() {
+            self.target = val;
+        }
     }
 
     /// Advance the smoother by one sample and return the smoothed value.
     pub fn advance(&mut self) -> f32 {
-        self.current += self.alpha * (self.target - self.current);
+        self.current = sanitize(self.current + self.alpha * (self.target - self.current));
         self.current
     }
 

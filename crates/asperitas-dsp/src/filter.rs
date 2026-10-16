@@ -4,7 +4,7 @@ use libm::expf as exp;
 use libm::powf;
 
 use crate::processor::{Frame, Processor};
-use crate::smooth::Smoother;
+use crate::smooth::{sanitize, Smoother};
 
 #[cfg(feature = "std")]
 use std::string::String;
@@ -57,7 +57,8 @@ impl Processor for OnePoleLowPass {
     }
 
     fn set_params(&mut self, params: &Self::Params) {
-        // Clamp cutoff to [0, sample_rate/2] to keep alpha in [0, 1].
+        // Clamp cutoff to [0, sample_rate/2] to keep alpha in [0, 1]. f32::max/min return the
+        // non-NaN operand, so a NaN cutoff lands on 0 Hz instead of propagating.
         let nyquist = self.sample_rate_hz / 2.0;
         let cutoff = params.cutoff_hz.max(0.0).min(nyquist);
         // alpha = 1 - exp(-2π · fc / fs)
@@ -68,8 +69,9 @@ impl Processor for OnePoleLowPass {
 
     fn tick(&mut self, input: Frame) -> Frame {
         let alpha = self.smoother.advance();
-        self.prev_l = self.prev_l + alpha * (input[0] - self.prev_l);
-        self.prev_r = self.prev_r + alpha * (input[1] - self.prev_r);
+        let (in_l, in_r) = (sanitize(input[0]), sanitize(input[1]));
+        self.prev_l = sanitize(self.prev_l + alpha * (in_l - self.prev_l));
+        self.prev_r = sanitize(self.prev_r + alpha * (in_r - self.prev_r));
         [self.prev_l.clamp(-1.0, 1.0), self.prev_r.clamp(-1.0, 1.0)]
     }
 

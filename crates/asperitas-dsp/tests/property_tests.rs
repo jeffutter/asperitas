@@ -645,3 +645,103 @@ proptest! {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Non-finite robustness and exact-zero decay
+// ---------------------------------------------------------------------------
+
+fn run_finite_after_event<P: Processor>(
+    p: &mut P,
+    bad: &P::Params,
+    good: &P::Params,
+    bad_input: Frame,
+) -> bool {
+    p.set_sample_rate(48_000.0);
+    p.set_params(bad);
+    for _ in 0..64 {
+        p.tick(bad_input);
+    }
+    p.set_params(good);
+    let block = vec![[0.5f32, -0.5]; 512];
+    let mut out = vec![Frame::default(); block.len()];
+    p.process_block(&block, &mut out);
+    out.iter().all(|f| f[0].is_finite() && f[1].is_finite())
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    #[test]
+    fn gain_recovers_after_any_param_or_input(
+        db in any::<f32>(), x in any::<f32>(), y in any::<f32>()
+    ) {
+        let mut g = Gain::default();
+        assert!(run_finite_after_event(
+            &mut g,
+            &GainParams { gain_db: db },
+            &GainParams::default(),
+            [x, y],
+        ));
+    }
+
+    #[test]
+    fn filter_recovers_after_any_param_or_input(
+        fc in any::<f32>(), x in any::<f32>(), y in any::<f32>()
+    ) {
+        let mut f = OnePoleLowPass::default();
+        assert!(run_finite_after_event(
+            &mut f,
+            &FilterParams { cutoff_hz: fc },
+            &FilterParams::default(),
+            [x, y],
+        ));
+    }
+
+    #[test]
+    fn filter_state_reaches_exactly_zero_in_silence(
+        fc in 20.0f32..20_000.0, level in -1.0f32..=1.0
+    ) {
+        let mut f = OnePoleLowPass::default();
+        f.set_sample_rate(48_000.0);
+        f.set_params(&FilterParams { cutoff_hz: fc });
+        f.reset();
+        for _ in 0..1000 { f.tick([level, level]); }
+        // Slowest case: 20 Hz cutoff; 1e-30 needs about 69 time constants (~26k samples at
+        // alpha ~ 0.0026). 300k samples is ample.
+        let mut last = [1.0f32; 2];
+        for _ in 0..300_000 { last = f.tick([0.0, 0.0]); }
+        prop_assert_eq!(last, [0.0, 0.0]);
+    }
+}
+
+#[test]
+fn gain_and_filter_survive_nan_deterministically() {
+    let mut g = Gain::default();
+    assert!(run_finite_after_event(
+        &mut g,
+        &GainParams { gain_db: f32::NAN },
+        &GainParams::default(),
+        [f32::NAN, f32::INFINITY],
+    ));
+    let mut f = OnePoleLowPass::default();
+    assert!(run_finite_after_event(
+        &mut f,
+        &FilterParams {
+            cutoff_hz: f32::NAN
+        },
+        &FilterParams::default(),
+        [f32::NAN, f32::NEG_INFINITY],
+    ));
+}
+
+#[test]
+fn gain_smoother_tail_reaches_exactly_zero() {
+    let mut g = Gain::default();
+    g.set_sample_rate(48_000.0);
+    g.set_params(&GainParams { gain_db: -1000.0 });
+    let mut last = [1.0f32; 2];
+    for _ in 0..200_000 {
+        last = g.tick([1.0, 1.0]);
+    }
+    assert_eq!(last, [0.0, 0.0]);
+}

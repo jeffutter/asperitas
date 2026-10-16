@@ -3,7 +3,7 @@
 use libm::powf;
 
 use crate::processor::{Frame, Processor};
-use crate::smooth::Smoother;
+use crate::smooth::{sanitize, Smoother};
 
 #[cfg(feature = "std")]
 use std::string::String;
@@ -52,7 +52,13 @@ impl Processor for Gain {
     fn set_params(&mut self, params: &Self::Params) {
         // Convert dB to linear gain, clamped to prevent overflow.
         // 10^(dB/20): -60 dB = 1e-3, +6.02 dB ~ x2, +78.3 dB hits the ceiling below.
-        let gain_linear = powf(10.0, params.gain_db / 20.0);
+        // A non-finite gain_db falls back to unity (0 dB).
+        let gain_db = if params.gain_db.is_finite() {
+            params.gain_db
+        } else {
+            0.0
+        };
+        let gain_linear = powf(10.0, gain_db / 20.0);
         let gain_clamped = gain_linear.clamp(0.0, 8192.0); // ~78 dB ceiling
         self.smoother_l.set_target(gain_clamped);
         self.smoother_r.set_target(gain_clamped);
@@ -62,8 +68,8 @@ impl Processor for Gain {
         let g_l = self.smoother_l.advance();
         let g_r = self.smoother_r.advance();
         [
-            (input[0] * g_l).clamp(-1.0, 1.0),
-            (input[1] * g_r).clamp(-1.0, 1.0),
+            (sanitize(input[0]) * g_l).clamp(-1.0, 1.0),
+            (sanitize(input[1]) * g_r).clamp(-1.0, 1.0),
         ]
     }
 
