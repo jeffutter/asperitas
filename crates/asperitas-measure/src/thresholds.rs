@@ -218,3 +218,25 @@ pub const SWEEP_FLAT_EPS_DB: f64 = 0.5;
 ///
 /// Origin: TASK-019.03.02.
 pub const SWEEP_FLAT_MIN_STEPS: usize = 3;
+
+/// Shortest capture a soak verdict is given for, seconds. The ticket asks for "a 5+ minute
+/// capture"; a shorter run is a failed verdict, not a shorter soak.
+///
+/// Origin: TASK-019.03 acceptance criterion 2, TASK-019.03.03.
+pub const SOAK_MIN_SECONDS: f64 = 300.0;
+
+/// Time added after the end of a parameter sweep, and before its start, that still counts as
+/// "parameter motion" when attributing candidates, seconds. Covers the 10 ms smoothing tail
+/// (several time constants) and the error in the caller's estimate of when the first `SET` landed
+/// (the capture does not record it), as [`SWEEP_BUCKET_TRIM`] does for the sweep analysis.
+///
+/// Origin: TASK-019.03.03; attribution only, never changes a verdict.
+pub const SOAK_MOTION_MARGIN_S: f64 = 1.0;
+
+/// Block over which the soak's discontinuity detector refits the loop gain, samples: 10 ms, ten
+/// periods of the rig's 1 kHz sine. A sweep changes the gain by a few thousandths of a percent
+/// per block, so the residual of a healthy swept capture stays far under
+/// [`DISCONTINUITY_JUMP_LSB`], while a dropout or a snapped step still jumps inside the block.
+///
+/// Origin: TASK-019.03.03, set from the synthetic fixtures in `soak.rs`.
+pub const SOAK_GAIN_FIT_BLOCK_SAMPLES: usize = 480;

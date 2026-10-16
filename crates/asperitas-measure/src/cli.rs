@@ -7,7 +7,16 @@
 //!     [--fx bypass|gain|lowpass] [--fx-value <0..65535 | 0xHEX>]
 //! asperitas-measure analyze <capture.console.zst> --sweep FROM:TO --sweep-kind gain|lowpass \
 //!     [--sweep-start-s S] [--sweep-duration-s D]
+//! asperitas-measure analyze <capture.console.zst> --soak FROM:TO [--stimulus sine] \
+//!     [--sweep-start-s S] [--sweep-duration-s D] [--expect-fail]
 //! ```
+//!
+//! The soak form judges a long (5+ minute) capture taken while a knob moves: silence, discontinuity
+//! and parameter-step candidates over the whole run, attributed to the parameter-motion window or
+//! outside it (see [`crate::soak`]). `--sweep-start-s` and `--sweep-duration-s` place the motion as
+//! for `--sweep`; `FROM == TO` is a held parameter. `--expect-fail` inverts the verdict for an
+//! unsmoothed build: exit 0 only when the step detector fired (and no dropout is present), exit 1
+//! when the capture unexpectedly passes.
 //!
 //! The sweep form judges a knob sweep from `asperitas-rig override --sweep FROM:TO` (knob levels
 //! `0..=1`): the response curve against knob value, its direction, monotonicity and flat regions
@@ -33,6 +42,7 @@ use crate::capture::Capture;
 use crate::compare::{compare, FxSetting, Reference};
 use crate::metrics::analyze;
 use crate::param_step::detect_param_steps;
+use crate::soak::{judge_soak, SoakSpec};
 use crate::stimulus::Stimulus;
 use crate::sweep::{judge_sweep, SweepKind, SweepSpec};
 use crate::thresholds;
@@ -57,12 +67,23 @@ impl Outcome {
 
 const USAGE: &str = "usage: asperitas-measure analyze <capture.console.zst> \
 [--stimulus sine|sweep|pulse | --excerpt <clip.wav> [--fx bypass|gain|lowpass] [--fx-value <0..65535|0xHEX>] \
-| --sweep FROM:TO --sweep-kind gain|lowpass [--sweep-start-s S] [--sweep-duration-s D]]";
+| --sweep FROM:TO --sweep-kind gain|lowpass [--sweep-start-s S] [--sweep-duration-s D] \
+| --soak FROM:TO [--stimulus sine] [--sweep-start-s S] [--sweep-duration-s D] [--expect-fail]]";
 
 enum Mode {
     Stimulus(String),
     Excerpt(String, FxSetting),
     Sweep(SweepArgs),
+    Soak(SoakArgs),
+}
+
+struct SoakArgs {
+    stimulus: String,
+    from: f64,
+    to: f64,
+    start_s: f64,
+    duration_s: Option<f64>,
+    expect_fail: bool,
 }
 
 struct SweepArgs {
@@ -90,14 +111,21 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Outcome
             return Outcome::Error;
         }
     };
+    let expect_fail = matches!(&mode, Mode::Soak(a) if a.expect_fail);
     let result = match mode {
         Mode::Stimulus(name) => judge_stimulus(&capture, &name),
         Mode::Excerpt(wav, fx) => judge_excerpt(&capture, &wav, fx),
         Mode::Sweep(args) => Ok(judge_sweep_capture(&capture, &args)),
+        Mode::Soak(args) => judge_soak_capture(&capture, &args),
     };
     match result {
         Ok((report, failures)) => {
             let mut report = report;
+            let failures = if expect_fail {
+                invert_for_expected_failure(&mut report, failures)
+            } else {
+                failures
+            };
             report["capture"] = json!(path);
             report["pass"] = json!(failures.is_empty());
             report["failures"] = json!(failures);
@@ -134,6 +162,8 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
     let mut sweep_kind = None;
     let mut sweep_start = None;
     let mut sweep_duration = None;
+    let mut soak = None;
+    let mut expect_fail = false;
     while let Some(a) = it.next() {
         match a.as_str() {
             "--stimulus" => stimulus = Some(it.next().ok_or("--stimulus needs a value")?.clone()),
@@ -145,6 +175,8 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
                 )?)
             }
             "--sweep" => sweep = Some(it.next().ok_or("--sweep needs FROM:TO")?.clone()),
+            "--soak" => soak = Some(it.next().ok_or("--soak needs FROM:TO")?.clone()),
+            "--expect-fail" => expect_fail = true,
             "--sweep-kind" => {
                 sweep_kind = Some(it.next().ok_or("--sweep-kind needs a value")?.clone())
             }
@@ -161,15 +193,34 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
     if excerpt.is_none() && (fx_name.is_some() || fx_value.is_some()) {
         return Err("--fx and --fx-value need --excerpt".into());
     }
+    if let Some(range) = soak {
+        if sweep.is_some() || excerpt.is_some() || fx_name.is_some() || fx_value.is_some() {
+            return Err("--soak is exclusive with --sweep, --excerpt, --fx".into());
+        }
+        if sweep_kind.is_some() {
+            return Err("--sweep-kind does not apply to --soak".into());
+        }
+        let (from, to) = parse_range("--soak", &range)?;
+        return Ok((
+            path,
+            Mode::Soak(SoakArgs {
+                stimulus: stimulus.unwrap_or_else(|| "sine".into()),
+                from,
+                to,
+                start_s: sweep_start.unwrap_or(0.0),
+                duration_s: sweep_duration,
+                expect_fail,
+            }),
+        ));
+    }
+    if expect_fail {
+        return Err("--expect-fail needs --soak".into());
+    }
     if let Some(range) = sweep {
         if stimulus.is_some() || excerpt.is_some() || fx_name.is_some() || fx_value.is_some() {
             return Err("--sweep is exclusive with --stimulus, --excerpt, --fx".into());
         }
-        let (from, to) = range
-            .split_once(':')
-            .and_then(|(a, b)| Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?)))
-            .filter(|(a, b)| (0.0..=1.0).contains(a) && (0.0..=1.0).contains(b))
-            .ok_or_else(|| format!("--sweep wants FROM:TO knob levels in 0..=1, got {range:?}"))?;
+        let (from, to) = parse_range("--sweep", &range)?;
         let kind_name = sweep_kind.ok_or("--sweep needs --sweep-kind gain|lowpass")?;
         let kind = SweepKind::from_name(&kind_name)
             .ok_or_else(|| format!("unknown --sweep-kind {kind_name:?} (gain, lowpass)"))?;
@@ -199,6 +250,14 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
         (None, None) => Mode::Stimulus("sine".into()),
     };
     Ok((path, mode))
+}
+
+fn parse_range(flag: &str, range: &str) -> Result<(f64, f64), String> {
+    range
+        .split_once(':')
+        .and_then(|(a, b)| Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?)))
+        .filter(|(a, b)| (0.0..=1.0).contains(a) && (0.0..=1.0).contains(b))
+        .ok_or_else(|| format!("{flag} wants FROM:TO knob levels in 0..=1, got {range:?}"))
 }
 
 fn parse_seconds(flag: &str, v: Option<&String>) -> Result<f64, String> {
@@ -339,5 +398,66 @@ fn judge_sweep_capture(capture: &Capture, args: &SweepArgs) -> (Value, Vec<Strin
             json!({"sweep": {"from": args.from, "to": args.to}}),
             vec![format!("sweep: {e}")],
         ),
+    }
+}
+
+fn judge_soak_capture(capture: &Capture, args: &SoakArgs) -> Result<(Value, Vec<String>), String> {
+    let stimulus = match args.stimulus.as_str() {
+        "sine" => Stimulus::Sine(SineParams::default()),
+        other => return Err(format!("--soak judges the sine stimulus, not {other:?}")),
+    };
+    let rate = f64::from(capture.sample_rate_hz);
+    let duration_s = args
+        .duration_s
+        .unwrap_or(capture.samples.len() as f64 / rate - args.start_s)
+        .max(0.0);
+    let spec = SoakSpec {
+        from: args.from,
+        to: args.to,
+        start_s: args.start_s,
+        duration_s,
+    };
+    let motion = json!({"from": args.from, "to": args.to, "start_s": args.start_s, "duration_s": duration_s});
+    match judge_soak(capture, &stimulus, &spec) {
+        Ok(r) => {
+            let failures = r.failures.clone();
+            Ok((
+                json!({"soak": motion, "expected_failure_observed": r.expected_failure_observed(), "result": r}),
+                failures,
+            ))
+        }
+        Err(e) => Ok((json!({"soak": motion}), vec![format!("soak: {e}")])),
+    }
+}
+
+/// `--expect-fail`: the detectors' findings move to `detector_failures` as evidence, and the
+/// verdict is whether the soak showed the step detector fired (and no dropout muddied it).
+fn invert_for_expected_failure(report: &mut Value, detector_failures: Vec<String>) -> Vec<String> {
+    report["detector_failures"] = json!(detector_failures);
+    report["expect_failure"] = json!(true);
+    if report["expected_failure_observed"] == json!(true) {
+        Vec::new()
+    } else {
+        vec!["expected the step detector to fire on its own, but it did not".to_string()]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expect_fail_passes_only_when_the_step_detector_fired() {
+        let mut fired = json!({"expected_failure_observed": true});
+        assert!(invert_for_expected_failure(&mut fired, vec!["3 steps".into()]).is_empty());
+        assert_eq!(fired["detector_failures"][0], "3 steps");
+
+        let mut quiet = json!({"expected_failure_observed": false});
+        assert_eq!(invert_for_expected_failure(&mut quiet, Vec::new()).len(), 1);
+        let mut errored = json!({});
+        assert_eq!(
+            invert_for_expected_failure(&mut errored, vec!["x".into()]).len(),
+            1
+        );
     }
 }

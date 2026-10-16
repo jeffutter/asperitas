@@ -111,3 +111,39 @@ fn sweep_mode_rejects_bad_usage_and_reports_short_capture() {
     assert_eq!(j["pass"], false);
     assert_eq!(j["response"]["direction"], "none");
 }
+
+#[test]
+fn soak_mode_rejects_bad_usage_and_fails_a_short_capture() {
+    let cap = root("audio/captures/2026-10-13-rig-10s-reset1.console.zst");
+    for args in [
+        vec!["analyze", &cap, "--soak", "0:2"],
+        vec![
+            "analyze",
+            &cap,
+            "--soak",
+            "0:1",
+            "--sweep",
+            "0:1",
+            "--sweep-kind",
+            "gain",
+        ],
+        vec!["analyze", &cap, "--soak", "0:1", "--sweep-kind", "gain"],
+        vec!["analyze", &cap, "--soak", "0:1", "--stimulus", "pulse"],
+        vec!["analyze", &cap, "--expect-fail"],
+    ] {
+        assert_eq!(run(&args).status.code(), Some(2), "{args:?}");
+    }
+    // 10 s is not a soak: a failed verdict with a JSON report, not an error.
+    let o = run(&["analyze", &cap, "--soak", "0:1"]);
+    assert_eq!(o.status.code(), Some(1));
+    let j = json(&o);
+    assert_eq!(j["pass"], false);
+    assert!(j["result"]["failures"][0]
+        .as_str()
+        .unwrap()
+        .contains("at least"));
+    // Expecting failure does not excuse a capture the step detector never fired on.
+    let o = run(&["analyze", &cap, "--soak", "0:1", "--expect-fail"]);
+    assert_eq!(o.status.code(), Some(1));
+    assert_eq!(json(&o)["expect_failure"], true);
+}

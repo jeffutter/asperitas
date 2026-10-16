@@ -198,6 +198,7 @@ cargo run -p asperitas-measure --release -- analyze <capture.console.zst> [--sti
 cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav
 cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav --fx gain --fx-value 43690
 cargo run -p asperitas-measure --release -- analyze <sweep.console.zst> --sweep 0:1 --sweep-kind gain|lowpass [--sweep-start-s S] [--sweep-duration-s D]
+cargo run -p asperitas-measure --release -- analyze <soak.console.zst> --soak FROM:TO [--sweep-start-s S] [--sweep-duration-s D] [--expect-fail]
 ```
 
 `--sweep FROM:TO` judges a capture taken under `asperitas-rig override --sweep FROM:TO` (knob
@@ -212,6 +213,18 @@ sweep length, so pass `--sweep-start-s` (default 0) and `--sweep-duration-s` (de
 the capture, which includes the rig's final ack grace, so give the rig's `--duration` when known).
 Limits are the `SWEEP_*` constants in `thresholds.rs`, to be revisited with the first real capture
 (TASK-019.03.04).
+
+`--soak FROM:TO` judges a 5+ minute sine capture taken while a knob moves (`FROM == TO` is a held
+knob). One verdict over silence runs, discontinuity candidates and parameter steps for the whole
+run: any of them, anywhere, fails. The JSON attributes each to the motion window (sweep start and
+duration, plus 1 s each side) or outside it, as `inside_motion`, `outside_motion` and
+`unattributed` (counted but past the detector's position cap). The discontinuity detector refits
+the loop gain every 10 ms so a swept gain does not read as a discontinuity. Keep sweep ranges above
+the silence floor, since a sweep to zero legitimately produces silence runs. `--expect-fail` is for
+the unsmoothed-build capture: exit 0 only when the step detector fired and no silence is present
+(`expected_failure_observed`), exit 1 when the capture passes or fails some other way; the
+detectors' findings are kept under `detector_failures`. Limits are the `SOAK_*` constants in
+`thresholds.rs`.
 
 Exit codes match `asperitas-rig`: **0** pass, **1** failed verdict (the JSON lists `failures`,
 each also on stderr), **2** usage, load or I/O error. The default stimulus is the sine. Only the

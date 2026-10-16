@@ -112,7 +112,7 @@ pub fn analyze(capture: &Capture, stimulus: &[f32], alignment: &Alignment) -> Me
     Metrics {
         samples: n,
         silence: silence(&capture.samples),
-        discontinuities: discontinuities(&x, stimulus, alignment, gain),
+        discontinuities: discontinuities(&x, stimulus, alignment, GainFit::Fixed(gain)),
         spurs: spurs(&x, f64::from(capture.sample_rate_hz)),
         level,
     }
@@ -144,7 +144,7 @@ fn level(x: &[f64], stimulus: &[f32]) -> Level {
     }
 }
 
-fn silence(samples: &[i16]) -> Silence {
+pub(crate) fn silence(samples: &[i16]) -> Silence {
     let mut s = Silence {
         run_count: 0,
         longest_run_samples: 0,
@@ -198,7 +198,71 @@ fn frac_delay_taps(frac: f64) -> [f64; INTERP_TAPS] {
     h
 }
 
-fn discontinuities(x: &[f64], stimulus: &[f32], al: &Alignment, gain: f64) -> Discontinuities {
+/// How the stimulus model is scaled when looking for discontinuities.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum GainFit {
+    /// One gain for the whole capture (a steady parameter).
+    Fixed(f64),
+    /// Least-squares gain refitted per block of this many samples, so a parameter that moves
+    /// slowly (a knob sweep) leaves a residual that stays small; a dropout or a snapped step
+    /// still jumps within the block.
+    Tracking { block: usize },
+}
+
+/// Stimulus lane scaled to capture LSB, delayed per alignment window.
+struct DelayedModel<'a> {
+    stimulus: &'a [f32],
+    al: &'a Alignment,
+    taps: [f64; INTERP_TAPS],
+    taps_window: usize,
+    base: i64,
+}
+
+impl<'a> DelayedModel<'a> {
+    fn new(stimulus: &'a [f32], al: &'a Alignment) -> Self {
+        Self {
+            stimulus,
+            al,
+            taps: [0.0; INTERP_TAPS],
+            taps_window: usize::MAX,
+            base: 0,
+        }
+    }
+
+    /// `(model sample, bottom tap index)`; `None` until every interpolation tap is in range.
+    fn at(&mut self, n: usize) -> Option<(f64, i64)> {
+        let w = (n / self.al.window_samples).min(self.al.delays.len() - 1);
+        if w != self.taps_window {
+            self.taps_window = w;
+            let d = self.al.delays[w];
+            let di = d.floor();
+            self.base = di as i64;
+            self.taps = frac_delay_taps(d - di);
+        }
+        // Stimulus index for tap k is n - base - k + centre.
+        let centre = (INTERP_TAPS / 2 - 1) as i64;
+        let top = n as i64 - self.base + centre;
+        let bottom = top - (INTERP_TAPS as i64 - 1);
+        if bottom < 0 || top >= self.stimulus.len() as i64 {
+            return None;
+        }
+        let m: f64 = self
+            .taps
+            .iter()
+            .enumerate()
+            .map(|(k, h)| h * f64::from(self.stimulus[(top - k as i64) as usize]))
+            .sum::<f64>()
+            * FULL_SCALE;
+        Some((m, bottom))
+    }
+}
+
+pub(crate) fn discontinuities(
+    x: &[f64],
+    stimulus: &[f32],
+    al: &Alignment,
+    fit: GainFit,
+) -> Discontinuities {
     let mut out = Discontinuities {
         count: 0,
         positions: Vec::new(),
@@ -206,48 +270,51 @@ fn discontinuities(x: &[f64], stimulus: &[f32], al: &Alignment, gain: f64) -> Di
     };
     let mut prev = 0.0;
     let mut last_event: Option<usize> = None;
-    let mut taps = [0.0; INTERP_TAPS];
-    let mut taps_window = usize::MAX;
-    let mut base = 0i64;
-    #[allow(clippy::needless_range_loop)] // n is also the window and stimulus index
-    for n in 0..x.len() {
-        let w = (n / al.window_samples).min(al.delays.len() - 1);
-        if w != taps_window {
-            taps_window = w;
-            let d = al.delays[w];
-            let di = d.floor();
-            base = di as i64;
-            taps = frac_delay_taps(d - di);
-        }
-        // Stimulus index for tap k is n - base - k + centre; skip until every tap is in range.
-        let centre = (INTERP_TAPS / 2 - 1) as i64;
-        let top = n as i64 - base + centre;
-        let bottom = top - (INTERP_TAPS as i64 - 1);
-        if bottom < 0 || top >= stimulus.len() as i64 {
-            continue;
-        }
-        let model: f64 = taps
-            .iter()
-            .enumerate()
-            .map(|(k, h)| h * f64::from(stimulus[(top - k as i64) as usize]))
-            .sum::<f64>()
-            * gain
-            * FULL_SCALE;
-        let r = x[n] - model;
-        let jump = (r - prev).abs();
-        prev = r;
-        if n == 0 || bottom == 0 {
-            continue;
-        }
-        out.max_jump_lsb = out.max_jump_lsb.max(jump);
-        if jump > thresholds::DISCONTINUITY_JUMP_LSB {
-            let merged =
-                last_event.is_some_and(|l| n - l <= thresholds::DISCONTINUITY_MERGE_SAMPLES);
-            last_event = Some(n);
-            if !merged {
-                out.count += 1;
-                if out.positions.len() < thresholds::DISCONTINUITY_MAX_POSITIONS {
-                    out.positions.push(n);
+    let mut model = DelayedModel::new(stimulus, al);
+    let block = match fit {
+        GainFit::Fixed(_) => 4096,
+        GainFit::Tracking { block } => block.max(1),
+    };
+    let mut buf: Vec<Option<(f64, i64)>> = Vec::with_capacity(block);
+    for start in (0..x.len()).step_by(block) {
+        let end = (start + block).min(x.len());
+        buf.clear();
+        buf.extend((start..end).map(|n| model.at(n)));
+        let gain = match fit {
+            GainFit::Fixed(g) => g,
+            GainFit::Tracking { .. } => {
+                let (mut xm, mut mm) = (0.0, 0.0);
+                for (n, m) in (start..end).zip(&buf) {
+                    if let Some((m, _)) = m {
+                        xm += x[n] * m;
+                        mm += m * m;
+                    }
+                }
+                if mm > 0.0 {
+                    xm / mm
+                } else {
+                    0.0
+                }
+            }
+        };
+        for (n, m) in (start..end).zip(&buf) {
+            let Some((m, bottom)) = m else { continue };
+            let r = x[n] - m * gain;
+            let jump = (r - prev).abs();
+            prev = r;
+            if n == 0 || *bottom == 0 {
+                continue;
+            }
+            out.max_jump_lsb = out.max_jump_lsb.max(jump);
+            if jump > thresholds::DISCONTINUITY_JUMP_LSB {
+                let merged =
+                    last_event.is_some_and(|l| n - l <= thresholds::DISCONTINUITY_MERGE_SAMPLES);
+                last_event = Some(n);
+                if !merged {
+                    out.count += 1;
+                    if out.positions.len() < thresholds::DISCONTINUITY_MAX_POSITIONS {
+                        out.positions.push(n);
+                    }
                 }
             }
         }

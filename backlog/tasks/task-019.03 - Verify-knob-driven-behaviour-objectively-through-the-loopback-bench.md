@@ -1,16 +1,15 @@
 ---
 id: TASK-019.03
 title: Verify knob-driven behaviour objectively through the Pod self-loopback
-status: To Do
+status: Blocked
 assignee:
-  - '@agent'
+  - '@human'
 created_date: '2026-09-09 01:27'
-updated_date: '2026-10-08 14:16'
-labels: []
+updated_date: '2026-10-16 01:01'
+labels:
+  - planned
 dependencies:
-  - TASK-032
-  - TASK-035
-  - TASK-038
+  - TASK-019.03.04
 references:
   - audio/captures/2026-10-07-rig-sine-300s.console.zst
 documentation:
@@ -40,6 +39,14 @@ Host override must enter upstream of smoothing, per TASK-032's constraint, or th
 - [ ] #5 Capture artifacts and metric summaries are committed and referenced from this ticket, per the standard that a measurement is the evidence and a successful build is not.
 - [ ] #6 Any disagreement found is filed as its own bug ticket rather than resolved by loosening a threshold.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against 4fab0e4
+
+Approach: the rig can only apply a static replay effect (CTL FX) and cannot be swept during capture, while main.rs has the live override path but no loopback capture. Gaps: (a) live override on the rig plus an unsmoothed feature build (.01); (b) sweep monotonic/flat-region analysis (.02); (c) soak analysis with expect-failure sensitivity (.03); (d) hardware run and committed evidence (.04, HUMAN). Order: .01 and .02 in parallel, .03 after .01, .04 last. Parent is @human because .04 is @human (CLAUDE.md inheritance rule); all direct work is in children, so status is Blocked. AC #4 and #6 are covered by .04; AC #5 by .04.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

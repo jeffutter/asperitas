@@ -9,6 +9,7 @@
 //! - [`metrics`] reports level, silence, discontinuity candidates and spurs as JSON.
 //! - [`param_step`] flags audible level steps from unsmoothed parameter changes.
 //! - [`sweep`] judges a knob sweep: response direction, monotonicity and flat regions.
+//! - [`soak`] judges a long capture while a parameter moves: dropouts, discontinuities and steps.
 //! - [`cli`] is the `asperitas-measure analyze` command over all of the above.
 //! - [`thresholds`] is the only place a numeric limit is written down.
 
@@ -18,6 +19,7 @@ pub mod cli;
 pub mod compare;
 pub mod metrics;
 pub mod param_step;
+pub mod soak;
 pub mod stimulus;
 pub mod sweep;
 pub mod thresholds;
