@@ -36,3 +36,5 @@ Candidate differences from rig, to test not assume: main polls `usb::run()` insi
 - [ ] #3 A guard keeps it from coming back: a gate, host test or boot-time check that fails when a bootloaded main would not bring its console up (for example a build-time or CI assertion on whatever the root cause was), with scripts/gates.sh push green
 - [ ] #4 docs/reference/daisy-seed3.md records the finding next to the bootloaded-layout section, including which binaries have been run on a board in each layout
 <!-- AC:END -->
+
+2026-10-16 (TASK-019.02 session): after 9d01511 moved main's audio callback to an interrupt executor, `/dev/cu.usbmodem101` enumerated on bootloaded main, and survived a power cycle. Not yet root-caused or verified with `asperitas-rig query`, and no guard exists, so criteria are still open.

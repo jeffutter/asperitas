@@ -1,7 +1,7 @@
 ---
 id: TASK-019.02
 title: Hear knobs changing the sound on hardware
-status: In Progress
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-05 17:27'
@@ -34,12 +34,12 @@ If TASK-018.04 recorded knob jitter, this is where you find out whether that num
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: turning knob 1 audibly changes the sound in the intended direction across its full travel, and the character of the change is what the mapping was meant to produce — not merely that some change occurs
-- [ ] #2 HUMAN: turning knob 2 does the same for its mapped parameter
-- [ ] #3 HUMAN: no zipper noise, stepping or crackle is audible by ear while a knob moves at playing speed, confirming that the automated detector's threshold from TASK-019.03 matches what a person actually hears
-- [ ] #4 HUMAN: no unwanted modulation is audible while a knob is held still at an arbitrary position
-- [ ] #5 HUMAN: behaviour survives unplugging and restoring power
-- [ ] #6 Any gain-staging or mapping finding worth keeping is written into docs/reference/daisy-pod.md or the shared mapping documentation
+- [x] #1 HUMAN: turning knob 1 audibly changes the sound in the intended direction across its full travel, and the character of the change is what the mapping was meant to produce — not merely that some change occurs
+- [x] #2 HUMAN: turning knob 2 does the same for its mapped parameter
+- [x] #3 HUMAN: no zipper noise, stepping or crackle is audible by ear while a knob moves at playing speed, confirming that the automated detector's threshold from TASK-019.03 matches what a person actually hears
+- [x] #4 HUMAN: no unwanted modulation is audible while a knob is held still at an arbitrary position
+- [x] #5 HUMAN: behaviour survives unplugging and restoring power
+- [x] #6 Any gain-staging or mapping finding worth keeping is written into docs/reference/daisy-pod.md or the shared mapping documentation
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -54,4 +54,6 @@ Depends on TASK-019.03 so measurements pass before anyone is asked to listen —
 2026-10-09: Set to Blocked at the owner's request while they have no physical access to the board. This ticket flashes or runs firmware on the Seed3, which can wedge it (debug port stuck until USB-C is replugged, bad bootloader or link layout) in a way that needs hands to recover. Return to To Do when the owner is back at the bench.
 
 2026-10-16: Owner is back at the bench; Blocked lifted. Board runs the bootloaded `main` (DFU to QSPI, flashed from this session). Passthrough verified Mac out -> Pod -> Mac mic: 1 kHz at -50.1 dBFS against -95.5 dBFS without the tone, knobs read ~1.0. Listening session starts with the owner at the Pod.
+
+2026-10-16: Closed with the owner. Mandolin loop through the Pod on headphones; the owner agreed each criterion live: #1 and #2 (direction and character as intended; knob 1 needs broadband material, on a sine it only acts as gain), #3 and #4 (no zipper, crackle, wobble or hiss, moving or still), #5 (behaviour survived unplugging and restoring power). #6: findings written to docs/reference/daisy-pod.md. Getting there needed `main`'s audio callback moved to an interrupt executor (9d01511).
 <!-- SECTION:NOTES:END -->
