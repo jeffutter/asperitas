@@ -1266,6 +1266,24 @@ fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
                         Reply::Error(ErrorCode::BadValue)
                     }
                 }
+                // Allowed mid-capture, unlike `FX`: the effect kind and base value stay fixed
+                // while the override moves the parameter, which is what a sweep is.
+                #[cfg(feature = "stim-excerpt")]
+                asperitas_logging::control::Command::OverrideSet { knob, value } => {
+                    if excerpt_play::override_set(knob, value) {
+                        Reply::Ok(cmd.verb())
+                    } else {
+                        Reply::Error(ErrorCode::BadKnob)
+                    }
+                }
+                #[cfg(feature = "stim-excerpt")]
+                asperitas_logging::control::Command::OverrideRelease { knob } => {
+                    if excerpt_play::override_release(knob) {
+                        Reply::Ok(cmd.verb())
+                    } else {
+                        Reply::Error(ErrorCode::BadKnob)
+                    }
+                }
                 _ => Reply::Error(ErrorCode::UnknownVerb),
             });
         },
@@ -1453,6 +1471,23 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 // so the control must arrive in that window; it is refused with `busy` once a capture is armed.
 // `select_fx` publishes under a critical section and the callback picks it up at the next block.
 //
+// `CTL SET k=00 v=<4 hex>` / `CTL REL k=00` (TASK-019.03.01) override knob 0, the selected effect's
+// parameter, through the same `asperitas_pod::knob_override::KnobOverride` the shipped firmware
+// uses. Unlike `FX` it is accepted while a capture is armed, so `asperitas-rig`'s override sweep
+// moves the effect mid-capture. Each callback merges the override with the `FX` value (the "pot
+// reading") and calls `ReplayFx::set_knob`, which acts only when the merged value changed; the
+// override therefore enters UPSTREAM of the effect's smoothing, exactly where `main` applies it.
+// Releasing returns to the `FX` value. Bypass ignores it. Knob ids other than 0 get `bad-knob`.
+//
+// Feature `unsmoothed-params` builds the effect without smoothing (`ReplayFx::new_unsmoothed`): the
+// parameter steps on the next sample. Deliberately click-prone, for proving the discontinuity
+// detector sees steps; the default build keeps the shipped smoothing.
+//
+// Callback cost ESTIMATE (not a measurement; that belongs to TASK-019.03.04): when nothing
+// changes, one critical section around a one-element copy plus a compare, a few tens of cycles.
+// While a value moves, one `set_params` per block: a `powf` for gain or a `powf` and `expf` for the
+// low-pass, order of 1-3 us at 480 MHz against the 666 us block period.
+//
 // ### What EXCPLAY's CRC says
 //
 // It is the CRC of the samples handed to the DAC encoder (`replay::PassReport::crc16`). With `want`
@@ -1470,7 +1505,8 @@ mod excerpt_play {
         BYTES_PER_SAMPLE,
     };
     use asperitas_logging::{console, error, info};
-    use core::cell::Cell;
+    use asperitas_pod::knob_override::KnobOverride;
+    use core::cell::{Cell, RefCell};
     use core::fmt::Write as _;
     use core::sync::atomic::{AtomicU32, Ordering};
     use cortex_m::interrupt::Mutex;
@@ -1570,6 +1606,39 @@ mod excerpt_play {
         true
     }
 
+    /// The host's override of the effect parameter (knob 0). One knob: the effect has one parameter.
+    static KNOB: Mutex<RefCell<KnobOverride<1>>> = Mutex::new(RefCell::new(KnobOverride::new()));
+
+    /// Override knob `knob` with the wire value `value` (`0..=65535` spans `0.0..=1.0`). `false`
+    /// for a knob other than 0.
+    #[cfg(feature = "log-usb")]
+    pub fn override_set(knob: u8, value: u16) -> bool {
+        let v = f32::from(value) / f32::from(u16::MAX);
+        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().set(usize::from(knob), v))
+    }
+
+    /// Return knob `knob` to the `FX` value. `false` for a knob other than 0.
+    #[cfg(feature = "log-usb")]
+    pub fn override_release(knob: u8) -> bool {
+        if knob != 0 {
+            return false;
+        }
+        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().release(0));
+        true
+    }
+
+    /// The effect's constructor: shipped smoothing, or none under `unsmoothed-params`.
+    fn new_fx() -> ReplayFx {
+        #[cfg(feature = "unsmoothed-params")]
+        {
+            ReplayFx::new_unsmoothed()
+        }
+        #[cfg(not(feature = "unsmoothed-params"))]
+        {
+            ReplayFx::new()
+        }
+    }
+
     /// One cache line, aligned like one, for the header read's destination.
     #[repr(align(32))]
     struct Line([u8; 32]);
@@ -1632,8 +1701,9 @@ mod excerpt_play {
         }
         Ok(ExcerptPlayer {
             header,
-            fx: ReplayFx::new(),
+            fx: new_fx(),
             fx_seen: 0,
+            base: 0.0,
         })
     }
 
@@ -1682,6 +1752,8 @@ mod excerpt_play {
         header: SlotHeader,
         fx: ReplayFx,
         fx_seen: u32,
+        /// The `FX` value, normalised: the pot reading the override replaces.
+        base: f32,
     }
 
     impl ExcerptPlayer {
@@ -1723,8 +1795,15 @@ mod excerpt_play {
                 self.fx_seen = generation;
                 let (code, value) = cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).get());
                 if let Some(kind) = FxKind::from_code(code) {
-                    self.fx.select(kind, f32::from(value) / f32::from(u16::MAX));
+                    self.base = f32::from(value) / f32::from(u16::MAX);
+                    self.fx.select(kind, self.base);
                 }
+            }
+            // Upstream of smoothing, as `main` does; a no-op when the value is unchanged.
+            if self.fx.kind() != FxKind::Bypass {
+                let [knob] =
+                    cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow().merge([self.base]));
+                self.fx.set_knob(knob);
             }
             self.fx.process(output);
         }

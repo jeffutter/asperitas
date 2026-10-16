@@ -142,6 +142,16 @@ excerpt. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
   stored samples and cannot detect the effect.
 - **Applied at the next block** after the reply; the processor starts from a clean state with no
   smoothing ramp, so a given selection always produces the same output.
+- **Live override (TASK-019.03.01).** `CTL SET k=00 v=<4 hex>` and `CTL REL k=00` override the
+  selected effect's parameter, and unlike `FX` they are accepted while a capture is armed, so an
+  override sweep moves the effect mid-capture. Knob 0 only (`bad-knob` otherwise). Each block merges
+  the override with the `FX` value through the shipped `KnobOverride`, upstream of the effect's
+  smoothing, as `main` does; bypass ignores it. Callback cost, an estimate only: a critical section
+  and a compare per block, plus one `set_params` (a `powf`, and an `expf` for the low-pass) when
+  the value moved, order of 1-3 us against the 666 us period. The measurement is TASK-019.03.04.
+- **`unsmoothed-params` feature.** `--features seed3,stim-excerpt,unsmoothed-params` builds the
+  effect without smoothing, so an override steps the parameter on the next sample. It exists only
+  to prove the discontinuity detector can see a step; never use it for ordinary captures.
 
 To judge a capture taken with a `CTL FX` selection, pass the same wire values to `analyze`:
 `--fx bypass|gain|lowpass` and `--fx-value <0..65535 or 0xHEX>` (the `v=` sent to the board). The

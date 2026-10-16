@@ -43,6 +43,11 @@ stim-pulse = []
 # is `ASP_RIG_EXCERPT_SLOT` at build time (default 0). Needs the async flash, so it builds only with the
 # bootloaded layout like the rest of the install path. See "Excerpt replay" in `src/bin/rig.rs`.
 stim-excerpt = []
+# Remove parameter smoothing from the excerpt replay's effect (TASK-019.03.01), so a knob override
+# steps the parameter instantly. An intentionally click-prone build, used only to prove the
+# discontinuity detector can see what smoothing hides. Additive and never in `default`; it changes
+# nothing without `stim-excerpt`. See "Replay effect" in `src/bin/rig.rs`.
+unsmoothed-params = []
 
 [profile.release]
 # probe-rs decodes symbols, backtraces and defmt log locations from DWARF - and it accepts

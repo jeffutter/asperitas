@@ -34,6 +34,9 @@ pub struct ReplayFx {
     kind: FxKind,
     gain: Gain,
     low_pass: OnePoleLowPass,
+    smoothing: bool,
+    /// The knob value the current processor was last parameterised from.
+    knob: f32,
 }
 
 impl Default for ReplayFx {
@@ -49,6 +52,45 @@ impl ReplayFx {
             kind: FxKind::Bypass,
             gain: Gain::default(),
             low_pass: OnePoleLowPass::default(),
+            smoothing: true,
+            knob: 0.0,
+        }
+    }
+
+    /// Bypass, at 48 kHz, with parameter smoothing removed: every parameter change takes effect
+    /// on the next sample as a step. Intentionally click-prone, for proving that a discontinuity
+    /// detector can see what smoothing normally hides. Never the shipped behaviour.
+    pub fn new_unsmoothed() -> Self {
+        Self {
+            smoothing: false,
+            ..Self::new()
+        }
+    }
+
+    /// Re-parameterise the current processor from `knob` in `[0.0, 1.0]` without resetting it:
+    /// filter history and any in-flight smoothing ramp carry on, so a sweep is continuous.
+    /// Bypass: a no-op that touches nothing. When built unsmoothed the new value is snapped in.
+    /// A `knob` equal to the one already applied does nothing, so it is cheap to call every block.
+    pub fn set_knob(&mut self, knob: f32) {
+        if knob == self.knob {
+            return;
+        }
+        self.knob = knob;
+        match self.kind {
+            FxKind::Bypass => {}
+            FxKind::Gain => {
+                self.gain.set_params(&Gain::params_from_normalised(knob));
+                if !self.smoothing {
+                    self.gain.snap_params();
+                }
+            }
+            FxKind::LowPass => {
+                self.low_pass
+                    .set_params(&OnePoleLowPass::params_from_normalised(knob));
+                if !self.smoothing {
+                    self.low_pass.snap_params();
+                }
+            }
         }
     }
 
@@ -57,6 +99,7 @@ impl ReplayFx {
     /// selection always produces the same output.
     pub fn select(&mut self, kind: FxKind, knob: f32) {
         self.kind = kind;
+        self.knob = knob;
         match kind {
             FxKind::Bypass => {}
             FxKind::Gain => {
@@ -145,6 +188,81 @@ mod tests {
         let mut b = ramp();
         fx.process(&mut b);
         assert_eq!(b[5][0].to_bits(), ramp()[5][0].to_bits());
+    }
+
+    fn run_block(fx: &mut ReplayFx) -> [Frame; 32] {
+        let mut b = [[0.1; 2]; 32];
+        fx.process(&mut b);
+        b
+    }
+
+    #[test]
+    fn set_knob_moves_output_between_blocks() {
+        let mut fx = ReplayFx::new();
+        fx.select(FxKind::Gain, 1.0);
+        let loud = run_block(&mut fx)[31][0];
+        fx.set_knob(0.2);
+        for _ in 0..200 {
+            run_block(&mut fx);
+        }
+        let quiet = run_block(&mut fx)[31][0];
+        assert!(quiet < loud * 0.1, "{loud} -> {quiet}");
+    }
+
+    #[test]
+    fn set_knob_on_bypass_is_bit_exact_noop() {
+        let mut fx = ReplayFx::new();
+        fx.set_knob(0.3);
+        let mut b = ramp();
+        fx.process(&mut b);
+        for (a, e) in b.iter().zip(ramp()) {
+            assert_eq!(a[0].to_bits(), e[0].to_bits());
+        }
+    }
+
+    #[test]
+    fn unsmoothed_steps_within_one_sample_smoothed_ramps() {
+        let mut smooth = ReplayFx::new();
+        let mut step = ReplayFx::new_unsmoothed();
+        for fx in [&mut smooth, &mut step] {
+            fx.select(FxKind::Gain, 1.0);
+            fx.set_knob(0.5);
+        }
+        let target = 0.1 * 10f32.powf((-60.0 + 0.5 * 72.0) / 20.0);
+        let s = run_block(&mut smooth);
+        let u = run_block(&mut step);
+        assert!((u[0][0] - target).abs() < 1e-6, "{} vs {target}", u[0][0]);
+        assert!(
+            s[0][0] > target * 2.0,
+            "smoothed starts far from target: {}",
+            s[0][0]
+        );
+        assert!(s[31][0] < s[0][0], "smoothed is still ramping");
+    }
+
+    #[test]
+    fn set_knob_with_unchanged_value_leaves_ramp_alone() {
+        let mut fx = ReplayFx::new();
+        fx.select(FxKind::Gain, 1.0);
+        fx.set_knob(0.5);
+        let a = run_block(&mut fx)[31][0];
+        fx.set_knob(0.5);
+        let b = run_block(&mut fx)[31][0];
+        assert!(b < a, "ramp continues: {a} -> {b}");
+    }
+
+    #[test]
+    fn set_knob_keeps_low_pass_history() {
+        let mut fx = ReplayFx::new_unsmoothed();
+        fx.select(FxKind::LowPass, 0.5);
+        run_block(&mut fx);
+        fx.set_knob(0.6);
+        let b = run_block(&mut fx);
+        assert!(
+            b[0][0] > 0.05,
+            "history kept, not restarted from zero: {}",
+            b[0][0]
+        );
     }
 
     #[test]

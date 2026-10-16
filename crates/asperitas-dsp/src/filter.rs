@@ -81,6 +81,12 @@ impl Processor for OnePoleLowPass {
 }
 
 impl OnePoleLowPass {
+    /// Jump the smoothed coefficient to its target now, keeping the filter state. Unlike
+    /// [`Processor::reset`] this does not clear the signal history.
+    pub fn snap_params(&mut self) {
+        self.smoother.snap();
+    }
+
     /// Convert a normalised knob position [0.0, 1.0] to [`FilterParams`].
     ///
     /// Uses logarithmic taper: maps linearly across the frequency ratio,

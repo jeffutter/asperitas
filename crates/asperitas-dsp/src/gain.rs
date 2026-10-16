@@ -74,6 +74,13 @@ impl Processor for Gain {
 }
 
 impl Gain {
+    /// Jump the smoothed gain to its target now. Gain has no signal history, so this is what
+    /// [`Processor::reset`] does too; it exists as its own name for the unsmoothed path.
+    pub fn snap_params(&mut self) {
+        self.smoother_l.snap();
+        self.smoother_r.snap();
+    }
+
     /// Convert a normalised knob position [0.0, 1.0] to [`GainParams`].
     ///
     /// Uses linear taper: maps [-60 dB silence, +12 dB headroom].
