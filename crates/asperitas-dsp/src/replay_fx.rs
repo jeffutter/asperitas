@@ -46,6 +46,7 @@ pub struct ReplayFx {
     gain: Gain,
     low_pass: OnePoleLowPass,
     smoothing: bool,
+    sample_rate_hz: f32,
     /// The knob value the current processor was last parameterised from.
     knob: f32,
 }
@@ -64,6 +65,7 @@ impl ReplayFx {
             gain: Gain::default(),
             low_pass: OnePoleLowPass::default(),
             smoothing: true,
+            sample_rate_hz: 48_000.0,
             knob: 0.0,
         }
     }
@@ -75,6 +77,20 @@ impl ReplayFx {
         Self {
             smoothing: false,
             ..Self::new()
+        }
+    }
+
+    /// Set the sample rate of both processors and re-derive the current parameter at it, keeping
+    /// filter history. A non-positive rate is ignored.
+    pub fn set_sample_rate(&mut self, hz: f32) {
+        if hz > 0.0 {
+            self.sample_rate_hz = hz;
+            self.gain.set_sample_rate(hz);
+            self.low_pass.set_sample_rate(hz);
+            if !self.smoothing {
+                self.gain.snap_params();
+                self.low_pass.snap_params();
+            }
         }
     }
 

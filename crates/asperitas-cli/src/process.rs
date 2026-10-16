@@ -24,17 +24,13 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
         "gain" => {
             let params = Gain::parse_params_from_cli(&parse_param_pairs(&args.params)?)?;
             let sample_rate = spec.sample_rate as f32;
-            let mut proc = Gain::default();
-            proc.set_sample_rate(sample_rate);
-            proc.set_params(&params);
+            let mut proc = Gain::new(sample_rate, &params);
             proc.process_block(&frames, &mut output);
         }
         "filter" => {
             let params = OnePoleLowPass::parse_params_from_cli(&parse_param_pairs(&args.params)?)?;
             let sample_rate = spec.sample_rate as f32;
-            let mut proc = OnePoleLowPass::default();
-            proc.set_sample_rate(sample_rate);
-            proc.set_params(&params);
+            let mut proc = OnePoleLowPass::new(sample_rate, &params);
             proc.process_block(&frames, &mut output);
         }
         other => {

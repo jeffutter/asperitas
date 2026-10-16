@@ -30,6 +30,9 @@ impl Default for FilterParams {
 /// where `alpha = 1 - exp(-2π·f_c / f_s)`.
 pub struct OnePoleLowPass {
     sample_rate_hz: f32,
+    /// Sanitised requested cutoff; the coefficient is derived from this and the sample rate, so
+    /// the order of `set_params` and `set_sample_rate` does not matter.
+    cutoff_hz: f32,
     smoother: Smoother,
     prev_l: f32,
     prev_r: f32,
@@ -39,6 +42,7 @@ impl Default for OnePoleLowPass {
     fn default() -> Self {
         Self {
             sample_rate_hz: 48_000.0,
+            cutoff_hz: 48_000.0 / 2.0,
             smoother: Smoother::new(1.0, 5.0, 48_000.0),
             prev_l: 0.0,
             prev_r: 0.0,
@@ -53,18 +57,14 @@ impl Processor for OnePoleLowPass {
         if hz > 0.0 {
             self.sample_rate_hz = hz;
             self.smoother.update_sample_rate(5.0, hz);
+            self.recompute();
         }
     }
 
     fn set_params(&mut self, params: &Self::Params) {
-        // Clamp cutoff to [0, sample_rate/2] to keep alpha in [0, 1]. f32::max/min return the
-        // non-NaN operand, so a NaN cutoff lands on 0 Hz instead of propagating.
-        let nyquist = self.sample_rate_hz / 2.0;
-        let cutoff = params.cutoff_hz.max(0.0).min(nyquist);
-        // alpha = 1 - exp(-2π · fc / fs)
-        let exponent = -(2.0 * core::f32::consts::PI) * cutoff / self.sample_rate_hz;
-        let alpha = 1.0 - exp(exponent);
-        self.smoother.set_target(alpha);
+        // f32::max returns the non-NaN operand, so a NaN cutoff lands on 0 Hz.
+        self.cutoff_hz = params.cutoff_hz.max(0.0);
+        self.recompute();
     }
 
     fn tick(&mut self, input: Frame) -> Frame {
@@ -83,6 +83,26 @@ impl Processor for OnePoleLowPass {
 }
 
 impl OnePoleLowPass {
+    /// A filter at `sample_rate_hz` with `params` already in force: the first sample is filtered
+    /// with the requested coefficient, not one ramped in from the default.
+    pub fn new(sample_rate_hz: f32, params: &FilterParams) -> Self {
+        let mut f = Self::default();
+        f.set_sample_rate(sample_rate_hz);
+        f.set_params(params);
+        f.reset();
+        f
+    }
+
+    /// Derive the coefficient from the stored cutoff and sample rate. The cutoff is clamped to
+    /// `[0, nyquist]` here, so a later sample-rate change re-clamps it, and alpha stays in
+    /// `[0, 1]`.
+    fn recompute(&mut self) {
+        let cutoff = self.cutoff_hz.min(self.sample_rate_hz / 2.0);
+        // alpha = 1 - exp(-2π · fc / fs)
+        let exponent = -(2.0 * core::f32::consts::PI) * cutoff / self.sample_rate_hz;
+        self.smoother.set_target(1.0 - exp(exponent));
+    }
+
     /// Jump the smoothed coefficient to its target now, keeping the filter state. Unlike
     /// [`Processor::reset`] this does not clear the signal history.
     pub fn snap_params(&mut self) {
@@ -179,6 +199,41 @@ mod normalised_tests {
             assert!(cutoff >= prev, "not monotonic at knob={}", knob);
             prev = cutoff;
         }
+    }
+}
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+
+    fn step_out(mut f: OnePoleLowPass) -> f32 {
+        let mut last = 0.0;
+        for _ in 0..4 {
+            last = f.tick([1.0, 1.0])[0];
+        }
+        last
+    }
+
+    #[test]
+    fn rate_and_params_commute() {
+        let p = FilterParams { cutoff_hz: 1000.0 };
+        let mut a = OnePoleLowPass::default();
+        a.set_params(&p);
+        a.set_sample_rate(8000.0);
+        a.reset();
+        let mut b = OnePoleLowPass::default();
+        b.set_sample_rate(8000.0);
+        b.set_params(&p);
+        b.reset();
+        assert_eq!(step_out(a).to_bits(), step_out(b).to_bits());
+    }
+
+    #[test]
+    fn new_is_settled_from_sample_zero() {
+        let f = OnePoleLowPass::new(8000.0, &FilterParams { cutoff_hz: 1000.0 });
+        let alpha = 1.0 - exp(-2.0 * core::f32::consts::PI * 1000.0 / 8000.0);
+        let mut f = f;
+        assert!((f.tick([1.0, 1.0])[0] - alpha).abs() < 1e-6);
     }
 }
 

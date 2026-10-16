@@ -77,6 +77,8 @@ where
     let mut proc = P::default();
     proc.set_sample_rate(sample_rate as f32);
     proc.set_params(&P::Params::default());
+    // Settle: the golden is the processor at its default parameters, not a ramp towards them.
+    proc.reset();
     proc.process_block(&frames, &mut output);
 
     let slug = input.slug();

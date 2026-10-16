@@ -80,6 +80,15 @@ impl Processor for Gain {
 }
 
 impl Gain {
+    /// A gain at `sample_rate_hz` with `params` already in force, with no ramp from the default.
+    pub fn new(sample_rate_hz: f32, params: &GainParams) -> Self {
+        let mut g = Self::default();
+        g.set_sample_rate(sample_rate_hz);
+        g.set_params(params);
+        g.reset();
+        g
+    }
+
     /// Jump the smoothed gain to its target now. Gain has no signal history, so this is what
     /// [`Processor::reset`] does too; it exists as its own name for the unsmoothed path.
     pub fn snap_params(&mut self) {

@@ -95,6 +95,7 @@ impl<G: Processor> Processor for FxChain<G> {
 
     fn set_sample_rate(&mut self, hz: f32) {
         self.gen.set_sample_rate(hz);
+        self.fx.set_sample_rate(hz);
     }
 
     fn set_params(&mut self, params: &Self::Params) {
@@ -264,6 +265,27 @@ mod tests {
         let mut c = chain(true);
         let mut out = [[0.0; 2]; 32];
         c.process_block_with(&SILENCE, &mut out, |_| panic!("override merged in bypass"));
+    }
+
+    #[test]
+    fn sample_rate_reaches_the_effect() {
+        let mut c = chain(false);
+        c.set_sample_rate(8000.0);
+        c.select(2, 30_000);
+        let knob = f32::from(30_000u16) / f32::from(u16::MAX);
+
+        let mut g = Sine::default();
+        g.set_sample_rate(8000.0);
+        let mut fx = ReplayFx::new_unsmoothed();
+        fx.set_sample_rate(8000.0);
+        fx.select(FxKind::LowPass, knob);
+        let mut expected = render(&mut g, 4);
+        fx.process(&mut expected);
+
+        let got = render(&mut c, 4);
+        for (x, y) in got.iter().zip(&expected) {
+            assert_eq!(x[0].to_bits(), y[0].to_bits());
+        }
     }
 
     #[test]

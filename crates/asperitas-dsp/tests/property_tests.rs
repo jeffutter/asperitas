@@ -217,6 +217,29 @@ proptest! {
     }
 
     #[test]
+    fn filter_rate_and_params_order_is_irrelevant(
+        cutoff in 0.0f32..30_000.0,
+        rate in 4_000.0f32..96_000.0,
+        block in arb_block(),
+    ) {
+        let params = FilterParams { cutoff_hz: cutoff };
+        let mut fa = OnePoleLowPass::default();
+        fa.set_params(&params);
+        fa.set_sample_rate(rate);
+        let mut fb = OnePoleLowPass::default();
+        fb.set_sample_rate(rate);
+        fb.set_params(&params);
+        let mut oa = vec![Frame::default(); block.len()];
+        let mut ob = vec![Frame::default(); block.len()];
+        fa.process_block(&block, &mut oa);
+        fb.process_block(&block, &mut ob);
+        for (a, b) in oa.iter().zip(&ob) {
+            prop_assert_eq!(a[0].to_bits(), b[0].to_bits());
+            prop_assert_eq!(a[1].to_bits(), b[1].to_bits());
+        }
+    }
+
+    #[test]
     fn filter_reset_idempotent(block in arb_block()) {
         let mut fa = OnePoleLowPass::default();
         let mut fb = OnePoleLowPass::default();
