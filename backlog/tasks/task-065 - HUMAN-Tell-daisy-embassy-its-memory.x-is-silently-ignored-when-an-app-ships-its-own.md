@@ -3,7 +3,7 @@ id: TASK-065
 title: >-
   HUMAN: Tell daisy-embassy its memory.x is silently ignored when an app ships
   its own
-status: To Do
+status: Blocked
 assignee:
   - '@human'
 created_date: '2026-09-13 06:59'
@@ -100,3 +100,7 @@ local workaround and the upstream discussion point at each other. If the maintai
 diagnosis, record what they said here rather than arguing it out over several rounds - our build is
 already fixed and gated.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+2026-10-16: Set to Blocked at the owner's request. Low priority, and the owner does not intend to report it upstream for now. Return to To Do when they are ready to post.
