@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-10-16 18:12'
-updated_date: '2026-10-16 22:32'
+updated_date: '2026-10-16 22:33'
 labels:
   - planned
 dependencies:
@@ -37,7 +37,7 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-SHIPPED by 6ebf05f. This plan is superseded; the ticket's final summary describes what actually landed.
+SHIPPED by 87606ca. This plan is superseded; the ticket's final summary describes what actually landed.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
