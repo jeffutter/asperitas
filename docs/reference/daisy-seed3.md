@@ -1091,8 +1091,7 @@ not covered by that run.
 
 The protocol (`CTL VER|RSN|RST|SET|REL`, `CTLR` replies) is `asperitas_logging::control`; the knob
 table is `asperitas_pod::knob_override`. The firmware side is one shared file,
-`firmware/src/host_control.rs`, pulled into each binary with `#[path]` (the package has no lib
-target). Console builds only (`log-usb`); the RTT-only build has no inbound path and compiles the
+`firmware/src/host_control.rs`, a module of the package library, imported by each binary. Console builds only (`log-usb`); the RTT-only build has no inbound path and compiles the
 module down to `capture_reset_reason` and `merge`.
 
 - **Consumer.** `host_control::spawn` calls `usb::enable_inbound()` before `usb::run()` starts and

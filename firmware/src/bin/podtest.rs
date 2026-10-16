@@ -3,8 +3,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see build.rs
 
-#[path = "../host_control.rs"]
-mod host_control;
+use asperitas_firmware::host_control;
 
 use asperitas_logging::info;
 use asperitas_pod::encoder::{ControlEvent, ControlSurface};

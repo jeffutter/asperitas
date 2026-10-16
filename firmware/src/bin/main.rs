@@ -5,8 +5,7 @@ include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see 
 
 use core::cell::UnsafeCell;
 
-#[path = "../host_control.rs"]
-mod host_control;
+use asperitas_firmware::host_control;
 
 use asperitas_dsp::filter::OnePoleLowPass;
 use asperitas_dsp::gain::Gain;

@@ -1,8 +1,5 @@
-//! Firmware side of the host control channel (TASK-032.03).
-//!
-//! Shared by `main` and `podtest` with `#[path = "../host_control.rs"] mod host_control;`: the
-//! package has no library target, and `src/bin/*.rs` files are each their own crate. Design and
-//! rationale: "Host control channel" in `docs/reference/daisy-seed3.md`.
+//! Firmware side of the host control channel, shared by `main` and `podtest` through the package
+//! library. Design and rationale: "Host control channel" in `docs/reference/daisy-seed3.md`.
 //!
 //! Three pieces of state live here, each owned by the thing that cannot be rebuilt elsewhere:
 //!
@@ -15,13 +12,10 @@
 //! `emit_record`, which commits whole or not at all and returns `false` when the console has no
 //! room; a lost reply is the host's timeout to handle, a blocked task would be the board's problem.
 
-// `main` uses `merge` but `podtest` does not, and without the console nothing reads the reason or
-// version; one shared file, several consumers, so unused-item lints are expected per binary.
-#![allow(dead_code)]
-
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicU32, Ordering};
 
+#[cfg(feature = "log-usb")]
 use asperitas_logging::control::{VersionText, VERSION_MAX};
 use asperitas_pod::knob_override::KnobOverride;
 use cortex_m::interrupt::Mutex;
@@ -52,6 +46,7 @@ pub fn merge(knobs: [f32; KNOBS]) -> [f32; KNOBS] {
     cortex_m::interrupt::free(|cs| OVERRIDE.borrow(cs).borrow().merge(knobs))
 }
 
+#[cfg(feature = "log-usb")]
 fn version() -> VersionText {
     let v = env!("ASPERITAS_VERSION").as_bytes();
     VersionText::version(&v[..v.len().min(VERSION_MAX)])
