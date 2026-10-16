@@ -3,7 +3,7 @@ id: TASK-066.01
 title: >-
   Add --explain to unblocked-todo.sh so one call names why each task in a status
   is ineligible
-status: Blocked
+status: Done
 assignee:
   - '@human'
 created_date: '2026-09-13 09:03'
@@ -40,7 +40,7 @@ not change by a single byte; what the script considers ready is out of scope (TA
 - [x] #2 Default output is byte-identical to the pre-change output for To Do, Dev Ready, Blocked and Needs Plan at all three assignee modes, proven by diffing recorded captures, and the recorded diffs are shown empty in the notes.
 - [x] #3 --explain is parsed before the positional catch-all, so it can never be swallowed into TARGET_STATUS; a still-unknown flag keeps today's behavior (documented, not fixed here).
 - [x] #4 The header comment documents the mode and the reason vocabulary, and states that reasons are computed in this file so verdict and explanation cannot disagree.
-- [ ] #5 Landed in the home-manager source, applied with ~/bin/rebuild, and verified byte-identical at ~/.pi/agent/extensions/ralph/unblocked-todo.sh; notes carry the home-manager commit sha and confirm the asperitas repo got no code change outside backlog/.
+- [x] #5 Landed in the home-manager source, applied with ~/bin/rebuild, and verified byte-identical at ~/.pi/agent/extensions/ralph/unblocked-todo.sh; notes carry the home-manager commit sha and confirm the asperitas repo got no code change outside backlog/.
 - [x] #6 `--explain` stdout is byte-identical across `--assignee agent|human|all`: reasons name conditions on the agent side (`assignee-human` = some assignee normalises to `human`, so the task is withheld from the agent pool), never the mode verdict, and `--assignee` does not filter explain lines. The header comment states this.
 - [x] #7 When `--explain` matches zero tasks, stdout stays empty and exit stays 0, while one line on stderr names the requested status and the statuses present on this board, so a mistyped status is no longer indistinguishable from an empty one. Default (non-explain) mode gains no output on either stream.
 <!-- AC:END -->
@@ -225,6 +225,8 @@ Next actionable step, for a person: run `~/bin/rebuild`, then
 TASK-066.01.01 and check AC #5 here. If Jeff would rather ralph deploy nix changes unattended in
 future, an askpass helper or a sudoers `NOPASSWD` fragment narrowed to `darwin-rebuild` would do it -
 that is his security decision to make, not one an agent should quietly take.
+
+2026-10-16: Closed with the owner. TASK-066.01.01 closed earlier today (the rebuild had been activated; deployed hash bea239d8... matches the source and contains `--explain`). AC #5 verified in the session: home-manager commit dc4398780c9ed71a842cbc35b13e27dce69497a5 (one file, +54/-4); asperitas commit ee9d554 touched only backlog/ (this ticket, TASK-066.01.01, a comment-only change to backlog/unblocked-todo.sh). The owner agreed nothing was left.
 <!-- SECTION:NOTES:END -->
 
 ## AC #1 - what places `.sram1_bss`, measured on the unmodified tree at `d096b28`
