@@ -1,7 +1,7 @@
 ---
 id: TASK-018
 title: 'Pod BSP: control surface for the Daisy Pod'
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-08-05 17:25'
@@ -30,5 +30,9 @@ Umbrella ticket. It is `@human` because it inherits the strictest assignee among
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All subtasks are Done
+- [x] #1 All subtasks are Done
 <!-- AC:END -->
+
+## Implementation Notes
+
+2026-10-16: Closed with the owner. Subtasks TASK-018.01 to TASK-018.04 are all Done; TASK-018.04 (hardware verification of every Pod control) closed earlier the same day.
