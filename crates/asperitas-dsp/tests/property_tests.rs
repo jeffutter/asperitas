@@ -4,7 +4,8 @@
 
 use asperitas_dsp::{
     ExponentialSweep, ExponentialSweepParams, FilterParams, Frame, Gain, GainParams,
-    OnePoleLowPass, Processor, PulseTrain, PulseTrainParams, Sine, SineParams,
+    OnePoleLowPass, Processor, PulseTrain, PulseTrainParams, Sine, SineParams, FILTER_PARAMS,
+    GAIN_PARAMS,
 };
 use proptest::prelude::*;
 
@@ -45,7 +46,7 @@ proptest! {
     }
 
     #[test]
-    fn gain_output_bounded(block in arb_block(), gain_db in -24.0f32..24.0) {
+    fn gain_output_bounded(block in arb_block(), gain_db in GAIN_PARAMS[0].min..=GAIN_PARAMS[0].max) {
         let mut g = Gain::default();
         g.set_sample_rate(48_000.0);
         g.set_params(&GainParams { gain_db });
@@ -142,7 +143,7 @@ proptest! {
     }
 
     #[test]
-    fn gain_param_change_smooth(gain_db_a in -30.0f32..=30.0, gain_db_b in -30.0f32..=30.0) {
+    fn gain_param_change_smooth(gain_db_a in GAIN_PARAMS[0].min..=GAIN_PARAMS[0].max, gain_db_b in GAIN_PARAMS[0].min..=GAIN_PARAMS[0].max) {
         let mut g = Gain::default();
         g.set_sample_rate(48_000.0);
         g.set_params(&GainParams { gain_db: gain_db_a });
@@ -238,7 +239,7 @@ proptest! {
 
     #[test]
     fn filter_rate_and_params_order_is_irrelevant(
-        cutoff in 0.0f32..30_000.0,
+        cutoff in 0.0f32..FILTER_PARAMS[0].max * 1.5,
         rate in 4_000.0f32..96_000.0,
         block in arb_block(),
     ) {
@@ -315,7 +316,7 @@ proptest! {
     }
 
     #[test]
-    fn filter_param_change_smooth(cutoff_a in 100.0f32..=20000.0, cutoff_b in 100.0f32..=20000.0) {
+    fn filter_param_change_smooth(cutoff_a in FILTER_PARAMS[0].min..=FILTER_PARAMS[0].max, cutoff_b in FILTER_PARAMS[0].min..=FILTER_PARAMS[0].max) {
         let mut f = OnePoleLowPass::default();
         f.set_sample_rate(48_000.0);
         f.set_params(&FilterParams { cutoff_hz: cutoff_a });
@@ -778,7 +779,7 @@ proptest! {
 
     #[test]
     fn filter_state_reaches_exactly_zero_in_silence(
-        fc in 20.0f32..20_000.0, level in -1.0f32..=1.0
+        fc in FILTER_PARAMS[0].min..FILTER_PARAMS[0].max, level in -1.0f32..=1.0
     ) {
         let mut f = OnePoleLowPass::default();
         f.set_sample_rate(48_000.0);

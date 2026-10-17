@@ -1,13 +1,19 @@
 //! One-pole low-pass filter with smoothed coefficient transitions.
 
-use libm::expf as exp;
-use libm::powf;
-
+use crate::param::{ParamSpec, Taper};
 use crate::processor::{Frame, Processor};
 use crate::smooth::{sanitize, Smoother};
+use libm::expf as exp;
 
-#[cfg(feature = "std")]
-use std::string::String;
+/// Parameter table for [`OnePoleLowPass`]; the only source of its range, taper and default.
+pub const FILTER_PARAMS: [ParamSpec; 1] = [ParamSpec {
+    name: "cutoff_hz",
+    unit: "Hz",
+    min: 20.0,
+    max: 20_000.0,
+    taper: Taper::Log,
+    default: 20_000.0,
+}];
 
 /// Parameters for the one-pole low-pass filter.
 #[derive(Clone, Debug)]
@@ -19,7 +25,7 @@ pub struct FilterParams {
 impl Default for FilterParams {
     fn default() -> Self {
         Self {
-            cutoff_hz: 20_000.0,
+            cutoff_hz: FILTER_PARAMS[0].default,
         }
     }
 }
@@ -118,36 +124,10 @@ impl OnePoleLowPass {
     /// At midpoint (0.5) this yields ≈ 632 Hz (geometric mean of 20 and 20 kHz).
     ///
     /// Input is clamped to [0.0, 1.0] so degenerate readings produce valid params.
-    /// NOT behind `#[cfg(feature = "std")]` — usable in no_std firmware context.
     pub fn params_from_normalised(knob: f32) -> FilterParams {
-        let n = knob.clamp(0.0, 1.0);
-        let freq_min = 20.0_f32;
-        let freq_max = 20_000.0_f32;
-        let cutoff = freq_min * powf(freq_max / freq_min, n);
-        FilterParams { cutoff_hz: cutoff }
-    }
-}
-
-#[cfg(feature = "std")]
-impl OnePoleLowPass {
-    /// Parse CLI key=value pairs into [`FilterParams`].
-    ///
-    /// Recognized keys: `cutoff_hz`. Returns an error for unknown keys or bad values.
-    pub fn parse_params_from_cli(pairs: &[(String, String)]) -> Result<FilterParams, String> {
-        let mut params = FilterParams::default();
-        for (key, value) in pairs {
-            match key.as_str() {
-                "cutoff_hz" => {
-                    params.cutoff_hz = value
-                        .parse::<f32>()
-                        .map_err(|_| format!("invalid value for cutoff_hz: {value}"))?;
-                }
-                _ => {
-                    return Err(format!("unknown parameter key for filter processor: {key}"));
-                }
-            }
+        FilterParams {
+            cutoff_hz: FILTER_PARAMS[0].from_normalised(knob),
         }
-        Ok(params)
     }
 }
 
@@ -234,31 +214,5 @@ mod order_tests {
         let alpha = 1.0 - exp(-2.0 * core::f32::consts::PI * 1000.0 / 8000.0);
         let mut f = f;
         assert!((f.tick([1.0, 1.0])[0] - alpha).abs() < 1e-6);
-    }
-}
-
-#[cfg(all(test, feature = "std"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn filter_parse_rejects_unknown_key() {
-        let err = OnePoleLowPass::parse_params_from_cli(&[("bogus_key".into(), "1000.0".into())])
-            .unwrap_err();
-        assert!(
-            err.contains("unknown parameter"),
-            "expected error about unknown parameter, got: {err}"
-        );
-    }
-
-    #[test]
-    fn filter_parse_rejects_non_numeric_value() {
-        let err =
-            OnePoleLowPass::parse_params_from_cli(&[("cutoff_hz".into(), "not_a_number".into())])
-                .unwrap_err();
-        assert!(
-            err.contains("invalid value"),
-            "expected error about invalid value, got: {err}"
-        );
     }
 }

@@ -1,7 +1,8 @@
 //! Process a WAV file through a named DSP processor.
 
-use asperitas_dsp::filter::OnePoleLowPass;
-use asperitas_dsp::gain::Gain;
+use asperitas_dsp::filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
+use asperitas_dsp::gain::{Gain, GainParams, GAIN_PARAMS};
+use asperitas_dsp::param::ParamSpec;
 use asperitas_dsp::processor::Processor;
 
 use crate::wav_io;
@@ -22,13 +23,22 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
 
     match args.processor_name.as_str() {
         "gain" => {
-            let params = Gain::parse_params_from_cli(&parse_param_pairs(&args.params)?)?;
+            let params = GainParams {
+                gain_db: parse_with_table("gain", &GAIN_PARAMS, &parse_param_pairs(&args.params)?)?
+                    [0],
+            };
             let sample_rate = spec.sample_rate as f32;
             let mut proc = Gain::new(sample_rate, &params);
             proc.process_block(&mut frames);
         }
         "filter" => {
-            let params = OnePoleLowPass::parse_params_from_cli(&parse_param_pairs(&args.params)?)?;
+            let params = FilterParams {
+                cutoff_hz: parse_with_table(
+                    "filter",
+                    &FILTER_PARAMS,
+                    &parse_param_pairs(&args.params)?,
+                )?[0],
+            };
             let sample_rate = spec.sample_rate as f32;
             let mut proc = OnePoleLowPass::new(sample_rate, &params);
             proc.process_block(&mut frames);
@@ -47,6 +57,27 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve `key=value` pairs against a processor's parameter table. Returns one value per table
+/// entry, in table order, starting from each entry's default. Values are not range-checked:
+/// processors sanitise their own inputs.
+fn parse_with_table(
+    processor: &str,
+    table: &[ParamSpec],
+    pairs: &[(String, String)],
+) -> Result<Vec<f32>, String> {
+    let mut values: Vec<f32> = table.iter().map(|spec| spec.default).collect();
+    for (key, value) in pairs {
+        let idx = table
+            .iter()
+            .position(|spec| spec.name == key)
+            .ok_or_else(|| format!("unknown parameter key for {processor} processor: {key}"))?;
+        values[idx] = value
+            .parse::<f32>()
+            .map_err(|_| format!("invalid value for {key}: {value}"))?;
+    }
+    Ok(values)
+}
+
 fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {
     let mut pairs = Vec::new();
     for arg in raw {
@@ -62,6 +93,32 @@ fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gain_parse_rejects_unknown_key() {
+        let err = parse_with_table("gain", &GAIN_PARAMS, &[("bogus_key".into(), "1.0".into())])
+            .unwrap_err();
+        assert!(err.contains("unknown parameter"), "got: {err}");
+    }
+
+    #[test]
+    fn filter_parse_rejects_non_numeric_value() {
+        let err = parse_with_table(
+            "filter",
+            &FILTER_PARAMS,
+            &[("cutoff_hz".into(), "not_a_number".into())],
+        )
+        .unwrap_err();
+        assert!(err.contains("invalid value"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_uses_table_defaults_and_overrides() {
+        let v = parse_with_table("filter", &FILTER_PARAMS, &[]).unwrap();
+        assert_eq!(v, vec![FILTER_PARAMS[0].default]);
+        let v = parse_with_table("gain", &GAIN_PARAMS, &[("gain_db".into(), "-6".into())]).unwrap();
+        assert_eq!(v, vec![-6.0]);
+    }
 
     #[test]
     fn parse_param_pairs_rejects_malformed_arg() {

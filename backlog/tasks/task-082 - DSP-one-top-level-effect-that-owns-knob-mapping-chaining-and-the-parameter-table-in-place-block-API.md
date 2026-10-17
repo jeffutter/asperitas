@@ -3,18 +3,21 @@ id: TASK-082
 title: >-
   DSP: one top-level effect that owns knob mapping, chaining and the parameter
   table; in-place block API
-status: To Do
+status: Blocked
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:12'
+updated_date: '2026-10-16 22:35'
 labels:
   - review-2026-10
   - dsp
   - architecture
+  - planned
 dependencies:
-  - TASK-077
-  - TASK-078
-  - TASK-079
+  - TASK-082.01
+  - TASK-082.02
+  - TASK-082.03
+  - TASK-082.04
 priority: high
 type: chore
 ordinal: 184800
@@ -39,6 +42,16 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #3 Block processing is in place with no triple buffering in main.rs; max_block_us is not worse by more than a few us
 - [ ] #4 Hardware recheck is covered by the review hardware-recheck ticket
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against d9ed6ab
+Epic-style tracking ticket; all work is delegated. Owner decisions already recorded: block-rate modulation, no soft-clip stage.
+Order: .01 (in-place block API) and .02 (parameter tables) are independent; .03 (Asperitas effect) needs both; .04 (move main, rig, CLI onto it) last.
+Verification: host gate and goldens bit-identical after each step; all firmware variants build; max_block_us recheck on hardware is covered by TASK-120 (AC #4).
+No remaining work outside the subtasks.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

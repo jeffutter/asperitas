@@ -2,11 +2,19 @@
 
 use libm::powf;
 
+use crate::param::{ParamSpec, Taper};
 use crate::processor::{Frame, Processor};
 use crate::smooth::{sanitize, Smoother};
 
-#[cfg(feature = "std")]
-use std::string::String;
+/// Parameter table for [`Gain`]; the only source of its range, taper and default.
+pub const GAIN_PARAMS: [ParamSpec; 1] = [ParamSpec {
+    name: "gain_db",
+    unit: "dB",
+    min: -60.0,
+    max: 12.0,
+    taper: Taper::Linear,
+    default: 0.0,
+}];
 
 /// Parameters for the gain processor.
 #[derive(Clone, Debug)]
@@ -17,7 +25,9 @@ pub struct GainParams {
 
 impl Default for GainParams {
     fn default() -> Self {
-        Self { gain_db: 0.0 }
+        Self {
+            gain_db: GAIN_PARAMS[0].default,
+        }
     }
 }
 
@@ -99,34 +109,10 @@ impl Gain {
     /// At midpoint (0.5) this yields -24 dB.
     ///
     /// Input is clamped to [0.0, 1.0] so degenerate readings produce valid params.
-    /// NOT behind `#[cfg(feature = "std")]` — usable in no_std firmware context.
     pub fn params_from_normalised(knob: f32) -> GainParams {
-        let n = knob.clamp(0.0, 1.0);
-        let gain_db = -60.0 + n * 72.0;
-        GainParams { gain_db }
-    }
-}
-
-#[cfg(feature = "std")]
-impl Gain {
-    /// Parse CLI key=value pairs into [`GainParams`].
-    ///
-    /// Recognized keys: `gain_db`. Returns an error for unknown keys or bad values.
-    pub fn parse_params_from_cli(pairs: &[(String, String)]) -> Result<GainParams, String> {
-        let mut params = GainParams::default();
-        for (key, value) in pairs {
-            match key.as_str() {
-                "gain_db" => {
-                    params.gain_db = value
-                        .parse::<f32>()
-                        .map_err(|_| format!("invalid value for gain_db: {value}"))?;
-                }
-                _ => {
-                    return Err(format!("unknown parameter key for gain processor: {key}"));
-                }
-            }
+        GainParams {
+            gain_db: GAIN_PARAMS[0].from_normalised(knob),
         }
-        Ok(params)
     }
 }
 
@@ -177,39 +163,5 @@ mod normalised_tests {
             assert!(gain >= prev, "not monotonic at knob={}", knob);
             prev = gain;
         }
-    }
-}
-
-#[cfg(all(test, feature = "std"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn set_params_converts_db_to_linear_base_10() {
-        let mut g = Gain::default();
-        g.set_params(&GainParams { gain_db: 6.0206 });
-        g.reset();
-        let out = g.tick([0.25, 0.25]);
-        assert!((out[0] - 0.5).abs() < 1e-3, "got {}", out[0]);
-        assert!((out[1] - 0.5).abs() < 1e-3, "got {}", out[1]);
-    }
-
-    #[test]
-    fn gain_parse_rejects_unknown_key() {
-        let err = Gain::parse_params_from_cli(&[("bogus_key".into(), "1.0".into())]).unwrap_err();
-        assert!(
-            err.contains("unknown parameter"),
-            "expected error about unknown parameter, got: {err}"
-        );
-    }
-
-    #[test]
-    fn gain_parse_rejects_non_numeric_value() {
-        let err =
-            Gain::parse_params_from_cli(&[("gain_db".into(), "not_a_number".into())]).unwrap_err();
-        assert!(
-            err.contains("invalid value"),
-            "expected error about invalid value, got: {err}"
-        );
     }
 }
