@@ -81,7 +81,7 @@ since boot (modulo 1e8), and `body` is the ASCII-sanitised message.
 ## Control
 
 `query`, `restart` and `override` send host control commands on the same serial device the
-rig captures from. The grammar and codec are in `crates/asperitas-logging/src/control.rs`
+rig captures from. The grammar and codec are in `crates/asperitas-wire/src/control.rs`
 (`CTL VER|RSN|RST|SET|REL|FX` out, `CTLR ...` replies back in the ordinary record stream); the
 rig uses that codec directly, so host and device cannot drift.
 
@@ -148,7 +148,7 @@ Move the patch with `CTL SET`/`REL`: knob `00` is the filter cutoff (20 Hz to 20
   stimulus build with the console (`log-usb`); the RTT-only builds have no console to send them on.
 - **Timing (excerpt).** The pass is held until the capture's first callback, `ARM_DELAY_MS` (2 s) after audio
   starts. Send `FX` in that window, i.e. right after the console attaches. The `rig` host
-  subcommand for this is not written yet; `cargo run -p asperitas-logging --example ctl_frame -- <fx hex> <value hex>` (or `set <knob> <value>` / `rel <knob>`) prints the
+  subcommand for this is not written yet; `cargo run -p asperitas-wire --example ctl_frame -- <fx hex> <value hex>` (or `set <knob> <value>` / `rel <knob>`) prints the
   framed command to send, and `scripts/rig-session.py` runs the whole sequence, and a session script that sends it the moment the console attaches (about 3.7 s after a probe reset) lands inside the window.
 - **CRC.** The effect runs after the block is taken, so `EXCPLAY`'s CRC still describes the raw
   stored samples and cannot detect the effect.

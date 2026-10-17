@@ -17,7 +17,7 @@ asperitas/
 │   ├── asperitas-cli/       # Offline WAV-in/WAV-out CLI (process, generate) and golden-file tests
 │   ├── asperitas-wire/      # no_std console and control wire protocol, device and host sides
 │   ├── asperitas-replay/    # Replay core shared by firmware and host
-│   ├── asperitas-logging/   # Device log facade (USB console, defmt, panic handler)
+│   ├── asperitas-logging/   # Device logging runtime (USB console, defmt, panic handler, LEDs)
 │   ├── asperitas-pod/       # Pod control surface drivers (knobs, encoder, LEDs)
 │   ├── asperitas-host/      # Host tooling for the wire protocol (dump reassembly, excerpt install)
 │   ├── asperitas-rig/       # Capture runner for the framed console, with a pass/fail verdict

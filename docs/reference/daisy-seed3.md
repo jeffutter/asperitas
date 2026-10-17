@@ -211,7 +211,7 @@ CDC-ACM delivers an undifferentiated byte stream: no boundaries, no length, no s
 whose tail vanished at a ring wrap is therefore indistinguishable from a short log line, which is how
 truncated knob lines came to be filed as an ADC glitch (TASK-018.04). v1 puts a sequence number and a
 checksum on every line while keeping each one readable in `screen` and greppable in a raw capture.
-The normative copy is `crates/asperitas-logging/src/frame.rs`; this is a transcription, and where the
+The normative copy is `crates/asperitas-wire/src/frame.rs`; this is a transcription, and where the
 two disagree the code is right.
 
 ```text
@@ -288,7 +288,7 @@ around the splice really are intact.
 
 #### `BOOT` and `STATUS`: the reserved body prefixes
 
-Two bodies are wire contract, rendered in `crates/asperitas-logging/src/console.rs` and riding ordinary
+Two bodies are wire contract, rendered in `crates/asperitas-wire/src/console.rs` and riding ordinary
 records — same framing, same CRC, same chance of being dropped:
 
 ```text
@@ -337,7 +337,7 @@ lost `STATUS` record is indistinguishable from nothing having changed, except th
 leaves behind — silence means "probably nothing changed", not "nothing changed".
 
 `AUDIO` and `AUDEND` are a third reserved pair carrying base64 audio dumps over the same framing
-(`crates/asperitas-logging/src/dump.rs`); the rig verbs and the dump pair are tabled together in
+(`crates/asperitas-wire/src/dump.rs`); the rig verbs and the dump pair are tabled together in
 *Rig record grammar* below, and the workflow around them is the README's *Measurement rig* section.
 
 #### Rig record grammar
@@ -350,17 +350,17 @@ in QSPI*.
 
 | Record | Sent | Worked line | Pinned by |
 |---|---|---|---|
-| `RIGCFG` | once at boot | `RIGCFG proto=1 capture=mono16 lane=L blocks=879 block_bytes=32768 bytes_per_s=96000 capsec_us=349525333 window_s=300 cpu_hz=480000000 icache=1 dcache=0` | `rigcfg_body_pins_field_names_and_order` in `crates/asperitas-logging/src/console.rs` |
+| `RIGCFG` | once at boot | `RIGCFG proto=1 capture=mono16 lane=L blocks=879 block_bytes=32768 bytes_per_s=96000 capsec_us=349525333 window_s=300 cpu_hz=480000000 icache=1 dcache=0` | `rigcfg_body_pins_field_names_and_order` in `crates/asperitas-wire/src/console.rs` |
 | `RIGGEN` | once at boot | `RIGGEN proto=1 name=sine sample_rate_hz=48000 level_dbfs=-20.0 frequency_hz=1000 period_samples=48` (generator text clipped to 160 B) | `riggen_body_carries_the_generator_text_verbatim` in `console.rs` |
 | `CAPMAX` | once at boot | `CAPMAX proto=1 total_bytes=28800000 ring_bytes=33554432 seconds_max=349 us_max=349525333 unused_headroom_bytes=4754432` | `capmax_body_pins_field_names_and_order` in `console.rs` |
 | `CAPSTAT` | about 1 Hz | `CAPSTAT proto=1 delivered=412 expected=467 overrun=0 max_block_us=731 worst_gap_us=1102 audio_exit=0 dumped=100 dropped_full=3` | `capstat_body_pins_field_names_and_order` in `console.rs` |
 | `STIMSTART` | once, one-shot stimulus builds | `STIMSTART proto=1 first_block=4 offset=0` | `stimstart_body_pins_field_names_and_order` in `console.rs` |
-| `AUDIO` | per chunk, during the dump | `AUDIO blk=1234 n=40 c=3f d=8J9hAH//XA==` (final chunk, 7 raw bytes) | `golden_padded_final_chunks_survive_framing` in `crates/asperitas-logging/tests/console_dump.rs` |
+| `AUDIO` | per chunk, during the dump | `AUDIO blk=1234 n=40 c=3f d=8J9hAH//XA==` (final chunk, 7 raw bytes) | `golden_padded_final_chunks_survive_framing` in `crates/asperitas-wire/tests/console_dump.rs` |
 | `AUDEND` | closes each block | `AUDEND blk=0000 n=03 bytes=00009 crc16=29b1` | `golden_audend_frame_is_reproduced_byte_for_byte` in `console_dump.rs` |
 | `DUMPEND` | once, the dump summary | `DUMPEND proto=1 blocks=879 chunks=224145 bytes=28800000 elapsed_ms=311402 refused=17 stall_ms=940 sent=4118 dropped_full=3 bytes_dropped=12288` | `dumpend_body_pins_field_names_and_order` in `console.rs` |
 
 `AUDIO` and `AUDEND` carry their widths and size table in the module docs of
-`crates/asperitas-logging/src/dump.rs`, which is normative. `RIGCFG` and `CAPMAX` report constants the
+`crates/asperitas-wire/src/dump.rs`, which is normative. `RIGCFG` and `CAPMAX` report constants the
 firmware was compiled with, not measurements. `CAPSTAT` counters are since-boot. `DUMPEND` is the
 tightest body on the wire (194 of 200 bytes at saturation). Its `elapsed_ms` is a reading; a dump rate
 computed from it is derived from that reading (see *Capture budgets*).
@@ -1088,7 +1088,7 @@ Status: built and linked for `main` and `podtest` (TASK-032.03). Verified on har
 `reset_reason=software`, over the probe-flashed image. `main` and `SET`/`REL` on a live knob path are
 not covered by that run.
 
-The protocol (`CTL VER|RSN|RST|SET|REL`, `CTLR` replies) is `asperitas_logging::control`; the knob
+The protocol (`CTL VER|RSN|RST|SET|REL`, `CTLR` replies) is `asperitas_wire::control`; the knob
 table is `asperitas_pod::knob_override`. The firmware side is one shared file,
 `firmware/src/host_control.rs`, a module of the package library, imported by each binary. Console builds only (`log-usb`); the RTT-only build has no inbound path and compiles the
 module down to `capture_reset_reason` and `merge`.
@@ -1297,7 +1297,7 @@ What that settles:
 
 ### Capture budgets (SDRAM)
 
-Basis labels: derived = arithmetic on constants in `crates/asperitas-logging/src/capture.rs`;
+Basis labels: derived = arithmetic on constants in `crates/asperitas-wire/src/capture.rs`;
 measured = a reading from a board, with its date; estimated = a guess with no measurement behind it.
 A derived figure is not a reading and must not be cited as one.
 
@@ -1327,8 +1327,8 @@ window would cost twice the wire time on a link that already needs about a fifth
 
 Recorded from the code at `0e12f7e`; nothing in this section has run on a board. Every observed cell
 reads `pending TASK-038.09`, which is the ticket that installs a clip and measures it on the bench.
-The owner of every constant below is `crates/asperitas-logging/src/excerpt.rs`; this table mirrors it
-and `crates/asperitas-logging/tests/excerpt_docs.rs` fails when the two drift. Change the module
+The owner of every constant below is `crates/asperitas-wire/src/excerpt.rs`; this table mirrors it
+and `crates/asperitas-wire/tests/excerpt_docs.rs` fails when the two drift. Change the module
 first, then this table. The README owns the workflow and *Capture budgets (SDRAM)* owns the SDRAM budget; this section
 holds only what is specific to excerpts and is linked from there, not restated there. The application
 itself is not placed in QSPI by the default layout (see *Flashing the Seed3*); the bootloaded layout
@@ -1420,16 +1420,16 @@ One worked line each, with the host test that pins its format. Install records r
 
 | Record | Direction | Worked line | Pinned by |
 |---|---|---|---|
-| `EXCSTART` | host to device | `EXCSTART slot=03 name=mand_chord bytes=288000 crc16=beef` | `bodies_have_the_documented_shape` in `crates/asperitas-logging/tests/excerpt.rs` |
-| `EXCDATA` | host to device | `EXCDATA i=002a b64=AAH+` | `bodies_have_the_documented_shape` in `crates/asperitas-logging/tests/excerpt.rs` |
-| `EXCEND` | host to device | `EXCEND` | `bodies_have_the_documented_shape` in `crates/asperitas-logging/tests/excerpt.rs` |
-| `EXCOK` | device to host | `EXCOK name=guitar_a bytes=288000 crc16=beef` | `exc_ok_body_renders_the_pinned_format` in `crates/asperitas-logging/tests/excerpt_install.rs` |
-| `EXCFAIL` | device to host | `EXCFAIL got=1234 want=abcd why=order` (plain CRC mismatch omits `why`) | `exc_fail_body_renders_got_want_and_why` in `crates/asperitas-logging/tests/excerpt_install.rs` |
-| `EXCPLAY` | device to host | `EXCPLAY proto=1 slot=3 bytes=288000 crc16=0abc want=0abc underruns=0 clean=1` | `excplay_body_pins_field_names_and_order` in `crates/asperitas-logging/src/console.rs` |
-| `EXCPLAYFAIL` | device to host | `EXCPLAYFAIL proto=1 slot=13 why=empty` | `excplayfail_body_pins_field_names_and_fits` in `crates/asperitas-logging/src/console.rs` |
+| `EXCSTART` | host to device | `EXCSTART slot=03 name=mand_chord bytes=288000 crc16=beef` | `bodies_have_the_documented_shape` in `crates/asperitas-wire/tests/excerpt.rs` |
+| `EXCDATA` | host to device | `EXCDATA i=002a b64=AAH+` | `bodies_have_the_documented_shape` in `crates/asperitas-wire/tests/excerpt.rs` |
+| `EXCEND` | host to device | `EXCEND` | `bodies_have_the_documented_shape` in `crates/asperitas-wire/tests/excerpt.rs` |
+| `EXCOK` | device to host | `EXCOK name=guitar_a bytes=288000 crc16=beef` | `exc_ok_body_renders_the_pinned_format` in `crates/asperitas-wire/tests/excerpt_install.rs` |
+| `EXCFAIL` | device to host | `EXCFAIL got=1234 want=abcd why=order` (plain CRC mismatch omits `why`) | `exc_fail_body_renders_got_want_and_why` in `crates/asperitas-wire/tests/excerpt_install.rs` |
+| `EXCPLAY` | device to host | `EXCPLAY proto=1 slot=3 bytes=288000 crc16=0abc want=0abc underruns=0 clean=1` | `excplay_body_pins_field_names_and_order` in `crates/asperitas-wire/src/console.rs` |
+| `EXCPLAYFAIL` | device to host | `EXCPLAYFAIL proto=1 slot=13 why=empty` | `excplayfail_body_pins_field_names_and_fits` in `crates/asperitas-wire/src/console.rs` |
 
-The whole stream, framed, is pinned byte for byte by `excerpt_stream_matches_pinned_golden_frames` against the
-golden fixture in `crates/asperitas-logging/tests/golden/`.
+The whole stream, framed, is pinned byte for byte by `excerpt_stream_matches_pinned_golden_frames` (in `crates/asperitas-host/tests/excerpt_install.rs`) against the
+golden fixture in `crates/asperitas-host/tests/golden/`.
 
 ## libDaisy (C++) has no Seed3 support
 

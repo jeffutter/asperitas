@@ -1,4 +1,5 @@
-//! Logging facade for Asperitas firmware.
+//! Device logging runtime for Asperitas firmware: the log backends, the USB CDC console, the
+//! panic handler and the status LEDs. The wire protocol it speaks lives in `asperitas-wire`.
 //!
 //! Provides a feature-selected logging backend using the `log` crate.
 //! Call-sites use `info!`, `debug!`, `warn!`, `error!` from the re-exported macros.
