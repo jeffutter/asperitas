@@ -1,13 +1,15 @@
 ---
 id: TASK-087
 title: 'Firmware: replace main''s unsafe KnobState with atomics'
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-17 02:06'
 labels:
   - review-2026-10
   - firmware
+  - planned
 dependencies: []
 priority: medium
 type: chore
@@ -26,6 +28,26 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No unsafe impl Sync for the knob state; main builds and clippy passes
-- [ ] #2 Knobs still drive filter and gain (hardware recheck ticket)
+- [x] #1 No unsafe impl Sync for the knob state; main builds and clippy passes
+- [x] #2 Knobs still drive filter and gain (hardware recheck ticket)
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by fad1801. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+KnobState is now two AtomicU32 (f32 bits), plain static, Relaxed ordering; no unsafe, no critical section, no StaticCell for it. Also seeds it from Controls::default().knobs at boot (the TASK-124 zeros-at-boot and torn-write concerns). clippy clean for default and log-usb features.
+
+AC #2 is verified on hardware by TASK-120 (HUMAN recheck, depends on this ticket); no agent can satisfy it, so it is ticked as delegated there.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Replaced unsafe UnsafeCell KnobState with atomics in firmware/src/bin/main.rs; clippy passes.
+<!-- SECTION:FINAL_SUMMARY:END -->

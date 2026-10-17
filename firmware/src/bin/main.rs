@@ -3,7 +3,7 @@
 
 include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see build.rs
 
-use core::cell::UnsafeCell;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use asperitas_firmware::audio::{self, decode_block, encode_block, AudioProcessor, BLOCK_LENGTH};
 use asperitas_firmware::host_control;
@@ -23,39 +23,40 @@ bind_interrupts!(pub struct UsbIrqs {
     OTG_FS => usb::InterruptHandler<peripherals::USB_OTG_FS>;
 });
 
-/// Shared knob readings — written by control-surface task, read by audio callback.
+/// Shared knob readings - written by the control-surface task, read by the audio callback.
 ///
-/// Stored as `[f32; 2]` in static memory behind `UnsafeCell` + `cortex_m::interrupt::free`.
-/// Safe on single-core Cortex-M7: the callback runs at fixed priority, the knob
-/// task runs in the executor, and interrupt-free sections prevent concurrent access.
+/// Each knob is an `f32` stored as its bit pattern in an `AtomicU32`, so the audio interrupt
+/// can preempt the poll task at any point and still read whole values. The two knobs are
+/// independent atomics: a read may pair a new knob 1 with the previous knob 2, which the
+/// per-block smoothing in the effect absorbs.
 struct KnobState {
-    inner: UnsafeCell<[f32; 2]>,
+    knobs: [AtomicU32; 2],
 }
-
-// Safety: every access goes through `cortex_m::interrupt::free`, and the part has one core, so the
-// knob task and the audio interrupt cannot overlap on the cell. The audio task is spawned on an
-// interrupt executor, which requires `Send` of what it borrows.
-unsafe impl Sync for KnobState {}
 
 impl KnobState {
     const fn new() -> Self {
         Self {
-            inner: UnsafeCell::new([0.0, 0.0]),
+            knobs: [AtomicU32::new(0), AtomicU32::new(0)],
         }
     }
 
     /// Write new knob values from the polling task.
     fn write(&self, values: [f32; 2]) {
-        unsafe { *self.inner.get() = values };
+        for (slot, v) in self.knobs.iter().zip(values) {
+            slot.store(v.to_bits(), Ordering::Relaxed);
+        }
     }
 
-    /// Read current knob values from the audio callback (inside critical section).
+    /// Read current knob values from the audio callback.
     fn read(&self) -> [f32; 2] {
-        unsafe { *self.inner.get() }
+        [
+            f32::from_bits(self.knobs[0].load(Ordering::Relaxed)),
+            f32::from_bits(self.knobs[1].load(Ordering::Relaxed)),
+        ]
     }
 }
 
-static KNOB_STATE: StaticCell<KnobState> = StaticCell::new();
+static KNOB_STATE: KnobState = KnobState::new();
 
 /// Poll interval for control surface (~1 kHz).
 const POLL_INTERVAL_MS: u64 = 1;
@@ -68,8 +69,7 @@ struct KnobChain {
 
 impl AudioProcessor for KnobChain {
     fn process(&mut self, input: &[u32], output: &mut [u32]) {
-        // Read latest knob positions under critical section.
-        let knobs = host_control::merge(cortex_m::interrupt::free(|_| self.knob_state.read()));
+        let knobs = host_control::merge(self.knob_state.read());
 
         // Controls are applied once per block; the effect smooths the change.
         self.effect.set_controls(&Controls { knobs });
@@ -165,8 +165,10 @@ async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(feature = "log-usb")]
     host_control::spawn(&spawner);
 
-    // Initialize shared knob state.
-    let knob_state = KNOB_STATE.init(KnobState::new());
+    // Seed the shared knob state with the effect's defaults so the audio callback never sees
+    // zeros before the first poll.
+    let knob_state = &KNOB_STATE;
+    knob_state.write(Controls::default().knobs);
 
     // Bring the knob ADC up here, before the audio interface starts. `Knobs::new` enables and
     // calibrates the ADC with blocking waits of a millisecond or more; run inside the knob task
