@@ -2,9 +2,8 @@
 
 use crate::filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 use crate::gain::{Gain, GainParams, GAIN_PARAMS};
-use crate::param::{ParamSpec, Taper};
+use crate::param::ParamSpec;
 use crate::processor::{Frame, Processor};
-use libm::logf;
 
 /// Number of knobs: filter cutoff, then output gain.
 pub const KNOB_COUNT: usize = 2;
@@ -17,21 +16,13 @@ pub struct Controls {
     pub knobs: [f32; KNOB_COUNT],
 }
 
-/// Knob position at which `spec` yields its default value.
-fn default_knob(spec: &ParamSpec) -> f32 {
-    match spec.taper {
-        Taper::Linear => (spec.default - spec.min) / (spec.max - spec.min),
-        Taper::Log => logf(spec.default / spec.min) / logf(spec.max / spec.min),
-    }
-}
-
 impl Default for Controls {
     /// Knob positions that give every parameter its table default (filter open, 0 dB).
     fn default() -> Self {
         Self {
             knobs: [
-                default_knob(&FILTER_PARAMS[0]),
-                default_knob(&GAIN_PARAMS[0]),
+                FILTER_PARAMS[0].to_normalised(FILTER_PARAMS[0].default),
+                GAIN_PARAMS[0].to_normalised(GAIN_PARAMS[0].default),
             ],
         }
     }

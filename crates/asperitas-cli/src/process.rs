@@ -1,5 +1,6 @@
 //! Process a WAV file through a named DSP processor.
 
+use asperitas_dsp::asperitas::{Asperitas, Controls, KNOB_COUNT};
 use asperitas_dsp::filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 use asperitas_dsp::gain::{Gain, GainParams, GAIN_PARAMS};
 use asperitas_dsp::param::ParamSpec;
@@ -21,32 +22,33 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
 
     let mut frames = frames;
 
+    let sample_rate = spec.sample_rate as f32;
+    let pairs = parse_param_pairs(&args.params)?;
     match args.processor_name.as_str() {
         "gain" => {
-            let params = GainParams {
-                gain_db: parse_with_table("gain", &GAIN_PARAMS, &parse_param_pairs(&args.params)?)?
-                    [0],
-            };
-            let sample_rate = spec.sample_rate as f32;
-            let mut proc = Gain::new(sample_rate, &params);
-            proc.process_block(&mut frames);
+            let v = parse_with_table("gain", &GAIN_PARAMS, &pairs)?;
+            Gain::new(sample_rate, &GainParams { gain_db: v[0] }).process_block(&mut frames);
         }
         "filter" => {
-            let params = FilterParams {
-                cutoff_hz: parse_with_table(
-                    "filter",
-                    &FILTER_PARAMS,
-                    &parse_param_pairs(&args.params)?,
-                )?[0],
-            };
-            let sample_rate = spec.sample_rate as f32;
-            let mut proc = OnePoleLowPass::new(sample_rate, &params);
-            proc.process_block(&mut frames);
+            let v = parse_with_table("filter", &FILTER_PARAMS, &pairs)?;
+            OnePoleLowPass::new(sample_rate, &FilterParams { cutoff_hz: v[0] })
+                .process_block(&mut frames);
+        }
+        "asperitas" => {
+            // The effect's knobs are `[cutoff, gain]`, so its table is the two stage tables in
+            // that order; each real-unit value goes back through its spec to a knob position.
+            let table: Vec<ParamSpec> = FILTER_PARAMS.iter().chain(&GAIN_PARAMS).copied().collect();
+            debug_assert_eq!(table.len(), KNOB_COUNT);
+            let values = parse_with_table("asperitas", &table, &pairs)?;
+            let mut controls = Controls::default();
+            for ((knob, spec), value) in controls.knobs.iter_mut().zip(&table).zip(values) {
+                *knob = spec.to_normalised(value);
+            }
+            Asperitas::new(sample_rate, &controls).process_block(&mut frames);
         }
         other => {
             return Err(format!(
-                "unknown processor '{}'; supported: gain, filter",
-                other
+                "unknown processor '{other}'; supported: gain, filter, asperitas"
             ))
         }
     }
@@ -170,5 +172,95 @@ mod tests {
             FRAMES * 2,
             "header must agree with the interleaved stereo payload"
         );
+    }
+
+    fn run_on_ramp(processor: &str, params: &[&str]) -> Vec<i16> {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.wav");
+        let output = dir.path().join("out.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&input, spec).unwrap();
+        for i in 0..2000i32 {
+            writer
+                .write_sample(((i % 200) * 100 - 10_000) as i16)
+                .unwrap();
+        }
+        writer.finalize().unwrap();
+        run_process(&ProcessArgs {
+            input_path: input.to_str().unwrap().to_string(),
+            output_path: output.to_str().unwrap().to_string(),
+            processor_name: processor.to_string(),
+            params: params.iter().map(|p| p.to_string()).collect(),
+        })
+        .unwrap();
+        hound::WavReader::open(&output)
+            .unwrap()
+            .samples::<i16>()
+            .map(|s| s.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn asperitas_rejects_unknown_key() {
+        let table: Vec<ParamSpec> = FILTER_PARAMS.iter().chain(&GAIN_PARAMS).copied().collect();
+        let err =
+            parse_with_table("asperitas", &table, &[("bogus".into(), "1".into())]).unwrap_err();
+        assert!(err.contains("unknown parameter"), "got: {err}");
+    }
+
+    #[test]
+    fn asperitas_matches_filter_then_gain() {
+        let chained = run_on_ramp("asperitas", &["cutoff_hz=1000", "gain_db=-6"]);
+        let filtered = run_on_ramp("filter", &["cutoff_hz=1000"]);
+        // Gain stage applied to the filtered file via a second pass.
+        let dir = tempfile::tempdir().unwrap();
+        let mid = dir.path().join("mid.wav");
+        let out = dir.path().join("out.wav");
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(&mid, spec).unwrap();
+        for s in &filtered {
+            w.write_sample(*s).unwrap();
+        }
+        w.finalize().unwrap();
+        run_process(&ProcessArgs {
+            input_path: mid.to_str().unwrap().to_string(),
+            output_path: out.to_str().unwrap().to_string(),
+            processor_name: "gain".to_string(),
+            params: vec!["gain_db=-6".to_string()],
+        })
+        .unwrap();
+        let staged: Vec<i16> = hound::WavReader::open(&out)
+            .unwrap()
+            .samples::<i16>()
+            .map(|s| s.unwrap())
+            .collect();
+        assert_eq!(chained.len(), staged.len());
+        for (a, b) in chained.iter().zip(&staged) {
+            assert!((*a as i32 - *b as i32).abs() <= 3, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn asperitas_defaults_match_default_effect() {
+        let out = run_on_ramp("asperitas", &[]);
+        let unity = run_on_ramp("gain", &["gain_db=0"]);
+        assert_eq!(out.len(), unity.len());
+        // Default cutoff is open, default gain 0 dB: close to passthrough.
+        let max_diff = out
+            .iter()
+            .zip(&unity)
+            .map(|(a, b)| (*a as i32 - *b as i32).abs())
+            .max();
+        assert!(max_diff.unwrap() < 1500, "{max_diff:?}");
     }
 }
