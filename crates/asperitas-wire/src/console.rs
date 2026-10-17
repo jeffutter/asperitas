@@ -114,17 +114,35 @@ impl ConsoleStats {
     ///
     /// Wraps mod 2^32 — see the module docs. Callers assign it **inside** the record
     /// lock, which is what makes numeric order equal wire order.
+    #[deny(
+        clippy::indexing_slicing,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic
+    )]
     pub fn take_seq(&self) -> u32 {
         self.seq.fetch_add(1, Ordering::Relaxed)
     }
 
     /// A record reached the pipe whole.
+    #[deny(
+        clippy::indexing_slicing,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic
+    )]
     pub fn record_committed(&self) {
         bump(&self.records_sent);
     }
 
     /// A record was refused because it did not fit. `bytes` is the size of the frame that
     /// never went out, so the ring is untouched and only these two counters move.
+    #[deny(
+        clippy::indexing_slicing,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic
+    )]
     pub fn record_dropped_for_space(&self, bytes: usize) {
         bump(&self.dropped_full);
         add(
@@ -134,6 +152,12 @@ impl ConsoleStats {
     }
 
     /// A body exceeded [`crate::frame::MAX_BODY`] and shipped shortened.
+    #[deny(
+        clippy::indexing_slicing,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic
+    )]
     pub fn body_shortened(&self) {
         bump(&self.truncated);
     }

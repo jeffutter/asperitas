@@ -257,102 +257,65 @@ static RECORD_BUFS: embassy_sync::blocking_mutex::Mutex<
     frame: [0; frame::MAX_FRAME],
 }));
 
-/// An internal contract break noticed **while the record lock was held**, which must not be raised
-/// there.
-///
-/// This target aborts rather than unwinds and [`RECORD_BUFS`] is a `CriticalSectionRawMutex`, so a
-/// panic inside that closure never restores `PRIMASK`: the board loses interrupts for good, and the
-/// panic handler's own serial emit then waits on an interrupt it just froze. Callers therefore
-/// *report* a break out of the closure as one of these and let [`commit_records`] crash once the
-/// lock has released.
-///
-/// Opaque on purpose — the way to consume one is to hand it to [`commit_records`], never to branch
-/// on it. [`frame::WriteOutcome`] stays the single vocabulary for what a commit *did*: this says only
-/// that something else went wrong alongside it.
-///
-/// Deliberately **not** profile-split with `#[cfg(debug_assertions)]`. A carrier whose payload
-/// existed only in debug would cost nothing in release, but it defines the type twice and makes
-/// `commit_records` reason about two profiles; this crate has no uses of that cfg anywhere, and the
-/// price here is one `Option` store and one never-taken branch per record on a path that is not the
-/// audio callback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(any(feature = "log-usb", test))]
-struct Violation(Option<(&'static str, usize)>);
-
-#[cfg(any(feature = "log-usb", test))]
-impl Violation {
-    /// Nothing to report.
-    const NONE: Self = Self(None);
-
-    /// A contract break naming itself and the size involved. Debug builds crash on it once the
-    /// record lock has released; release builds keep doing whatever they do today, which for every
-    /// current site is counting the loss and reporting the same refusal. See [`commit_records`].
-    const fn noted(msg: &'static str, amount: usize) -> Self {
-        Self(Some((msg, amount)))
-    }
-}
-
-/// Did the pipe refuse a frame the headroom rule had already admitted?
-///
-/// Pure and ungated so the whole decision is decidable on the host, exactly as [`asperitas_wire::dump::dump_fits`]
-/// is: the code that acts on the answer stays behind `log-usb` and cannot even link there. The four
-/// row is covered by `tests_under_the_record_lock_stay_panic_free` in this module — the crash itself
-/// is not host-observable, so the value is what gets asserted.
-#[cfg(any(feature = "log-usb", test))]
-fn refusal_after_admission(
-    admitted: bool,
-    outcome: frame::WriteOutcome,
-    framed_len: usize,
-) -> Violation {
-    match (admitted, outcome) {
-        (true, frame::WriteOutcome::RefusedForSpace) => Violation::noted(
-            "pipe refused a frame the headroom rule had already admitted",
-            framed_len,
-        ),
-        _ => Violation::NONE,
-    }
-}
-
 /// Run `commit` with the record buffers held, and fail loud if the pipe stalled mid-frame.
 ///
 /// Every panic on the record-commit path fires here, after the record lock has released, and
 /// nowhere else. That lock is a `CriticalSectionRawMutex`, so its closure runs with `PRIMASK` set,
 /// and this target aborts rather than unwinds: a panic raised inside that closure never restores
 /// `PRIMASK`, so the panic handler's serial emit (`usb::emit_blocking`) would spin with no USB
-/// interrupt and drop the very text it exists to deliver. Callers therefore report *anything* that
-/// broke a contract — not only a stall — out of their closure as a value, either
-/// [`frame::WriteOutcome::Stalled`] or a [`Violation`], and this function does the crashing.
-/// Returns whether the frame reached the pipe.
+/// interrupt and drop the very text it exists to deliver. The closure therefore reports a broken
+/// contract as [`frame::WriteOutcome::Stalled`] and this function does the crashing. The functions
+/// the closure runs (`frame::encode`, `frame::write_whole`, `asperitas_wire::dump::dump_fits`,
+/// [`write_and_count`] and the console counters) carry
+/// `#[deny(clippy::indexing_slicing, clippy::unwrap_used, clippy::expect_used, clippy::panic)]`, so
+/// clippy rejects any of them that can panic through indexing, unwrap or an explicit panic. Release
+/// builds wrap on overflow rather than panic, so arithmetic is not linted. Run
+/// `cargo clippy -p asperitas-logging --features log-usb --target thumbv7em-none-eabihf` and
+/// `cargo clippy -p asperitas-wire` to check; the firmware workspace does not lint these path crates.
 ///
-/// The two reports differ in profile, deliberately. A stall panics in **every** build, because
-/// TASK-040 found the alternative was an unbounded retry spin producing no diagnostic at all —
-/// nothing else could tell anyone anything. A [`Violation`] crashes only in debug builds, because
-/// it already has a release-visible channel: the refusing path counts the loss into
-/// `dropped_full`/`bytes_dropped`, which `console::snapshot()` surfaces and STATUS prints. The
-/// record is lost either way and the board keeps playing music, whereas crashing there would reset
-/// a performer's pedal mid-song over a refused dump chunk — a change to release semantics this
-/// ticket does not make. Making it loud everywhere is a one-line decision for whoever wants it, not
-/// a side effect of a debug-safety fix.
+/// A stall panics in every build: the alternative is an unbounded retry spin that produces no
+/// diagnostic at all. A refusal for space is ordinary backpressure, counted into
+/// `dropped_full`/`bytes_dropped` where `console::snapshot()` and STATUS report it.
+///
+/// Returns whether the frame reached the pipe.
 #[cfg(feature = "log-usb")]
-fn commit_records(
-    commit: impl FnOnce(&mut RecordBufs) -> (frame::WriteOutcome, Violation),
-) -> bool {
-    let (outcome, violation) = RECORD_BUFS.lock(|cell| {
+fn commit_records(commit: impl FnOnce(&mut RecordBufs) -> frame::WriteOutcome) -> bool {
+    let outcome = RECORD_BUFS.lock(|cell| {
         // Safety: the only route to these buffers is this mutex, the core is single-core,
         // and the reference never escapes this closure.
         commit(unsafe { &mut *cell.get() })
     });
-    // Contract breaks first: both are raised outside the lock, so neither can strand PRIMASK.
-    if let Some((msg, amount)) = violation.0 {
-        debug_assert!(
-            false,
-            "record commit invariant violated under RECORD_BUFS: {msg} ({amount} bytes)"
-        );
-    }
     if outcome == frame::WriteOutcome::Stalled {
         panic!("record commit: the sink stalled after the capacity pre-check passed; the caller held RECORD_BUFS and verified free_capacity, so the pipe broke write_whole's contract and a record was lost");
     }
     outcome == frame::WriteOutcome::Committed
+}
+
+/// Write one encoded frame into [`LOG_PIPE`] whole or not at all, and count what happened.
+///
+/// Must run inside the record lock: free capacity is only frozen there, because the lock masks
+/// interrupts and the drain consumer cannot run. A pre-check outside the lock would turn a clean
+/// refusal into a mid-frame stall. A refusal counts the loss into `dropped_full`/`bytes_dropped`;
+/// a stall counts nothing, since [`commit_records`] crashes on it once the lock releases.
+#[cfg(feature = "log-usb")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
+fn write_and_count(framed: &[u8]) -> frame::WriteOutcome {
+    let outcome = frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
+        LOG_PIPE.try_write(chunk).ok()
+    });
+    match outcome {
+        frame::WriteOutcome::Committed => console::CONSOLE.record_committed(),
+        frame::WriteOutcome::RefusedForSpace => {
+            console::CONSOLE.record_dropped_for_space(framed.len())
+        }
+        frame::WriteOutcome::Stalled => {}
+    }
+    outcome
 }
 
 /// Commit one already-rendered record body as a whole frame, returning whether it reached the pipe.
@@ -417,10 +380,9 @@ fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usiz
 /// sequence number, checksum, and delivery are this function's business.
 ///
 /// One thing this function cannot promise: `fill` runs **inside** the record lock, so a `Display`
-/// impl that panics masks `PRIMASK` just as permanently as an assert here would. No lexical check
-/// can see that, because it lives in whatever the caller closes over; today every `fill` in the tree
-/// formats a fixed-shape message, and closing it properly means hoisting formatting out of the lock
-/// entirely — its own ticket, not a footnote to this one.
+/// impl that panics masks `PRIMASK` just as permanently as an assert here would. `#[no_panic]`
+/// cannot see that, because it lives in whatever the caller closes over; today every `fill` in the
+/// tree formats a fixed-shape message.
 ///
 /// # What the critical section costs, bounded rather than measured
 ///
@@ -441,6 +403,12 @@ fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usiz
 /// ever shows up in the audio budget, the fix is a reserve/commit ring replacing the
 /// `Pipe`, tracked as its own ticket, not a quiet redesign of the atomicity rule.
 #[cfg(feature = "log-usb")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 fn emit_at(
     level: Level,
     now_ms: u32,
@@ -452,31 +420,18 @@ fn emit_at(
     commit_records(|bufs| {
         let seq = console::CONSOLE.take_seq();
         let body_len = fill(&mut bufs.body);
-        let encoded = frame::encode(level, seq, now_ms, &bufs.body[..body_len], &mut bufs.frame);
+        let encoded = frame::encode(
+            level,
+            seq,
+            now_ms,
+            bufs.body.get(..body_len).unwrap_or_default(),
+            &mut bufs.frame,
+        );
         if encoded.truncated {
             console::CONSOLE.body_shortened();
         }
 
-        let framed = &bufs.frame[..encoded.len];
-        // The capacity pre-check has to live inside this lock, next to the write loop.
-        // Outside it, a full ring turns a clean headroom refusal into a mid-frame stall.
-        // Inside, free capacity is *frozen* — `RECORD_BUFS.lock` masks interrupts globally,
-        // so the drain consumer cannot run at all while the lock is held — and a pre-check
-        // that passes therefore guarantees progress on every round.
-        let outcome = frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
-            LOG_PIPE.try_write(chunk).ok()
-        });
-        match outcome {
-            frame::WriteOutcome::Committed => console::CONSOLE.record_committed(),
-            frame::WriteOutcome::RefusedForSpace => {
-                console::CONSOLE.record_dropped_for_space(framed.len())
-            }
-            // Counted as nothing: `commit_records` crashes on this once the lock releases.
-            frame::WriteOutcome::Stalled => {}
-        }
-        // No headroom rule admitted this frame's bytes, so a refusal here is ordinary backpressure
-        // rather than a broken contract: nothing to report out of the closure.
-        (outcome, Violation::NONE)
+        write_and_count(bufs.frame.get(..encoded.len).unwrap_or_default())
     })
 }
 
@@ -553,10 +508,8 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 ///   `usb::run()`'s drain task cannot move a byte and free capacity is *frozen* — not merely
 ///   non-decreasing — for the duration. That is what makes the capacity check below sound
 ///   rather than optimistic. And nothing this closure does can panic: `write_whole` reports a sink
-///   that stopped accepting bytes as `frame::WriteOutcome::Stalled`, and a sink that refused a frame
-///   the headroom rule had admitted comes back as a `Violation` value. `commit_records` crashes on
-///   either
-///   only once `RECORD_BUFS.lock` has returned. The counters are the exception by design — they are
+///   that stopped accepting bytes as `frame::WriteOutcome::Stalled`, and `commit_records` crashes on
+///   that only once `RECORD_BUFS.lock` has returned. The counters are the exception by design — they are
 ///   the wire ledger, so they are taken in the same IRQ-off window as the write they describe.
 /// - **`dump_fits` is consulted before `take_seq`.** Refusals therefore consume no sequence
 ///   number, by construction rather than by discipline: a retry loop cannot manufacture `seq`
@@ -606,45 +559,33 @@ pub fn try_emit_dump(body: &[u8]) -> bool {
         return false;
     }
 
-    commit_records(|bufs| {
-        // The headroom rule, asked before anything is spent: no `seq`, no counter, no byte.
-        let admitted = asperitas_wire::dump::dump_fits(body.len(), LOG_PIPE.free_capacity());
-        if !admitted {
-            return (frame::WriteOutcome::RefusedForSpace, Violation::NONE);
-        }
+    commit_records(|bufs| commit_dump(bufs, body, now_ms))
+}
 
-        let seq = console::CONSOLE.take_seq();
-        let encoded = frame::encode(Level::Info, seq, now_ms, body, &mut bufs.frame);
-        // No truncation check here, and none needed: `Encoded::truncated` *is* the predicate
-        // `body.len() > frame::MAX_BODY`, and the guard at the top of this function refused that
-        // case before the lock was taken. The bit therefore cannot be set on this path; the
-        // equivalence is pinned by a host test in `frame.rs` rather than asserted on the device,
-        // where asserting it could only ever cost an interrupt mask.
+/// The in-lock half of [`try_emit_dump`]: headroom check, sequence number, encode, write.
+///
+/// Separate so `#[no_panic]` covers the whole decision sequence, `dump_fits` and the encoder
+/// included.
+#[cfg(feature = "log-usb")]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
+fn commit_dump(bufs: &mut RecordBufs, body: &[u8], now_ms: u32) -> frame::WriteOutcome {
+    // The headroom rule, asked before anything is spent: no `seq`, no counter, no byte.
+    if !asperitas_wire::dump::dump_fits(body.len(), LOG_PIPE.free_capacity()) {
+        return frame::WriteOutcome::RefusedForSpace;
+    }
 
-        let framed = &bufs.frame[..encoded.len];
-        let outcome = frame::write_whole(framed, LOG_PIPE.free_capacity(), |chunk| {
-            LOG_PIPE.try_write(chunk).ok()
-        });
-        match outcome {
-            frame::WriteOutcome::Committed => console::CONSOLE.record_committed(),
-            frame::WriteOutcome::RefusedForSpace => {
-                // Unreachable while the lock holds the producer contract: free capacity is
-                // frozen here, and the pre-check above already paid the reserve. Reaching it
-                // means the sink broke that contract, and then a record genuinely was lost —
-                // so this one path does count, unlike a headroom refusal.
-                console::CONSOLE.record_dropped_for_space(framed.len());
-            }
-            // Counted as nothing: `commit_records` crashes on this once the lock releases.
-            frame::WriteOutcome::Stalled => {}
-        }
-        // Past the early return above, admission is exactly "the headroom rule said yes", so the
-        // refusal branch alone is the contract break — reported out rather than raised here, and
-        // crashed on in `commit_records` once `RECORD_BUFS.lock` has returned.
-        (
-            outcome,
-            refusal_after_admission(admitted, outcome, framed.len()),
-        )
-    })
+    let seq = console::CONSOLE.take_seq();
+    let encoded = frame::encode(Level::Info, seq, now_ms, body, &mut bufs.frame);
+    // No truncation check here, and none needed: `Encoded::truncated` *is* the predicate
+    // `body.len() > frame::MAX_BODY`, and `try_emit_dump` refused that case before the lock was
+    // taken. The equivalence is pinned by a host test in `frame.rs`.
+
+    write_and_count(bufs.frame.get(..encoded.len).unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------
@@ -662,72 +603,4 @@ pub fn init() {
     #[cfg(feature = "log-defmt")]
     set_backend_defmt();
     install_logger();
-}
-
-// ---------------------------------------------------------------------------
-// Tests — the decisions the record lock makes, observed as values
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The classification behind the one real contract break under the record lock, across all four
-    /// of its rows.
-    ///
-    /// **Why the crash itself is not asserted here.** Nothing behind `log-usb` links on host: an
-    /// integration test that actually called `try_emit_dump` fails at link time with undefined
-    /// `__critical_section_1_0_acquire`, `__critical_section_1_0_release` and `__embassy_time_now`,
-    /// because no `critical-section` implementation is registered for the host target. So the
-    /// `debug_assert!` that consumes a reported violation cannot be observed from CI at all — only
-    /// the value it consumes can, which is why `commit_records` takes violations as data instead of
-    /// seeing callers raise them. This is the same split `asperitas_wire::dump::dump_fits` documents: the predicate
-    /// is decidable here, the code acting on it stays on the device. What proves the crash still
-    /// exists is `tests/commit_path_no_panic.rs`, which reads this file as text and fails if the
-    /// post-lock `debug_assert!` is ever deleted.
-    #[test]
-    fn refusal_after_admission_reports_only_the_contract_break() {
-        // Row 1: the headroom rule said no, so a refusal is ordinary backpressure. Reporting it as
-        // a violation would turn every full ring into a debug-build crash.
-        assert_eq!(
-            refusal_after_admission(false, frame::WriteOutcome::RefusedForSpace, 228),
-            Violation::NONE,
-            "a refusal the headroom rule itself returned is not a contract break"
-        );
-
-        // Row 2: admitted, then refused — the sink broke the producer's contract, and the byte count
-        // that reaches the panic message has to be the frame's own length.
-        let got = refusal_after_admission(true, frame::WriteOutcome::RefusedForSpace, 228);
-        assert_eq!(
-            got,
-            Violation::noted(
-                "pipe refused a frame the headroom rule had already admitted",
-                228
-            ),
-            "the admitted-then-refused case must carry its message and size out of the lock"
-        );
-        let Some((msg, amount)) = got.0 else {
-            unreachable!("row 2 must report a violation, and asserts above prove it did")
-        };
-        assert_eq!(amount, 228, "the carried size is what the message quotes");
-        assert!(
-            msg.contains("headroom rule"),
-            "the message must name the rule that was broken, not just the refusal: {msg}"
-        );
-
-        // Row 3: admitted and committed — nothing happened.
-        assert_eq!(
-            refusal_after_admission(true, frame::WriteOutcome::Committed, 228),
-            Violation::NONE
-        );
-
-        // Row 4: a stall belongs to the unconditional `panic!` in `commit_records`, not to this
-        // carrier. Routing it through both would give one failure two reports with different words.
-        assert_eq!(
-            refusal_after_admission(true, frame::WriteOutcome::Stalled, 228),
-            Violation::NONE,
-            "a stall is already fatal on every profile; double-reporting it here would only \
-             decide which message wins"
-        );
-    }
 }

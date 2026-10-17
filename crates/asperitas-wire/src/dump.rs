@@ -534,6 +534,12 @@ pub const RESERVE: usize = MAX_FRAME;
 /// A `body_len` above [`MAX_BODY`] describes a record the codec cannot build, and yields
 /// `false` for every capacity the ring can report; the device's one dump commit path,
 /// `try_emit_dump`, refuses such a body outright instead of shipping a shortened chunk.
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub const fn dump_fits(body_len: usize, free_capacity: usize) -> bool {
     let frame_len = PREFIX_LEN + body_len + TRAILER_LEN;
     frame_len <= free_capacity.saturating_sub(RESERVE)

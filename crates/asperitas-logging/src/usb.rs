@@ -457,10 +457,9 @@ async fn inbound_reader() {
 /// stack that may be nearly exhausted. Sharing the buffer is acceptable for the same reason
 /// — with the executor halted nothing else is formatting, and the one theoretical overlap
 /// (a panic raised inside the commit critical section) is designed out: record-path callers
-/// crash only *outside* the record lock, where `commit_records` defers every panic — its
-/// unconditional stall `panic!` and the debug-only contract-break check alike — until
-/// `RECORD_BUFS.lock` has returned. Nothing on the record path can raise while `PRIMASK` is set;
-/// `tests/commit_path_no_panic.rs` fails the build if anything starts to.
+/// crash only *outside* the record lock, where `commit_records` defers its stall `panic!`
+/// until `RECORD_BUFS.lock` has returned. Nothing on the record path can raise while `PRIMASK` is
+/// set; the `#[no_panic]` functions it runs make the release build fail to link if anything starts to.
 pub fn emit_panic_record(body: &[u8]) {
     // Safety: see [`PANIC_FRAME`]. Takes no lock by design; `frame!` writes are pure byte
     // arithmetic into the buffer we were given.

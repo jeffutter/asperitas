@@ -207,6 +207,12 @@ pub(crate) const fn check_decimal_fits(max_value: u32, digits: usize) {
 /// pinned by `crc16_ccitt_update_chains_to_match_one_shot` here and by a real 32 KiB capture
 /// block split at [`crate::dump::CHUNK_RAW`] boundaries in `tests/capture_geometry.rs`.
 #[must_use]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub fn crc16_ccitt(data: &[u8]) -> u16 {
     crc16_ccitt_update(CRC16_INITIAL, data)
 }
@@ -240,6 +246,12 @@ pub const CRC16_INITIAL: u16 = 0xFFFF;
 ///
 /// Start from [`CRC16_INITIAL`]; pass each return value in as the next argument.
 #[must_use]
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub fn crc16_ccitt_update(crc: u16, data: &[u8]) -> u16 {
     let mut crc = crc;
     for &byte in data {
@@ -281,6 +293,12 @@ pub struct Encoded {
 ///
 /// The body is sanitised and capped on the way in ([`sanitize_byte`]), then the CRC
 /// is computed over the bytes that actually ship.
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub fn encode(
     level: Level,
     seq: u32,
@@ -291,8 +309,10 @@ pub fn encode(
     // Body first: the prefix is fixed-width, so nothing here needs the body length
     // before writing the fields that precede it.
     let body_len = body.len().min(MAX_BODY);
-    for (slot, &byte) in out[PREFIX_LEN..PREFIX_LEN + body_len].iter_mut().zip(body) {
-        *slot = sanitize_byte(byte);
+    if let Some(dst) = out.get_mut(PREFIX_LEN..PREFIX_LEN + body_len) {
+        for (slot, &byte) in dst.iter_mut().zip(body) {
+            *slot = sanitize_byte(byte);
+        }
     }
 
     // Widths are compile-time facts — see the `check_*` pins beside the constants — so these
@@ -305,15 +325,20 @@ pub fn encode(
     write_decimal(now_ms % T_MS_WRAP, &mut out[T_MS_AT..T_MS_AT + T_MS_DIGITS]);
     out[T_MS_AT + T_MS_DIGITS] = b' ';
 
-    let crc = crc16_ccitt(&out[1..PREFIX_LEN + body_len]);
+    // `body_len <= MAX_BODY` and `MAX_FRAME` holds the whole frame (pinned beside the constants),
+    // so every `get`/`get_mut` below succeeds; the fallbacks exist so no path can panic.
     let trailer = PREFIX_LEN + body_len;
-    out[trailer] = b'*';
-    write_hex(
-        u32::from(crc),
-        &mut out[trailer + 1..trailer + 1 + CRC_DIGITS],
-    );
-    out[trailer + 1 + CRC_DIGITS] = b'\r';
-    out[trailer + 2 + CRC_DIGITS] = b'\n';
+    let crc = crc16_ccitt(out.get(1..trailer).unwrap_or_default());
+    if let Some(dst) = out.get_mut(trailer..trailer + TRAILER_LEN) {
+        if let Some((star, rest)) = dst.split_first_mut() {
+            *star = b'*';
+            let (digits, tail) = rest.split_at_mut_checked(CRC_DIGITS).unwrap_or_default();
+            write_hex(u32::from(crc), digits);
+            for (slot, &byte) in tail.iter_mut().zip(b"\r\n") {
+                *slot = byte;
+            }
+        }
+    }
 
     Encoded {
         len: trailer + TRAILER_LEN,
@@ -322,6 +347,12 @@ pub fn encode(
 }
 
 /// The single wire letter for a level.
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 fn level_letter(level: Level) -> u8 {
     match level {
         Level::Error => b'E',
@@ -341,6 +372,12 @@ fn level_letter(level: Level) -> u8 {
 /// strength therefore comes from the grammar plus the CRC and, above all, the
 /// no-CR/LF invariant, not from a supposedly tilde-free payload: a stray `~` or `*`
 /// inside a body can only produce a CRC mismatch, never a false-valid record.
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub const fn sanitize_byte(byte: u8) -> u8 {
     if byte < 0x20 || byte == 0x7F {
         b'_'
@@ -378,11 +415,20 @@ const _: () = {
 /// rejected because getting an array reference out of `out[SEQ_AT..SEQ_AT + SEQ_DIGITS]` needs
 /// `try_into().unwrap()`, which reintroduces an in-lock panic at the very boundary it was meant to
 /// remove.
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub(crate) fn write_hex(value: u32, dst: &mut [u8]) {
     let n = dst.len();
     for (i, slot) in dst.iter_mut().enumerate() {
         let shift = 4 * (n - 1 - i);
-        *slot = HEX_DIGITS[((value >> shift) & 0xF) as usize];
+        *slot = HEX_DIGITS
+            .get(((value >> shift) & 0xF) as usize)
+            .copied()
+            .unwrap_or(b'0');
     }
 }
 
@@ -395,6 +441,12 @@ pub(crate) fn write_hex(value: u32, dst: &mut [u8]) {
 /// computed `10u32.pow(dst.len())` before asserting, so a field of ten or more digits panicked in
 /// every profile, not just debug. Dropping leading digits is still what an oversized value does,
 /// which is why the pin is on the maximum value rather than the rendered one.
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub(crate) fn write_decimal(value: u32, dst: &mut [u8]) {
     let mut v = value;
     for slot in dst.iter_mut().rev() {
@@ -472,6 +524,12 @@ pub enum WriteOutcome {
 /// the failure to the project's fail-loud path: the shared `panic_handler` module (`boot-led`
 /// feature) turns the LED red and emits the panic text — this message included — over
 /// whatever transport is compiled in.
+#[deny(
+    clippy::indexing_slicing,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 pub fn write_whole(
     frame: &[u8],
     free_capacity: usize,
@@ -482,8 +540,8 @@ pub fn write_whole(
     }
 
     let mut written = 0usize;
-    while written < frame.len() {
-        match write(&frame[written..]) {
+    while let Some(rest) = frame.get(written..).filter(|r| !r.is_empty()) {
+        match write(rest) {
             Some(n) if n > 0 => written += n,
             // `None` or `Some(0)` after the pre-check passed: the sink broke the
             // caller's contract. Reported, not panicked — see the doc section above.
