@@ -215,7 +215,7 @@ pub mod panic_handler;
 /// silence. The static that does carry a type-level dependency, `LOG_PIPE`, stays gated.
 pub const LOG_PIPE_SIZE: usize = 2048;
 
-/// The log pipe: `emit_at` and `try_emit_dump` commit framed records here, [`usb`]'s drain task empties it.
+/// The log pipe: `commit` puts framed records here, [`usb`]'s drain task empties it.
 ///
 /// A plain immutable `static`, because `Pipe`'s methods all take `&self` and its own
 /// `CriticalSectionRawMutex` serialises them. The previous `Option` reached through
@@ -374,34 +374,79 @@ fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usiz
     emit_at(level, now_ms, fill);
 }
 
-/// Format, frame, and commit one record - whole, or not at all - stamped `now_ms`.
+/// Whether a record may take the last of the ring, and what a refusal costs.
+#[cfg(feature = "log-usb")]
+#[derive(Clone, Copy)]
+enum Policy {
+    /// An ordinary record: it takes any space that fits, always spends a `seq`, and a refusal for
+    /// space is a drop counted into `dropped_full`/`bytes_dropped`.
+    Log,
+    /// Bulk dump payload: it must fit around the reserve [`asperitas_wire::dump::dump_fits`]
+    /// keeps for ordinary records. A refusal is asked before anything is spent, so it takes no
+    /// `seq` and counts no drop - the writer retries, and a retry is not a lost record.
+    Dump,
+}
+
+/// Fill, frame and commit one record - whole, or not at all - stamped `now_ms`.
 ///
-/// `fill` writes the body into the guarded window and returns its length; the level,
-/// sequence number, checksum, and delivery are this function's business.
+/// The one place a record reaches [`LOG_PIPE`]. `fill` writes the body into the guarded window and
+/// returns its length; the level, sequence number, checksum, and delivery are this function's
+/// business. Returns whether the frame reached the pipe.
 ///
-/// One thing this function cannot promise: `fill` runs **inside** the record lock, so a `Display`
-/// impl that panics masks `PRIMASK` just as permanently as an assert here would. `#[no_panic]`
-/// cannot see that, because it lives in whatever the caller closes over; today every `fill` in the
-/// tree formats a fixed-shape message.
+/// # Why each step sits where it does
+///
+/// - **The clock is read before the lock** by the caller, keeping the timer driver's own locking
+///   out of the IRQ-off window. A millisecond of skew is invisible in a millisecond field;
+///   sequence order is not, so `seq` is taken inside.
+/// - **The lock is not optional.** Records are emitted from arbitrary context including the audio
+///   callback, so an interrupt can preempt a producer that does not hold `RECORD_BUFS`, and two
+///   interleaved `write_whole` calls splice two frames into the ring. While the lock is held the
+///   consumer does *not* run: `RECORD_BUFS` is a `CriticalSectionRawMutex`, which masks
+///   interrupts globally, so `usb::run()`'s drain task cannot move a byte and free capacity is
+///   *frozen* for the duration. That is what makes the capacity check sound rather than
+///   optimistic. Nothing inside can panic: `write_whole` reports a sink that stopped accepting
+///   bytes as `frame::WriteOutcome::Stalled`, and `commit_records` crashes on that only once the
+///   lock has released. The counters are the exception by design - they are the wire ledger, so
+///   they are taken in the same IRQ-off window as the write they describe.
+/// - **`Policy::Dump` consults `dump_fits` before `take_seq`.** Refusals therefore consume no
+///   sequence number, by construction rather than by discipline: a retry loop cannot manufacture
+///   `seq` gaps that a host would read as loss.
+/// - **Committed records of either policy consume `seq` and bump `records_sent`.** They really
+///   occupy the wire, and `seq` continuity must keep meaning loss.
+/// - **`Pipe::write` / `Pipe::write_all` are not used.** Either strands a partial frame in the
+///   ring whenever capacity falls short of the frame, and the pipe has one shared `write_waker`
+///   woken only on the full to non-full transition, so a stranded prefix wakes nobody.
+///
+/// `fill` runs **inside** the record lock, so a `Display` impl that panics masks `PRIMASK` just as
+/// permanently as an assert here would. `#[no_panic]` cannot see that, because it lives in
+/// whatever the caller closes over; today every `fill` in the tree formats a fixed-shape message.
 ///
 /// # What the critical section costs, bounded rather than measured
 ///
 /// All of this runs with interrupts disabled while a 48 kHz audio block arrives every
-/// ~667 µs on the same single-threaded executor. The work is fixed-size:
+/// ~667 us on the same single-threaded executor. The work is fixed-size:
 ///
 /// | step | bound |
 /// |---|---|
-/// | format into the body window | ≤ 256 bytes copied |
-/// | sanitise + copy into the frame | ≤ 200 bytes in, ≤ 228 bytes out |
-/// | CRC-16 over the CRC-covered range | ≤ 220 bytes × 8 bit iterations ≈ 1 760 shift-and-xor steps |
-/// | commit | ≤ 2 `try_write` calls (one, plus one to cross a ring wrap) |
+/// | format into the body window | <= 256 bytes copied |
+/// | sanitise + copy into the frame | <= 200 bytes in, <= 228 bytes out |
+/// | CRC-16 over the CRC-covered range | <= 220 bytes x 8 bit iterations = 1 760 shift-and-xor steps |
+/// | commit | <= 2 `try_write` calls (one, plus one to cross a ring wrap) |
 ///
-/// The table-less CRC dominates the region by a wide margin. This crate cannot measure
-/// any of it — the time driver ticks at 32 768 Hz, so one tick (~30.5 µs) is coarser than
-/// the window worth measuring and a `max_ticks` field would sit at zero — which is why the
-/// bound above is stated in bytes and iterations instead of microseconds. If this region
-/// ever shows up in the audio budget, the fix is a reserve/commit ring replacing the
-/// `Pipe`, tracked as its own ticket, not a quiet redesign of the atomicity rule.
+/// The table-less CRC dominates the region by a wide margin. This crate cannot measure any of it -
+/// the time driver ticks at 32 768 Hz, so one tick (~30.5 us) is coarser than the window worth
+/// measuring - which is why the bound is stated in bytes and iterations instead of microseconds.
+/// If this region ever shows up in the audio budget, the fix is a reserve/commit ring replacing
+/// the `Pipe`, not a quiet redesign of the atomicity rule.
+///
+/// # What CI can and cannot reach
+///
+/// `cargo test --workspace` builds this crate without `log-usb`, and on the host no
+/// `critical-section` implementation is registered, so this function fails to *link* there. CI
+/// proves the predicate ([`asperitas_wire::dump::dump_fits`], exhaustively, against a real
+/// `embassy_sync` ring: see `tests/console_dump.rs`). Only the firmware release build
+/// (`cd firmware && cargo build --release --features seed3`) proves the arrangement type-checks,
+/// and only the rig on hardware proves runtime behaviour.
 #[cfg(feature = "log-usb")]
 #[deny(
     clippy::indexing_slicing,
@@ -409,6 +454,34 @@ fn emit(level: Level, fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usiz
     clippy::expect_used,
     clippy::panic
 )]
+fn commit(
+    level: Level,
+    now_ms: u32,
+    policy: Policy,
+    fill: impl FnOnce(&mut [u8; console::BODY_WINDOW]) -> usize,
+) -> bool {
+    commit_records(|bufs| {
+        let body_len = fill(&mut bufs.body);
+        let body = bufs.body.get(..body_len).unwrap_or_default();
+
+        if matches!(policy, Policy::Dump)
+            && !asperitas_wire::dump::dump_fits(body.len(), LOG_PIPE.free_capacity())
+        {
+            return frame::WriteOutcome::RefusedForSpace;
+        }
+
+        let seq = console::CONSOLE.take_seq();
+        let encoded = frame::encode(level, seq, now_ms, body, &mut bufs.frame);
+        if encoded.truncated {
+            console::CONSOLE.body_shortened();
+        }
+
+        write_and_count(bufs.frame.get(..encoded.len).unwrap_or_default())
+    })
+}
+
+/// Format, frame, and commit one ordinary record stamped `now_ms`; see `commit`.
+#[cfg(feature = "log-usb")]
 fn emit_at(
     level: Level,
     now_ms: u32,
@@ -417,22 +490,7 @@ fn emit_at(
     // The verdict is this function's return value: `BOOT`, `STATUS` and `log` callers discard it
     // and read loss from the console counters, while [`emit_record`] hands it back to a caller that
     // retries or reports.
-    commit_records(|bufs| {
-        let seq = console::CONSOLE.take_seq();
-        let body_len = fill(&mut bufs.body);
-        let encoded = frame::encode(
-            level,
-            seq,
-            now_ms,
-            bufs.body.get(..body_len).unwrap_or_default(),
-            &mut bufs.frame,
-        );
-        if encoded.truncated {
-            console::CONSOLE.body_shortened();
-        }
-
-        write_and_count(bufs.frame.get(..encoded.len).unwrap_or_default())
-    })
+    commit(level, now_ms, Policy::Log, fill)
 }
 
 /// Commit a `log::Record` as one framed console record.
@@ -489,67 +547,22 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 
 /// Commit one pre-built audio-dump body as a framed record, or refuse it whole.
 ///
-/// The only route by which dump traffic reaches [`LOG_PIPE`], and the only place
-/// [`asperitas_wire::dump::dump_fits`]'s headroom rule is acted on. Synchronous and non-blocking: it either
-/// commits or returns `false` having written nothing, so a caller on a timer can retry it
-/// without risking a deadlock in whatever context it runs (TASK-038.03 owns that retry
-/// loop, and keeps the dump task off the audio `InterruptExecutor`).
-///
-/// # Why each step sits where it does
-///
-/// - **The clock is read before the lock**, as `emit` does before handing `now_ms` to `emit_at`, keeping the timer driver's
-///   own locking out of the IRQ-off window. A millisecond of skew is invisible in a
-///   millisecond field; sequence order is not, so `seq` is taken inside.
-/// - **The lock is not optional.** Log records are emitted from arbitrary context including
-///   the audio callback, so an interrupt can preempt a producer that does not hold
-///   `RECORD_BUFS`, and two interleaved `write_whole` calls splice two frames into the
-///   ring. While the lock is held the consumer does *not* run: `RECORD_BUFS` is a
-///   `CriticalSectionRawMutex`, which masks interrupts globally for its duration, so
-///   `usb::run()`'s drain task cannot move a byte and free capacity is *frozen* — not merely
-///   non-decreasing — for the duration. That is what makes the capacity check below sound
-///   rather than optimistic. And nothing this closure does can panic: `write_whole` reports a sink
-///   that stopped accepting bytes as `frame::WriteOutcome::Stalled`, and `commit_records` crashes on
-///   that only once `RECORD_BUFS.lock` has returned. The counters are the exception by design — they are
-///   the wire ledger, so they are taken in the same IRQ-off window as the write they describe.
-/// - **`dump_fits` is consulted before `take_seq`.** Refusals therefore consume no sequence
-///   number, by construction rather than by discipline: a retry loop cannot manufacture `seq`
-///   gaps that a host would read as loss. The predicate is tested exhaustively across the
-///   ring's whole capacity range on the host, so the decision itself is proven even though
-///   nothing behind `log-usb` is reachable from CI (see the coverage note below).
-/// - **Committed dumps do consume `seq` and do bump `records_sent`.** Those records really
-///   occupy the wire, and `seq` continuity must keep meaning loss for the audio stream to be
-///   trustworthy; TASK-038.06 documents the resulting mixed-record rate for bench operators.
-/// - **Refusals bump neither `dropped_full` nor `bytes_dropped`.** Those counters mean "a
-///   record was thrown away", and a retry is not that. If dump stalls ever need their own
-///   counter they belong to TASK-038.03's starvation counters, not these.
-/// - **`Pipe::write` / `Pipe::write_all` are not used.** Either strands a partial frame in
-///   the ring whenever capacity falls short of the frame, and the pipe has one shared
-///   `write_waker` woken only on the full→non-full transition, so a stranded prefix wakes
-///   nobody. See TASK-038.02's notes on `ready_send`, which embassy-sync 0.6.2 does not have.
-///
-/// # What CI can and cannot reach
-///
-/// `cargo test --workspace` builds this crate without `log-usb`, and on the host no
-/// `critical-section` implementation is registered, so this function does not merely fail to
-/// run there — it fails to *link*. What CI proves is the predicate ([`asperitas_wire::dump::dump_fits`],
-/// exhaustively, against a real `embassy_sync` ring: see `tests/console_dump.rs`) and the
-/// shape this function mirrors from `emit_at`. What only the firmware release build
-/// (`cd firmware && cargo build --release --features seed3`) proves is that the arrangement
-/// type-checks at all. Neither reaches runtime behaviour on hardware; TASK-038.05 is the
-/// human-run check of that.
+/// The only route by which dump traffic reaches [`LOG_PIPE`], and the only caller of
+/// `Policy::Dump`; the lock rules and headroom ordering are explained on `commit`. Synchronous and
+/// non-blocking: it either commits or returns `false` having written nothing, no `seq` and no
+/// drop count, so a caller on a timer can retry it without risking a deadlock in whatever context
+/// it runs.
 ///
 /// A body longer than [`frame::MAX_BODY`] is refused outright rather than shipped shortened:
 /// a chunk whose tail silently vanished reassembles into audio that measures wrong, and the
 /// block CRC catching it afterwards is not the same thing as not sending it. Every builder in
 /// [`asperitas_wire::dump`] writes into a `[u8; frame::MAX_BODY]` window, so reaching this branch is a caller
-/// bug — hence the debug assertion alongside the refusal. The check runs *before* the record
+/// bug - hence the debug assertion alongside the refusal. The check runs *before* the record
 /// lock is taken, so that assertion cannot fire with interrupts masked.
 #[cfg(feature = "log-usb")]
 pub fn try_emit_dump(body: &[u8]) -> bool {
     let now_ms = embassy_time::Instant::now().as_millis() as u32;
 
-    // Pure input validation over an argument — no shared state, so it stays out of the
-    // critical section, where even a debug-profile panic would leave PRIMASK stuck.
     if body.len() > frame::MAX_BODY {
         debug_assert!(
             false,
@@ -559,33 +572,13 @@ pub fn try_emit_dump(body: &[u8]) -> bool {
         return false;
     }
 
-    commit_records(|bufs| commit_dump(bufs, body, now_ms))
-}
-
-/// The in-lock half of [`try_emit_dump`]: headroom check, sequence number, encode, write.
-///
-/// Separate so `#[no_panic]` covers the whole decision sequence, `dump_fits` and the encoder
-/// included.
-#[cfg(feature = "log-usb")]
-#[deny(
-    clippy::indexing_slicing,
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::panic
-)]
-fn commit_dump(bufs: &mut RecordBufs, body: &[u8], now_ms: u32) -> frame::WriteOutcome {
-    // The headroom rule, asked before anything is spent: no `seq`, no counter, no byte.
-    if !asperitas_wire::dump::dump_fits(body.len(), LOG_PIPE.free_capacity()) {
-        return frame::WriteOutcome::RefusedForSpace;
-    }
-
-    let seq = console::CONSOLE.take_seq();
-    let encoded = frame::encode(Level::Info, seq, now_ms, body, &mut bufs.frame);
-    // No truncation check here, and none needed: `Encoded::truncated` *is* the predicate
-    // `body.len() > frame::MAX_BODY`, and `try_emit_dump` refused that case before the lock was
-    // taken. The equivalence is pinned by a host test in `frame.rs`.
-
-    write_and_count(bufs.frame.get(..encoded.len).unwrap_or_default())
+    commit(Level::Info, now_ms, Policy::Dump, |out| {
+        let n = body.len().min(out.len());
+        out.get_mut(..n)
+            .unwrap_or_default()
+            .copy_from_slice(body.get(..n).unwrap_or_default());
+        n
+    })
 }
 
 // ---------------------------------------------------------------------------
