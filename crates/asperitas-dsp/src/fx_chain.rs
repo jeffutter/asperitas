@@ -112,8 +112,11 @@ impl<G: Processor> Processor for FxChain<G> {
         out[0]
     }
 
-    /// Resets the generator. The effect keeps its selection and filter state: a one-shot generator
-    /// is reset at capture start, and the effect was chosen before the capture armed.
+    /// Resets the generator only. This deliberately does not meet the [`Processor::reset`] law
+    /// (identical input gives identical output regardless of history): the effect keeps its
+    /// selection, smoothed parameters and filter state, so output right after a reset still
+    /// depends on what the effect heard before. A one-shot generator is reset at capture start,
+    /// and the effect was chosen before the capture armed.
     fn reset(&mut self) {
         self.gen.reset();
     }
@@ -315,5 +318,38 @@ mod tests {
         c.select(1, 100);
         c.reset();
         assert_eq!(c.kind(), FxKind::Patch);
+    }
+
+    #[test]
+    fn reset_restarts_the_generator_but_not_the_effect() {
+        // Drive the patch to a low cutoff so the filter holds a lot of state, then reset.
+        let mut c = chain(false);
+        c.select(1, 0);
+        for _ in 0..200 {
+            let mut out = SILENCE;
+            c.process_block_with(&mut out, |b| [b[0], 0.0]);
+        }
+        let mut twin = chain(false);
+        twin.select(1, 0);
+        c.reset();
+
+        let after_reset = {
+            let mut out = SILENCE;
+            c.process_block_with(&mut out, |b| [b[0], 0.0]);
+            out
+        };
+        let fresh = {
+            let mut out = SILENCE;
+            twin.process_block_with(&mut out, |b| [b[0], 0.0]);
+            out
+        };
+        // The generator restarted, so the unfiltered first sample is the fresh one's; the
+        // effect did not, so the settled low-cutoff filter state makes the blocks differ. A
+        // chain that honoured the Processor reset law would make them identical.
+        assert_eq!(c.kind(), FxKind::Patch);
+        assert_ne!(
+            after_reset.map(|f| f[0].to_bits()),
+            fresh.map(|f| f[0].to_bits())
+        );
     }
 }

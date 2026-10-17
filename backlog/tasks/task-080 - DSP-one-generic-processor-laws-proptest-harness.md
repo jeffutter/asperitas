@@ -1,14 +1,16 @@
 ---
 id: TASK-080
 title: 'DSP: one generic processor-laws proptest harness'
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:12'
+updated_date: '2026-10-17 01:03'
 labels:
   - review-2026-10
   - dsp
   - testing
+  - planned
 dependencies:
   - TASK-077
   - TASK-078
@@ -29,7 +31,25 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A generic harness runs the same laws for Gain and OnePoleLowPass with arbitrary params and differing prior histories
-- [ ] #2 The copied per-processor property tests are deleted
-- [ ] #3 The FxChain::reset contract deviation is documented and tested
+- [x] #1 A generic harness runs the same laws for Gain and OnePoleLowPass with arbitrary params and differing prior histories
+- [x] #2 The copied per-processor property tests are deleted
+- [x] #3 The FxChain::reset contract deviation is documented and tested
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Harness: processor_laws! macro in crates/asperitas-dsp/tests/property_tests.rs over generic law_* fns (finite+bounded with per-effect bound closure, silence, block==tick, reset after two different histories and params bit-identical, param step max per-sample delta over a whole 997 Hz sine window vs steady slews plus gap/20, NaN/inf/huge input and hostile params with recovery). Instantiated for Gain and OnePoleLowPass; copied gain_*/filter_* tests and the run_finite_after_event tests deleted; call-order, exact-zero-decay and Gain tail tests kept. Mutation-checked: removing Gain snap, filter state clear, and smoothing each fail the matching law. Finding: huge finite input times the 8192 gain ceiling overflows to inf (output is unclamped by design), so the hostile law asserts no NaN, then finite after recovery. Finding: filter cutoff 0 Hz freezes state rather than muting, so it sits in the hostile strategy, not the silence one. FxChain::reset doc now states it deliberately breaks the Processor reset law; new unit test reset_restarts_the_generator_but_not_the_effect.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Generic processor-laws proptest harness replaces the per-processor copies for Gain and OnePoleLowPass, with stronger reset, param-step and hostile-input laws; FxChain::reset deviation documented and tested.
+<!-- SECTION:FINAL_SUMMARY:END -->

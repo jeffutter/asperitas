@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a3adef69eac283e2857ae1190fe49e87252e4c18eb5fc83e1d4dd5ce294ca004 # shrinks to hostile = GainParams { gain_db: 3.4028235e38 }, bad = [3.4028235e38, 0.0], block = [[0.0, 0.0], [0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]
+cc cef25646548254921d269dab2d933f3695ab2faac6ffea7f2a790e08ee291207 # shrinks to a = FilterParams { cutoff_hz: 9351.436 }, b = FilterParams { cutoff_hz: 14608.996 }
+cc d0990a9c1d097c00e66867a0aa0011819323f17a24992c38270cfb70fcc08c06 # shrinks to a = FilterParams { cutoff_hz: 20.0 }, b = FilterParams { cutoff_hz: 13312.274 }
