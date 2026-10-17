@@ -23,6 +23,7 @@
 
 pub mod cli;
 pub mod control;
+pub mod session;
 
 use std::fmt::Write as _;
 use std::io::{self, Read};

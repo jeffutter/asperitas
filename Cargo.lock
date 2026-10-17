@@ -172,6 +172,7 @@ dependencies = [
  "asperitas-host",
  "asperitas-wire",
  "clap",
+ "ruzstd",
  "serialport",
  "tempfile",
 ]

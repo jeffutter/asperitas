@@ -117,6 +117,51 @@ I/O or timeout.
 
 Verified on the host with a fake transport, and on hardware 2026-10-15 (TASK-033.01): `query` and `restart` against `podtest` on a Seed3 re-enumerated with no BOOT/RESET and reported `reset_reason=software` (`captures/task-033-01-restart.txt`). A 240 s `capture` had `bad_frames=0` but `device_dropped=4041` in one gap (see `captures/task-033-01-podtest-240s.txt`).
 
+### Bench session (`session`)
+
+One command for the whole bench sequence: optionally reset the board over the probe, attach,
+require a fresh `BOOT`, select the effect, wait for the capture to arm, drive one knob on a
+timed schedule, release it, and record every byte until `DUMPEND` plus 2 s.
+
+```
+asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 [--probe-reset] \
+    [--device P] [--fx-v N] [--chip-description firmware/asperitas-h750.yaml] <MOTION>
+  sweep --from 0 --to 1 --duration 30 [--start-after-arm 5]
+  soak  [--no-snaps] [--snap-level 0.25]
+  hold  --level 0.5
+```
+
+- `--fx-f` is `0` bypass or `1` patch; `--knob` is decimal (0 filter cutoff, 1 output gain).
+  Device selection is the same as the other subcommands (`--device` or the single
+  `/dev/cu.usbmodem*` / `/dev/ttyACM*`).
+- `sweep` steps linearly at 20 `SET`s per second from `--start-after-arm` seconds after the
+  capture arms, then releases 0.1 s after the last step. `soak` is a 250 s triangle ramp
+  0.50 to 0.95 to 0.50 starting 10 s after arming (it starts and ends at the base value so the
+  ramp itself causes no snap), with two snaps (+`--snap-level` for 0.5 s) at 80 s and 160 s of the
+  ramp unless `--no-snaps`. `hold` sends one `SET` before the capture arms and releases when the
+  dump ends. Levels outside `0..=1` are a usage error (exit 2), never clamped.
+- `--probe-reset` runs `probe-rs reset` with the chip description, waits for the console node to
+  vanish, then retries attaching for up to 15 s. The chip description path defaults to the repo's
+  `firmware/asperitas-h750.yaml`.
+- `FX` is only sent after a `BOOT` record has been read on this attachment (12 s limit). Without
+  one the board has been running and may be armed, so the session exits 2 having sent nothing.
+- Release guarantee: once anything has been sent, `REL` follows on every way out, including a
+  failed write, a dead port and a timeout before the capture armed.
+- The schedule runs between reads of a 10 ms port timeout, so step timing jitters by up to 10 ms.
+
+Output: `--out` is the raw stream, zstd-compressed (readable with `asperitas-measure analyze`);
+`<out>.session` is the sidecar, `key=value` lines under an `asperitas-session v1` header, parsed
+by `asperitas_host::session::Sidecar`. It holds `fx_f`, `fx_v`, `knob`, `mode`, `from`, `to`,
+`duration_s`, `start_after_arm_s`, `snaps`, `snap_level`, and the device `t_ms` of the record that
+first showed the capture armed (`arm_t_ms`, a `CAPSTAT` with `delivered>0`) and of the first
+`CTLR OK SET` (`first_set_t_ms`) when the stream held them. Partial runs are still written.
+
+Exit codes: 0 when the device acknowledged `FX`, every `SET` and the `REL`, rejected nothing and
+the dump ended; 1 for incomplete acks or a device `CTLR ERR`; 2 for usage, device, I/O or
+timeout errors. The summary line is `session bytes=.. fx_acked=.. sets_sent=.. set_acks=..
+rel_acks=.. device_errors=.. armed=.. dump_end=..`. Verified on the host with a fake device;
+a bench run against hardware is a separate ticket.
+
 ### Replay effect (`CTL FX`)
 
 Every `rig` build runs an effect stage after its stimulus generator: the sine (the default),
