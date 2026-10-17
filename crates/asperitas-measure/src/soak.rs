@@ -305,7 +305,6 @@ mod tests {
             ((coarse(0.0) + 60.0) / 72.0 * f32::from(u16::MAX)).round() as u16,
         );
         chain.reset();
-        let silence = [[0.0f32; 2]; 32];
         let mut samples = Vec::with_capacity(n);
         let mut knob = 0.0f32;
         let mut block = 0usize;
@@ -317,7 +316,7 @@ mod tests {
                 knob = (coarse(t) + 60.0) / 72.0;
             }
             let mut out = [[0.0f32; 2]; 32];
-            chain.process_block_with(&silence, &mut out, |_| knob);
+            chain.process_block_with(&mut out, |_| knob);
             samples.extend(out.iter().map(|f| (f[0] * 32768.0).round() as i16));
             block += 1;
         }

@@ -36,7 +36,8 @@ proptest! {
         g.set_sample_rate(48_000.0);
         g.set_params(&GainParams::default());
         let mut out = vec![Frame::default(); block.len()];
-        g.process_block(&block, &mut out);
+        out.clone_from(&block);
+        g.process_block(&mut out);
         for f in &out {
             prop_assert!(f[0].is_finite(), "left not finite: {}", f[0]);
             prop_assert!(f[1].is_finite(), "right not finite: {}", f[1]);
@@ -49,7 +50,8 @@ proptest! {
         g.set_sample_rate(48_000.0);
         g.set_params(&GainParams { gain_db });
         let mut out = vec![Frame::default(); block.len()];
-        g.process_block(&block, &mut out);
+        out.clone_from(&block);
+        g.process_block(&mut out);
         // The smoother ramps from unity to the target, so the gain never exceeds the larger of
         // the two. Output is unclamped, so this bound is real.
         let max_gain = libm::powf(10.0, gain_db / 20.0).max(1.0);
@@ -70,12 +72,14 @@ proptest! {
             .map(|i| [(i as f32 % 100.0 - 50.0) / 50.0, -(i as f32 % 100.0 - 50.0) / 50.0])
             .collect();
         let mut wo = vec![Frame::default(); warmup.len()];
-        g.process_block(&warmup, &mut wo);
+        wo.clone_from(&warmup);
+        g.process_block(&mut wo);
 
         // Feed silence
         let silence = vec![Frame::default(); block_size.max(512)];
         let mut out = vec![Frame::default(); silence.len()];
-        g.process_block(&silence, &mut out);
+        out.clone_from(&silence);
+        g.process_block(&mut out);
 
         for f in &out {
             prop_assert!(f[0].abs() < EPSILON, "left not silent: {}", f[0]);
@@ -93,16 +97,20 @@ proptest! {
         // Dirty state
         let junk: Vec<Frame> = (0..64).map(|i| [(i as f32 / 32.0 - 1.0), -(i as f32 / 32.0 - 1.0)]).collect();
         let mut jo = vec![Frame::default(); junk.len()];
-        ga.process_block(&junk, &mut jo);
-        gb.process_block(&junk, &mut jo);
+        jo.clone_from(&junk);
+        ga.process_block(&mut jo);
+        jo.clone_from(&junk);
+        gb.process_block(&mut jo);
 
         ga.reset();
         gb.reset();
 
         let mut oa = vec![Frame::default(); block.len()];
         let mut ob = vec![Frame::default(); block.len()];
-        ga.process_block(&block, &mut oa);
-        gb.process_block(&block, &mut ob);
+        oa.clone_from(&block);
+        ga.process_block(&mut oa);
+        ob.clone_from(&block);
+        gb.process_block(&mut ob);
 
         for (i, (fa, fb)) in oa.iter().zip(ob.iter()).enumerate() {
             prop_assert!((fa[0] - fb[0]).abs() < EPSILON, "left mismatch at sample {}: {} != {}", i, fa[0], fb[0]);
@@ -119,7 +127,8 @@ proptest! {
         gb.set_sample_rate(48_000.0);
         gb.set_params(&GainParams::default());
         let mut ob = vec![Frame::default(); n];
-        gb.process_block(&block, &mut ob);
+        ob.clone_from(&block);
+        gb.process_block(&mut ob);
 
         let mut gt = Gain::default();
         gt.set_sample_rate(48_000.0);
@@ -141,7 +150,8 @@ proptest! {
         // Warm up so smoothing converges
         let warmup = vec![Frame::from([0.5, 0.5]); 256];
         let mut wo = vec![Frame::default(); warmup.len()];
-        g.process_block(&warmup, &mut wo);
+        wo.clone_from(&warmup);
+        g.process_block(&mut wo);
 
         // Change params mid-stream with constant input
         g.set_params(&GainParams { gain_db: gain_db_b });
@@ -167,7 +177,8 @@ proptest! {
         f.set_sample_rate(48_000.0);
         f.set_params(&FilterParams::default());
         let mut out = vec![Frame::default(); block.len()];
-        f.process_block(&block, &mut out);
+        out.clone_from(&block);
+        f.process_block(&mut out);
         for frame in &out {
             prop_assert!(frame[0].is_finite(), "left not finite: {}", frame[0]);
             prop_assert!(frame[1].is_finite(), "right not finite: {}", frame[1]);
@@ -180,7 +191,8 @@ proptest! {
         f.set_sample_rate(48_000.0);
         f.set_params(&FilterParams::default());
         let mut out = vec![Frame::default(); block.len()];
-        f.process_block(&block, &mut out);
+        out.clone_from(&block);
+        f.process_block(&mut out);
         // A one-pole low-pass is a convex average of past inputs, so it cannot exceed the
         // largest input magnitude. Output is unclamped, so a runaway would show here.
         let peak = block.iter().flat_map(|f| f.iter()).fold(0.0f32, |m, v| m.max(v.abs()));
@@ -201,7 +213,8 @@ proptest! {
             .map(|i| [(i as f32 % 100.0 - 50.0) / 50.0, -(i as f32 % 100.0 - 50.0) / 50.0])
             .collect();
         let mut wo = vec![Frame::default(); warmup.len()];
-        f.process_block(&warmup, &mut wo);
+        wo.clone_from(&warmup);
+        f.process_block(&mut wo);
 
         // Feed extended silence.
         // At default 20 kHz cutoff with 48 kHz sample rate, alpha ≈ 0.999,
@@ -209,7 +222,8 @@ proptest! {
         let silence_len = 50_000;
         let silence = vec![Frame::default(); silence_len];
         let mut out = vec![Frame::default(); silence_len];
-        f.process_block(&silence, &mut out);
+        out.clone_from(&silence);
+        f.process_block(&mut out);
 
         // Check the tail end (last quarter) has decayed to near-zero
         let tail_start = silence_len - silence_len / 4;
@@ -237,8 +251,10 @@ proptest! {
         fb.set_params(&params);
         let mut oa = vec![Frame::default(); block.len()];
         let mut ob = vec![Frame::default(); block.len()];
-        fa.process_block(&block, &mut oa);
-        fb.process_block(&block, &mut ob);
+        oa.clone_from(&block);
+        fa.process_block(&mut oa);
+        ob.clone_from(&block);
+        fb.process_block(&mut ob);
         for (a, b) in oa.iter().zip(&ob) {
             prop_assert_eq!(a[0].to_bits(), b[0].to_bits());
             prop_assert_eq!(a[1].to_bits(), b[1].to_bits());
@@ -254,16 +270,20 @@ proptest! {
 
         let junk: Vec<Frame> = (0..64).map(|i| [(i as f32 / 32.0 - 1.0), -(i as f32 / 32.0 - 1.0)]).collect();
         let mut jo = vec![Frame::default(); junk.len()];
-        fa.process_block(&junk, &mut jo);
-        fb.process_block(&junk, &mut jo);
+        jo.clone_from(&junk);
+        fa.process_block(&mut jo);
+        jo.clone_from(&junk);
+        fb.process_block(&mut jo);
 
         fa.reset();
         fb.reset();
 
         let mut oa = vec![Frame::default(); block.len()];
         let mut ob = vec![Frame::default(); block.len()];
-        fa.process_block(&block, &mut oa);
-        fb.process_block(&block, &mut ob);
+        oa.clone_from(&block);
+        fa.process_block(&mut oa);
+        ob.clone_from(&block);
+        fb.process_block(&mut ob);
 
         for (i, (a, b)) in oa.iter().zip(ob.iter()).enumerate() {
             prop_assert!((a[0] - b[0]).abs() < EPSILON, "left mismatch at sample {}: {} != {}", i, a[0], b[0]);
@@ -280,7 +300,8 @@ proptest! {
         fb.set_sample_rate(48_000.0);
         fb.set_params(&FilterParams::default());
         let mut ob = vec![Frame::default(); n];
-        fb.process_block(&block, &mut ob);
+        ob.clone_from(&block);
+        fb.process_block(&mut ob);
 
         let mut ft = OnePoleLowPass::default();
         ft.set_sample_rate(48_000.0);
@@ -302,7 +323,8 @@ proptest! {
         // Warm up so smoothing converges
         let warmup = vec![Frame::from([0.5, 0.5]); 256];
         let mut wo = vec![Frame::default(); warmup.len()];
-        f.process_block(&warmup, &mut wo);
+        wo.clone_from(&warmup);
+        f.process_block(&mut wo);
 
         // Change params mid-stream
         f.set_params(&FilterParams { cutoff_hz: cutoff_b });
@@ -374,7 +396,8 @@ proptest! {
         s.set_sample_rate(48_000.0);
         s.set_params(&SineParams { level_dbfs: level, frequency_hz: freq });
         let mut out = vec![Frame::default(); block.len()];
-        s.process_block(&block, &mut out);
+        out.clone_from(&block);
+        s.process_block(&mut out);
         for f in &out {
             prop_assert!(f[0].is_finite(), "left not finite: {}", f[0]);
             prop_assert!(f[1].is_finite(), "right not finite: {}", f[1]);
@@ -387,7 +410,8 @@ proptest! {
         s.set_sample_rate(48_000.0);
         s.set_params(&SineParams { level_dbfs: level, frequency_hz: freq });
         let mut out = vec![Frame::default(); block.len()];
-        s.process_block(&block, &mut out);
+        out.clone_from(&block);
+        s.process_block(&mut out);
         // Bounded twice over: never past full scale, and never past the requested peak. The second
         // bound is the one that catches an amplitude that wanders while staying legal.
         let ceiling = libm::pow(10.0, f64::from(level) / 20.0) as f32 * (1.0 + EPSILON);
@@ -410,16 +434,20 @@ proptest! {
 
         let junk: Vec<Frame> = (0..64).map(|i| [(i as f32 / 32.0 - 1.0), -(i as f32 / 32.0 - 1.0)]).collect();
         let mut jo = vec![Frame::default(); junk.len()];
-        sa.process_block(&junk, &mut jo);
-        sb.process_block(&junk, &mut jo);
+        jo.clone_from(&junk);
+        sa.process_block(&mut jo);
+        jo.clone_from(&junk);
+        sb.process_block(&mut jo);
 
         sa.reset();
         sb.reset();
 
         let mut oa = vec![Frame::default(); block.len()];
         let mut ob = vec![Frame::default(); block.len()];
-        sa.process_block(&block, &mut oa);
-        sb.process_block(&block, &mut ob);
+        oa.clone_from(&block);
+        sa.process_block(&mut oa);
+        ob.clone_from(&block);
+        sb.process_block(&mut ob);
 
         for (i, (a, b)) in oa.iter().zip(ob.iter()).enumerate() {
             prop_assert_eq!(a[0].to_bits(), b[0].to_bits(), "left mismatch at {}", i);
@@ -436,7 +464,8 @@ proptest! {
         fb.set_sample_rate(48_000.0);
         fb.set_params(&SineParams { level_dbfs: -20.0, frequency_hz: freq });
         let mut ob = vec![Frame::default(); n];
-        fb.process_block(&block, &mut ob);
+        ob.clone_from(&block);
+        fb.process_block(&mut ob);
 
         let mut ft = Sine::default();
         ft.set_sample_rate(48_000.0);
@@ -457,14 +486,16 @@ proptest! {
         sa.set_sample_rate(48_000.0);
         sa.set_params(&params);
         let mut oa = vec![Frame::default(); block.len()];
-        sa.process_block(&block, &mut oa);
+        oa.clone_from(&block);
+        sa.process_block(&mut oa);
 
         // Built the same way but later, with no shared state beyond the parameter struct.
         let mut sb = Sine::default();
         sb.set_sample_rate(48_000.0);
         sb.set_params(&params);
         let mut ob = vec![Frame::default(); block.len()];
-        sb.process_block(&block, &mut ob);
+        ob.clone_from(&block);
+        sb.process_block(&mut ob);
 
         for (i, (a, b)) in oa.iter().zip(ob.iter()).enumerate() {
             prop_assert_eq!(a[0].to_bits(), b[0].to_bits(), "left mismatch at {}", i);
@@ -480,7 +511,8 @@ proptest! {
         e.set_sample_rate(48_000.0);
         e.set_params(&params);
         let mut out = vec![Frame::default(); block.len()];
-        e.process_block(&block, &mut out);
+        out.clone_from(&block);
+        e.process_block(&mut out);
         for f in &out {
             prop_assert!(f[0].is_finite(), "left not finite: {}", f[0]);
             prop_assert!(f[1].is_finite(), "right not finite: {}", f[1]);
@@ -493,7 +525,8 @@ proptest! {
         e.set_sample_rate(48_000.0);
         e.set_params(&params);
         let mut out = vec![Frame::default(); block.len()];
-        e.process_block(&block, &mut out);
+        out.clone_from(&block);
+        e.process_block(&mut out);
         let ceiling = libm::pow(10.0, f64::from(params.level_dbfs) / 20.0) as f32 * (1.0 + EPSILON);
         for f in &out {
             prop_assert!(f[0].abs() <= 1.0 + EPSILON, "left unbounded: {}", f[0]);
@@ -514,16 +547,20 @@ proptest! {
 
         let junk: Vec<Frame> = (0..64).map(|i| [(i as f32 / 32.0 - 1.0), -(i as f32 / 32.0 - 1.0)]).collect();
         let mut jo = vec![Frame::default(); junk.len()];
-        ea.process_block(&junk, &mut jo);
-        eb.process_block(&junk, &mut jo);
+        jo.clone_from(&junk);
+        ea.process_block(&mut jo);
+        jo.clone_from(&junk);
+        eb.process_block(&mut jo);
 
         ea.reset();
         eb.reset();
 
         let mut oa = vec![Frame::default(); block.len()];
         let mut ob = vec![Frame::default(); block.len()];
-        ea.process_block(&block, &mut oa);
-        eb.process_block(&block, &mut ob);
+        oa.clone_from(&block);
+        ea.process_block(&mut oa);
+        ob.clone_from(&block);
+        eb.process_block(&mut ob);
 
         for (i, (a, b)) in oa.iter().zip(ob.iter()).enumerate() {
             prop_assert_eq!(a[0].to_bits(), b[0].to_bits(), "left mismatch at {}", i);
@@ -540,7 +577,8 @@ proptest! {
         fb.set_sample_rate(48_000.0);
         fb.set_params(&params);
         let mut ob = vec![Frame::default(); n];
-        fb.process_block(&block, &mut ob);
+        ob.clone_from(&block);
+        fb.process_block(&mut ob);
 
         let mut ft = ExponentialSweep::default();
         ft.set_sample_rate(48_000.0);
@@ -559,13 +597,15 @@ proptest! {
         ea.set_sample_rate(48_000.0);
         ea.set_params(&params);
         let mut oa = vec![Frame::default(); block.len()];
-        ea.process_block(&block, &mut oa);
+        oa.clone_from(&block);
+        ea.process_block(&mut oa);
 
         let mut eb = ExponentialSweep::default();
         eb.set_sample_rate(48_000.0);
         eb.set_params(&params);
         let mut ob = vec![Frame::default(); block.len()];
-        eb.process_block(&block, &mut ob);
+        ob.clone_from(&block);
+        eb.process_block(&mut ob);
 
         for (i, (a, b)) in oa.iter().zip(ob.iter()).enumerate() {
             prop_assert_eq!(a[0].to_bits(), b[0].to_bits(), "left mismatch at {}", i);
@@ -581,7 +621,8 @@ proptest! {
         p.set_sample_rate(48_000.0);
         p.set_params(&params);
         let mut out = vec![Frame::default(); block.len()];
-        p.process_block(&block, &mut out);
+        out.clone_from(&block);
+        p.process_block(&mut out);
         for f in &out {
             prop_assert!(f[0].is_finite(), "left not finite: {}", f[0]);
             prop_assert!(f[1].is_finite(), "right not finite: {}", f[1]);
@@ -594,7 +635,8 @@ proptest! {
         p.set_sample_rate(48_000.0);
         p.set_params(&params);
         let mut out = vec![Frame::default(); block.len()];
-        p.process_block(&block, &mut out);
+        out.clone_from(&block);
+        p.process_block(&mut out);
         let ceiling = libm::pow(10.0, f64::from(params.level_dbfs) / 20.0) as f32 * (1.0 + EPSILON);
         for f in &out {
             prop_assert!(f[0].abs() <= 1.0 + EPSILON, "left unbounded: {}", f[0]);
@@ -615,16 +657,20 @@ proptest! {
 
         let junk: Vec<Frame> = (0..64).map(|i| [(i as f32 / 32.0 - 1.0), -(i as f32 / 32.0 - 1.0)]).collect();
         let mut jo = vec![Frame::default(); junk.len()];
-        pa.process_block(&junk, &mut jo);
-        pb.process_block(&junk, &mut jo);
+        jo.clone_from(&junk);
+        pa.process_block(&mut jo);
+        jo.clone_from(&junk);
+        pb.process_block(&mut jo);
 
         pa.reset();
         pb.reset();
 
         let mut oa = vec![Frame::default(); block.len()];
         let mut ob = vec![Frame::default(); block.len()];
-        pa.process_block(&block, &mut oa);
-        pb.process_block(&block, &mut ob);
+        oa.clone_from(&block);
+        pa.process_block(&mut oa);
+        ob.clone_from(&block);
+        pb.process_block(&mut ob);
 
         for (i, (a, b)) in oa.iter().zip(ob.iter()).enumerate() {
             prop_assert_eq!(a[0].to_bits(), b[0].to_bits(), "left mismatch at {}", i);
@@ -641,7 +687,8 @@ proptest! {
         fb.set_sample_rate(48_000.0);
         fb.set_params(&params);
         let mut ob = vec![Frame::default(); n];
-        fb.process_block(&block, &mut ob);
+        ob.clone_from(&block);
+        fb.process_block(&mut ob);
 
         let mut ft = PulseTrain::default();
         ft.set_sample_rate(48_000.0);
@@ -660,13 +707,15 @@ proptest! {
         pa.set_sample_rate(48_000.0);
         pa.set_params(&params);
         let mut oa = vec![Frame::default(); block.len()];
-        pa.process_block(&block, &mut oa);
+        oa.clone_from(&block);
+        pa.process_block(&mut oa);
 
         let mut pb = PulseTrain::default();
         pb.set_sample_rate(48_000.0);
         pb.set_params(&params);
         let mut ob = vec![Frame::default(); block.len()];
-        pb.process_block(&block, &mut ob);
+        ob.clone_from(&block);
+        pb.process_block(&mut ob);
 
         for (i, (a, b)) in oa.iter().zip(ob.iter()).enumerate() {
             prop_assert_eq!(a[0].to_bits(), b[0].to_bits(), "left mismatch at {}", i);
@@ -693,7 +742,8 @@ fn run_finite_after_event<P: Processor>(
     p.set_params(good);
     let block = vec![[0.5f32, -0.5]; 512];
     let mut out = vec![Frame::default(); block.len()];
-    p.process_block(&block, &mut out);
+    out.clone_from(&block);
+    p.process_block(&mut out);
     out.iter().all(|f| f[0].is_finite() && f[1].is_finite())
 }
 

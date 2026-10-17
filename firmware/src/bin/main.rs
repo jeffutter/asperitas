@@ -79,16 +79,11 @@ impl AudioProcessor for KnobChain {
         self.gain
             .set_params(&Gain::params_from_normalised(knobs[1]));
 
-        let mut frames_in = [Frame::default(); BLOCK_LENGTH];
-        decode_block(input, &mut frames_in);
-
-        let mut frames_out = [Frame::default(); BLOCK_LENGTH];
-        self.filter.process_block(&frames_in, &mut frames_out);
-
-        let mut frames_processed = [Frame::default(); BLOCK_LENGTH];
-        self.gain.process_block(&frames_out, &mut frames_processed);
-
-        encode_block(&frames_processed, output);
+        let mut frames = [Frame::default(); BLOCK_LENGTH];
+        decode_block(input, &mut frames);
+        self.filter.process_block(&mut frames);
+        self.gain.process_block(&mut frames);
+        encode_block(&frames, output);
     }
 }
 

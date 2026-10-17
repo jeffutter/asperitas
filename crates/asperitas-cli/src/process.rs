@@ -2,7 +2,7 @@
 
 use asperitas_dsp::filter::OnePoleLowPass;
 use asperitas_dsp::gain::Gain;
-use asperitas_dsp::processor::{Frame, Processor};
+use asperitas_dsp::processor::Processor;
 
 use crate::wav_io;
 
@@ -18,20 +18,20 @@ pub struct ProcessArgs {
 pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
     let (spec, frames) = wav_io::read_wav(&args.input_path)?;
 
-    let mut output = vec![Frame::default(); frames.len()];
+    let mut frames = frames;
 
     match args.processor_name.as_str() {
         "gain" => {
             let params = Gain::parse_params_from_cli(&parse_param_pairs(&args.params)?)?;
             let sample_rate = spec.sample_rate as f32;
             let mut proc = Gain::new(sample_rate, &params);
-            proc.process_block(&frames, &mut output);
+            proc.process_block(&mut frames);
         }
         "filter" => {
             let params = OnePoleLowPass::parse_params_from_cli(&parse_param_pairs(&args.params)?)?;
             let sample_rate = spec.sample_rate as f32;
             let mut proc = OnePoleLowPass::new(sample_rate, &params);
-            proc.process_block(&frames, &mut output);
+            proc.process_block(&mut frames);
         }
         other => {
             return Err(format!(
@@ -43,7 +43,7 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
 
     // Output is always stereo regardless of the input's channel count; only the rate
     // carries over from the input file.
-    wav_io::write_wav(&args.output_path, spec.sample_rate, &output)?;
+    wav_io::write_wav(&args.output_path, spec.sample_rate, &frames)?;
     Ok(())
 }
 

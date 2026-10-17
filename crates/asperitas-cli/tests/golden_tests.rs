@@ -73,13 +73,13 @@ where
 {
     let (frames, sample_rate) = input.frames();
 
-    let mut output = vec![Frame::default(); frames.len()];
+    let mut output = frames;
     let mut proc = P::default();
     proc.set_sample_rate(sample_rate as f32);
     proc.set_params(&P::Params::default());
     // Settle: the golden is the processor at its default parameters, not a ramp towards them.
     proc.reset();
-    proc.process_block(&frames, &mut output);
+    proc.process_block(&mut output);
 
     let slug = input.slug();
     let path = format!("{GOLDEN_DIR}/{processor}_default_{slug}.wav");

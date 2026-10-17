@@ -1467,19 +1467,14 @@ mod fx_ctl {
     /// the roughly 590 us of 666 us headroom. No await, no flash access, no allocation; the
     /// critical sections are a handful of cycles and only run when a request is pending or an
     /// effect is selected.
-    pub fn render<G: Processor>(
-        chain: &mut FxChain<G>,
-        fx_seen: &mut u32,
-        input: &[Frame],
-        output: &mut [Frame],
-    ) {
+    pub fn render<G: Processor>(chain: &mut FxChain<G>, fx_seen: &mut u32, block: &mut [Frame]) {
         let generation = FX_GENERATION.load(Ordering::Acquire);
         if generation != *fx_seen {
             *fx_seen = generation;
             let (code, value) = cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).get());
             chain.select(code, value);
         }
-        chain.process_block_with(input, output, |base| {
+        chain.process_block_with(block, |base| {
             // Upstream of smoothing, as `main` does.
             let [knob] = cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow().merge([base]));
             knob
@@ -1715,7 +1710,7 @@ mod excerpt_play {
 
         /// The whole audio-path cost of replay: `take_block` and a sample conversion. No QSPI, no
         /// flash mutex, no await, no allocation. Samples convert as `s / 32768` into both channels.
-        fn process_block(&mut self, _input: &[Frame], output: &mut [Frame]) {
+        fn process_block(&mut self, output: &mut [Frame]) {
             let mut block = [0i16; BLOCK_SAMPLES];
             let _ = REPLAY.take_block(&mut block);
             for (frame, sample) in output.iter_mut().zip(block) {
@@ -1836,10 +1831,6 @@ async fn halt_unplayable(why: console::PlayRefusal) -> ! {
 struct RigAudio {
     generator: &'static mut ActiveGenerator,
     producer: Producer,
-    /// Silence handed to the generator because `Processor` is shaped for effects: `tick` takes an
-    /// input frame and these sources discard it. The codec's input goes to the capture ring only,
-    /// never to the generator or the output.
-    frames_in: [Frame; BLOCK_LENGTH],
     /// Silence until the generator plays. A one-shot generator is held back until the capture's
     /// first callback: started at boot, it would be two seconds (ARM_DELAY_MS) through before the
     /// recording began, and the analysis needs it whole. A periodic one plays from the first
@@ -1860,7 +1851,6 @@ impl RigAudio {
                 callbacks_in_block: 0,
                 last_entry: None,
             },
-            frames_in: [Frame::default(); BLOCK_LENGTH],
             frames_out: [Frame::default(); BLOCK_LENGTH],
             playing,
             fx_seen: 0,
@@ -1892,12 +1882,7 @@ impl AudioProcessor for RigAudio {
         // Render site, mirroring `main.rs`: stimulus -> [processor slot] -> encode_block.
         // The processor slot is empty by design and is where a measured effect will hang.
         if self.playing {
-            fx_ctl::render(
-                self.generator,
-                &mut self.fx_seen,
-                &self.frames_in,
-                &mut self.frames_out,
-            );
+            fx_ctl::render(self.generator, &mut self.fx_seen, &mut self.frames_out);
         }
         audio::encode_block(&self.frames_out, output);
         self.producer.finish(entry);

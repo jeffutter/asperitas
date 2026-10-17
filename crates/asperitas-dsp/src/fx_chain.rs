@@ -75,17 +75,12 @@ impl<G: Processor> FxChain<G> {
     ///
     /// `knob` maps the `FX` value to the value actually applied; the rig passes its live override
     /// merge here. It runs only when an effect is selected, so bypass stays free of it.
-    pub fn process_block_with(
-        &mut self,
-        input: &[Frame],
-        output: &mut [Frame],
-        knob: impl FnOnce(f32) -> f32,
-    ) {
-        self.gen.process_block(input, output);
+    pub fn process_block_with(&mut self, block: &mut [Frame], knob: impl FnOnce(f32) -> f32) {
+        self.gen.process_block(block);
         if self.fx.kind() != FxKind::Bypass {
             // Upstream of smoothing; a no-op when the value is unchanged.
             self.fx.set_knob(knob(self.base));
-            self.fx.process(output);
+            self.fx.process(block);
         }
     }
 }
@@ -117,8 +112,8 @@ impl<G: Processor> Processor for FxChain<G> {
         self.gen.reset();
     }
 
-    fn process_block(&mut self, input: &[Frame], output: &mut [Frame]) {
-        self.process_block_with(input, output, |base| base);
+    fn process_block(&mut self, block: &mut [Frame]) {
+        self.process_block_with(block, |base| base);
     }
 }
 
@@ -173,8 +168,8 @@ mod tests {
     fn render<P: Processor>(p: &mut P, blocks: usize) -> Vec<Frame> {
         let mut all = Vec::new();
         for _ in 0..blocks {
-            let mut out = [[0.0; 2]; 32];
-            p.process_block(&SILENCE, &mut out);
+            let mut out = SILENCE;
+            p.process_block(&mut out);
             all.extend_from_slice(&out);
         }
         all
@@ -246,15 +241,17 @@ mod tests {
     fn live_knob_change_moves_the_output() {
         let mut c = chain(true);
         c.select(1, u16::MAX);
-        let mut out = [[0.0; 2]; 32];
+        let mut out;
         let mut loud = 0.0;
         for _ in 0..200 {
-            c.process_block_with(&SILENCE, &mut out, |b| b);
+            out = SILENCE;
+            c.process_block_with(&mut out, |b| b);
             loud = peak(&out);
         }
         let mut quiet = 0.0;
         for _ in 0..2000 {
-            c.process_block_with(&SILENCE, &mut out, |_| 0.0);
+            out = SILENCE;
+            c.process_block_with(&mut out, |_| 0.0);
             quiet = peak(&out);
         }
         assert!(quiet < loud * 0.05, "{loud} -> {quiet}");
@@ -264,7 +261,7 @@ mod tests {
     fn closure_is_not_called_in_bypass() {
         let mut c = chain(true);
         let mut out = [[0.0; 2]; 32];
-        c.process_block_with(&SILENCE, &mut out, |_| panic!("override merged in bypass"));
+        c.process_block_with(&mut out, |_| panic!("override merged in bypass"));
     }
 
     #[test]

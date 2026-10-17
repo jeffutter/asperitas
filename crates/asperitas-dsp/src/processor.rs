@@ -26,14 +26,11 @@ pub trait Processor {
     /// identical output regardless of prior history.
     fn reset(&mut self);
 
-    /// Process a block of frames. Provided implementation delegates to `tick`.
+    /// Process a block of frames in place. Provided implementation delegates to `tick`.
     /// Override only if you have a genuinely more efficient block-level algorithm.
-    ///
-    /// If `input` and `output` differ in length, only the overlapping prefix is processed;
-    /// this never panics, per the no-`Result`, real-time-safe contract above.
-    fn process_block(&mut self, input: &[Frame], output: &mut [Frame]) {
-        for (inp, out) in input.iter().zip(output.iter_mut()) {
-            *out = self.tick(*inp);
+    fn process_block(&mut self, block: &mut [Frame]) {
+        for frame in block.iter_mut() {
+            *frame = self.tick(*frame);
         }
     }
 }
