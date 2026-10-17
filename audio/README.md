@@ -50,9 +50,11 @@ Keep them archived elsewhere; they cannot be recovered from these files.
 
 ## `goldens/` — frozen processor output
 
-Twenty-two files: `gain` and `filter` at their default parameters, over three synthetic
-signals and all eight instrument clips. Naming is `{processor}_default_{input}.wav`.
-Always stereo, because the DSP pipeline works in stereo frames throughout.
+Fourteen files: `gain`, `filter` and `asperitas` (the full effect chain) at default and
+non-default parameters, over synthetic signals and a few instrument clips. Naming is
+`{processor}_{variant}_{input}.wav`, where the variant is `default` or a tag for the
+parameters (`cutoff500`, `boost12`, ...). **32-bit float stereo**, so levels above full
+scale are kept and quiet tails are not quantised away.
 
 Generated and checked by `crates/asperitas-cli/tests/golden_tests.rs`:
 
@@ -65,14 +67,18 @@ Regeneration is deliberately opt-in. **A golden diff means "listen to this befor
 accepting it", not "run the update command"** — that distinction is the entire value of
 the mechanism. Goldens are listenable WAVs precisely so you can.
 
+Each case runs through `asperitas_cli::process::run_process`, the same entry point as the
+CLI, and is compared sample by sample at an absolute tolerance of 1e-6 (last-bit float
+variation only).
+
 Two caveats worth knowing before reading a diff:
 
-- `GainParams::default()` is 0 dB, so the `gain_default_*` goldens are near-copies of
-  their input. They guard the read/widen/process/write chain over real material; the gain
-  maths itself is covered by the synthetic cases.
+- `GainParams::default()` is 0 dB, an identity, so there is only one default-parameter gain
+  golden (`gain_default_pluck`); it guards the read/process/write chain. The gain maths is
+  covered by the `cut12`, `boost6` and `boost12` cases, the last of which exceeds full scale.
 - `FilterParams::default()` is 20 kHz, which at 48 kHz is a mild low-pass rather than a
-  true pass-through (α ≈ 0.93), so those goldens do differ audibly little but measurably
-  from their input.
+  true pass-through (alpha about 0.93). The `cutoff500` impulse golden is the one to read for
+  the filter's slope and decaying tail.
 
 ## `captures/` - on-device loopback evidence
 

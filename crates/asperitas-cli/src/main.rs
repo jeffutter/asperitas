@@ -1,9 +1,6 @@
 use clap::{Parser, Subcommand};
 
 mod generate;
-mod process;
-mod synth;
-mod wav_io;
 
 #[derive(Parser)]
 #[command(
@@ -42,13 +39,13 @@ fn main() {
 
     let result = match cli.command {
         Command::Process(args) => {
-            let proc_args = process::ProcessArgs {
+            let proc_args = asperitas_cli::process::ProcessArgs {
                 input_path: args.input,
                 output_path: args.output,
                 processor_name: args.processor,
                 params: args.params,
             };
-            process::run_process(&proc_args)
+            asperitas_cli::process::run_process(&proc_args)
         }
         Command::Generate(args) => generate::run_generate(&args),
     };

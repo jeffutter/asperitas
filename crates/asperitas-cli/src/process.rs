@@ -174,7 +174,7 @@ mod tests {
         );
     }
 
-    fn run_on_ramp(processor: &str, params: &[&str]) -> Vec<i16> {
+    fn run_on_ramp(processor: &str, params: &[&str]) -> Vec<f32> {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("in.wav");
         let output = dir.path().join("out.wav");
@@ -200,7 +200,7 @@ mod tests {
         .unwrap();
         hound::WavReader::open(&output)
             .unwrap()
-            .samples::<i16>()
+            .samples::<f32>()
             .map(|s| s.unwrap())
             .collect()
     }
@@ -224,8 +224,8 @@ mod tests {
         let spec = hound::WavSpec {
             channels: 2,
             sample_rate: 48_000,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
         };
         let mut w = hound::WavWriter::create(&mid, spec).unwrap();
         for s in &filtered {
@@ -239,14 +239,14 @@ mod tests {
             params: vec!["gain_db=-6".to_string()],
         })
         .unwrap();
-        let staged: Vec<i16> = hound::WavReader::open(&out)
+        let staged: Vec<f32> = hound::WavReader::open(&out)
             .unwrap()
-            .samples::<i16>()
+            .samples::<f32>()
             .map(|s| s.unwrap())
             .collect();
         assert_eq!(chained.len(), staged.len());
         for (a, b) in chained.iter().zip(&staged) {
-            assert!((*a as i32 - *b as i32).abs() <= 3, "{a} vs {b}");
+            assert!((a - b).abs() <= 1e-5, "{a} vs {b}");
         }
     }
 
@@ -259,8 +259,8 @@ mod tests {
         let max_diff = out
             .iter()
             .zip(&unity)
-            .map(|(a, b)| (*a as i32 - *b as i32).abs())
-            .max();
-        assert!(max_diff.unwrap() < 1500, "{max_diff:?}");
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(max_diff < 0.05, "{max_diff:?}");
     }
 }

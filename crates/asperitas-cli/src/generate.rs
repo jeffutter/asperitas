@@ -2,8 +2,8 @@
 
 use clap::Parser;
 
-use crate::synth;
-use crate::wav_io;
+use asperitas_cli::synth;
+use asperitas_cli::wav_io;
 
 /// Signal type to generate.
 #[derive(clap::ValueEnum, Clone, Debug)]
