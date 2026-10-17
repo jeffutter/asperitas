@@ -8,8 +8,7 @@ use core::cell::UnsafeCell;
 use asperitas_firmware::audio::{self, decode_block, encode_block, AudioProcessor, BLOCK_LENGTH};
 use asperitas_firmware::host_control;
 
-use asperitas_dsp::filter::OnePoleLowPass;
-use asperitas_dsp::gain::Gain;
+use asperitas_dsp::asperitas::{Asperitas, Controls};
 use asperitas_dsp::processor::{Frame, Processor};
 use asperitas_logging::info;
 use asperitas_pod::knob::Knobs;
@@ -61,11 +60,10 @@ static KNOB_STATE: StaticCell<KnobState> = StaticCell::new();
 /// Poll interval for control surface (~1 kHz).
 const POLL_INTERVAL_MS: u64 = 1;
 
-/// The audio chain: low-pass filter (knob 1) then gain (knob 2), once per block.
+/// The audio callback's state: the shared knob readings and the effect they drive.
 struct KnobChain {
     knob_state: &'static KnobState,
-    filter: OnePoleLowPass,
-    gain: Gain,
+    effect: Asperitas,
 }
 
 impl AudioProcessor for KnobChain {
@@ -73,16 +71,12 @@ impl AudioProcessor for KnobChain {
         // Read latest knob positions under critical section.
         let knobs = host_control::merge(cortex_m::interrupt::free(|_| self.knob_state.read()));
 
-        // Update processor params at block rate.
-        self.filter
-            .set_params(&OnePoleLowPass::params_from_normalised(knobs[0]));
-        self.gain
-            .set_params(&Gain::params_from_normalised(knobs[1]));
+        // Controls are applied once per block; the effect smooths the change.
+        self.effect.set_controls(&Controls { knobs });
 
         let mut frames = [Frame::default(); BLOCK_LENGTH];
         decode_block(input, &mut frames);
-        self.filter.process_block(&mut frames);
-        self.gain.process_block(&mut frames);
+        self.effect.process_block(&mut frames);
         encode_block(&frames, output);
     }
 }
@@ -190,17 +184,10 @@ async fn main(spawner: embassy_executor::Spawner) {
         Knobs::new(adc1, knob1, knob2)
     };
 
-    // Create processors - OnePoleLowPass (knob 1) -> Gain (knob 2).
-    let mut filter = OnePoleLowPass::default();
-    let mut gain = Gain::default();
-
-    // Set sample rate explicitly to match device actual (48 kHz default).
-    filter.set_sample_rate(48_000.0);
-    gain.set_sample_rate(48_000.0);
+    // The effect runs at the device's 48 kHz sample rate.
     let chain = CHAIN.init(KnobChain {
         knob_state,
-        filter,
-        gain,
+        effect: Asperitas::new(48_000.0, &Controls::default()),
     });
 
     // Prepare the audio interface (SAI + codec init + DMA buffers)
