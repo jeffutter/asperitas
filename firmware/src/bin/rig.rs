@@ -1784,7 +1784,7 @@ fn replay_pass_open() -> bool {
 /// tasks running and starts no audio, which is the point - a slot with nothing playable is a
 /// configuration mistake to surface, not a reason to play silence and look healthy.
 #[cfg(feature = "stim-excerpt")]
-async fn halt_unplayable(why: console::PlayRefusal) -> ! {
+async fn halt_unplayable(why: console::PlayRefusal, console: asperitas_logging::Console) -> ! {
     error!(
         "rig: excerpt slot {} is not playable ({}); not starting audio",
         excerpt_play::SLOT,
@@ -1794,11 +1794,7 @@ async fn halt_unplayable(why: console::PlayRefusal) -> ! {
     let n = console::exc_play_refused_body(excerpt_play::SLOT, why, &mut body);
     emit_console(&body[..n]);
     asperitas_logging::led::set_global_state(asperitas_logging::led::LedState::Panicked);
-    #[cfg(feature = "log-usb")]
-    let console_fut = asperitas_logging::usb::run();
-    #[cfg(not(feature = "log-usb"))]
-    let console_fut = core::future::pending::<()>();
-    embassy_futures::select::select(console_fut, asperitas_logging::led::blink_task()).await;
+    embassy_futures::select::select(console.run(), asperitas_logging::led::blink_task()).await;
     #[allow(clippy::empty_loop)]
     loop {}
 }
@@ -1964,14 +1960,6 @@ fn boot_halt() -> ! {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
-    // Install the backend before the first record exists. Under `log-usb` this would be wrong: the
-    // logger cannot be installed until the device is live, and [`asperitas_logging::usb::init`]
-    // below does it, so this is only the other configurations' entry point.
-    #[cfg(not(feature = "log-usb"))]
-    asperitas_logging::init();
-
-    info!("rig booting");
-
     // Claim the core peripherals BEFORE `hal::init`, so that whatever else in the stack wants
     // them finds them gone rather than half-configured by us. The `Option` is matched below
     // rather than unwrapped or `steal()`ed: `None` means somebody else owns the core peripherals,
@@ -1992,7 +1980,7 @@ async fn main(_spawner: Spawner) {
 
     let board: DaisyBoard<'_> = new_daisy_board!(p);
 
-    // Discard USB peripherals - usb::init() steals them directly via Peri::steal(). Same
+    // Discard USB peripherals - `asperitas_logging::init` steals them directly via Peri::steal(). Same
     // invariant as `main.rs`: reading this field would create a second handle for the same
     // physical peripheral.
     let _ = board.usb_peripherals;
@@ -2000,11 +1988,9 @@ async fn main(_spawner: Spawner) {
     // Init RGB LED - single owner for boot stages + panic handler.
     asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
 
-    // Init USB CDC serial logging.
-    #[cfg(feature = "log-usb")]
-    let _usb_handle = asperitas_logging::usb::init(RigUsbIrqs);
-    #[cfg(feature = "log-usb")]
-    info!("USB logging initialized");
+    // Bring up logging. Records logged before this call are discarded.
+    let console = asperitas_logging::init(RigUsbIrqs);
+    info!("rig booting");
 
     // The claim is matched here rather than at the `take()` above, and the gap is the LED: a
     // failure that early has no pin to report through, so taking the peripherals first and
@@ -2055,7 +2041,7 @@ async fn main(_spawner: Spawner) {
     #[cfg(feature = "stim-excerpt")]
     let player = match excerpt_play::load(&mut cp.SCB).await {
         Ok(player) => player,
-        Err(why) => halt_unplayable(why).await,
+        Err(why) => halt_unplayable(why, console).await,
     };
     #[cfg(feature = "stim-excerpt")]
     let want_crc = player.want_crc16();
@@ -2122,16 +2108,10 @@ async fn main(_spawner: Spawner) {
     // the one binary with a consumer for it, and every other binary keeps EP OUT unread.
     #[cfg(feature = "log-usb")]
     let install_fut = run_install(asperitas_logging::usb::enable_inbound());
-    // No console, no inbound path, nothing to install from. Same `pending()` stand-in as below.
+    // No console, no inbound path, nothing to install from, so this never wakes.
     #[cfg(not(feature = "log-usb"))]
     let install_fut = core::future::pending::<()>();
-    #[cfg(feature = "log-usb")]
-    let console_fut = asperitas_logging::usb::run();
-    // No drain task exists without the console, and RTT needs no task to exist at all - the
-    // probe reads RAM behind our back. `pending()` stands in so this future is written once
-    // instead of twice: it never wakes, exactly like the drain task it replaces.
-    #[cfg(not(feature = "log-usb"))]
-    let console_fut = core::future::pending::<()>();
+    let console_fut = console.run();
     let led_fut = asperitas_logging::led::blink_task();
     // The timeline finishes after its dump; the reporter and the installer never do, so the join
     // never completes.

@@ -37,15 +37,4 @@ fn defmt_panic_handler() -> ! {
 use defmt_rtt as _;
 
 #[cfg(not(feature = "log-defmt"))]
-#[defmt::global_logger]
-struct Logger;
-
-#[cfg(not(feature = "log-defmt"))]
-unsafe impl defmt::Logger for Logger {
-    fn acquire() {}
-    unsafe fn release() {}
-    unsafe fn flush() {}
-    unsafe fn write(data: &[u8]) {
-        let _ = data;
-    }
-}
+asperitas_logging::noop_defmt_logger!();

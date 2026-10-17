@@ -124,21 +124,11 @@ async fn main(spawner: embassy_executor::Spawner) {
     // Before anything else can touch RCC_RSR: CTL RSN reports what this read.
     host_control::capture_reset_reason();
 
-    // Install the backend before the first record exists. Under `log-usb` this would be wrong —
-    // the logger cannot be installed until the device is live, and [`usb::init`] below does it —
-    // so it is only this configuration's entry point. Everything logged before the console comes
-    // up is invisible on USB; over RTT it is not, which is why boot records are worth checking
-    // here rather than at "USB logging initialized".
-    #[cfg(not(feature = "log-usb"))]
-    asperitas_logging::init();
-
-    info!("Booting...");
-
     let config = daisy_embassy::default_rcc();
     let p = hal::init(config);
     let board: DaisyBoard<'_> = new_daisy_board!(p);
 
-    // Discard USB peripherals — usb::init() steals them directly via Peri::steal().
+    // Discard USB peripherals — `asperitas_logging::init` steals them directly via Peri::steal().
     // This field must never be read; using it would create a second Peri handle
     // for the same physical peripheral, defeating Peri's exclusivity guarantee.
     let _ = board.usb_peripherals;
@@ -155,14 +145,11 @@ async fn main(spawner: embassy_executor::Spawner) {
     // Init RGB LED — single owner for boot stages + panic handler.
     asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
 
-    // Init USB CDC serial logging.
-    #[cfg(feature = "log-usb")]
-    let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
-    #[cfg(feature = "log-usb")]
-    info!("USB logging initialized");
-    // Host control (VER/RSN/RST/SET/REL). Must precede `usb::run()` below, which reads the
-    // enable flag once when it starts.
-    #[cfg(feature = "log-usb")]
+    // Bring up logging. Records logged before this call are discarded.
+    let console = asperitas_logging::init(UsbIrqs);
+    info!("Booting...");
+    // Host control (VER/RSN/RST/SET/REL). Must precede `console.run()` below, which reads the
+    // inbound enable flag once when it starts.
     host_control::spawn(&spawner);
 
     // Seed the shared knob state with the effect's defaults so the audio callback never sees
@@ -215,13 +202,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     audio::start(interface, chain).await;
 
     // Thread mode keeps what has no deadline: the console and the LED blink.
-    #[cfg(feature = "log-usb")]
-    let console_fut = asperitas_logging::usb::run();
-    // No drain task exists without the console, and RTT needs no task to exist at all — the
-    // probe reads RAM behind our back. `pending()` stands in so the select below is written
-    // once instead of twice: it never wakes, exactly like the drain task it replaces.
-    #[cfg(not(feature = "log-usb"))]
-    let console_fut = core::future::pending::<()>();
+    let console_fut = console.run();
     let led_fut = asperitas_logging::led::blink_task();
 
     // Neither returns. If one does, the audio interrupt would keep playing with nothing

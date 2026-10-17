@@ -78,18 +78,7 @@ use defmt_rtt as _;
 // No-op defmt logger. This binary does not link `asperitas_firmware` (see that crate's docs), so
 // it carries its own copy of the logger.
 #[cfg(not(feature = "log-defmt"))]
-#[defmt::global_logger]
-struct Logger;
-
-#[cfg(not(feature = "log-defmt"))]
-unsafe impl defmt::Logger for Logger {
-    fn acquire() {}
-    unsafe fn release() {}
-    unsafe fn flush() {}
-    unsafe fn write(data: &[u8]) {
-        let _ = data;
-    }
-}
+asperitas_logging::noop_defmt_logger!();
 
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {

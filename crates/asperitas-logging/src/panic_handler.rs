@@ -60,7 +60,7 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
     // 2. Send the panic message over USB serial.
     //
     // Deliberately NOT through the log pipe. The pipe is drained by a future
-    // inside `usb::run()`, and by the time we get here the async executor is
+    // inside `Console::run()`, and by the time we get here the async executor is
     // halted for good — so a pipe write is not "best effort", it is guaranteed
     // to be discarded. `usb::emit_panic_record` frames the text as a console v1
     // record and then drives the CDC endpoint itself. That route assumes interrupts are

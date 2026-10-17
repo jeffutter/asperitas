@@ -1,25 +1,33 @@
 //! USB CDC-ACM serial logging backend.
 //!
 //! Implements logging over the Seed3's onboard USB-C using the CDC-ACM class. Records are
-//! committed to a framed ring by the crate-private `emit_at()` and carried to the host by [`run`]'s drain
-//! task, which is the only thing that touches the endpoint under normal operation.
+//! committed to a framed ring by the crate-private `emit_at()` and carried to the host by
+//! [`UsbConsole::run`]'s drain task, which is the only thing that touches the endpoint under
+//! normal operation.
 //!
 //! # Architecture
 //!
 //! ```text
-//! log::info!("msg") → FacadeLogger → LOG_PIPE (framed records) → run() drain task → CDC-ACM
+//! log::info!("msg") → FacadeLogger → LOG_PIPE (framed records) → drain task → CDC-ACM
 //!                                                        ↑ STATUS rides in here too
 //! panic → panic_handler → emit_panic_record → emit_blocking ─────────┘ (ring bypassed)
 //!
-//! host → CDC OUT → run() inbound reader → inbound::InboundFeed → INBOUND_CHANNEL → binary
+//! host → CDC OUT → inbound reader → inbound::InboundFeed → INBOUND_CHANNEL → binary
 //!                  (only after enable_inbound())
 //! ```
 //!
-//! The CDC class is split at [`init`] into its IN half (`CdcTx`, used by the drain task and
+//! The CDC class is split at `init` into its IN half (`CdcTx`, used by the drain task and
 //! the panic path) and its OUT half (`CdcRx`, used only by the inbound reader), so the two
 //! concurrent tasks each borrow a distinct object instead of aliasing one `&mut`.
+//!
+//! [`UsbConsole`] owns all three objects, and `run` consumes it. The one thing that outlives
+//! that ownership is the panic path: it needs the IN half and the device after the executor
+//! has stopped, so `init` also records raw pointers to them in two atomics. That is the only
+//! shared access; see `emit_blocking`.
 
+use core::cell::UnsafeCell;
 use core::future::Future;
+use core::sync::atomic::{AtomicPtr, Ordering};
 use core::task::{Context, Waker};
 
 use embassy_stm32::{
@@ -60,7 +68,7 @@ const DRAIN_BUF_SIZE: usize = 256;
 // budget.
 
 // ---------------------------------------------------------------------------
-// Static state — initialized once by init(), consumed by run()
+// Static state — initialized once by init()
 // ---------------------------------------------------------------------------
 
 static CONFIG_DESC: StaticCell<[u8; 256]> = StaticCell::new();
@@ -72,29 +80,34 @@ static EP_OUT_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
 /// Type alias for the USB driver.
 type UsbDrv = Driver<'static, hal::peripherals::USB_OTG_FS>;
 
+/// The USB device, whose `run` answers enumeration and control transfers.
+type UsbDev = embassy_usb::UsbDevice<'static, UsbDrv>;
+
 /// The CDC class's IN half: host-bound bytes.
 type CdcTx = cdc_acm::Sender<'static, UsbDrv>;
 
 /// The CDC class's OUT half: device-bound bytes.
 type CdcRx = cdc_acm::Receiver<'static, UsbDrv>;
 
-/// Storage for the CDC-ACM IN half. Initialized once by [`init`].
+/// Storage for the CDC-ACM IN half. Initialized once by `init`.
 static CDC_TX_STORAGE: StaticCell<CdcTx> = StaticCell::new();
 
-/// Storage for the CDC-ACM OUT half. Initialized once by [`init`].
+/// Storage for the CDC-ACM OUT half. Initialized once by `init`.
 static CDC_RX_STORAGE: StaticCell<CdcRx> = StaticCell::new();
 
-/// Storage for the USB device. Initialized once by [`init`].
-static USB_DEV_STORAGE: StaticCell<embassy_usb::UsbDevice<'static, UsbDrv>> = StaticCell::new();
+/// Storage for the USB device. Initialized once by `init`.
+static USB_DEV_STORAGE: StaticCell<UsbDev> = StaticCell::new();
 
-/// Cached pointer to the CDC IN half. Set during [`init`], read by [`cdc`].
-static mut CDC_REF: *mut CdcTx = core::ptr::null_mut();
+/// The CDC IN half, for the panic path only.
+///
+/// Null until `init` has run, which is how `emit_blocking` knows whether there is a console to
+/// write to. Points into [`CDC_TX_STORAGE`], and aliases the `&'static mut` that
+/// [`UsbConsole`] hands to the drain task: sound only because the panic path runs after the
+/// executor has stopped, so the drain task's borrow is dead.
+static PANIC_CDC: AtomicPtr<CdcTx> = AtomicPtr::new(core::ptr::null_mut());
 
-/// Cached pointer to the CDC OUT half. Set during [`init`], read by [`cdc_rx`].
-static mut CDC_RX_REF: *mut CdcRx = core::ptr::null_mut();
-
-/// Cached pointer to the initialized USB device. Set during [`init`], read by [`usb_dev`].
-static mut USB_DEV_REF: *mut embassy_usb::UsbDevice<'static, UsbDrv> = core::ptr::null_mut();
+/// The USB device, for the panic path only. Same contract as [`PANIC_CDC`].
+static PANIC_DEV: AtomicPtr<UsbDev> = AtomicPtr::new(core::ptr::null_mut());
 
 /// Frame buffer for the panic path — deliberately **not** [`crate::LOG_PIPE`] and not the
 /// shared [`crate`] record buffers.
@@ -105,48 +118,19 @@ static mut USB_DEV_REF: *mut embassy_usb::UsbDevice<'static, UsbDrv> = core::ptr
 /// (AC #6 in TASK-030.02), so this path gets storage of its own instead. 228 bytes of
 /// `.bss` buys a final record that decodes like every other one, and keeps a `MAX_FRAME`
 /// local off a stack that may already be nearly exhausted.
-static mut PANIC_FRAME: [u8; frame::MAX_FRAME] = [0; frame::MAX_FRAME];
+static PANIC_FRAME: PanicFrame = PanicFrame(UnsafeCell::new([0; frame::MAX_FRAME]));
 
-/// Handle to the running USB logger. Returned by [`init`].
-pub struct UsbLoggerHandle;
+/// `Sync` wrapper for [`PANIC_FRAME`]: the panic path is its only user and runs single-threaded.
+struct PanicFrame(UnsafeCell<[u8; frame::MAX_FRAME]>);
 
-/// Internal flag indicating whether init() has been called.
-static INITIALIZED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+// Safety: only `emit_panic_record` touches it, from the panic handler, with the executor stopped.
+unsafe impl Sync for PanicFrame {}
 
-/// Borrow the CDC IN half (host-bound writes).
-///
-/// Each caller uses what it gets and drops it; nothing here holds one across another
-/// call's borrow.
-///
-/// # Safety of the pattern
-///
-/// Points at [`CDC_TX_STORAGE`], which lives for `'static`, on a single core, populated once
-/// by [`init`] before the executor starts. `addr_of_mut!` + `read_volatile` is how this
-/// reads a `static mut` without creating a reference to it — the form the
-/// `static_mut_refs` lint sanctions, so the crate needs no blanket allow.
-fn cdc() -> &'static mut CdcTx {
-    // Safety: see above. Null only if `init` never ran; `run` documents the ordering and
-    // `emit_blocking` checks `INITIALIZED`.
-    unsafe { &mut *core::ptr::read_volatile(core::ptr::addr_of_mut!(CDC_REF)) }
-}
-
-/// Borrow the CDC OUT half. Only [`run`]'s inbound reader calls this, so its borrow never
-/// overlaps another; see [`cdc`] for why the access pattern is sound.
-fn cdc_rx() -> &'static mut CdcRx {
-    // Safety: as [`cdc`].
-    unsafe { &mut *core::ptr::read_volatile(core::ptr::addr_of_mut!(CDC_RX_REF)) }
-}
-
-/// Borrow the USB device. See [`cdc`] for why the access pattern is sound.
-///
-/// # Safety contract at the call site
-///
-/// The returned reference must be polled concurrently with — never after — any
-/// [`cdc`] borrow that is awaiting a transfer, because enumeration is driven by
-/// `UsbDevice::run`.
-fn usb_dev() -> &'static mut embassy_usb::UsbDevice<'static, UsbDrv> {
-    // Safety: as [`cdc`].
-    unsafe { &mut *core::ptr::read_volatile(core::ptr::addr_of_mut!(USB_DEV_REF)) }
+/// The USB device, both CDC halves and nothing else: what [`UsbConsole::run`] drives.
+pub(crate) struct UsbConsole {
+    dev: &'static mut UsbDev,
+    tx: &'static mut CdcTx,
+    rx: &'static mut CdcRx,
 }
 
 /// Milliseconds since boot, truncated to the width of the wire's `t_ms` field.
@@ -163,31 +147,20 @@ fn now_ms() -> u32 {
 // Public init
 // ---------------------------------------------------------------------------
 
-/// Initialize the USB CDC-ACM logging backend.
-///
-/// This function:
-/// 1. Creates the USB driver with FS speed configuration
-/// 2. Sets up Windows-compatible composite device descriptors
-/// 3. Creates the CDC-ACM class with 64-byte packet size
-/// 4. Switches the log backend to USB and emits the `BOOT` banner
-///
-/// After calling this, call [`run`] (typically in a spawned task) to start
-/// the USB event loop.
+/// Build the USB CDC-ACM device: FS driver, Windows-compatible composite descriptors and a
+/// CDC-ACM class with 64-byte packets. The crate-level `init` is the caller and goes on to
+/// switch the log backend and emit `BOOT`.
 ///
 /// # Panics
 ///
 /// Panics if called more than once (static cells can only be initialized once).
-pub fn init<I>(irqs: I) -> UsbLoggerHandle
+pub(crate) fn init<I>(irqs: I) -> UsbConsole
 where
     I: hal::interrupt::typelevel::Binding<
             <hal::peripherals::USB_OTG_FS as hal::usb::Instance>::Interrupt,
             hal::usb::InterruptHandler<hal::peripherals::USB_OTG_FS>,
         > + 'static,
 {
-    if INITIALIZED.swap(true, core::sync::atomic::Ordering::AcqRel) {
-        panic!("USB logging already initialized");
-    }
-
     // Safety: peripherals are never dropped for the life of the device.
     // steal() conjures a fresh 'static Peri for each peripheral listed below.
     // daisy_embassy::DaisyBoard also hands out these same peripherals via
@@ -234,130 +207,114 @@ where
     let (cdc_tx, cdc_rx) = CdcAcmClass::new(&mut builder, cdc_state, MAX_PACKET_SIZE).split();
     let usb_device = builder.build();
 
-    // Initialize static storage and cache the pointers.
-    // StaticCell::init returns &'static mut T, which we keep as raw pointers for the
-    // accessors above. Single-core Cortex-M, set before the executor starts.
-    let cdc_ref = CDC_TX_STORAGE.init(cdc_tx);
-    let cdc_rx_ref = CDC_RX_STORAGE.init(cdc_rx);
-    let usb_dev_ref = USB_DEV_STORAGE.init(usb_device);
-    unsafe {
-        core::ptr::write(core::ptr::addr_of_mut!(CDC_REF), cdc_ref);
-        core::ptr::write(core::ptr::addr_of_mut!(CDC_RX_REF), cdc_rx_ref);
-        core::ptr::write(core::ptr::addr_of_mut!(USB_DEV_REF), usb_dev_ref);
-    }
+    let tx = CDC_TX_STORAGE.init(cdc_tx);
+    let rx = CDC_RX_STORAGE.init(cdc_rx);
+    let dev = USB_DEV_STORAGE.init(usb_device);
+
+    // Publish the panic path's view last: a non-null pointer is its proof that everything
+    // above is built. The pointers are taken before the `&mut`s move into `UsbConsole`.
+    PANIC_CDC.store(core::ptr::from_mut(&mut *tx), Ordering::Release);
+    PANIC_DEV.store(core::ptr::from_mut(&mut *dev), Ordering::Release);
 
     // No pipe to initialize: `LOG_PIPE` is a `const`-constructed static, so there is no
     // window in which a producer could find it missing.
 
-    // Install the global logger, switch the backend, then announce the console. The order
-    // is load-bearing: `BOOT` before the backend switch reaches `Backend::NoOp` and is
-    // discarded without a trace, and the counters cannot report a record that was never
-    // offered to them.
-    crate::install_logger();
-    crate::set_backend_usb();
-    crate::emit_boot();
-
-    UsbLoggerHandle
+    UsbConsole { dev, tx, rx }
 }
 
-/// Run the USB device event loop and log-drain task.
-///
-/// Must be called after [`init`] and typically spawned as a background task.
-/// This future loops forever, handling connect/disconnect cycles gracefully.
-///
-/// # Example
-///
-/// ```ignore
-/// asperitas_logging::usb::init(Irqs);
-/// spawner.spawn(async { asperitas_logging::usb::run().await });
-/// ```
-pub async fn run() {
-    // `usb_dev.run()` is what drives enumeration: control transfers, descriptor
-    // requests, address assignment. It must be polled CONCURRENTLY with any
-    // `wait_connection()`, never after it.
-    //
-    // Awaiting wait_connection() first deadlocks the device: wait_connection()
-    // only completes once the host has configured the device, and the host can
-    // only configure a device whose run() future is being polled to answer it.
-    // Neither side can advance, and the board never appears on the USB bus at
-    // all. This mirrors the upstream daisy-embassy usb_serial example, which
-    // joins the two futures rather than sequencing them.
-    let usb_fut = usb_dev().run();
+impl UsbConsole {
+    /// Run the USB device event loop, log drain and inbound reader.
+    ///
+    /// This future loops forever, handling connect/disconnect cycles gracefully.
+    pub(crate) async fn run(self) {
+        let UsbConsole { dev, tx, rx } = self;
+        // `dev.run()` is what drives enumeration: control transfers, descriptor
+        // requests, address assignment. It must be polled CONCURRENTLY with any
+        // `wait_connection()`, never after it.
+        //
+        // Awaiting wait_connection() first deadlocks the device: wait_connection()
+        // only completes once the host has configured the device, and the host can
+        // only configure a device whose run() future is being polled to answer it.
+        // Neither side can advance, and the board never appears on the USB bus at
+        // all. This mirrors the upstream daisy-embassy usb_serial example, which
+        // joins the two futures rather than sequencing them.
+        let usb_fut = dev.run();
 
-    // Connection/drain loop — runs alongside usb_fut, not before it. Handles
-    // repeated connect/disconnect cycles without ever dropping usb_fut.
-    let drain_fut = async {
-        let mut buf = [0u8; DRAIN_BUF_SIZE];
-        let mut status_gate = console::StatusGate::new();
-
-        loop {
-            cdc().wait_connection().await;
-            log::info!("USB connected");
-            // Whether the last packet handed to the endpoint filled it exactly. A new
-            // connection starts with no unfinished transaction, so it lives per connection.
-            // See the short-packet rule below: this flag is what keeps a capture's tail from
-            // being withheld by the host.
-            let mut last_packet_was_full = false;
+        // Connection/drain loop — runs alongside usb_fut, not before it. Handles
+        // repeated connect/disconnect cycles without ever dropping usb_fut.
+        let drain_fut = async {
+            let mut buf = [0u8; DRAIN_BUF_SIZE];
+            let mut status_gate = console::StatusGate::new();
 
             loop {
-                let n = match crate::LOG_PIPE.try_read(&mut buf) {
-                    Ok(n) if n > 0 => n,
-                    // Nothing buffered: this is the only place a STATUS record or a
-                    // zero-length packet belongs, because both mean "the ring is empty and
-                    // I am about to stop sending".
-                    _ => {
-                        let now = now_ms();
-                        let snap = console::CONSOLE.snapshot();
-                        if status_gate.due(now, &snap) {
-                            crate::emit_status(&snap);
-                            status_gate.mark_sent(&console::CONSOLE.snapshot());
-                            continue; // The record just queued is now waiting to go out.
-                        }
+                tx.wait_connection().await;
+                log::info!("USB connected");
+                // Whether the last packet handed to the endpoint filled it exactly. A new
+                // connection starts with no unfinished transaction, so it lives per connection.
+                // See the short-packet rule below: this flag is what keeps a capture's tail from
+                // being withheld by the host.
+                let mut last_packet_was_full = false;
 
-                        // USB bulk transactions must end with a short packet. A 64-byte
-                        // packet is held in the host's driver until something shorter
-                        // follows, so parking while the last packet was full silently loses
-                        // the tail of every capture — loss our own framing would faithfully
-                        // report as a `seq` gap while the cause sat in this loop.
-                        if last_packet_was_full {
-                            if cdc().write_packet(&[]).await.is_err() {
-                                console::CONSOLE.endpoint_error();
-                                break;
+                loop {
+                    let n = match crate::LOG_PIPE.try_read(&mut buf) {
+                        Ok(n) if n > 0 => n,
+                        // Nothing buffered: this is the only place a STATUS record or a
+                        // zero-length packet belongs, because both mean "the ring is empty and
+                        // I am about to stop sending".
+                        _ => {
+                            let now = now_ms();
+                            let snap = console::CONSOLE.snapshot();
+                            if status_gate.due(now, &snap) {
+                                crate::emit_status(&snap);
+                                status_gate.mark_sent(&console::CONSOLE.snapshot());
+                                continue; // The record just queued is now waiting to go out.
                             }
-                            last_packet_was_full = false;
+
+                            // USB bulk transactions must end with a short packet. A 64-byte
+                            // packet is held in the host's driver until something shorter
+                            // follows, so parking while the last packet was full silently loses
+                            // the tail of every capture — loss our own framing would faithfully
+                            // report as a `seq` gap while the cause sat in this loop.
+                            if last_packet_was_full {
+                                if tx.write_packet(&[]).await.is_err() {
+                                    console::CONSOLE.endpoint_error();
+                                    break;
+                                }
+                                last_packet_was_full = false;
+                            }
+
+                            // Park until a byte exists instead of `yield_now()`-spinning, which
+                            // was stealing executor slots from the audio loop. Consumes bytes
+                            // only in the poll that returns Ready, so this cannot eat a record.
+                            crate::LOG_PIPE.read(&mut buf).await
                         }
+                    };
 
-                        // Park until a byte exists instead of `yield_now()`-spinning, which
-                        // was stealing executor slots from the audio loop. Consumes bytes
-                        // only in the poll that returns Ready, so this cannot eat a record.
-                        crate::LOG_PIPE.read(&mut buf).await
+                    // Hand the endpoint at most one packet per write — see MAX_PACKET_SIZE.
+                    let mut link_lost = false;
+                    for chunk in buf[..n].chunks(MAX_PACKET_SIZE as usize) {
+                        if tx.write_packet(chunk).await.is_err() {
+                            console::CONSOLE.endpoint_error();
+                            link_lost = true;
+                            break;
+                        }
+                        last_packet_was_full = chunk.len() == MAX_PACKET_SIZE as usize;
                     }
-                };
 
-                // Hand the endpoint at most one packet per write — see MAX_PACKET_SIZE.
-                let mut link_lost = false;
-                for chunk in buf[..n].chunks(MAX_PACKET_SIZE as usize) {
-                    if cdc().write_packet(chunk).await.is_err() {
-                        console::CONSOLE.endpoint_error();
-                        link_lost = true;
+                    if link_lost {
+                        // Bytes pulled in this read but not yet written die with the link. That
+                        // is at most one DRAIN_BUF_SIZE read per reconnect and it surfaces as an
+                        // `ep_err` plus a `seq` gap, never silently.
                         break;
                     }
-                    last_packet_was_full = chunk.len() == MAX_PACKET_SIZE as usize;
                 }
 
-                if link_lost {
-                    // Bytes pulled in this read but not yet written die with the link. That
-                    // is at most one DRAIN_BUF_SIZE read per reconnect and it surfaces as an
-                    // `ep_err` plus a `seq` gap, never silently.
-                    break;
-                }
+                log::info!("USB disconnected");
             }
+        };
 
-            log::info!("USB disconnected");
-        }
-    };
-
-    embassy_futures::join::join3(usb_fut, drain_fut, inbound_reader()).await;
+        embassy_futures::join::join3(usb_fut, drain_fut, inbound_reader(rx)).await;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +332,7 @@ pub const INBOUND_DEPTH: usize = 4;
 static INBOUND_CHANNEL: Channel<CriticalSectionRawMutex, InboundRecord, INBOUND_DEPTH> =
     Channel::new();
 
-/// Whether a binary asked for inbound records. Read once, when [`run`] starts.
+/// Whether a binary asked for inbound records. Read once, when the console starts running.
 static INBOUND_ENABLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// The receiving end of the inbound record channel.
@@ -383,7 +340,7 @@ pub type InboundReceiver = Receiver<'static, CriticalSectionRawMutex, InboundRec
 
 /// Turn on the CDC OUT reader and return the receiver its records arrive on.
 ///
-/// Call before [`run`] starts. Only a binary with a consumer should call this: without one
+/// Call before the console starts running. Only a binary with a consumer should call this: without one
 /// the channel fills after [`INBOUND_DEPTH`] records, the reader stops reading, and the host's
 /// writes stall until the board resets. That is flow control doing its job — nothing is
 /// dropped — but it is not a state a binary should be able to enter by accident, so binaries
@@ -394,7 +351,7 @@ pub type InboundReceiver = Receiver<'static, CriticalSectionRawMutex, InboundRec
 /// [`crate::inbound::INBOUND`], never delivered. The body means whatever the consumer
 /// decides; excerpt install parses it with `asperitas_wire::excerpt::parse_record`.
 pub fn enable_inbound() -> InboundReceiver {
-    INBOUND_ENABLED.store(true, core::sync::atomic::Ordering::Release);
+    INBOUND_ENABLED.store(true, Ordering::Release);
     INBOUND_CHANNEL.receiver()
 }
 
@@ -411,8 +368,8 @@ pub fn enable_inbound() -> InboundReceiver {
 ///
 /// Every connection starts with [`InboundFeed::reset`], which abandons a half record a
 /// dropped link left behind so it cannot splice onto the next session's bytes.
-async fn inbound_reader() {
-    if !INBOUND_ENABLED.load(core::sync::atomic::Ordering::Acquire) {
+async fn inbound_reader(rx: &'static mut CdcRx) {
+    if !INBOUND_ENABLED.load(Ordering::Acquire) {
         return;
     }
     let sender = INBOUND_CHANNEL.sender();
@@ -420,11 +377,11 @@ async fn inbound_reader() {
     let mut packet = [0u8; MAX_PACKET_SIZE as usize];
 
     loop {
-        cdc_rx().wait_connection().await;
+        rx.wait_connection().await;
         feed.reset();
 
         loop {
-            let n = match cdc_rx().read_packet(&mut packet).await {
+            let n = match rx.read_packet(&mut packet).await {
                 Ok(n) => n,
                 Err(_) => {
                     INBOUND.endpoint_error();
@@ -463,7 +420,7 @@ async fn inbound_reader() {
 pub fn emit_panic_record(body: &[u8]) {
     // Safety: see [`PANIC_FRAME`]. Takes no lock by design; `frame!` writes are pure byte
     // arithmetic into the buffer we were given.
-    let out = unsafe { &mut *core::ptr::addr_of_mut!(PANIC_FRAME) };
+    let out = unsafe { &mut *PANIC_FRAME.0.get() };
     let encoded = frame::encode(
         log::Level::Error,
         console::CONSOLE.take_seq(),
@@ -477,7 +434,7 @@ pub fn emit_panic_record(body: &[u8]) {
 /// Send `bytes` to the host synchronously, without the async executor.
 ///
 /// This exists for the panic handler, and the pipe-based path cannot serve it.
-/// [`run`]'s drain loop is the only thing that normally moves bytes from the log
+/// The drain loop is the only thing that normally moves bytes from the log
 /// pipe to the endpoint, and it lives inside a future; a panic halts the executor
 /// for good, so anything written to the pipe afterwards sits there unread until
 /// the board is reset. This function bypasses the pipe and drives the device and
@@ -494,7 +451,7 @@ pub fn emit_panic_record(body: &[u8]) {
 ///
 /// Returns once the bytes are sent, or once the `SpinBudget` is spent — processor cycles
 /// (`EMIT_TIMEOUT_CYCLES`) or poll iterations (`EMIT_TIMEOUT_MAX_POLLS`), whichever expires
-/// first — if the host is not listening. Silently does nothing if [`init`] never ran.
+/// first — if the host is not listening. Silently does nothing if `init` never ran.
 ///
 /// Two assumptions live here and they are distinct, because conflating them is how the
 /// clock bug survived review. The *transport* assumption is the one above: CDC needs a live
@@ -508,17 +465,20 @@ pub fn emit_panic_record(body: &[u8]) {
 /// Never. This is called from `#[panic_handler]`, where a second panic recurses
 /// with no way out, so every step here is written to fail quietly instead.
 pub fn emit_blocking(msg: &[u8]) {
-    // Without init() the static cells are empty and the refs are null. A panic
-    // this early has only the LED to report through.
-    if !INITIALIZED.load(core::sync::atomic::Ordering::Acquire) {
+    // Without init() both pointers are null. A panic this early has only the LED to report
+    // through.
+    let (dev, tx) = (
+        PANIC_DEV.load(Ordering::Acquire),
+        PANIC_CDC.load(Ordering::Acquire),
+    );
+    if dev.is_null() || tx.is_null() {
         return;
     }
 
-    // Safe on the same grounds as run(): single-core, and these point at
-    // StaticCell-backed storage that lives for 'static. The executor is halted by
-    // the time we are called, so run()'s borrows are dead and cannot alias ours.
-    let usb_dev = usb_dev();
-    let cdc = cdc();
+    // Safety: both point at StaticCell-backed storage that lives for 'static, on a single
+    // core. The executor is halted by the time we are called, so the drain task's `&mut`s to
+    // the same objects are dead and cannot alias ours.
+    let (usb_dev, cdc) = unsafe { (&mut *dev, &mut *tx) };
 
     // `usb_dev.run()` must be polled alongside the writes, not before them — it
     // is what answers the host's control transfers, and without it the endpoint

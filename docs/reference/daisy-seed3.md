@@ -299,7 +299,7 @@ STATUS proto=1 sent=12 dropped_full=3 bytes_dropped=4096 trunc=1 ep_err=2 seq_ne
 `proto` comes first so a reader can handshake before trusting anything. `fw` is the
 `asperitas-logging` crate version, which is the version that ships the console — the firmware binaries
 have no separate release process. `pipe` is the log ring in bytes (`LOG_PIPE_SIZE`) and `maxbody` the
-encoder's cap. `BOOT` consumes `seq 0` and is emitted only once the USB backend is installed (`usb::init`
+encoder's cap. `BOOT` consumes `seq 0` and is emitted only once the USB backend is installed (`asperitas_logging::init`
 installs the logger, switches the backend, then announces), so ordering it before the switch discards it
 with no trace in any counter.
 
@@ -1093,7 +1093,7 @@ table is `asperitas_pod::knob_override`. The firmware side is one shared file,
 `firmware/src/host_control.rs`, a module of the package library, imported by each binary. Console builds only (`log-usb`); the RTT-only build has no inbound path and compiles the
 module down to `capture_reset_reason` and `merge`.
 
-- **Consumer.** `host_control::spawn` calls `usb::enable_inbound()` before `usb::run()` starts and
+- **Consumer.** `host_control::spawn` calls `usb::enable_inbound()` before `Console::run()` starts and
   spawns one executor task that `receive()`s `InboundRecord`s and hands each to `control::route`.
   The task does nothing slow, so the 4-deep inbound channel does not stay full and the USB reader's
   flow control does not engage in practice.
@@ -1211,8 +1211,8 @@ internal-flash layout is `firmware/memory-internal.x` and stays the default.
   `GCCFG` powered, `DCTL` 0 (not soft-disconnected), `DSTS` `SUSPSTS=1` (the bus saw a reset, then nothing).
   The peripheral was attached; nothing serviced it.
 - **Cause:** `main` polled the SAI callback on the thread executor beside the knob task's blocking ADC
-  reads and `usb::run()`. The callback has about 1.3 ms per DMA half-transfer; `main` lost that race at boot
-  (`AUDIO_EXIT == 3`, `Overrun`), the audio loop ended, and the halt that followed left `usb::run()` never
+  reads and `Console::run()`. The callback has about 1.3 ms per DMA half-transfer; `main` lost that race at boot
+  (`AUDIO_EXIT == 3`, `Overrun`), the audio loop ended, and the halt that followed left `Console::run()` never
   polled, so the host's SETUP requests went unanswered. The core is not faulted in that state, which is why
   the register reads looked healthy. `rig` was unaffected because it already ran audio on its own
   `InterruptExecutor`. The `AUDIO_EXIT == 3` reading is from the fix commit's measurement; the pre-fix image

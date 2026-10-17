@@ -38,7 +38,7 @@
 //!
 //! ```text
 //! log::info!("msg") → FacadeLogger → [one critical section: format → frame → space check
-//!                                     → commit] → Pipe → usb::run() drain task → CDC-ACM
+//!                                     → commit] → Pipe → Console::run() drain task → CDC-ACM
 //! ```
 //!
 //! Everything inside the brackets happens with interrupts disabled and ends with either
@@ -63,34 +63,33 @@ pub use log::{debug, error, info, trace, warn, Level, LevelFilter};
 // configuration.
 #[allow(unused_imports)]
 use asperitas_wire::{console, frame};
-use core::sync::atomic::{AtomicBool, Ordering};
-
-/// Has the logger been installed?
-static LOGGER_INSTALLED: AtomicBool = AtomicBool::new(false);
+use core::sync::atomic::{AtomicU8, Ordering};
 
 // ---------------------------------------------------------------------------
-// Global logger — implements log::Log
+// Global logger - implements log::Log
 // ---------------------------------------------------------------------------
 
-/// Backend enum — selected at compile time by features.
+/// Backend enum - selected at compile time by features.
+#[derive(Clone, Copy)]
+#[repr(u8)]
 pub(crate) enum Backend {
-    NoOp,
+    NoOp = 0,
     #[cfg(feature = "log-usb")]
-    Usb,
+    Usb = 1,
     #[cfg(feature = "log-defmt")]
-    Defmt,
+    Defmt = 2,
 }
 
 impl Backend {
     /// Deliver one record.
     ///
-    /// The `NoOp` arm is the state before anything has switched the backend away from it —
-    /// for the USB transport, that is [`usb::init`]. Those records vanish **uncounted**, because there is no console yet to attribute them
+    /// The `NoOp` arm is the state before anything has switched the backend away from it -
+    /// for the USB transport, that is [`init`]. Those records vanish **uncounted**, because there is no console yet to attribute them
     /// to. Counting them would make `sent + dropped_full` disagree with what the host can
     /// ever see, for a reason nobody watching a capture can act on. Leave it that way;
     /// do not file it as a counter bug.
     #[allow(unused_variables)]
-    pub(crate) fn write(&self, record: &log::Record) {
+    pub(crate) fn write(self, record: &log::Record) {
         match self {
             Backend::NoOp => {}
             #[cfg(feature = "log-usb")]
@@ -101,47 +100,27 @@ impl Backend {
     }
 }
 
-/// The global logger instance.
-static mut GLOBAL_BACKEND: Backend = Backend::NoOp;
-
-/// Read the active backend.
+/// The active backend, as a `Backend` discriminant.
 ///
-/// `addr_of_mut!` instead of `&GLOBAL_BACKEND`: taking a reference to a `static mut` is
-/// precisely what the `static_mut_refs` lint forbids, and every static in this crate can
-/// be reached without it — so the crate keeps no blanket `allow` that would also hide the
-/// next real misuse.
-fn backend() -> &'static Backend {
-    // Safety: written exactly once, by `set_backend_usb`, while the boot thread is still
-    // alone (before the executor runs and before any other task exists), and read-only
-    // thereafter. Single-core, so no observer can straddle the write.
-    unsafe { &*core::ptr::addr_of_mut!(GLOBAL_BACKEND) }
-}
+/// Written once by [`init`] and read by every record; an atomic rather than a `static mut`
+/// because a record can be logged from interrupt context while `init` is still finishing.
+static ACTIVE_BACKEND: AtomicU8 = AtomicU8::new(Backend::NoOp as u8);
 
-/// Switch logging to the USB backend.
-///
-/// Called by [`usb::init`] after the device and endpoint storage are live. Anything
-/// logged before this call reaches [`Backend::NoOp`] and is discarded.
-#[cfg(feature = "log-usb")]
-pub(crate) fn set_backend_usb() {
-    // Safety: see [`backend`] — single-threaded boot, one-way transition.
-    unsafe {
-        core::ptr::write(core::ptr::addr_of_mut!(GLOBAL_BACKEND), Backend::Usb);
+fn backend() -> Backend {
+    match ACTIVE_BACKEND.load(Ordering::Acquire) {
+        #[cfg(feature = "log-usb")]
+        x if x == Backend::Usb as u8 => Backend::Usb,
+        #[cfg(feature = "log-defmt")]
+        x if x == Backend::Defmt as u8 => Backend::Defmt,
+        _ => Backend::NoOp,
     }
 }
 
-/// Switch logging to the defmt backend.
-///
-/// Unlike the `log-usb` backend switch `set_backend_usb()` there is no device to wait for: RTT
-/// is a couple of statics in RAM that exist from the first instruction, which is why this is the
-/// only channel that can speak during the pre-USB window. Callers reach it through the
-/// crate-level `init()`, which exists only when `log-usb` is off; it stays public because
-/// a binary that wants RTT before anything else can call it directly.
-#[cfg(feature = "log-defmt")]
-pub fn set_backend_defmt() {
-    // Safety: see [`backend`] — single-threaded boot, one-way transition.
-    unsafe {
-        core::ptr::write(core::ptr::addr_of_mut!(GLOBAL_BACKEND), Backend::Defmt);
-    }
+/// Point logging at `backend`. Anything logged before this call reaches [`Backend::NoOp`] and
+/// is discarded.
+#[cfg(any(feature = "log-usb", feature = "log-defmt"))]
+fn set_backend(backend: Backend) {
+    ACTIVE_BACKEND.store(backend as u8, Ordering::Release);
 }
 
 struct FacadeLogger;
@@ -158,12 +137,9 @@ impl log::Log for FacadeLogger {
     fn flush(&self) {}
 }
 
-/// Install the facade logger as the global `log` backend.
-pub(crate) fn install_logger() {
-    if LOGGER_INSTALLED.swap(true, Ordering::AcqRel) {
-        return; // Already installed
-    }
-
+/// Install the facade logger as the global `log` backend. `log::set_logger` refuses a second
+/// install, which is the whole idempotence story.
+fn install_logger() {
     log::set_logger(&FacadeLogger)
         .map(|()| log::set_max_level(LevelFilter::Info))
         .ok();
@@ -231,7 +207,7 @@ pub const LOG_PIPE_SIZE: usize = 2048;
 /// implementation is registered, which fails at *link* time with an undefined symbol
 /// rather than a type error.
 #[cfg(feature = "log-usb")]
-pub static LOG_PIPE: embassy_sync::pipe::Pipe<
+pub(crate) static LOG_PIPE: embassy_sync::pipe::Pipe<
     embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
     LOG_PIPE_SIZE,
 > = embassy_sync::pipe::Pipe::new();
@@ -402,7 +378,7 @@ enum Policy {
 ///   callback, so an interrupt can preempt a producer that does not hold `RECORD_BUFS`, and two
 ///   interleaved `write_whole` calls splice two frames into the ring. While the lock is held the
 ///   consumer does *not* run: `RECORD_BUFS` is a `CriticalSectionRawMutex`, which masks
-///   interrupts globally, so `usb::run()`'s drain task cannot move a byte and free capacity is
+///   interrupts globally, so `Console::run()`'s drain task cannot move a byte and free capacity is
 ///   *frozen* for the duration. That is what makes the capacity check sound rather than
 ///   optimistic. Nothing inside can panic: `write_whole` reports a sink that stopped accepting
 ///   bytes as `frame::WriteOutcome::Stalled`, and `commit_records` crashes on that only once the
@@ -582,18 +558,90 @@ pub fn try_emit_dump(body: &[u8]) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Default init (no features)
+// Bring-up: one entry point in every configuration
 // ---------------------------------------------------------------------------
 
-#[cfg(not(feature = "log-usb"))]
-/// Initialize the logging facade with whichever backend this build has.
+/// The console's long-running half, returned by [`init`].
 ///
-/// The entry point for every configuration except the USB console, which initializes itself
-/// (`usb::init` installs the logger as part of bringing up the device). Picks defmt when
-/// `log-defmt` is on — RTT needs no device, so there is nothing to wait for — and a no-op
-/// otherwise, in which case every message is silently dropped.
-pub fn init() {
-    #[cfg(feature = "log-defmt")]
-    set_backend_defmt();
+/// Poll [`Console::run`] for the life of the program, beside the LED blink. Under `log-usb` it
+/// drives USB enumeration, drains the log pipe to the host and reads inbound records; in every
+/// other configuration there is nothing to drive (RTT is read out of RAM by the probe) and it
+/// never completes, so a binary is written once rather than once per transport.
+pub struct Console {
+    #[cfg(feature = "log-usb")]
+    usb: usb::UsbConsole,
+}
+
+impl Console {
+    /// Run the console forever.
+    pub async fn run(self) {
+        #[cfg(feature = "log-usb")]
+        self.usb.run().await;
+        #[cfg(not(feature = "log-usb"))]
+        core::future::pending::<()>().await;
+    }
+}
+
+/// Bring up logging for whichever transport this build has, and return the [`Console`] to run.
+///
+/// Call once, after the HAL is initialised. `irqs` is the `bind_interrupts!` struct that binds
+/// `OTG_FS` to `embassy_stm32::usb::InterruptHandler<USB_OTG_FS>`; only the USB console uses it.
+///
+/// - `log-usb`: builds the CDC-ACM device, installs the logger, points it at the framed
+///   console and emits `BOOT`. USB peripherals are taken with `steal()`, so the caller must
+///   discard `DaisyBoard::usb_peripherals` unread.
+/// - `log-defmt` alone: installs the logger over RTT, which needs no device.
+/// - neither: installs the logger over a no-op backend and every record is dropped.
+///
+/// # Panics
+///
+/// Under `log-usb`, panics if called more than once.
+#[cfg(feature = "log-usb")]
+pub fn init<I>(irqs: I) -> Console
+where
+    I: embassy_stm32::interrupt::typelevel::Binding<
+            <embassy_stm32::peripherals::USB_OTG_FS as embassy_stm32::usb::Instance>::Interrupt,
+            embassy_stm32::usb::InterruptHandler<embassy_stm32::peripherals::USB_OTG_FS>,
+        > + 'static,
+{
+    let usb = usb::init(irqs);
+    // The order is load-bearing: `BOOT` before the backend switch reaches `Backend::NoOp` and
+    // is discarded without a trace, and the counters cannot report a record that was never
+    // offered to them.
     install_logger();
+    set_backend(Backend::Usb);
+    emit_boot();
+    Console { usb }
+}
+
+/// See the `log-usb` variant above; without it `irqs` is unused.
+#[cfg(not(feature = "log-usb"))]
+pub fn init<I>(_irqs: I) -> Console {
+    #[cfg(feature = "log-defmt")]
+    set_backend(Backend::Defmt);
+    install_logger();
+    Console {}
+}
+
+/// Define the defmt global logger as a no-op.
+///
+/// A defmt logger supplies `_defmt_write`, `_defmt_acquire`, `_defmt_release` and `_defmt_flush`,
+/// which every defmt frame inside embassy-stm32 and daisy-embassy resolves against, so a binary
+/// needs exactly one even when it logs nothing through defmt. Without a probe nobody scans RAM
+/// for RTT, so this one discards every byte. The invoking crate must depend on `defmt`.
+#[macro_export]
+macro_rules! noop_defmt_logger {
+    () => {
+        #[defmt::global_logger]
+        struct Logger;
+
+        unsafe impl defmt::Logger for Logger {
+            fn acquire() {}
+            unsafe fn release() {}
+            unsafe fn flush() {}
+            unsafe fn write(data: &[u8]) {
+                let _ = data;
+            }
+        }
+    };
 }

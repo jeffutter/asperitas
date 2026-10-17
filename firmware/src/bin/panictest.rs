@@ -94,16 +94,11 @@ bind_interrupts!(pub struct UsbIrqs {
 
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
-    // Install the backend before anything can log; with the console compiled in, `usb::init`
-    // below does it instead.
-    #[cfg(not(feature = "log-usb"))]
-    asperitas_logging::init();
-
     let config = daisy_embassy::default_rcc();
     let p = hal::init(config);
     let board: DaisyBoard<'_> = new_daisy_board!(p);
 
-    // Discard USB peripherals — usb::init() steals them directly. Reading this
+    // Discard USB peripherals — `asperitas_logging::init` steals them directly. Reading this
     // field would create a second Peri handle for the same peripheral. See the
     // longer note at the same line in main.rs.
     let _ = board.usb_peripherals;
@@ -111,19 +106,14 @@ async fn main(_spawner: embassy_executor::Spawner) {
     // Steady red from here on, until the countdown starts.
     led::init(board.pins.d20, board.pins.d19, board.pins.d18);
 
-    #[cfg(feature = "log-usb")]
-    let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
+    let console = asperitas_logging::init(UsbIrqs);
 
     // Green during the countdown, so the panic handler's red is a change rather
     // than a continuation. Starting from red would make "panicked" and "still
     // booting" look the same.
     led::set_global_state(LedState::Running);
 
-    #[cfg(feature = "log-usb")]
-    let console_fut = asperitas_logging::usb::run();
-    // No drain task without the console; RTT is read out of RAM by the probe. See main.rs.
-    #[cfg(not(feature = "log-usb"))]
-    let console_fut = core::future::pending::<()>();
+    let console_fut = console.run();
     let led_fut = led::blink_task();
     let countdown = async {
         for remaining in (1..=PANIC_DELAY_SECS).rev() {

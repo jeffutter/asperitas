@@ -135,7 +135,7 @@ mod console {
     }
 
     /// Enable the inbound console reader and start servicing control records. Call before
-    /// `usb::run()` starts.
+    /// the console starts running.
     pub fn spawn(spawner: &embassy_executor::Spawner) {
         let rx = enable_inbound();
         spawner.spawn(control_task(rx).expect("failed to spawn control task"));
@@ -144,3 +144,7 @@ mod console {
 
 #[cfg(feature = "log-usb")]
 pub use console::spawn;
+
+/// No console, no control channel.
+#[cfg(not(feature = "log-usb"))]
+pub fn spawn(_spawner: &embassy_executor::Spawner) {}

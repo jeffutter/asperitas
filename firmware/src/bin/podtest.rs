@@ -98,34 +98,24 @@ async fn main(spawner: embassy_executor::Spawner) {
     // Before anything else can touch RCC_RSR: CTL RSN reports what this read.
     host_control::capture_reset_reason();
 
-    // Install the backend before the first record exists; with the console compiled in,
-    // `usb::init` below does it instead.
-    #[cfg(not(feature = "log-usb"))]
-    asperitas_logging::init();
-
-    info!("[podtest] booting");
-
     let config = daisy_embassy::default_rcc();
     let p = hal::init(config);
     let board: DaisyBoard<'_> = new_daisy_board!(p);
 
-    // Discard USB peripherals — usb::init() steals them directly via Peri::steal().
+    // Discard USB peripherals — `asperitas_logging::init` steals them directly via Peri::steal().
     let _ = board.usb_peripherals;
 
     // Init LED 1 (boot/panic indicator) — single owner for boot stages + panic handler.
     asperitas_logging::led::init(board.pins.d20, board.pins.d19, board.pins.d18);
 
-    // Init USB CDC serial logging.
-    #[cfg(feature = "log-usb")]
-    let _usb_handle = asperitas_logging::usb::init(UsbIrqs);
+    // Bring up logging. Records logged before this call are discarded.
+    let console = asperitas_logging::init(UsbIrqs);
+    info!("[podtest] booting");
 
-    // Host control (VER/RSN/RST/SET/REL), before `usb::run()` reads the enable flag. podtest logs
+    // Host control (VER/RSN/RST/SET/REL), before `console.run()` reads the enable flag. podtest logs
     // RAW ADC counts to measure the pot itself, so unlike `main` it does not merge overrides into
     // what it logs; SET/REL are accepted and held so the control path can be exercised here.
-    #[cfg(feature = "log-usb")]
     host_control::spawn(&spawner);
-    #[cfg(not(feature = "log-usb"))]
-    let _ = spawner; // no console, no control channel
 
     // Linger on the pre-init red so it can actually be seen. Boot takes a few
     // milliseconds, so without the delay red → green reads as "always green"
@@ -141,7 +131,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     // `board.pins` also names (e.g. d26 == PD11, the encoder A pin below).
     // Discard them here, unread, so the steal() calls that follow are the only
     // live Peri handle to each physical pin — same invariant documented for
-    // `board.usb_peripherals` above and for asperitas_logging::usb::init's own
+    // `board.usb_peripherals` above and for `asperitas_logging::init`'s own
     // steal() (crates/asperitas-logging/src/usb.rs).
     let _ = (
         board.pins.d21, // knob1 / PC4
@@ -302,11 +292,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     };
 
     // Run the console drain alongside the polling loop.
-    #[cfg(feature = "log-usb")]
-    let console_fut = asperitas_logging::usb::run();
-    // No drain task without the console; RTT is read out of RAM by the probe. See main.rs.
-    #[cfg(not(feature = "log-usb"))]
-    let console_fut = core::future::pending::<()>();
+    let console_fut = console.run();
     let _ = embassy_futures::select::select(poll_fut, console_fut).await;
 }
 
