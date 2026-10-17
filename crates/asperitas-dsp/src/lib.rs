@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod asperitas;
 pub mod filter;
 pub mod fx_chain;
 pub mod gain;
@@ -9,6 +10,7 @@ pub mod replay_fx;
 mod smooth;
 pub mod stimulus;
 
+pub use asperitas::{Asperitas, Controls, KNOB_COUNT};
 pub use filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 pub use fx_chain::FxChain;
 pub use gain::{Gain, GainParams, GAIN_PARAMS};
