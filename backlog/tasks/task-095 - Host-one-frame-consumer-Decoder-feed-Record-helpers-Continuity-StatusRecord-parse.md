@@ -3,14 +3,13 @@ id: TASK-095
 title: >-
   Host: one frame-consumer (Decoder::feed, Record helpers, Continuity,
   StatusRecord::parse)
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-17 02:51'
 labels:
-  - review-2026-10
-  - logging
-  - host
+  - planned
 dependencies: []
 priority: medium
 type: chore
@@ -29,7 +28,25 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The copies are replaced by the shared consumer in rig, measure and the examples
-- [ ] #2 STATUS is parsed by one function next to its formatter
-- [ ] #3 No re-encoding of frames to learn their length
+- [x] #1 The copies are replaced by the shared consumer in rig, measure and the examples
+- [x] #2 STATUS is parsed by one function next to its formatter
+- [x] #3 No re-encoding of frames to learn their length
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the commit 'Wire/host: one frame consumer (Decoder::feed, Record helpers, Continuity, StatusRecord::parse)' (Task-Id: TASK-095). This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added Decoder::feed/accounted, Stats.framed_bytes, Record::level/framed_len (wire frame.rs); StatusRecord::parse, is_boot and Continuity (wire console.rs). Rig lib.rs/control.rs, host pump, console_decode and dump_reassemble now use them; the re-encode length helpers, both Continuity copies and both STATUS hand-parses are gone. dump_reassemble moved to a host bin (gates.sh and docs updated). The measure capture loop already went through asperitas_host::capture. StatusRecord::parse is strict (proto=1, all seven fields in order). rig control wait() now drops records after the accepted one in a chunk (previously the unpushed bytes were dropped). Unrelated pre-existing failure: asperitas-measure compare reference test (TASK-123).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+One frame consumer in asperitas-wire (Decoder::feed, framed_bytes accounting, Record helpers, Continuity, StatusRecord::parse) replaces the copied push/drain loops, length re-encoding, continuity tracking and STATUS parsing in rig, host, console_decode and dump_reassemble; dump_reassemble is now a host bin.
+<!-- SECTION:FINAL_SUMMARY:END -->

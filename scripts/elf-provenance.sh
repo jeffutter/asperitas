@@ -490,7 +490,7 @@ fail() { printf '%s\n' "$*" >&2; exit 1; }
 
 # A case is a function that returns 0, or fails having printed one reason. Nothing short-circuits:
 # AC #1 asks for every failure in one run, and the shape is copied from dump_reassemble's `selftest::
-# run` (`crates/asperitas-host/examples/dump_reassemble.rs`) - one prefixed line per case on
+# run` (`crates/asperitas-host/src/bin/dump_reassemble.rs`) - one prefixed line per case on
 # stderr, stdout staying reserved for `show`'s payload.
 run_case() { # <name> <case-function>
   local name=$1 reason rc

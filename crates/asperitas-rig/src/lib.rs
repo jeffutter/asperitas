@@ -6,11 +6,6 @@
 //! summary into pass or fail, and [`render`] writes a deterministic text artifact that can
 //! be committed and diffed.
 //!
-//! The loop mirrors `crates/asperitas-wire/examples/console_decode.rs` (about 40 lines
-//! of chunking and the push/drain handshake). It is duplicated here deliberately: the
-//! example is a binary and exposing its loop from `asperitas-wire` would add host-only
-//! `std` API to a firmware crate.
-//!
 //! # What fails a capture
 //!
 //! * any bad frame, any discarded byte (including garbage before the first valid frame -
@@ -33,7 +28,8 @@ use std::fmt::Write as _;
 use std::io::{self, Read};
 
 use asperitas_host::stream::pump;
-use asperitas_wire::frame::{Decoder, Record, MAX_FRAME};
+use asperitas_wire::console::{is_boot, Continuity, StatusRecord};
+use asperitas_wire::frame::{Decoder, Record};
 
 /// One validated record, owned.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -151,14 +147,16 @@ pub fn capture<R: Read>(reader: R) -> io::Result<Capture> {
     let pushed = pump(reader, &mut decoder, |record| acc.observe(record)).into_result()?;
 
     let stats = decoder.stats();
-    let accounted = acc.framed_bytes + stats.discarded_bytes + decoder.buffered() as u64;
     let mut summary = acc.summary;
     summary.records = stats.records;
     summary.bytes_pushed = pushed;
     summary.bad_frames = stats.bad_frames;
     summary.resyncs = stats.resyncs;
     summary.discarded_bytes = stats.discarded_bytes;
-    summary.accounting_ok = accounted == pushed;
+    summary.accounting_ok = decoder.accounted(pushed);
+    summary.seq_gaps = acc.continuity.gaps;
+    summary.restarts = acc.continuity.restarts;
+    summary.first_gap = acc.continuity.first_gap;
     summary.device_dropped = acc
         .any_status
         .then(|| acc.dropped_total + acc.dropped_this_boot);
@@ -172,8 +170,7 @@ pub fn capture<R: Read>(reader: R) -> io::Result<Capture> {
 struct Accumulator {
     records: Vec<OwnedRecord>,
     summary: Summary,
-    framed_bytes: u64,
-    previous_seq: Option<u32>,
+    continuity: Continuity,
     any_status: bool,
     dropped_total: u64,
     dropped_this_boot: u64,
@@ -182,31 +179,18 @@ struct Accumulator {
 impl Accumulator {
     fn observe(&mut self, r: &Record<'_>) {
         let body = String::from_utf8_lossy(r.body).into_owned();
-        // Frame = '~' + prefix + body + crc + terminator; ask the codec rather than
-        // hard-coding its layout.
-        self.framed_bytes += framed_len(r) as u64;
+        self.continuity.observe(r);
 
-        let is_boot = body.starts_with("BOOT ");
-        if let Some(prev) = self.previous_seq {
-            if is_boot {
-                self.summary.restarts += 1;
-            } else if r.seq != prev.wrapping_add(1) {
-                self.summary.seq_gaps += 1;
-                self.summary.first_gap.get_or_insert((prev, r.seq));
-            }
-        }
-        self.previous_seq = Some(r.seq);
-
-        if is_boot {
+        if is_boot(r.body) {
             // Device counters restart from zero at boot.
             self.dropped_total += self.dropped_this_boot;
             self.dropped_this_boot = 0;
         } else if body.starts_with("STATUS ") {
-            match parse_status(&body) {
-                Some(dropped) => {
+            match StatusRecord::parse(r.body) {
+                Some(status) => {
                     self.summary.status_records += 1;
                     self.any_status = true;
-                    self.dropped_this_boot = dropped;
+                    self.dropped_this_boot = u64::from(status.dropped_full);
                 }
                 None => self.summary.unparsed_status += 1,
             }
@@ -218,36 +202,6 @@ impl Accumulator {
             t_ms: r.t_ms,
             body,
         });
-    }
-}
-
-fn framed_len(r: &Record<'_>) -> usize {
-    let mut buf = [0u8; MAX_FRAME];
-    let level = match r.level {
-        b'W' => asperitas_wire::Level::Warn,
-        b'E' => asperitas_wire::Level::Error,
-        b'D' => asperitas_wire::Level::Debug,
-        b'T' => asperitas_wire::Level::Trace,
-        _ => asperitas_wire::Level::Info,
-    };
-    asperitas_wire::frame::encode(level, r.seq, r.t_ms, r.body, &mut buf).len
-}
-
-/// Parse `STATUS proto=1 ... dropped_full=N ...`; `None` for unknown proto or bad field.
-fn parse_status(body: &str) -> Option<u64> {
-    let mut proto_ok = false;
-    let mut dropped = None;
-    for tok in body.split_whitespace().skip(1) {
-        match tok.split_once('=') {
-            Some(("proto", v)) => proto_ok = v == "1",
-            Some(("dropped_full", v)) => dropped = v.parse::<u64>().ok(),
-            _ => {}
-        }
-    }
-    if proto_ok {
-        dropped
-    } else {
-        None
     }
 }
 
@@ -332,7 +286,7 @@ pub fn render(capture: &Capture, policy: &Policy) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use asperitas_wire::frame::encode;
+    use asperitas_wire::frame::{encode, MAX_FRAME};
 
     fn frame(seq: u32, body: &str) -> Vec<u8> {
         let mut buf = [0u8; MAX_FRAME];

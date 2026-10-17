@@ -407,7 +407,7 @@ The reassembler turns `capture.bin` back into PCM and exits non-zero if any bloc
 its CRC:
 
 ```bash
-cargo run -p asperitas-host --release --example dump_reassemble -- capture.bin --out capture.pcm
+cargo run -p asperitas-host --release --bin dump_reassemble -- capture.bin --out capture.pcm
 ```
 
 The PCM is headerless signed 16-bit little-endian, mono, 48 kHz. For a sweep or excerpt build, the

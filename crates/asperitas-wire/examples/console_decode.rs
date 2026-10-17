@@ -33,8 +33,8 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::process::exit;
 
+use asperitas_wire::console::Continuity;
 use asperitas_wire::frame::{encode, Decoder, Record, Stats, MAX_FRAME};
-use asperitas_wire::Level;
 
 /// Bytes requested per read. Larger than [`MAX_FRAME`] on purpose: a reader that happens
 /// to align with record boundaries proves nothing about the decoder's boundaries.
@@ -67,52 +67,34 @@ fn main() {
             }
         };
 
-        // `push` takes only what the decoder can currently hold, so the remainder of the
-        // chunk stays here until the records waiting inside it have been handed to the
-        // sink. That handshake is what makes this loop lossless however long the read.
-        let mut offset = 0usize;
-        while offset < filled {
-            let before = offset;
-            offset += decoder.push(&chunk[offset..filled]);
-            drain(&mut decoder, &mut sink, &mut frame_buf);
-            if offset == before {
-                // Unreachable while `next_record` is being drained: freeing a queue slot
-                // always lets `push` take more input. Reported, not assumed.
-                eprintln!("console_decode: decoder took no further bytes; stopping early");
-                unread = true;
-                break;
-            }
-        }
+        // `feed` is the lossless push/drain loop: the remainder of the chunk waits until the
+        // records inside it have been handed to the sink.
+        let taken = decoder.feed(&chunk[..filled], |record| {
+            sink.emit(record, &mut frame_buf);
+        });
         // Count what the decoder actually took. Bytes still waiting in this chunk when we
         // stopped early were never offered, so they belong to no counter.
-        pushed += offset as u64;
+        pushed += taken as u64;
+        if taken < filled {
+            // Unreachable while records are being drained: freeing a queue slot always lets
+            // `push` take more input. Reported, not assumed.
+            eprintln!("console_decode: decoder took no further bytes; stopping early");
+            unread = true;
+            break;
+        }
     }
 
     // Required before reading the counters: whatever is still undecided has nowhere to
     // come from, so it becomes discarded bytes rather than an invisible remainder.
     decoder.finish();
-    drain(&mut decoder, &mut sink, &mut frame_buf);
     sink.close();
 
-    report(
-        decoder.stats(),
-        pushed,
-        sink.framed_bytes,
-        decoder.buffered(),
-        &sink.continuity,
-    );
+    report(&decoder, pushed, &sink.continuity);
 
     // The summary is printed either way: the numbers are the point, and an operator who
     // loses them to a non-zero exit has lost the diagnosis too.
     if unread {
         exit(1);
-    }
-}
-
-/// Hand every queued record to the sink, one at a time as the decoder allows.
-fn drain(decoder: &mut Decoder, sink: &mut Emitter, frame_buf: &mut [u8; MAX_FRAME]) {
-    while let Some(record) = decoder.next_record() {
-        sink.emit(&record, frame_buf);
     }
 }
 
@@ -125,7 +107,6 @@ fn drain(decoder: &mut Decoder, sink: &mut Emitter, frame_buf: &mut [u8; MAX_FRA
 struct Emitter {
     out: BufWriter<io::StdoutLock<'static>>,
     open: bool,
-    framed_bytes: u64,
     continuity: Continuity,
 }
 
@@ -134,15 +115,13 @@ impl Emitter {
         Self {
             out: BufWriter::new(io::stdout().lock()),
             open: true,
-            framed_bytes: 0,
             continuity: Continuity::default(),
         }
     }
 
     fn emit(&mut self, record: &Record<'_>, frame_buf: &mut [u8; MAX_FRAME]) {
         let bytes = reencoded_frame(record, frame_buf);
-        self.framed_bytes += bytes.len() as u64;
-        self.continuity.observe(record.seq);
+        self.continuity.observe(record);
         if !self.open {
             return;
         }
@@ -188,52 +167,8 @@ fn open_input() -> Box<dyn Read> {
 /// fixed-width, the body arrives pre-sanitised, and the checksum is a function of the
 /// two. Printing that is what lets this output be grepped and piped back in.
 fn reencoded_frame<'a>(record: &Record<'_>, buf: &'a mut [u8; MAX_FRAME]) -> &'a [u8] {
-    let encoded = encode(
-        level_from_letter(record.level),
-        record.seq,
-        record.t_ms,
-        record.body,
-        buf,
-    );
+    let encoded = encode(record.level(), record.seq, record.t_ms, record.body, buf);
     &buf[..encoded.len]
-}
-
-fn level_from_letter(letter: u8) -> Level {
-    match letter {
-        b'W' => Level::Warn,
-        b'E' => Level::Error,
-        b'D' => Level::Debug,
-        b'T' => Level::Trace,
-        // `I` is the only remaining wire letter; defaulting keeps this total rather than
-        // panicking on a byte the decoder would already have rejected.
-        _ => Level::Info,
-    }
-}
-
-/// Sequence continuity across the records that validated.
-#[derive(Default)]
-struct Continuity {
-    observed: u64,
-    gaps: u64,
-    first_gap: Option<(u32, u32)>,
-    previous: Option<u32>,
-}
-
-impl Continuity {
-    /// Note one record's sequence number. Consecutive numbering wraps at `u32::MAX` and
-    /// the wrap is not a gap.
-    fn observe(&mut self, seq: u32) {
-        self.observed += 1;
-        if let Some(previous) = self.previous {
-            if seq != previous.wrapping_add(1) {
-                self.gaps += 1;
-                if self.first_gap.is_none() {
-                    self.first_gap = Some((previous, seq));
-                }
-            }
-        }
-        self.previous = Some(seq);
-    }
 }
 
 /// Print the four integrity counters, then show that they account for every byte.
@@ -241,33 +176,36 @@ impl Continuity {
 /// The law is printed rather than merely checked because it is the reader's evidence:
 /// `discarded_bytes = 0` means something only when the bytes you pushed are all present
 /// somewhere in the summary.
-fn report(stats: Stats, pushed: u64, framed_bytes: u64, buffered: usize, continuity: &Continuity) {
-    let accounted = framed_bytes + stats.discarded_bytes + buffered as u64;
+fn report(decoder: &Decoder, pushed: u64, continuity: &Continuity) {
+    let stats: Stats = decoder.stats();
+    let buffered = decoder.buffered();
+    let accounted = stats.framed_bytes + stats.discarded_bytes + buffered as u64;
     eprintln!(
         "console_decode: records={} bad_frames={} resyncs={} discarded_bytes={}",
         stats.records, stats.bad_frames, stats.resyncs, stats.discarded_bytes
     );
     eprintln!(
         "console_decode: bytes pushed={} accounted_for={} (framed_records={} discarded={} buffered={})",
-        pushed, accounted, framed_bytes, stats.discarded_bytes, buffered
+        pushed, accounted, stats.framed_bytes, stats.discarded_bytes, buffered
     );
-    if accounted != pushed {
+    if !decoder.accounted(pushed) {
         eprintln!(
             "console_decode: ACCOUNTING FAILURE: {} bytes are in neither category",
-            pushed - accounted
+            pushed.abs_diff(accounted)
         );
     }
     eprintln!(
-        "console_decode: seq continuity: records={} gaps={} first_gap={}",
+        "console_decode: seq continuity: records={} gaps={} restarts={} first_gap={}",
         continuity.observed,
         continuity.gaps,
+        continuity.restarts,
         match continuity.first_gap {
             None => "none".to_string(),
             Some((from, to)) => format!("{from:08x}->{to:08x}"),
         }
     );
     eprintln!(
-        "console_decode: note: CRC verifies integrity, never absence. A gap right after a BOOT \
-         record is a restart, not loss."
+        "console_decode: note: CRC verifies integrity, never absence. A BOOT record restarts \
+         the numbering and counts as a restart, not a gap."
     );
 }

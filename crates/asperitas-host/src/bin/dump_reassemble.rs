@@ -4,9 +4,9 @@
 //! Run it on a file, or pipe a capture through it:
 //!
 //! ```sh
-//! cargo run -p asperitas-host --example dump_reassemble -- capture.bin --out capture.pcm
-//! cat capture.bin | cargo run -p asperitas-host --example dump_reassemble --out live.pcm
-//! cargo run -p asperitas-host --example dump_reassemble -- --selftest
+//! cargo run -p asperitas-host --bin dump_reassemble -- capture.bin --out capture.pcm
+//! cat capture.bin | cargo run -p asperitas-host --bin dump_reassemble --out live.pcm
+//! cargo run -p asperitas-host --bin dump_reassemble -- --selftest
 //! ```
 //!
 //! Bytes are read in 4 KiB pieces — larger than one frame on purpose, so record boundaries never
@@ -17,7 +17,7 @@
 //!
 //! # How this differs from `console_decode`, and why
 //!
-//! [`console_decode`](../../asperitas-wire/examples/console_decode.rs) prints validated records to stdout and always
+//! [`console_decode`](../../../asperitas-wire/examples/console_decode.rs) prints validated records to stdout and always
 //! exits 0 on a readable capture, because deciding whether a capture passed is a human call. This
 //! tool cannot keep either convention, and the divergence is deliberate rather than an oversight for
 //! someone to "fix":
@@ -45,10 +45,11 @@ use std::process::exit;
 
 use asperitas_host::assemble::{Abandoned, Action, BlockAssembler, Failure, Finish, Tally};
 use asperitas_host::stream::pump;
+use asperitas_wire::console::StatusRecord;
 use asperitas_wire::dump::{
     self, AUDIO_HEADER_LEN, CHUNK_RAW, FULL_AUDIO_FRAME_LEN, MAX_CHUNKS_PER_BLOCK,
 };
-use asperitas_wire::frame::{encode, Decoder, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN};
+use asperitas_wire::frame::{Decoder, Record, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN};
 use asperitas_wire::Level;
 
 /// Staging room for one maximum-size block: every chunk the `n` field can name, at full width.
@@ -169,7 +170,8 @@ struct BlockRow {
 #[derive(Debug)]
 struct Summary {
     pushed: u64,
-    framed_bytes: u64,
+    /// Whether the decoder's accounting law holds against `pushed`.
+    accounted: bool,
     stats: Stats,
     buffered: usize,
     tally: Tally,
@@ -184,7 +186,7 @@ struct Summary {
 impl Summary {
     /// Every byte offered is inside a validated record, charged to `discarded_bytes`, or buffered.
     fn law_holds(&self) -> bool {
-        self.pushed == self.framed_bytes + self.stats.discarded_bytes + self.buffered as u64
+        self.accounted
     }
 
     /// Whether anything in this capture failed to prove itself.
@@ -266,11 +268,10 @@ fn consume(input: &mut dyn Read, sink: &mut WriteOrDiscard<'_>) -> Summary {
     let mut decoder = Decoder::new();
     let mut staging = vec![0u8; STAGING_BYTES];
     let mut assembler = BlockAssembler::new(&mut staging);
-    let mut frame_buf = [0u8; MAX_FRAME];
     let mut got = Assembled::default();
 
     let pumped = pump(input, &mut decoder, |record| {
-        handle(record, &mut assembler, sink, &mut frame_buf, &mut got)
+        handle(record, &mut assembler, sink, &mut got)
     });
     let unread = match pumped.error {
         Some(e) => {
@@ -288,7 +289,7 @@ fn consume(input: &mut dyn Read, sink: &mut WriteOrDiscard<'_>) -> Summary {
 
     Summary {
         pushed: pumped.pushed,
-        framed_bytes: got.framed_bytes,
+        accounted: decoder.accounted(pumped.pushed),
         stats: decoder.stats(),
         buffered: decoder.buffered(),
         tally,
@@ -302,8 +303,6 @@ fn consume(input: &mut dyn Read, sink: &mut WriteOrDiscard<'_>) -> Summary {
 /// What the assembler has produced so far, as the read loop accumulates it.
 #[derive(Default)]
 struct Assembled {
-    /// Wire bytes of every record handed to the assembler, for the accounting law.
-    framed_bytes: u64,
     blocks: Vec<BlockRow>,
     refused: Vec<(u32, Failure)>,
     abandoned: Vec<Abandoned>,
@@ -314,14 +313,12 @@ struct Assembled {
 /// Hand one record to the assembler, charging its wire cost and writing out any block it just
 /// finished.
 fn handle(
-    record: &asperitas_wire::frame::Record<'_>,
+    record: &Record<'_>,
     assembler: &mut BlockAssembler<'_>,
     sink: &mut WriteOrDiscard<'_>,
-    frame_buf: &mut [u8; MAX_FRAME],
     got: &mut Assembled,
 ) {
     {
-        got.framed_bytes += reencoded_frame(record, frame_buf).len() as u64;
         let actions = assembler.accept(record.body);
         // The body borrow ends with the record, so the assembler's PCM slice and the next record never
         // coexist: copy out whatever a completion promises before asking for anything else.
@@ -354,24 +351,11 @@ fn handle(
 /// Echo a non-dump record's body when it carries a fact a rig watches: `STATUS` is the counter
 /// stream, everything else is ordinary logging noise that would bury the manifest.
 fn note(body: &[u8]) {
-    if body.starts_with(b"STATUS") {
+    if StatusRecord::parse(body).is_some() {
         if let Ok(text) = core::str::from_utf8(body) {
             eprintln!("dump_reassemble: {text}");
         }
     }
-}
-
-/// Reassemble the wire bytes a validated record arrived as, to measure what it cost on the wire.
-///
-/// The record already passed CRC, so re-encoding its fields is not re-checking anything: the prefix
-/// is fixed-width, the body arrives pre-sanitised, and the checksum is a function of the two, so this
-/// reproduces the frame byte for byte.
-fn reencoded_frame<'a>(
-    record: &asperitas_wire::frame::Record<'_>,
-    buf: &'a mut [u8; MAX_FRAME],
-) -> &'a [u8] {
-    let encoded = encode(Level::Info, record.seq, record.t_ms, record.body, buf);
-    &buf[..encoded.len]
 }
 
 /// Print the manifest: what was assembled, what was refused, and the arithmetic behind both.
@@ -414,10 +398,11 @@ fn report(summary: &Summary, out_path: Option<&str>) {
         );
     }
 
-    let accounted = summary.framed_bytes + summary.stats.discarded_bytes + summary.buffered as u64;
+    let accounted =
+        summary.stats.framed_bytes + summary.stats.discarded_bytes + summary.buffered as u64;
     eprintln!(
         "dump_reassemble: bytes pushed={} accounted_for={} (framed_records={} discarded={} buffered={})",
-        summary.pushed, accounted, summary.framed_bytes, summary.stats.discarded_bytes, summary.buffered
+        summary.pushed, accounted, summary.stats.framed_bytes, summary.stats.discarded_bytes, summary.buffered
     );
     if !summary.law_holds() {
         eprintln!(

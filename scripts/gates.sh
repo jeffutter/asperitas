@@ -374,7 +374,7 @@ gate push clippy-pod-hw "=== cargo clippy (asperitas-pod pod-hw feature) ===" \
 # The capture decoder's own verdict: exit 0 means every block the synthetic captures promised, they
 # proved. Exercises the shipped read/decode/assemble path, so it needs no board.
 gate push dump-reassemble-selftest "=== dump_reassemble --selftest ===" \
-  cargo run -p asperitas-host --example dump_reassemble -- --selftest
+  cargo run -p asperitas-host --bin dump_reassemble -- --selftest
 
 # Rustdoc cross-references. Each member's `[lints] workspace = true` already denies the two
 # intra-doc-link lints via the root table; RUSTDOCFLAGS raises that to every rustdoc warning.

@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use asperitas_wire::console::is_boot;
 use asperitas_wire::control::{parse_reply, BodyBuf, Command, ErrorCode, Reply, Verb};
 use asperitas_wire::frame::{encode, Decoder, MAX_FRAME};
 use asperitas_wire::Level;
@@ -153,15 +154,13 @@ impl<P: Read + Write> Link<P> {
         }
     }
 
-    /// Read until `pick` accepts a record body or `timeout` passes. Bytes in the same read
-    /// chunk after the accepted record are dropped; callers wait on one reply at a time.
+    /// Read until `pick` accepts a record body or `timeout` passes. Records in the same read
+    /// chunk after the accepted one are consumed without being offered to `pick`; callers wait
+    /// on one reply at a time.
     fn wait<T>(&mut self, mut pick: impl FnMut(&str) -> Option<T>) -> Result<T, ControlError> {
         let deadline = Instant::now() + self.timeout;
         let mut chunk = [0u8; 4096];
         loop {
-            if let Some(v) = self.drain(&mut pick) {
-                return Ok(v);
-            }
             if Instant::now() >= deadline {
                 return Err(ControlError::Timeout);
             }
@@ -180,33 +179,25 @@ impl<P: Read + Write> Link<P> {
                 }
                 Err(e) => return Err(e.into()),
             };
-            let mut off = 0;
-            while off < n {
-                let taken = self.decoder.push(&chunk[off..n]);
-                if let Some(v) = self.drain(&mut pick) {
-                    return Ok(v);
+            let mut found = None;
+            let saw_boot = &mut self.saw_boot;
+            let taken = self.decoder.feed(&chunk[..n], |r| {
+                if is_boot(r.body) {
+                    *saw_boot = true;
                 }
-                if taken == 0 {
-                    return Err(ControlError::Io(io::Error::other(
-                        "decoder made no progress",
-                    )));
+                if found.is_none() {
+                    found = pick(&String::from_utf8_lossy(r.body));
                 }
-                off += taken;
+            });
+            if let Some(v) = found {
+                return Ok(v);
+            }
+            if taken < n {
+                return Err(ControlError::Io(io::Error::other(
+                    "decoder made no progress",
+                )));
             }
         }
-    }
-
-    fn drain<T>(&mut self, pick: &mut impl FnMut(&str) -> Option<T>) -> Option<T> {
-        while let Some(r) = self.decoder.next_record() {
-            let body = String::from_utf8_lossy(r.body);
-            if body.starts_with("BOOT ") {
-                self.saw_boot = true;
-            }
-            if let Some(v) = pick(&body) {
-                return Some(v);
-            }
-        }
-        None
     }
 }
 

@@ -1,9 +1,8 @@
 //! Feeding a byte stream through the framed-console [`Decoder`].
 //!
-//! Every host tool that reads the console does the same dance: read a chunk, push it, drain the
-//! records it completed before pushing the rest (the decoder takes only what it can hold), and
-//! flush at end of stream. Written once here so no tool can forget the drain between pushes and
-//! lose the tail of a chunk.
+//! Every host tool that reads a console capture does the same thing: read a chunk, hand it to
+//! [`Decoder::feed`], and flush at end of stream. Written once here so no tool has its own read
+//! loop to get wrong.
 
 use std::io::{self, Read};
 
@@ -54,7 +53,7 @@ where
     let mut pushed: u64 = 0;
     let mut error = None;
 
-    'read: loop {
+    loop {
         let filled = match reader.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => n,
@@ -64,21 +63,11 @@ where
                 break;
             }
         };
-        // `push` takes only what the decoder can currently hold, so the rest of the chunk waits
-        // here until the records inside it have been consumed. That handshake is what makes the
-        // loop lossless however long the read.
-        let mut offset = 0usize;
-        while offset < filled {
-            let taken = decoder.push(&chunk[offset..filled]);
-            while let Some(record) = decoder.next_record() {
-                on_record(&record);
-            }
-            if taken == 0 {
-                error = Some(io::Error::other("decoder made no progress"));
-                break 'read;
-            }
-            offset += taken;
-            pushed += taken as u64;
+        let taken = decoder.feed(&chunk[..filled], &mut on_record);
+        pushed += taken as u64;
+        if taken < filled {
+            error = Some(io::Error::other("decoder made no progress"));
+            break;
         }
     }
 

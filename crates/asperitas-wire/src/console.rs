@@ -245,6 +245,96 @@ pub fn status_body(out: &mut [u8; BODY_WINDOW], snap: &ConsoleCounters, pipe_fre
     w.filled()
 }
 
+/// Whether `body` is a `BOOT` banner, the first record of a boot (see [`boot_body`]).
+pub fn is_boot(body: &[u8]) -> bool {
+    body.starts_with(b"BOOT ")
+}
+
+/// Sequence continuity across the validated records of one capture.
+///
+/// Consecutive numbering wraps at `u32::MAX` and the wrap is not a gap. A `BOOT` banner
+/// restarts the device's numbering, so it counts as a restart whatever its `seq`, never as a
+/// gap.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Continuity {
+    /// Records observed.
+    pub observed: u64,
+    /// Records whose `seq` did not follow the previous record's, excluding restarts.
+    pub gaps: u64,
+    /// `BOOT` banners that followed another record.
+    pub restarts: u64,
+    /// `(previous, next)` of the first gap.
+    pub first_gap: Option<(u32, u32)>,
+    previous: Option<u32>,
+}
+
+impl Continuity {
+    /// Note one record.
+    pub fn observe(&mut self, record: &crate::frame::Record<'_>) {
+        self.observed += 1;
+        if let Some(previous) = self.previous {
+            if is_boot(record.body) {
+                self.restarts += 1;
+            } else if record.seq != previous.wrapping_add(1) {
+                self.gaps += 1;
+                self.first_gap.get_or_insert((previous, record.seq));
+            }
+        }
+        self.previous = Some(record.seq);
+    }
+}
+
+/// A parsed `STATUS` record body: the counterpart of [`status_body`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StatusRecord {
+    /// Records the device has committed since boot.
+    pub sent: u32,
+    /// Records dropped because the ring was full.
+    pub dropped_full: u32,
+    /// Bytes those drops cost.
+    pub bytes_dropped: u32,
+    /// Records whose body was truncated.
+    pub truncated: u32,
+    /// USB endpoint write errors.
+    pub endpoint_errors: u32,
+    /// The `seq` the next record will carry.
+    pub seq_next: u32,
+    /// Free bytes in the ring when the record was rendered.
+    pub pipe_free: u64,
+}
+
+impl StatusRecord {
+    /// Parse a body rendered by [`status_body`]: protocol 1, all seven fields, in order.
+    ///
+    /// `None` for anything else - another protocol version, a missing, reordered or
+    /// non-numeric field, or trailing text - so a host never reports a half-understood record
+    /// as device truth.
+    pub fn parse(body: &[u8]) -> Option<StatusRecord> {
+        let text = core::str::from_utf8(body).ok()?;
+        let mut tokens = text.split_ascii_whitespace();
+        if tokens.next()? != "STATUS" {
+            return None;
+        }
+        let mut field = |name: &str| -> Option<&str> {
+            let (key, value) = tokens.next()?.split_once('=')?;
+            (key == name).then_some(value)
+        };
+        if field("proto")? != "1" {
+            return None;
+        }
+        let parsed = StatusRecord {
+            sent: field("sent")?.parse().ok()?,
+            dropped_full: field("dropped_full")?.parse().ok()?,
+            bytes_dropped: field("bytes_dropped")?.parse().ok()?,
+            truncated: field("trunc")?.parse().ok()?,
+            endpoint_errors: field("ep_err")?.parse().ok()?,
+            seq_next: field("seq_next")?.parse().ok()?,
+            pipe_free: field("pipe_free")?.parse().ok()?,
+        };
+        tokens.next().is_none().then_some(parsed)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Measurement-rig verbs (TASK-038.03.02)
 // ---------------------------------------------------------------------------
@@ -833,6 +923,75 @@ mod tests {
             core::str::from_utf8(&out[..n]).unwrap(),
             "STATUS proto=1 sent=12 dropped_full=3 bytes_dropped=4096 trunc=1 ep_err=2 seq_next=18 pipe_free=2048"
         );
+    }
+
+    fn observed(c: &mut Continuity, seq: u32, body: &[u8]) {
+        c.observe(&crate::frame::Record {
+            level: b'I',
+            seq,
+            t_ms: 0,
+            body,
+        });
+    }
+
+    #[test]
+    fn continuity_counts_gaps_and_restarts_apart_and_ignores_the_seq_wrap() {
+        let mut c = Continuity::default();
+        observed(&mut c, u32::MAX - 1, b"x");
+        observed(&mut c, u32::MAX, b"x");
+        observed(&mut c, 0, b"x");
+        assert_eq!((c.gaps, c.restarts, c.first_gap), (0, 0, None));
+        observed(&mut c, 5, b"x");
+        observed(&mut c, 9, b"x");
+        observed(&mut c, 0, b"BOOT proto=1");
+        assert_eq!(
+            (c.observed, c.gaps, c.restarts, c.first_gap),
+            (6, 2, 1, Some((0, 5)))
+        );
+    }
+
+    #[test]
+    fn status_record_parses_what_status_body_renders() {
+        let mut out = [0u8; BODY_WINDOW];
+        for (snap, free) in [
+            (counters(12, 3, 4_096, 1, 2, 18), 2_048),
+            (
+                counters(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX),
+                usize::MAX,
+            ),
+        ] {
+            let n = status_body(&mut out, &snap, free);
+            let parsed = StatusRecord::parse(&out[..n]).expect("own rendering parses");
+            assert_eq!(
+                parsed,
+                StatusRecord {
+                    sent: snap.records_sent,
+                    dropped_full: snap.dropped_full,
+                    bytes_dropped: snap.bytes_dropped,
+                    truncated: snap.truncated,
+                    endpoint_errors: snap.endpoint_errors,
+                    seq_next: snap.seq_next,
+                    pipe_free: free as u64,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn status_record_refuses_what_it_does_not_fully_understand() {
+        let good = "STATUS proto=1 sent=5 dropped_full=0 bytes_dropped=0 trunc=0 ep_err=0 seq_next=9 pipe_free=100";
+        assert!(StatusRecord::parse(good.as_bytes()).is_some());
+        for bad in [
+            "STATUS proto=2 sent=5 dropped_full=0 bytes_dropped=0 trunc=0 ep_err=0 seq_next=9 pipe_free=100",
+            "STATUS proto=2 dropped_full=9",
+            "STATUS proto=1 dropped_full=0",
+            "STATUS proto=1 sent=x dropped_full=0 bytes_dropped=0 trunc=0 ep_err=0 seq_next=9 pipe_free=100",
+            "BOOT proto=1 sent=5 dropped_full=0 bytes_dropped=0 trunc=0 ep_err=0 seq_next=9 pipe_free=100",
+            "STATUS proto=1 sent=5 dropped_full=0 bytes_dropped=0 trunc=0 ep_err=0 seq_next=9 pipe_free=100 extra=1",
+        ] {
+            assert_eq!(StatusRecord::parse(bad.as_bytes()), None, "{bad}");
+        }
+        assert_eq!(StatusRecord::parse(&[0xff, 0xfe]), None);
     }
 
     #[test]

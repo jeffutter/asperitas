@@ -578,15 +578,36 @@ pub struct Record<'a> {
     pub body: &'a [u8],
 }
 
-/// What a [`Decoder`] saw, in four counters that each answer one question.
+impl Record<'_> {
+    /// The record's level. A record from a [`Decoder`] always carries one of the five wire
+    /// letters; any other byte, reachable only by building a `Record` by hand, reads as
+    /// [`Level::Info`].
+    pub fn level(&self) -> Level {
+        match self.level {
+            b'E' => Level::Error,
+            b'W' => Level::Warn,
+            b'D' => Level::Debug,
+            b'T' => Level::Trace,
+            _ => Level::Info,
+        }
+    }
+
+    /// Bytes this record occupied on the wire, start marker through CRLF. Equal to the length
+    /// [`encode`] produces for the same body, without encoding anything.
+    pub fn framed_len(&self) -> usize {
+        PREFIX_LEN + self.body.len().min(MAX_BODY) + TRAILER_LEN
+    }
+}
+
+/// What a [`Decoder`] saw, in five counters that each answer one question.
 ///
 /// Read these only after [`Decoder::finish`] — see there. The accounting law
 ///
 /// ```text
-/// bytes_pushed == Σ consumed + discarded_bytes + buffered()
+/// bytes_pushed == framed_bytes + discarded_bytes + buffered()
 /// ```
 /// holds after every [`push`](Decoder::push) and after `finish()`, which is what makes
-/// the summary trustworthy rather than merely plausible.
+/// the summary trustworthy rather than merely plausible. [`Decoder::accounted`] checks it.
 #[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Stats {
     /// Records that validated on framing *and* CRC.
@@ -601,6 +622,9 @@ pub struct Stats {
     /// forfeited `~` of each rejected start, and windows abandoned because no start
     /// marker ever appeared in them.
     pub discarded_bytes: u64,
+    /// Bytes that made up validated records, start marker through CRLF. Together with
+    /// `discarded_bytes` and [`Decoder::buffered`] this accounts for every byte pushed.
+    pub framed_bytes: u64,
 }
 
 /// How many validated records may sit undelivered at once.
@@ -733,6 +757,7 @@ impl Decoder {
                 bad_frames: 0,
                 resyncs: 0,
                 discarded_bytes: 0,
+                framed_bytes: 0,
             },
         }
     }
@@ -785,6 +810,36 @@ impl Decoder {
             }
         }
         pos
+    }
+
+    /// Offer all of `bytes`, handing every record they complete to `on_record` in arrival
+    /// order, and return how many bytes were taken.
+    ///
+    /// This is the lossless drain-then-retry loop described at [`push`](Decoder::push), written
+    /// once. The result is `bytes.len()` unless the decoder stopped making progress, which its
+    /// construction rules out; a shorter count is the only signal of that, so a caller that
+    /// cares compares it with `bytes.len()` instead of looping on a decoder that will not move.
+    /// Records still queued from earlier calls are delivered first.
+    pub fn feed(&mut self, bytes: &[u8], mut on_record: impl FnMut(&Record<'_>)) -> usize {
+        let mut offset = 0usize;
+        loop {
+            let taken = self.push(bytes.get(offset..).unwrap_or_default());
+            let mut delivered = false;
+            while let Some(record) = self.next_record() {
+                on_record(&record);
+                delivered = true;
+            }
+            offset += taken;
+            if offset >= bytes.len() || (taken == 0 && !delivered) {
+                return offset;
+            }
+        }
+    }
+
+    /// Whether the accounting law holds against `pushed`, the number of bytes this decoder
+    /// has taken: `pushed == framed_bytes + discarded_bytes + buffered()`.
+    pub fn accounted(&self, pushed: u64) -> bool {
+        pushed == self.stats.framed_bytes + self.stats.discarded_bytes + self.len as u64
     }
 
     /// Take the oldest validated record not yet delivered, if any.
@@ -907,6 +962,7 @@ impl Decoder {
                 }
                 Decision::Accept(frame) => {
                     self.stats.records += 1;
+                    self.stats.framed_bytes += frame.consumed as u64;
                     // Queue first: the body still lives in `buf`, and consuming shifts
                     // it away.
                     self.enqueue(frame);
@@ -1359,7 +1415,8 @@ mod tests {
                 records: 1,
                 bad_frames: 0,
                 resyncs: 0,
-                discarded_bytes: 0
+                discarded_bytes: 0,
+                framed_bytes: enc.len as u64,
             },
             "a clean capture must report a clean capture"
         );
@@ -1755,6 +1812,47 @@ mod tests {
             "stream is not an exact concatenation of committed frames (commits={commits} drops={drops})"
         );
         assert!(commits > 0 && drops > 0, "test exercised neither path");
+    }
+
+    #[test]
+    fn framed_len_and_level_match_what_encode_produced() {
+        let levels = [
+            Level::Error,
+            Level::Warn,
+            Level::Info,
+            Level::Debug,
+            Level::Trace,
+        ];
+        let body = [b'x'; MAX_BODY];
+        for level in levels {
+            for body_len in 0..=MAX_BODY {
+                let (out, enc) = encoded(level, 7, 9, &body[..body_len]);
+                let mut decoder = Decoder::new();
+                decoder.push(&out[..enc.len]);
+                let record = decoder.next_record().expect("valid frame");
+                assert_eq!(record.framed_len(), enc.len);
+                assert_eq!(record.level(), level);
+            }
+        }
+    }
+
+    #[test]
+    fn feed_delivers_every_record_of_a_long_slice_and_balances_the_books() {
+        let mut wire = Vec::new();
+        for seq in 0..100u32 {
+            let (out, enc) = encoded(Level::Info, seq, seq, b"hello");
+            wire.extend_from_slice(&out[..enc.len]);
+        }
+        wire.extend_from_slice(b"junk~tail");
+        let mut decoder = Decoder::new();
+        let mut seqs = Vec::new();
+        let taken = decoder.feed(&wire, |r| seqs.push(r.seq));
+        assert_eq!(taken, wire.len());
+        assert_eq!(seqs, (0..100).collect::<Vec<_>>());
+        assert!(decoder.accounted(wire.len() as u64));
+        decoder.finish();
+        assert!(decoder.accounted(wire.len() as u64));
+        assert!(!decoder.accounted(wire.len() as u64 + 1));
     }
 
     /// Deterministic RNG so the randomized rounds replay identically on every run.

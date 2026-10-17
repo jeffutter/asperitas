@@ -185,7 +185,7 @@
     },
     {
       "banner": "=== dump_reassemble --selftest ===",
-      "command_sha256": "43f9a05e4f84c44298ea9a52c3390ef26b1470cee4ab6c5d59e3bb6d71eac49f",
+      "command_sha256": "c4ab5951fbc4188b9e73891589d6e05b9457e02f8386a28460db55feb75b2bee",
       "cost": {
         "ci": 0.364,
         "push": 1.024
