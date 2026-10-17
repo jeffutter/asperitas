@@ -1,5 +1,5 @@
 """One rig bench session (TASK-019.03.04): reset the board over the probe, hold the console as the only
-reader, send CTL FX on attach, wait for the capture to arm, run a timed CTL SET schedule (like
+reader, send CTL FX on attach (FX_F 00 bypass, 01 patch; FX_V is ignored), wait for the capture to arm, run a timed CTL SET schedule (like
 `asperitas-rig override`, 20 steps/s), send REL, and record raw bytes until DUMPEND + 2 s.
 
   rig-session.py sweep OUT FX_F FX_V FROM TO DUR_S START_AFTER_ARM_S MAX_S
@@ -9,7 +9,7 @@ reader, send CTL FX on attach, wait for the capture to arm, run a timed CTL SET 
 Frames come from the `ctl_frame` example (build it first: `cargo build -p asperitas-wire --example
 ctl_frame`), so the bytes are the ones the device parses. The soak ramp is a triangle that starts and
 ends at the base value 0x8000, because a REL (or a first SET away from the base) snaps the parameter
-and a snap trips the discontinuity detector whatever the smoothing. Env: ASPERITAS_CONSOLE (default
+and a snap trips the discontinuity detector whatever the smoothing. Env: KNOB (hex id, default 00), ASPERITAS_CONSOLE (default
 /dev/cu.usbmodem101). Raw output goes to OUT; compress it with zstd and
 judge it with `asperitas-measure analyze`. Needs the probe attached and the bootloaded rig flashed.
 """
@@ -17,6 +17,8 @@ import os, re, select, subprocess, sys, termios, time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEV = os.environ.get('ASPERITAS_CONSOLE', '/dev/cu.usbmodem101')
+# Patch knob the SET/REL schedule moves: 00 filter cutoff, 01 output gain.
+KNOB = os.environ.get('KNOB', '00')
 CTL = os.path.join(REPO, 'target/debug/examples/ctl_frame')
 _cache = {}
 
@@ -35,8 +37,8 @@ def wire(level):
 def sweep_schedule(a, b, dur, start):
     """[(t_s, frame)] : SETs at 20/s linear from a to b over dur, then REL."""
     n = int(round(dur * 20))
-    sched = [(start + i / 20.0, frame('set', '00', '%04x' % wire(a + (b - a) * i / n))) for i in range(n + 1)]
-    sched.append((start + dur + 0.1, frame('rel', '00')))
+    sched = [(start + i / 20.0, frame('set', KNOB, '%04x' % wire(a + (b - a) * i / n))) for i in range(n + 1)]
+    sched.append((start + dur + 0.1, frame('rel', KNOB)))
     return sched
 
 
@@ -52,8 +54,8 @@ def soak_schedule():
         v = a + (b - a) * (2 * x if x < 0.5 else 2 * (1 - x))  # triangle: starts and ends at the base value
         if any(s <= t < s + 0.5 for s in snaps):
             v = min(1.0, v + float(os.environ.get('SNAP', '0.25')))
-        sched.append((start + t, frame('set', '00', '%04x' % wire(v))))
-    sched.append((start + dur + 0.1, frame('rel', '00')))
+        sched.append((start + t, frame('set', KNOB, '%04x' % wire(v))))
+    sched.append((start + dur + 0.1, frame('rel', KNOB)))
     return sched
 
 
@@ -163,6 +165,6 @@ if __name__ == '__main__':
         out, f, v, a, b, dur, start, mx = sys.argv[2], sys.argv[3], sys.argv[4], float(sys.argv[5]), float(sys.argv[6]), float(sys.argv[7]), float(sys.argv[8]), float(sys.argv[9])
         run(out, f, v, sweep_schedule(a, b, dur, start), mx)
     elif mode == 'hold':
-        run(sys.argv[2], sys.argv[3], sys.argv[4], [], float(sys.argv[6]), pre=[frame('set', '00', sys.argv[5])])
+        run(sys.argv[2], sys.argv[3], sys.argv[4], [], float(sys.argv[6]), pre=[frame('set', KNOB, sys.argv[5])])
     elif mode == 'soak':
         run(sys.argv[2], sys.argv[3], sys.argv[4], soak_schedule(), float(sys.argv[5]))

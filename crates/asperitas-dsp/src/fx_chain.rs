@@ -1,40 +1,40 @@
-//! A stimulus generator followed by the selectable [`ReplayFx`] effect.
+//! A stimulus generator followed by the selectable [`ReplayFx`] stage.
 //!
-//! The rig plays one generator per build and, since TASK-019.03.05, runs the same effect after
-//! whichever it is: sine, sweep, pulse or the excerpt replay. This is that pairing as a plain
-//! host-testable unit, so the bypass-identity guarantee and the knob behaviour are pinned without a
-//! board. Order is fixed: generator first, effect second, and the capture (the codec input) never
-//! enters here.
+//! The rig plays one generator per build and runs the same stage after whichever it is: sine,
+//! sweep, pulse or the excerpt replay. The stage is bypass or the [`Asperitas`](crate::Asperitas)
+//! patch `main` runs. This is that pairing as a plain host-testable unit, so the bypass-identity
+//! guarantee and the knob behaviour are pinned without a board. Order is fixed: generator first,
+//! stage second, and the capture (the codec input) never enters here.
 //!
-//! Bypass is the default and touches no sample, so a chain with no effect selected renders exactly
-//! the bits the bare generator does. The baseline captures (TASK-034, TASK-038.05) depend on that.
+//! Bypass is the default and touches no sample, so a chain with nothing selected renders exactly
+//! the bits the bare generator does. The baseline captures depend on that.
 //!
 //! ## Callback cost
 //!
-//! Bypass adds one enum compare per block. With an effect selected the added work is one
-//! `set_knob` compare plus 32 `Gain` or `OnePoleLowPass` ticks per block; the 2026-10-15 replay
-//! measurement priced the effect at `max_block_us` 19 against 15 without it, so about 4 us of the
-//! roughly 590 us of 666 us headroom. No allocation, no await, no lock held across anything.
+//! Bypass adds one enum compare per block. With the patch selected the added work is one
+//! `set_knobs` compare plus the filter and gain over 32 frames per block. No allocation, no
+//! await, no lock held across anything.
 
+use crate::asperitas::{Controls, KNOB_COUNT};
 use crate::processor::{Frame, Processor};
 use crate::replay_fx::{FxKind, ReplayFx};
 use crate::stimulus::Stimulus;
 
-/// Generator `G` followed by the replay effect.
+/// Generator `G` followed by the replay stage.
 pub struct FxChain<G> {
     gen: G,
     fx: ReplayFx,
-    /// The `FX` value, normalised: the pot reading a live override replaces.
-    base: f32,
+    /// The knob positions a live override replaces: the patch's defaults.
+    base: [f32; KNOB_COUNT],
 }
 
 impl<G> FxChain<G> {
-    /// `gen` then a bypassed effect with shipped parameter smoothing.
+    /// `gen` then a bypassed stage with shipped parameter smoothing.
     pub fn new(gen: G) -> Self {
         Self {
             gen,
             fx: ReplayFx::new(),
-            base: 0.0,
+            base: Controls::default().knobs,
         }
     }
 
@@ -44,7 +44,7 @@ impl<G> FxChain<G> {
         Self {
             gen,
             fx: ReplayFx::new_unsmoothed(),
-            base: 0.0,
+            base: Controls::default().knobs,
         }
     }
 
@@ -53,33 +53,39 @@ impl<G> FxChain<G> {
         &self.gen
     }
 
-    /// Choose effect `code` (see [`FxKind::from_code`]) at wire value `value` (`0..=65535` spans
-    /// `0.0..=1.0`). `false` for an unknown code, changing nothing.
-    pub fn select(&mut self, code: u8, value: u16) -> bool {
+    /// Choose stage `code` (see [`FxKind::from_code`]). The patch starts at its default knob
+    /// positions; `_value` is accepted so the wire shape stays stable and is ignored. `false` for
+    /// an unknown code, changing nothing.
+    pub fn select(&mut self, code: u8, _value: u16) -> bool {
         let Some(kind) = FxKind::from_code(code) else {
             return false;
         };
-        self.base = f32::from(value) / f32::from(u16::MAX);
+        self.base = Controls::default().knobs;
         self.fx.select(kind, self.base);
         true
     }
 
-    /// The selected effect.
+    /// The selected stage.
     pub fn kind(&self) -> FxKind {
         self.fx.kind()
     }
 }
 
 impl<G: Processor> FxChain<G> {
-    /// Render a block from the generator, then run the effect over it in place.
+    /// Render a block from the generator, then run the stage over it in place.
     ///
-    /// `knob` maps the `FX` value to the value actually applied; the rig passes its live override
-    /// merge here. It runs only when an effect is selected, so bypass stays free of it.
-    pub fn process_block_with(&mut self, block: &mut [Frame], knob: impl FnOnce(f32) -> f32) {
+    /// `knobs` maps the patch's default knob positions to the ones actually applied; the rig
+    /// passes its live override merge here. It runs only when the patch is selected, so bypass
+    /// stays free of it.
+    pub fn process_block_with(
+        &mut self,
+        block: &mut [Frame],
+        knobs: impl FnOnce([f32; KNOB_COUNT]) -> [f32; KNOB_COUNT],
+    ) {
         self.gen.process_block(block);
         if self.fx.kind() != FxKind::Bypass {
-            // Upstream of smoothing; a no-op when the value is unchanged.
-            self.fx.set_knob(knob(self.base));
+            // Upstream of smoothing; a no-op when the values are unchanged.
+            self.fx.set_knobs(knobs(self.base));
             self.fx.process(block);
         }
     }
@@ -100,7 +106,7 @@ impl<G: Processor> Processor for FxChain<G> {
     fn tick(&mut self, input: Frame) -> Frame {
         let mut out = [self.gen.tick(input)];
         if self.fx.kind() != FxKind::Bypass {
-            self.fx.set_knob(self.base);
+            self.fx.set_knobs(self.base);
             self.fx.process(&mut out);
         }
         out[0]
@@ -201,14 +207,14 @@ mod tests {
     #[test]
     fn selected_effect_is_named() {
         let mut c = chain(true);
-        assert!(c.select(2, 30_000));
+        assert!(c.select(1, 30_000));
         let mut a = [0u8; 200];
         let n = c.describe(&mut a);
         assert!(core::str::from_utf8(&a[..n])
             .unwrap()
-            .ends_with(" fx=lowpass"));
+            .ends_with(" fx=patch"));
         assert!(!c.select(9, 0), "unknown code is refused");
-        assert_eq!(c.kind(), FxKind::LowPass, "and changes nothing");
+        assert_eq!(c.kind(), FxKind::Patch, "and changes nothing");
     }
 
     #[test]
@@ -220,19 +226,38 @@ mod tests {
     }
 
     #[test]
-    fn gain_scales_a_sine() {
+    fn default_patch_passes_a_1khz_sine_at_unity() {
         let mut c = chain(false);
-        c.select(1, 0); // minimum gain
-        let quiet = peak(&render(&mut c, 200)[4800..]);
+        c.select(1, 0);
+        let patched = peak(&render(&mut c, 200)[4800..]);
+        let raw = peak(&render(&mut bare(), 200)[4800..]);
+        assert!((patched / raw - 1.0).abs() < 0.01, "{patched} vs {raw}");
+    }
+
+    #[test]
+    fn gain_knob_scales_a_sine() {
+        let mut c = chain(false);
+        c.select(1, 0);
+        let mut quiet = 0.0;
+        for _ in 0..200 {
+            let mut out = SILENCE;
+            c.process_block_with(&mut out, |b| [b[0], 0.0]); // minimum gain
+            quiet = peak(&out);
+        }
         let loud = peak(&render(&mut bare(), 200)[4800..]);
         assert!(quiet < loud * 0.05, "{quiet} vs {loud}");
     }
 
     #[test]
-    fn low_pass_attenuates_a_1khz_sine() {
+    fn cutoff_knob_attenuates_a_1khz_sine() {
         let mut c = chain(false);
-        c.select(2, 0); // lowest cutoff
-        let filtered = peak(&render(&mut c, 200)[4800..]);
+        c.select(1, 0);
+        let mut filtered = 0.0;
+        for _ in 0..200 {
+            let mut out = SILENCE;
+            c.process_block_with(&mut out, |b| [0.0, b[1]]); // lowest cutoff
+            filtered = peak(&out);
+        }
         let raw = peak(&render(&mut bare(), 200)[4800..]);
         assert!(filtered < raw * 0.5, "{filtered} vs {raw}");
     }
@@ -240,7 +265,7 @@ mod tests {
     #[test]
     fn live_knob_change_moves_the_output() {
         let mut c = chain(true);
-        c.select(1, u16::MAX);
+        c.select(1, 0);
         let mut out;
         let mut loud = 0.0;
         for _ in 0..200 {
@@ -251,7 +276,7 @@ mod tests {
         let mut quiet = 0.0;
         for _ in 0..2000 {
             out = SILENCE;
-            c.process_block_with(&mut out, |_| 0.0);
+            c.process_block_with(&mut out, |b| [b[0], 0.0]);
             quiet = peak(&out);
         }
         assert!(quiet < loud * 0.05, "{loud} -> {quiet}");
@@ -268,14 +293,13 @@ mod tests {
     fn sample_rate_reaches_the_effect() {
         let mut c = chain(false);
         c.set_sample_rate(8000.0);
-        c.select(2, 30_000);
-        let knob = f32::from(30_000u16) / f32::from(u16::MAX);
+        c.select(1, 0);
 
         let mut g = Sine::default();
         g.set_sample_rate(8000.0);
         let mut fx = ReplayFx::new_unsmoothed();
         fx.set_sample_rate(8000.0);
-        fx.select(FxKind::LowPass, knob);
+        fx.select(FxKind::Patch, Controls::default().knobs);
         let mut expected = render(&mut g, 4);
         fx.process(&mut expected);
 
@@ -290,6 +314,6 @@ mod tests {
         let mut c = chain(true);
         c.select(1, 100);
         c.reset();
-        assert_eq!(c.kind(), FxKind::Gain);
+        assert_eq!(c.kind(), FxKind::Patch);
     }
 }

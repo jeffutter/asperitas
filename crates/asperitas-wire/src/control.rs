@@ -22,7 +22,7 @@
 //! CTL RST                      restart the device
 //! CTL SET k=<2 hex> v=<4 hex>  override knob k with value v (0x0000..=0xFFFF spans 0.0..=1.0)
 //! CTL REL k=<2 hex>            release the override on knob k
-//! CTL FX f=<2 hex> v=<4 hex>   rig replay effect f (00 bypass, 01 gain, 02 low-pass) at value v
+//! CTL FX f=<2 hex> v=<4 hex>   rig effect stage f (00 bypass, 01 Asperitas patch); v is reserved
 //! ```
 //!
 //! Device to host:
@@ -139,7 +139,8 @@ pub enum Command {
     OverrideRelease {
         knob: u8,
     },
-    /// Select the rig's replay effect `fx` (opaque code here) with a `0..=0xFFFF` value.
+    /// Select the rig's effect stage `fx` (opaque code here; the rig knows bypass and patch) with a
+    /// `0..=0xFFFF` value the rig currently ignores.
     ReplayFx {
         fx: u8,
         value: u16,

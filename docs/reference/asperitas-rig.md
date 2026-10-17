@@ -119,16 +119,20 @@ Verified on the host with a fake transport, and on hardware 2026-10-15 (TASK-033
 
 ### Replay effect (`CTL FX`)
 
-Every `rig` build runs an `asperitas-dsp` processor after its stimulus generator (TASK-019.03.05): the
-sine (the default), `stim-ess`, `stim-pulse` and the `stim-excerpt` replay all carry the same stage,
+Every `rig` build runs an effect stage after its stimulus generator: the sine (the default),
+`stim-ess`, `stim-pulse` and the `stim-excerpt` replay all carry the same stage,
 `asperitas_dsp::fx_chain::FxChain`. Generator first, effect second, then the encoder; the capture is of the
-codec input, as before. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
+codec input, as before. The stage is bypass or the `asperitas_dsp::Asperitas` patch, the same
+low-pass-then-gain chain `main` runs, so the rig measures what ships and no knob mapping lives outside
+`asperitas-dsp`. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
 
-| `f` | effect | `v` (`0x0000..=0xFFFF` spans knob `0.0..=1.0`) |
-|-----|--------|------------------------------------------------|
+| `f` | effect | `v` |
+|-----|--------|-----|
 | `00` | bypass (default) | ignored |
-| `01` | gain | `Gain::params_from_normalised`: -60 dB to +12 dB |
-| `02` | one-pole low-pass | `OnePoleLowPass::params_from_normalised`: 20 Hz to 20 kHz, log taper |
+| `01` | `Asperitas` patch at its default knob positions (filter open at 20 kHz, 0 dB) | ignored; kept in the frame so the wire shape stays stable |
+
+Move the patch with `CTL SET`/`REL`: knob `00` is the filter cutoff (20 Hz to 20 kHz, log taper) and knob
+`01` the output gain (-60 dB to +12 dB), both through the `asperitas-dsp` parameter tables.
 
 - **Sine and the other periodic generators.** They run from the first callback, so `FX` is accepted
   any time before the capture arms and the effect is in place for the whole capture; `SET`/`REL` move it
@@ -138,7 +142,7 @@ codec input, as before. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR 
   `FX` you sent with the capture (`analyze --fx`).
 - **Default is bit-exact.** Bypass touches no sample, so captures taken without sending `FX`
   are unchanged from before the control existed. Sending `f=00` returns to that state.
-- **Replies.** `CTLR ERR bad-value` for an unknown `f`; `CTLR ERR busy` once a capture is armed
+- **Replies.** `CTLR ERR bad-value` for an `f` other than `00` and `01`; `CTLR ERR busy` once a capture is armed
   (a change mid-capture would make the recording unrepeatable); `CTLR ERR unknown-verb` for any
   other `CTL` verb, which this binary does not serve. `FX`, `SET` and `REL` are served by every
   stimulus build with the console (`log-usb`); the RTT-only builds have no console to send them on.
@@ -150,25 +154,25 @@ codec input, as before. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR 
   stored samples and cannot detect the effect.
 - **Applied at the next block** after the reply; the processor starts from a clean state with no
   smoothing ramp, so a given selection always produces the same output.
-- **Live override (TASK-019.03.01).** `CTL SET k=00 v=<4 hex>` and `CTL REL k=00` override the
-  selected effect's parameter, and unlike `FX` they are accepted while a capture is armed, so an
-  override sweep moves the effect mid-capture. Knob 0 only (`bad-knob` otherwise). Each block merges
-  the override with the `FX` value through the shipped `KnobOverride`, upstream of the effect's
-  smoothing, as `main` does; bypass ignores it. Callback cost, an estimate only: a critical section
-  and a compare per block, plus one `set_params` (a `powf`, and an `expf` for the low-pass) when
-  the value moved, order of 1-3 us against the 666 us period. The measurement is TASK-019.03.04.
+- **Live override.** `CTL SET k=<00|01> v=<4 hex>` and `CTL REL k=<00|01>` override the patch's
+  cutoff (`00`) and gain (`01`), and unlike `FX` they are accepted while a capture is armed, so an
+  override sweep moves the effect mid-capture. Other knob ids get `bad-knob`. Each block merges the
+  overrides over the patch's default knob positions through the shipped `KnobOverride<2>`, upstream of the
+  effect's smoothing, as `main` does; bypass ignores them. A `REL` returns that knob to its default.
+  Cost: a critical section and a compare per block, plus one `set_controls` (a `powf`, and an `expf`
+  for the filter) when a value moved.
 - **`unsmoothed-params` feature.** `--features seed3,unsmoothed-params` (sine) or
   `--features seed3,stim-excerpt,unsmoothed-params` (excerpt) builds the effect without smoothing, so an override steps the parameter on the next sample. It exists only
   to prove the discontinuity detector can see a step; never use it for ordinary captures.
 
-To judge a capture taken with a `CTL FX` selection, pass the same wire values to `analyze`:
-`--fx bypass|gain|lowpass` and `--fx-value <0..65535 or 0xHEX>` (the `v=` sent to the board). The
-reference then runs `ReplayFx` at that selection, and the report carries an `fx` object. The
-limits are the same at every setting; a capture taken at a different setting than the one passed
-fails on loop gain (gain) or residual/alignment (low-pass). Host-synthesized captures cover this;
-a device capture at non-identity settings is TASK-035.07.03.
+To judge a capture taken with a `CTL FX` selection, pass the same selection to `analyze`:
+`--fx bypass|patch` and one `--fx-knob K=<0..65535 or 0xHEX>` per knob you overrode with `SET` (the `v=`
+sent to the board; a knob not named stays at its default). The reference then runs `ReplayFx` at that
+selection, and the report carries an `fx` object. The limits are the same at every setting; a capture
+taken at a different setting than the one passed fails on loop gain (gain) or residual/alignment
+(cutoff). Host-synthesized captures cover this.
 
-Measured on the board 2026-10-15 (TASK-035.07.03), `mandolin_single_note_soft` in slot 0, 10 s window, each
+Measured on the board 2026-10-15 (TASK-035.07.03), on the earlier build whose `FX` codes `01` and `02` were separate gain and low-pass effects driven by `v`; the rows below name that build's settings and are not reproducible with the current wire. `mandolin_single_note_soft` in slot 0, 10 s window, each
 setting sent right after the console attached and answered `CTLR OK FX`:
 
 | `CTL FX` | `analyze --fx --fx-value` | loop gain vs model | residual RMS | residual peak | verdict |
@@ -204,7 +208,7 @@ the two, and reports metrics as one JSON document on stdout. Every numeric limit
 ```sh
 cargo run -p asperitas-measure --release -- analyze <capture.console.zst> [--stimulus sine|sweep|pulse]
 cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav
-cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav --fx gain --fx-value 43690
+cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav --fx patch --fx-knob 1=43690
 cargo run -p asperitas-measure --release -- analyze <sweep.console.zst> --sweep 0:1 --sweep-kind gain|lowpass [--sweep-start-s S] [--sweep-duration-s D]
 cargo run -p asperitas-measure --release -- analyze <soak.console.zst> --soak FROM:TO [--sweep-start-s S] [--sweep-duration-s D] [--expect-fail]
 ```
@@ -253,6 +257,8 @@ alignment stability only. `--excerpt` instead compares an excerpt replay with th
 | `comparison` (`--excerpt`, optional `--fx`) | Residual of the replay against the reference after alignment, gain fit and DC removal. | Residual RMS above -25 dB or peak above -15 dB relative to the reference, or loop gain off baseline. |
 
 ### Measured on the board (TASK-019.03.04)
+
+Taken on the earlier build in which `CTL FX` chose a lone gain or low-pass and knob `00` moved whichever was chosen. On the current rig the gain is knob `01` and the cutoff knob `00` of the patch.
 
 All on `rig` in the bootloaded layout, each run started by `scripts/rig-session.py` (probe reset, a fresh `BOOT`
 record, `CTL FX` on attach, then a `SET` schedule at 20 per second ending in `REL`), console held by that one

@@ -1378,30 +1378,31 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 //
 // ### Replay effect
 //
-// `CTL FX f=<2 hex> v=<4 hex>` selects an `asperitas_dsp::ReplayFx` for the replay: f 00 bypass (the
-// default), 01 gain, 02 one-pole low-pass; v spans the processor's `params_from_normalised` knob
-// range. Bypass touches no sample, so default captures are bit-exact with the pre-effect rig. The
+// `CTL FX f=<2 hex> v=<4 hex>` selects the effect stage that follows the generator: f 00 bypass (the
+// default), 01 the `asperitas_dsp::Asperitas` patch, the same filter-then-gain chain `main` runs, at
+// its default knob positions (filter open, 0 dB). v is accepted for wire stability and ignored.
+// Bypass touches no sample, so default captures are bit-exact with the bare generator. The
 // effect runs after `take_block`, so EXCPLAY's CRC still describes the raw stored samples.
 // The pass is held until the capture's first callback, which is `ARM_DELAY_MS` after audio starts,
 // so the control must arrive in that window; it is refused with `busy` once a capture is armed.
 // `select_fx` publishes under a critical section and the callback picks it up at the next block.
 //
-// `CTL SET k=00 v=<4 hex>` / `CTL REL k=00` (TASK-019.03.01) override knob 0, the selected effect's
-// parameter, through the same `asperitas_pod::knob_override::KnobOverride` the shipped firmware
+// `CTL SET k=<00|01> v=<4 hex>` / `CTL REL k=<00|01>` override knob 0 (filter cutoff) or knob 1
+// (output gain) through the same `asperitas_pod::knob_override::KnobOverride` the shipped firmware
 // uses. Unlike `FX` it is accepted while a capture is armed, so `asperitas-rig`'s override sweep
-// moves the effect mid-capture. Each callback merges the override with the `FX` value (the "pot
-// reading") and calls `ReplayFx::set_knob`, which acts only when the merged value changed; the
-// override therefore enters UPSTREAM of the effect's smoothing, exactly where `main` applies it.
-// Releasing returns to the `FX` value. Bypass ignores it. Knob ids other than 0 get `bad-knob`.
+// moves the effect mid-capture. Each callback merges the overrides over the patch's default knob
+// positions (the "pot reading") and calls `ReplayFx::set_knobs`, which acts only when the merged
+// pair changed; the override therefore enters UPSTREAM of the effect's smoothing, exactly where
+// `main` applies it. Releasing returns a knob to its default. Bypass ignores both. Knob ids other
+// than 0 and 1 get `bad-knob`.
 //
 // Feature `unsmoothed-params` builds the effect without smoothing (`ReplayFx::new_unsmoothed`): the
-// parameter steps on the next sample. Deliberately click-prone, for proving the discontinuity
+// parameters step on the next sample. Deliberately click-prone, for proving the discontinuity
 // detector sees steps; the default build keeps the shipped smoothing.
 //
-// Callback cost ESTIMATE (not a measurement; that belongs to TASK-019.03.04): when nothing
-// changes, one critical section around a one-element copy plus a compare, a few tens of cycles.
-// While a value moves, one `set_params` per block: a `powf` for gain or a `powf` and `expf` for the
-// low-pass, order of 1-3 us at 480 MHz against the 666 us block period.
+// Callback cost: when nothing changes, one critical section around a two-element copy plus a
+// compare, a few tens of cycles. While a value moves, one `set_controls` per block re-derives the
+// parameters (a `powf` for gain, a `powf` and `expf` for the filter).
 //
 // ### What EXCPLAY's CRC says
 //
@@ -1413,10 +1414,11 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 // ---------------------------------------------------------------------------
 
 /// The host's handle on the effect stage that follows the generator. Compiled on every build, not
-/// only `stim-excerpt`: the sine, sweep and pulse builds run the same stage (TASK-019.03.05).
+/// only `stim-excerpt`: the sine, sweep and pulse builds run the same stage.
 mod fx_ctl {
     use asperitas_dsp::fx_chain::FxChain;
     use asperitas_dsp::processor::{Frame, Processor};
+    use asperitas_dsp::KNOB_COUNT;
     use asperitas_pod::knob_override::KnobOverride;
     use core::cell::{Cell, RefCell};
     use core::sync::atomic::{AtomicU32, Ordering};
@@ -1438,33 +1440,33 @@ mod fx_ctl {
         true
     }
 
-    /// The host's override of the effect parameter (knob 0). One knob: the effect has one parameter.
-    static KNOB: Mutex<RefCell<KnobOverride<1>>> = Mutex::new(RefCell::new(KnobOverride::new()));
+    /// The host's overrides of the patch's knobs: 0 filter cutoff, 1 output gain.
+    static KNOB: Mutex<RefCell<KnobOverride<KNOB_COUNT>>> =
+        Mutex::new(RefCell::new(KnobOverride::new()));
 
     /// Override knob `knob` with the wire value `value` (`0..=65535` spans `0.0..=1.0`). `false`
-    /// for a knob other than 0.
+    /// for a knob the patch does not have.
     #[cfg(feature = "log-usb")]
     pub fn override_set(knob: u8, value: u16) -> bool {
         let v = f32::from(value) / f32::from(u16::MAX);
         cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().set(usize::from(knob), v))
     }
 
-    /// Return knob `knob` to the `FX` value. `false` for a knob other than 0.
+    /// Return knob `knob` to its default. `false` for a knob the patch does not have.
     #[cfg(feature = "log-usb")]
     pub fn override_release(knob: u8) -> bool {
-        if knob != 0 {
+        if usize::from(knob) >= KNOB_COUNT {
             return false;
         }
-        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().release(0));
+        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().release(usize::from(knob)));
         true
     }
 
     /// Render one block: the generator, then the effect, applying a pending `FX` first.
     ///
     /// `fx_seen` is the generation this stage last applied. The callback's cost beyond the bare
-    /// generator is one relaxed atomic load in bypass; with an effect selected it adds 32 effect
-    /// ticks per block, measured at `max_block_us` 19 against 15 (2026-10-15, replay), well inside
-    /// the roughly 590 us of 666 us headroom. No await, no flash access, no allocation; the
+    /// generator is one relaxed atomic load in bypass; with the patch selected it adds 32 effect
+    /// ticks per block. No await, no flash access, no allocation; the
     /// critical sections are a handful of cycles and only run when a request is pending or an
     /// effect is selected.
     pub fn render<G: Processor>(chain: &mut FxChain<G>, fx_seen: &mut u32, block: &mut [Frame]) {
@@ -1476,8 +1478,7 @@ mod fx_ctl {
         }
         chain.process_block_with(block, |base| {
             // Upstream of smoothing, as `main` does.
-            let [knob] = cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow().merge([base]));
-            knob
+            cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow().merge(base))
         });
     }
 }

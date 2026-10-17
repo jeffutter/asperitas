@@ -73,6 +73,13 @@ impl Asperitas {
         }
     }
 
+    /// Jump both stages to their current targets with no ramp. For proving that a discontinuity
+    /// detector can see what smoothing normally hides; never the shipped behaviour.
+    pub fn snap_params(&mut self) {
+        self.filter.snap_params();
+        self.gain.snap_params();
+    }
+
     /// Apply knob positions; the stages smooth the transition.
     pub fn set_controls(&mut self, controls: &Controls) {
         self.filter.set_params(&filter_params(controls));

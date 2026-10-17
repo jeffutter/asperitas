@@ -286,7 +286,7 @@ mod tests {
         assert_eq!(r.param_steps.count, 0, "{r:#?}");
     }
 
-    /// The rig's sine path: `FxChain<Sine>` with gain selected, the knob following `coarse` at 20
+    /// The rig's sine path: `FxChain<Sine>` with the patch selected, the gain knob following `coarse` at 20
     /// `SET`/s through the live override, exactly as the firmware callback drives it.
     fn chain_capture(smoothed: bool) -> Capture {
         use asperitas_dsp::fx_chain::FxChain;
@@ -299,11 +299,13 @@ mod tests {
         } else {
             FxChain::new_unsmoothed(sine)
         };
-        // Selected at the schedule's starting level, so the first block is not itself a step.
-        chain.select(
-            1,
-            ((coarse(0.0) + 60.0) / 72.0 * f32::from(u16::MAX)).round() as u16,
-        );
+        chain.select(1, 0);
+        // Settled at the schedule's starting level before the capture, so the first captured
+        // block is not itself a step or a ramp.
+        let start = (coarse(0.0) + 60.0) / 72.0;
+        for _ in 0..2000 {
+            chain.process_block_with(&mut [[0.0f32; 2]; 32], |base| [base[0], start]);
+        }
         chain.reset();
         let mut samples = Vec::with_capacity(n);
         let mut knob = 0.0f32;
@@ -316,7 +318,7 @@ mod tests {
                 knob = (coarse(t) + 60.0) / 72.0;
             }
             let mut out = [[0.0f32; 2]; 32];
-            chain.process_block_with(&mut out, |_| knob);
+            chain.process_block_with(&mut out, |base| [base[0], knob]);
             samples.extend(out.iter().map(|f| (f[0] * 32768.0).round() as i16));
             block += 1;
         }

@@ -4,7 +4,7 @@
 //! ```text
 //! asperitas-measure analyze <capture.console.zst> [--stimulus sine|sweep|pulse]
 //! asperitas-measure analyze <capture.console.zst> --excerpt <clip.wav> \
-//!     [--fx bypass|gain|lowpass] [--fx-value <0..65535 | 0xHEX>]
+//!     [--fx bypass|patch] [--fx-knob K=<0..65535 | 0xHEX>]...
 //! asperitas-measure analyze <capture.console.zst> --sweep FROM:TO --sweep-kind gain|lowpass \
 //!     [--sweep-start-s S] [--sweep-duration-s D]
 //! asperitas-measure analyze <capture.console.zst> --soak FROM:TO [--stimulus sine] \
@@ -66,7 +66,7 @@ impl Outcome {
 }
 
 const USAGE: &str = "usage: asperitas-measure analyze <capture.console.zst> \
-[--stimulus sine|sweep|pulse | --excerpt <clip.wav> [--fx bypass|gain|lowpass] [--fx-value <0..65535|0xHEX>] \
+[--stimulus sine|sweep|pulse | --excerpt <clip.wav> [--fx bypass|patch] [--fx-knob K=<0..65535|0xHEX>]... \
 | --sweep FROM:TO --sweep-kind gain|lowpass [--sweep-start-s S] [--sweep-duration-s D] \
 | --soak FROM:TO [--stimulus sine] [--sweep-start-s S] [--sweep-duration-s D] [--expect-fail]]";
 
@@ -157,7 +157,7 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
     let mut stimulus = None;
     let mut excerpt = None;
     let mut fx_name = None;
-    let mut fx_value = None;
+    let mut fx_knobs: Vec<(usize, u16)> = Vec::new();
     let mut sweep = None;
     let mut sweep_kind = None;
     let mut sweep_start = None;
@@ -169,10 +169,8 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
             "--stimulus" => stimulus = Some(it.next().ok_or("--stimulus needs a value")?.clone()),
             "--excerpt" => excerpt = Some(it.next().ok_or("--excerpt needs a value")?.clone()),
             "--fx" => fx_name = Some(it.next().ok_or("--fx needs a value")?.clone()),
-            "--fx-value" => {
-                fx_value = Some(parse_wire_value(
-                    it.next().ok_or("--fx-value needs a value")?,
-                )?)
+            "--fx-knob" => {
+                fx_knobs.push(parse_fx_knob(it.next().ok_or("--fx-knob needs K=VALUE")?)?)
             }
             "--sweep" => sweep = Some(it.next().ok_or("--sweep needs FROM:TO")?.clone()),
             "--soak" => soak = Some(it.next().ok_or("--soak needs FROM:TO")?.clone()),
@@ -190,12 +188,12 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
         }
     }
     let path = path.ok_or("missing capture path")?;
-    if excerpt.is_none() && (fx_name.is_some() || fx_value.is_some()) {
-        return Err("--fx and --fx-value need --excerpt".into());
+    if excerpt.is_none() && (fx_name.is_some() || !fx_knobs.is_empty()) {
+        return Err("--fx and --fx-knob need --excerpt".into());
     }
     if let Some(range) = soak {
-        if sweep.is_some() || excerpt.is_some() || fx_name.is_some() || fx_value.is_some() {
-            return Err("--soak is exclusive with --sweep, --excerpt, --fx".into());
+        if sweep.is_some() || excerpt.is_some() || fx_name.is_some() || !fx_knobs.is_empty() {
+            return Err("--soak is exclusive with --sweep, --excerpt, --fx, --fx-knob".into());
         }
         if sweep_kind.is_some() {
             return Err("--sweep-kind does not apply to --soak".into());
@@ -217,8 +215,8 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
         return Err("--expect-fail needs --soak".into());
     }
     if let Some(range) = sweep {
-        if stimulus.is_some() || excerpt.is_some() || fx_name.is_some() || fx_value.is_some() {
-            return Err("--sweep is exclusive with --stimulus, --excerpt, --fx".into());
+        if stimulus.is_some() || excerpt.is_some() || fx_name.is_some() || !fx_knobs.is_empty() {
+            return Err("--sweep is exclusive with --stimulus, --excerpt, --fx, --fx-knob".into());
         }
         let (from, to) = parse_range("--sweep", &range)?;
         let kind_name = sweep_kind.ok_or("--sweep needs --sweep-kind gain|lowpass")?;
@@ -242,8 +240,13 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
         (Some(_), Some(_)) => return Err("--stimulus and --excerpt are exclusive".into()),
         (None, Some(w)) => {
             let name = fx_name.unwrap_or_else(|| "bypass".into());
-            let fx = FxSetting::from_name(&name, fx_value.unwrap_or(0))
-                .ok_or_else(|| format!("unknown --fx {name:?} (bypass, gain, lowpass)"))?;
+            let mut fx = FxSetting::from_name(&name)
+                .ok_or_else(|| format!("unknown --fx {name:?} (bypass, patch)"))?;
+            for (knob, value) in fx_knobs {
+                fx = fx
+                    .with_knob(knob, value)
+                    .ok_or_else(|| format!("--fx-knob {knob}: the patch has knobs 0 and 1"))?;
+            }
             Mode::Excerpt(w, fx)
         }
         (Some(s), None) => Mode::Stimulus(s),
@@ -268,13 +271,19 @@ fn parse_seconds(flag: &str, v: Option<&String>) -> Result<f64, String> {
         .ok_or_else(|| format!("{flag} wants non-negative seconds"))
 }
 
-/// A `CTL FX v=` value: decimal or `0x` hex, `0..=0xFFFF`.
-fn parse_wire_value(s: &str) -> Result<u16, String> {
-    let parsed = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+/// An `--fx-knob K=VALUE` pair: knob id, then a `CTL SET v=` value, decimal or `0x` hex,
+/// `0..=0xFFFF`.
+fn parse_fx_knob(s: &str) -> Result<(usize, u16), String> {
+    let bad = || format!("--fx-knob {s:?} is not K=<0..=65535 | 0x0000..=0xFFFF>");
+    let (knob, value) = s.split_once('=').ok_or_else(bad)?;
+    let value = match value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+    {
         Some(h) => u16::from_str_radix(h, 16),
-        None => s.parse::<u16>(),
+        None => value.parse::<u16>(),
     };
-    parsed.map_err(|_| format!("--fx-value {s:?} is not 0..=65535 or 0x0000..=0xFFFF"))
+    Ok((knob.parse().map_err(|_| bad())?, value.map_err(|_| bad())?))
 }
 
 /// `Ok((report, failures))` when the analysis ran; `Err` only for conditions that are not a

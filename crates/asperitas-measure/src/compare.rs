@@ -2,10 +2,9 @@
 //!
 //! The rig replays an installed QSPI excerpt through the DAC; the loopback returns it through the
 //! ADC. The reference is the same excerpt PCM run through the processor the capture was taken
-//! with ([`FxSetting`], the `CTL FX` selection: bypass, `Gain`, or `OnePoleLowPass`), using the
-//! code and the int16-to-float convention `asperitas-cli process` uses. Bypass (the default, and
-//! what the device does unless told otherwise) is identity. The device capture at non-identity
-//! settings is TASK-035.07.03.
+//! with ([`FxSetting`], the `CTL FX` selection and any `CTL SET` knob overrides: bypass, or the
+//! `Asperitas` patch), using the code and the int16-to-float convention `asperitas-cli process`
+//! uses. Bypass (the default, and what the device does unless told otherwise) is identity.
 //!
 //! Because the reference already contains the commanded processing, the fitted loop gain stays
 //! comparable to [`thresholds::LOOP_GAIN_DB`] at every setting: a capture processed with a
@@ -20,6 +19,7 @@
 use std::fmt;
 
 use asperitas_dsp::replay_fx::{FxKind, ReplayFx};
+use asperitas_dsp::{Controls, KNOB_COUNT};
 use asperitas_host::excerpt::{parse_wav, WavError};
 use asperitas_wire::frame::crc16_ccitt;
 use serde::Serialize;
@@ -31,36 +31,55 @@ use crate::thresholds;
 /// Full scale of the 16-bit capture, LSB.
 const FULL_SCALE: f64 = 32768.0;
 
-/// The processor selection of the replay, as `CTL FX f=<code> v=<value>` carries it.
+/// The effect stage of the replay, as `CTL FX f=<code>` and any `CTL SET` overrides carry it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct FxSetting {
-    /// Wire code: 0 bypass, 1 gain, 2 low-pass ([`FxKind::from_code`]).
+    /// Wire code: 0 bypass, 1 patch ([`FxKind::from_code`]).
     pub code: u8,
-    /// Wire value, `0..=0xFFFF` spanning the processor's normalised knob `0.0..=1.0`.
-    pub value: u16,
+    /// Wire values (`0..=0xFFFF` spanning the normalised knob `0.0..=1.0`) of the knobs the host
+    /// overrode, indexed by knob id (0 cutoff, 1 gain); `None` leaves the knob at its default.
+    pub knobs: [Option<u16>; KNOB_COUNT],
 }
 
 impl FxSetting {
-    pub const BYPASS: FxSetting = FxSetting { code: 0, value: 0 };
+    pub const BYPASS: FxSetting = FxSetting {
+        code: 0,
+        knobs: [None; KNOB_COUNT],
+    };
 
-    /// Parse the `--fx` name (`bypass`, `gain`, `lowpass`) and `--fx-value` wire value.
-    pub fn from_name(name: &str, value: u16) -> Option<FxSetting> {
+    /// Parse the `--fx` name (`bypass`, `patch`) with no knob overridden.
+    pub fn from_name(name: &str) -> Option<FxSetting> {
         let code = match name {
             "bypass" => 0,
-            "gain" => 1,
-            "lowpass" => 2,
+            "patch" => 1,
             _ => return None,
         };
-        Some(FxSetting { code, value })
+        Some(FxSetting {
+            code,
+            knobs: [None; KNOB_COUNT],
+        })
+    }
+
+    /// This setting with knob `knob` overridden to wire value `value`; `None` for a knob the
+    /// patch does not have.
+    pub fn with_knob(mut self, knob: usize, value: u16) -> Option<FxSetting> {
+        *self.knobs.get_mut(knob)? = Some(value);
+        Some(self)
     }
 
     fn kind(self) -> Option<FxKind> {
         FxKind::from_code(self.code)
     }
 
-    /// The knob the firmware derives from the wire value (`value / u16::MAX`).
-    pub fn knob(self) -> f32 {
-        f32::from(self.value) / f32::from(u16::MAX)
+    /// The knob positions the firmware derives: defaults, overridden by `value / u16::MAX`.
+    pub fn knob_positions(self) -> [f32; KNOB_COUNT] {
+        let mut k = Controls::default().knobs;
+        for (slot, over) in k.iter_mut().zip(self.knobs) {
+            if let Some(v) = over {
+                *slot = f32::from(v) / f32::from(u16::MAX);
+            }
+        }
+        k
     }
 }
 
@@ -85,7 +104,7 @@ impl Reference {
         let pcm = parse_wav(raw).map_err(CompareError::Wav)?;
         let kind = fx.kind().ok_or(CompareError::UnknownFx(fx.code))?;
         let mut replay = ReplayFx::new();
-        replay.select(kind, fx.knob());
+        replay.select(kind, fx.knob_positions());
         // `asperitas-cli` widens int16 by dividing by i16::MAX and feeds the same value to both lanes.
         let mut frames: Vec<[f32; 2]> = pcm
             .chunks_exact(2)
@@ -380,7 +399,7 @@ mod tests {
     fn synth(fx: FxSetting) -> Capture {
         let mut c = replay();
         let mut replay_fx = ReplayFx::new();
-        replay_fx.select(fx.kind().unwrap(), fx.knob());
+        replay_fx.select(fx.kind().unwrap(), fx.knob_positions());
         let mut frames: Vec<[f32; 2]> = c
             .samples
             .iter()
@@ -396,26 +415,31 @@ mod tests {
         c
     }
 
-    fn fx(name: &str, value: u16) -> FxSetting {
-        FxSetting::from_name(name, value).unwrap()
+    /// The patch with cutoff and gain overridden; `None` leaves the knob at its default.
+    fn patch(cutoff: Option<u16>, gain: Option<u16>) -> FxSetting {
+        FxSetting {
+            code: 1,
+            knobs: [cutoff, gain],
+        }
     }
 
-    // Gain knob v/65535: 0.6667 = -12 dB, 0.8333 = 0 dB, 0.9167 = +6 dB. Low-pass log taper.
-    const SETTINGS: [(&str, u16); 5] = [
-        ("gain", 43_690),
-        ("gain", 58_982),
-        ("gain", 20_000),
-        ("lowpass", 52_000),
-        ("lowpass", 40_000),
-    ];
+    // Gain knob v/65535: 0.6667 = -12 dB, 0.8333 = 0 dB, 0.9167 = +6 dB. Cutoff knob: log taper.
+    fn settings() -> [FxSetting; 5] {
+        [
+            patch(None, Some(43_690)),
+            patch(None, Some(58_982)),
+            patch(None, Some(20_000)),
+            patch(Some(52_000), None),
+            patch(Some(40_000), Some(43_690)),
+        ]
+    }
 
     #[test]
     fn processed_captures_match_their_own_settings() {
-        for (name, v) in SETTINGS {
-            let s = fx(name, v);
+        for s in settings() {
             let c = compare(&synth(s), &clip_fx(s)).unwrap();
-            eprintln!("{name} {v}: {}", c.to_json());
-            c.check().unwrap_or_else(|e| panic!("{name} {v}: {e}"));
+            eprintln!("{s:?}: {}", c.to_json());
+            c.check().unwrap_or_else(|e| panic!("{s:?}: {e}"));
         }
     }
 
@@ -426,24 +450,38 @@ mod tests {
 
     #[test]
     fn capture_processed_with_a_different_setting_fails() {
-        for ((name, v), (rname, rv)) in [
-            (("gain", 43_690), ("gain", 58_982)),
-            (("gain", 43_690), ("gain", 40_000)),
-            (("lowpass", 52_000), ("lowpass", 40_000)),
-            (("lowpass", 52_000), ("bypass", 0)),
-            (("gain", 43_690), ("bypass", 0)),
+        let s = settings();
+        for (taken, reference) in [
+            (s[0], s[1]),
+            (s[0], patch(None, Some(40_000))),
+            (s[3], patch(Some(40_000), None)),
+            (s[3], FxSetting::BYPASS),
+            (s[0], FxSetting::BYPASS),
         ] {
-            let verdict =
-                compare(&synth(fx(name, v)), &clip_fx(fx(rname, rv))).and_then(|c| c.check());
-            eprintln!("{name} {v} vs {rname} {rv}: {verdict:?}");
-            assert!(verdict.is_err(), "{name} {v} vs {rname} {rv} passed");
+            let verdict = compare(&synth(taken), &clip_fx(reference)).and_then(|c| c.check());
+            eprintln!("{taken:?} vs {reference:?}: {verdict:?}");
+            assert!(verdict.is_err(), "{taken:?} vs {reference:?} passed");
         }
+    }
+
+    #[test]
+    fn knob_overrides_land_on_the_right_knob() {
+        let s = FxSetting::from_name("patch").unwrap();
+        assert_eq!(s.knob_positions(), Controls::default().knobs);
+        let k = s.with_knob(1, u16::MAX).unwrap().knob_positions();
+        assert_eq!(k[0], Controls::default().knobs[0]);
+        assert_eq!(k[1], 1.0);
+        assert!(s.with_knob(KNOB_COUNT, 0).is_none());
+        assert!(FxSetting::from_name("gain").is_none());
     }
 
     #[test]
     fn unknown_fx_code_is_a_typed_error() {
         let raw = std::fs::read(root(&format!("audio/instruments/{MAND_SOFT}.wav"))).unwrap();
-        let bad = FxSetting { code: 9, value: 0 };
+        let bad = FxSetting {
+            code: 9,
+            knobs: [None; KNOB_COUNT],
+        };
         assert!(matches!(
             Reference::from_excerpt_wav_fx(&raw, bad),
             Err(CompareError::UnknownFx(9))
