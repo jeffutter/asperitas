@@ -125,6 +125,8 @@ macro_rules! golden_cases {
 
 golden_cases! {
     golden_gain_default_pluck: "gain", "default", [] over Input::Synthetic("pluck");
+    golden_gain_default_mandolin_single_note_soft: "gain", "default", []
+        over Input::Clip("mandolin_single_note_soft");
     golden_filter_default_impulse: "filter", "default", [] over Input::Synthetic("impulse");
     golden_filter_default_sweep: "filter", "default", [] over Input::Synthetic("sweep");
     golden_filter_default_pluck: "filter", "default", [] over Input::Synthetic("pluck");

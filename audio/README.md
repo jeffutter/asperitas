@@ -50,7 +50,7 @@ Keep them archived elsewhere; they cannot be recovered from these files.
 
 ## `goldens/` — frozen processor output
 
-Fourteen files: `gain`, `filter` and `asperitas` (the full effect chain) at default and
+Fifteen files: `gain`, `filter` and `asperitas` (the full effect chain) at default and
 non-default parameters, over synthetic signals and a few instrument clips. Naming is
 `{processor}_{variant}_{input}.wav`, where the variant is `default` or a tag for the
 parameters (`cutoff500`, `boost12`, ...). **32-bit float stereo**, so levels above full

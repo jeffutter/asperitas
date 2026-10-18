@@ -320,21 +320,22 @@ mod tests {
         // EXCOK/EXCPLAY in the committed install/replay captures: crc16=15fd bytes=288000.
         assert_eq!(r.pcm_crc16, 0x15fd);
         assert_eq!(r.samples.len(), 144_000);
-        // The committed `asperitas-cli process gain` golden (stereo int16, canonical 44-byte header)
-        // is the CLI's own output for this clip at default (0 dB) parameters.
+        // The committed `asperitas-cli process gain` golden (stereo float32) is the CLI's own
+        // output for this clip at default (0 dB) parameters.
         let golden = std::fs::read(root(
             "audio/goldens/gain_default_mandolin_single_note_soft.wav",
         ))
         .unwrap();
-        let pcm = &golden[44..];
-        assert_eq!(pcm.len(), r.samples.len() * 4);
-        for (i, (&v, frame)) in r.samples.iter().zip(pcm.chunks_exact(4)).enumerate() {
-            let left = i16::from_le_bytes([frame[0], frame[1]]);
-            assert_eq!(
-                (v.clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16,
-                left,
-                "sample {i}"
-            );
+        let data = golden
+            .windows(4)
+            .position(|w| w == b"data")
+            .expect("data chunk")
+            + 8;
+        let pcm = &golden[data..];
+        assert_eq!(pcm.len(), r.samples.len() * 8);
+        for (i, (&v, frame)) in r.samples.iter().zip(pcm.chunks_exact(8)).enumerate() {
+            let left = f32::from_le_bytes([frame[0], frame[1], frame[2], frame[3]]);
+            assert!((v - left).abs() < 1e-6, "sample {i}: {v} vs {left}");
         }
     }
 
