@@ -89,9 +89,8 @@
 #
 #   C1  At most five child invocations of the whole script per run - one per exit code a gate can
 #       observe, plus the three read guards. Everything else calls the parsed-section functions
-#       in-process, where a fork is on the order of ~4 ms {{component:bash-subprocess-startup}} against the
-#       ~70 ms {{component:selftest-child-invocation}} even the cheapest child pays for a fresh interpreter and
-#       its objdump.
+#       in-process, where a fork is far cheaper than
+#       what even the cheapest child pays for a fresh interpreter and its objdump.
 #   C2  The fixture images are generated once, before the first case, and no case regenerates one.
 #   C3  No `cargo objdump`, `cargo objcopy`, `cargo build`, `cargo metadata` or `make`, and no case
 #       names a path under firmware/target/: those either rebuild or re-point the artifact the push-tier

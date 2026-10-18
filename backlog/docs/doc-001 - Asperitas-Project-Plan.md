@@ -37,7 +37,7 @@ relitigated.
 State them so they're cheap to overturn:
 
 - **48 kHz, 48-sample blocks, `f32` internally.** Matches libDaisy's Pod default block
-  size and the sample rate PR #80 verified. 1 ms of block latency. gate-costs:exempt reason="audio block latency from the sample rate, not a gate cost"
+  size and the sample rate PR #80 verified. 1 ms of block latency.
   The Seed3 codec can
   do 192 kHz/32-bit; there is no musical reason to pay for it here, and every reason to
   keep CPU headroom for resonator voices.
@@ -248,126 +248,32 @@ for it, its builder skips such a command before reading any, and the only overri
 An empty commit changes no tree, so the only thing it could gate is HEAD's tree - already paid for by
 the commit that made it.
 
-The tiers, priced. The block below is generated: `scripts/gate-costs.sh --render` joins
-`scripts/gates.sh --list` against `docs/gate-costs.json` and writes the whole region, cost column
-included, so it cannot drift from either source. Do not hand-edit a row and do not re-copy
-`gates.sh --list` over the block - `scripts/gate-costs.sh --check` compares the rendered bytes with
-what is on disk and fails the commit tier on any difference:
+The tiers: `scripts/gates.sh --list` prints every gate with its key, the tier that first runs it and the
+banner it prints, and each run prints a time per gate and per tier. This plan records no timings.
 
-<!-- BEGIN GENERATED: gate-matrix -->
-```text
-key                         | min    | com | psh | ci | cost    | gate
-----------------------------+--------+-----+-----+----+---------+---------------------------------------
-gate-definition-parses      | commit | yes | yes | yes | 0.01 s  | === gate definition parses ===
-docs-artifact-names         | commit | yes | yes | yes | 0.30 s  | === docs artifact names ===
-gate-costs-current          | commit | yes | yes | yes | 0.54 s  | === gate costs current ===
-elf-provenance-selftest     | commit | yes | yes | yes | ~1 s    | === elf-provenance --selftest ===
-elf-staleness-selftest      | commit | yes | yes | yes | ~3 s    | === elf-staleness --selftest ===
-load-addresses-selftest     | commit | yes | yes | yes | ~1 s    | === load-addresses --selftest ===
-cargo-fmt                   | commit | yes | yes | yes | 0.27 s  | === cargo fmt ===
-cargo-fmt-firmware          | commit | yes | yes | yes | 0.51 s  | === cargo fmt (firmware workspace) ===
-cargo-clippy                | commit | yes | yes | yes | ~5 s    | === cargo clippy ===
-cargo-clippy-log-usb        | commit | yes | yes | yes | 0.49 s  | === cargo clippy (asperitas-logging log-usb) ===
-cargo-clippy-log-defmt      | commit | yes | yes | yes | 0.47 s  | === cargo clippy (asperitas-logging log-defmt) ===
-clippy-pod-hw               | push   | -   | yes | yes | ~1 s    | === cargo clippy (asperitas-pod pod-hw feature) ===
-dump-reassemble-selftest    | push   | -   | yes | yes | ~1 s    | === dump_reassemble --selftest ===
-cargo-doc                   | push   | -   | yes | yes | ~13 s   | === cargo doc (workspace) ===
-cargo-doc-all-features      | push   | -   | yes | yes | ~4 s    | === cargo doc (workspace, all features) ===
-bootloaded-builds           | push   | -   | yes | yes | ~14 s   | === firmware bootloaded layout builds ===
-rig-stim-ess-build          | push   | -   | yes | yes | 0.15 s  | === firmware rig build (stim-ess) ===
-rig-stim-pulse-build        | push   | -   | yes | yes | 0.14 s  | === firmware rig build (stim-pulse) ===
-rig-sine-unsmoothed-build   | push   | -   | yes | yes | ~2 s    | === firmware rig build (sine, unsmoothed-params) ===
-rig-stim-excerpt-rtt-build  | push   | -   | yes | yes | ~1 s    | === firmware rig build (stim-excerpt, RTT-only) ===
-rig-stim-excerpt-unsmoothed-build | push   | -   | yes | yes | ~2 s    | === firmware rig build (stim-excerpt, unsmoothed-params) ===
-rig-window-override-build   | push   | -   | yes | yes | 0.85 s  | === firmware rig build (shortened capture window) ===
-rig-ring-fill-build         | push   | -   | yes | yes | 0.85 s  | === firmware rig build (ring-fill capture window) ===
-firmware-cross-compile      | push   | -   | yes | yes | ~1 s    | === firmware cross-compile ===
-firmware-cross-compile-rtt  | push   | -   | yes | yes | ~1 s    | === firmware cross-compile (RTT-only, log-defmt) ===
-firmware-elf-provenance     | push   | -   | yes | yes | 0.10 s  | === firmware ELF cfg provenance ===
-image-load-addresses        | push   | -   | yes | yes | 0.86 s  | === image load addresses ===
-firmware-clippy             | commit | yes | yes | yes | ~1 s    | === firmware clippy (all bins) ===
-firmware-clippy-rtt         | commit | yes | yes | yes | 0.89 s  | === firmware clippy (all bins, RTT-only, log-defmt) ===
-rig-stim-ess-clippy         | commit | yes | yes | yes | 0.92 s  | === firmware clippy (rig, stim-ess) ===
-rig-stim-pulse-clippy       | commit | yes | yes | yes | 0.93 s  | === firmware clippy (rig, stim-pulse) ===
-rig-stim-excerpt-clippy     | commit | yes | yes | yes | 0.92 s  | === firmware clippy (rig, stim-excerpt) ===
-rig-stim-excerpt-clippy-rtt | commit | yes | yes | yes | 0.87 s  | === firmware clippy (rig, stim-excerpt, RTT-only) ===
-cargo-test                  | push   | -   | yes | yes | ~84 s   | === cargo test ===
-cargo-test-pod-hw           | ci     | -   | -   | yes | ~2 s    | === cargo test (asperitas-pod pod-hw feature) ===
-counts: commit 17, push 34, ci 35
-```
-<!-- END GENERATED: gate-matrix -->
-
-#### Who owns each number
-
-Every figure in that block, and every figure quoted anywhere else in this repo, has exactly one owner:
-
-- **`docs/gate-costs.json` owns every measured number**, together with the date, host, environment,
-  sample count and approximation caveat that make any of them mean anything. It is the only tracked file
-  here that holds a wall-clock numeral.
-- **`bash scripts/gate-costs.sh --refresh` is the one command that reproduces them all.** It runs each of
-  the three tiers once, reads the seconds out of `GATES_TIMINGS_FILE` rather than off stdout, rewrites the
-  ledger canonically, and renders the prose from it. Roughly four minutes of cargo and clippy, which is why
-  it is a command a person runs and never a gate: four minutes does not belong in pre-commit, and that is
-  TASK-068's non-goal kept rather than ignored. It refuses to record a tier that failed, because costs
-  measured from a tier that does not pass are fiction. The one exception is pricing a brand-new gate,
-  which can only be measured by a run in which that gate is red for want of its own entry, and it needs
-  `GATE_COSTS_BOOTSTRAP=1` said out loud - see the header of the script.
-- **Everything else cites keys.** Prose in `scripts/gates.sh`, `lefthook.yml`, `.github/workflows/ci.yml`,
-  `firmware/Makefile` and the three checker headers carries a `gate`, `tier`, `component` or `meta` key
-  inside its sentences, and this plan's matrix and cost column are a generated region. `--render` puts the
-  figure where the key sits, so a priced argument keeps its number while the numeral itself stays in one
-  file.
-- **`scripts/gate-costs.sh --check` is what keeps the citations true.** It runs as the third gate of the
-  commit tier, ahead of every cargo invocation, at 0.54 s {{gate:gate-costs-current}} warm. It renders each
-  guarded file into a temp copy and compares bytes against the file on disk, so a stale figure and a
-  hand-typed one are one finding rather than two rules, and it fails when a gate has no ledger entry, when
-  an entry names no live gate, or when a gate's command digest stopped matching the command that runs. It
-  never writes: a hook that rewrote a tracked file would commit the stale version it was meant to grade.
-- **A stored figure is meaningless without the tier that paid it.** The two firmware-clippy gates cost tens
-  of seconds in a fresh target directory, seconds straight after a build, and a few tenths when nothing has
-  changed, because ordering rule 2 makes their price a function of adjacency. So the ledger prices every
-  gate per paying tier, and the published figure for a gate is the observation from the tier whose
-  `min_tier` runs it. Adding those numbers across tiers is invalid even though the tiers are cumulative as
-  sets: each tier is its own process and its clock starts over.
-- **Runner-side figures stay owed to TASK-052 and TASK-063.** `ci.yml` has no `workflow_dispatch`, no
-  artifact upload and no `permissions:` block, so nobody can start that workflow deliberately or write a
-  measurement back from it. Every number in this plan is a local one.
-
-The approximation policy is stated once because it covers every row above: one warm sample per tier on one
-machine, measured 2026-09-16 2026-10-08 2026-10-15 2026-10-16 {{meta:measured}} on aarch64-darwin inside `nix develop .#default`. The last digit is
-noise, and a cold cache or a background Spotlight scan moves any figure here by tens of percent. What the
-ledger's per-gate command digests buy is the claim that each number was taken against the command that runs
-today, not that it repeats to three figures. The tier totals are **commit ~18 s {{tier:commit}}**, **push
-~137 s {{tier:push}}**, **ci ~119 s {{tier:ci}}**; the two `cargo test` invocations are ~84 s {{gate:cargo-test}} and
-~2 s {{gate:cargo-test-pod-hw}}, which together are most of that `ci` total.
-
-Three selftest gates run ahead of every cargo invocation, at ~1 s {{gate:elf-provenance-selftest}},
-~3 s {{gate:elf-staleness-selftest}} and ~1 s {{gate:load-addresses-selftest}}:
+Three selftest gates run ahead of every cargo invocation:
 `=== elf-provenance --selftest
 ===`, `=== elf-staleness --selftest ===` (TASK-056) and `=== load-addresses --selftest ===` (TASK-068).
 All three sit there because they compile nothing and read no artifact, which is what cheapest-first does
 with a check that has no inputs to wait for; putting any of them beside the push-tier gate it shares a
 subject with "for symmetry" would misrepresent both, since each selftest grades the *reading* while the
 push-tier gate grades the *artifact*, and they share no state. Their cases and the cost rules that keep
-each at its figure are stated in the three scripts' own headers:
+each cheap are stated in the three scripts' own headers:
 
-- the provenance reader, ~1 s {{gate:elf-provenance-selftest}}: five child invocations of the script at most,
+- the provenance reader: five child invocations of the script at most,
   one `cargo metadata`,
   never a `cargo build` or a path under `firmware/target/`;
-- the staleness checker, ~3 s {{gate:elf-staleness-selftest}}: one `make` per case against a fixture tree, with
+- the staleness checker: one `make` per case against a fixture tree, with
   the compiler and the
   provenance clause both stubbed;
-- the load-address checker, ~1 s {{gate:load-addresses-selftest}}: seventeen cases, of which only five
+- the load-address checker: seventeen cases, of which only five
   re-execute the script as a child
-  process, because even the cheapest such child pays ~70 ms {{component:selftest-child-invocation}} for a fresh
+  process, because even the cheapest such child pays for a fresh
   interpreter and its objdump, against a subshell that costs nothing measurable, and the exit code is
   the subject of just those five. Its two hand-emitted images are generated once per run, both binutils shims are
   checked with `command -v` before anything is emitted, and it names no path under `firmware/target/`
   and calls no `cargo` or `make` at all -- a build there would rebuild, or worse re-point, the artifacts
-  the push-tier gate audits. Standing alone it stays within a few hundredths of its published figure
-  across eight runs; the one outlier reading came from the first run after the disk cache had been
-  displaced, and this is the first gate in
-  the tier to exec `llvm-objdump`, so it is where that page-in gets paid.
+  the push-tier gate audits.
 
 Order within a tier is whatever the script declares, cheapest-first, with two rules that outrank cost:
 the console cross-build comes immediately before the RTT-only one with nothing building firmware after
@@ -381,8 +287,7 @@ whichever ran last owns the path every `make probe-*` decodes with - so "the pai
 and "that path holds the RTT-only image" are one claim stated twice. `=== firmware ELF cfg provenance
 ===` reads the second statement out of the ELF's `.asp.prov` note via `scripts/elf-provenance.sh`, so
 swapping the pair or inserting a gate that compiles firmware after it fails the run naming both cfg
-sets; measured by swapping the two lines, running the tier, and restoring them. It costs
-0.10 s {{gate:firmware-elf-provenance}} warm,
+sets; measured by swapping the two lines, running the tier, and restoring them. It
 reads only, and asks cargo for nothing - a rebuild there would re-point the very path it audits.
 
 The gate below it grades a different axis of the same six ELFs. `=== image load addresses ===` asserts
@@ -391,7 +296,7 @@ stays NOBITS while `memory.x` claims to place it `(NOLOAD)`, and that each plain
 exactly as long as the highest flash LMA end implies - the invariant whose absence made `main.bin`
 469,763,536 bytes of mostly zeros with every gate green, because objcopy writes from the lowest to the
 highest *load* address (TASK-059). It reads rather than builds for the same reason the provenance gate
-has, bare `rust-objdump` / `rust-objcopy` only, and costs 0.86 s {{gate:image-load-addresses}} warm. Its tier is `push` because
+has, bare `rust-objdump` / `rust-objcopy` only, Its tier is `push` because
 pre-commit builds no firmware, so the ELFs it needs may not exist there; inventing a skip path for that
 is the blind spot TASK-062 had to remove from `elf-check`. The commit-tier `=== load-addresses
 --selftest ===` gate above is not a second copy of this claim and does not make this one redundant: that
@@ -402,7 +307,7 @@ the image length it would have produced.
 
 What the one-command shape costs: lefthook buffers a command's stdout and replays it when the command
 finishes, so a hook prints nothing until the tier it just ran has finished - for as long as that tier
-costs, which is the ledger's business and the paragraph above owns the figure. In exchange the log
+takes. In exchange the log
 carries per-gate headers and wall times it never had, and the run stops at the first failure naming the
 gate that died.
 
@@ -416,26 +321,24 @@ because nothing had been pushed since the last green run (TASK-060 found it that
 names no checks at all; `.github/ci-steps.sh`, the intermediate fix, is gone, and the parse check that
 file needed is now the first gate in the script.
 
-Exactly one gate lives in the `ci` tier alone: `cargo test -p asperitas-pod --features pod-hw`, ~2 s {{gate:cargo-test-pod-hw}} local warm. The feature adds no tests and no other crate depends on
+Exactly one gate lives in the `ci` tier alone: `cargo test -p asperitas-pod --features pod-hw`. The feature adds no tests and no other crate depends on
 `asperitas-pod`, so the gate runs only that crate's suite; the compile-time half (`clippy --features
-asperitas-pod/pod-hw`) runs on push. Whether it should move into the push tier is a question for its
-re-measured cost. CI stays the authority either way, immune to `--no-verify`, and it
-remains the only place these numbers have ever been observed on a real runner: the workflow has no `workflow_dispatch`, so runner-side figures stay owed to TASK-052
+asperitas-pod/pod-hw`) runs on push. CI stays the authority either way, immune to `--no-verify`, and it
+remains the only place timings have ever been observed on a real runner: the workflow has no `workflow_dispatch`, so runner-side figures stay owed to TASK-052
 and TASK-063.
 
-Runner-side figures, observed 2026-10-09 on GitHub Actions (these are measurements on a real runner,
-not the local warm figures above). The first push (run 37925833149) had no working cache: job 17m10s,
-the two `cargo test` invocations 123.9 s and 131.1 s, `cargo doc` 0.5 s and 2.2 s. The dev shell's gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+Runner-side figures, observed 2026-10-09 on GitHub Actions (measurements on a real runner). The first push (run 37925833149) had no working cache: job 17m10s,
+the two `cargo test` invocations 123.9 s and 131.1 s, `cargo doc` 0.5 s and 2.2 s. The dev shell's
 stdout then turned out to break rust-cache's `rustc -vV` probe (TASK-064.03). Cold keyed run 37938450034
-("No cache found"): job 14m54s, `gates.sh ci` 298 s. Warm run 37940574487 (cache of ~419 MB restored): gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
-job 15m53s, `gates.sh ci` 240 s. The cache works where it can: clippy gates fell from 4-15 s to 0.6-1.9 s and gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
-the stim-ess firmware build from 30 s to 2 s. It does not help the two `cargo test` runs (97 s and 103 s gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
-cold, 109 s and 107 s warm), and the nix dev shell build (9-11 min) dominated the job. gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
-TASK-072 broke that step down from run 37945671555's `nix develop -L` log: 155 paths substituted from cache.nixos.org in about 40 s, gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
-then one local build, the `probe-rs-tools` build from probe-rs main (the local reset-catch patch, since merged upstream as PR #4441), 9 min 50 s of a 10 min 34 s step. gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+("No cache found"): job 14m54s, `gates.sh ci` 298 s. Warm run 37940574487 (cache of ~419 MB restored):
+job 15m53s, `gates.sh ci` 240 s. The cache works where it can: clippy gates fell from 4-15 s to 0.6-1.9 s and
+the stim-ess firmware build from 30 s to 2 s. It does not help the two `cargo test` runs (97 s and 103 s
+cold, 109 s and 107 s warm), and the nix dev shell build (9-11 min) dominated the job.
+TASK-072 broke that step down from run 37945671555's `nix develop -L` log: 155 paths substituted from cache.nixos.org in about 40 s,
+then one local build, the `probe-rs-tools` build from probe-rs main (the local reset-catch patch, since merged upstream as PR #4441), 9 min 50 s of a 10 min 34 s step.
 No gate uses probe-rs, so CI now enters `nix develop .#ci`, the same shell minus that package (`flake.nix` `mkDevShell`).
 Same toolchain store path (`rust-default-1.97.1`, `bvlih9g3...`) and same rust-cache key as before. Cold keyed run 37948852414:
-job 6m18s, dev shell step 57 s, `gates.sh ci` 5m02s. Warm run 37949893837: job 5m22s, dev shell step 50 s, `gates.sh ci` 4m06s, gate-costs:exempt reason="runner-side figure observed on GitHub Actions 2026-10-09, not a local gate cost"
+job 6m18s, dev shell step 57 s, `gates.sh ci` 5m02s. Warm run 37949893837: job 5m22s, dev shell step 50 s, `gates.sh ci` 4m06s,
 against 14m54s and 15m53s before (warm wall time down 10m31s).
 
 
@@ -470,7 +373,7 @@ sounds different" — the failure mode property tests structurally cannot see.
 **Corpus policy.** Real instrument recordings are committed to git alongside synthetic
 signals (impulses, sweeps, plucked-string stubs). To keep this from becoming painful:
 
-- keep clips **short (2–5 s)**, mono, 48 kHz gate-costs:exempt reason="audio clip length in the test corpus policy, not a gate cost"
+- keep clips **short (2–5 s)**, mono, 48 kHz
 - goldens are regenerated deliberately via an explicit command, never automatically —
   every regeneration is a reviewable diff
 - a golden diff in a PR means "listen to this before accepting it", not "run the update

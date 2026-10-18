@@ -231,7 +231,7 @@ flash-all: build flash
 # ELF's .asp.prov (firmware/build.rs), and `elf-check` recomputes it and compares. No timestamp enters either half, which
 # is the entire point. What it replaces was `find $(ELF_INPUTS) -newer $(ELF)`, so it could not tell
 # "the sources moved on" from "something rewrote the filesystem metadata": TASK-056 measured
-# `make probe-log` going red on a tree `git status` called clean, 2975 s of pure metadata apart. gate-costs:exempt reason="one historical mtime gap, quoted as evidence for dropping -newer"
+# `make probe-log` going red on a tree `git status` called clean, 2975 s of pure metadata apart.
 # The churn behind it was files `git checkout` had just refreshed. Bulk metadata churn of exactly that
 # shape is ordinary housekeeping here, and a check that cries wolf on it is a check the loop learns to
 # work around.
@@ -306,10 +306,10 @@ endef
 # there is nothing to prove or to write. When it does not, the relink is made certain rather than
 # offered: `$(CARGO) build` decides for itself whether to link, and it decides from mtimes, so a
 # source whose bytes changed while its mtime went backwards -- a restore from a backup or a sync tool,
-# where a checkout does not land -- reports "Finished in 0.29s" and keeps the old bytes. gate-costs:exempt reason="quoting cargo's own output, not a cost this repo publishes"
-# Measured here 2026-09-14. Trusting that would certify bytes nobody compiled, a silent pass, so `$(MAIN_SRC)` is touched first and cargo
+# where a checkout does not land -- reports "Finished in 0.29s" and keeps the old bytes.
+# Trusting that would certify bytes nobody compiled, a silent pass, so `$(MAIN_SRC)` is touched first and cargo
 # is left no choice. Cost lands only where a recompile was already owed: a warm forced relink of this
-# crate measures ~0.69 s {{component:firmware-forced-relink}}.
+# crate is under a second.
 define ELF_BUILD
 	want=$$( $(ELF_INPUTS_SHA256) ) || exit 1; \
 	have=$$( $(PROV) digest $(ELF) 2>/dev/null ) || have=; \
@@ -373,7 +373,7 @@ REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)' LAYOUT=$(LAYOUT)$(if $(filte
 # Under the content check the reason to prefer it over a plain `make build-elf` is sharper than the
 # mtime argument it started with: `build-elf` touches `$(MAIN_SRC)` itself whenever the embedded
 # digest disagrees, so following this line is what makes cargo prove the link instead of declining to make an
-# offer. Measured warm on this tree, console cfg set: this remedy ~0.69 s {{component:firmware-forced-relink}}.
+# offer.
 # Forcing one by deleting target/$(TARGET)/release/.fingerprint/asperitas-firmware-* instead is slower,
 # and it reaches into cargo's private layout.
 REMEDY = touch $(MAIN_SRC) && make build-elf $(REQUESTED)
@@ -464,9 +464,8 @@ check:
 ## stages and CI execute. Raw cargo rather than `make clippy` on purpose: the gates need --bins, and
 ## the recipe above hard-wires one binary. The only place any tier still reaches make is the
 ## docs-artifact-name lint, and only with `-n` (see its header warning about why that flag is not
-## optional). Cost of those two gates, local warm inside `nix develop .#default`, as the commit tier
-## that publishes them pays them: ~1 s {{gate:firmware-clippy}} and 0.89 s {{gate:firmware-clippy-rtt}} when nothing
-## changed, several times that straight after a build, tens of seconds in a fresh target dir. Landed
+## optional). Cost of those two gates: cheap when nothing changed, several times dearer straight
+## after a build, tens of seconds in a fresh target dir. Landed
 ## with TASK-060.03, re-pointed by TASK-061.02 when the hook job names died.
 clippy:
 	cargo clippy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- -D warnings

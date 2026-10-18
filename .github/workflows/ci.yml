@@ -72,8 +72,7 @@ jobs:
       # Why Swatinem/rust-cache over `RUSTC_WRAPPER=sccache`: sccache never caches a crate whose
       # compilation invokes the linker, which is all six firmware/src/bin/*.rs binaries plus every
       # host test and example binary, and it refuses incremental debug builds, so the host
-      # `cargo test --workspace` run is outside it too - ~84 s {{gate:cargo-test}}, most of a
-      # ~119 s {{tier:ci}} tier. It
+      # `cargo test --workspace` run is outside it too, and that is most of the ci tier. It
       # would also need pkgs.sccache in flake.nix and RUSTC_WRAPPER exported into the step, leaking
       # a runner concern toward the shared gate definition. Over raw `actions/cache`: hand-rolling
       # the key means hand-rolling rustc identity, lockfile normalization, target-dir discovery for

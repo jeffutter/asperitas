@@ -265,24 +265,22 @@ compare_request() {
 # Cost rules, because this runs inside the pre-commit hook:
 #
 #   C1  The default closure is derived once per process. The suite pays for one memoized `cargo
-#       metadata` at ~52 ms {{component:cargo-metadata-invocation}} here plus one more inside the single child
+#       metadata` plus one more inside the single child
 #       that asks for it, and not five of them:
 #       deriving lazily inside the cases does not memoize, because each case body runs in a command
 #       substitution and a memo filled there dies with that subshell. The first draft learned this by
 #       paying that invocation once per case.
 #   C2  At most five child invocations of the whole script - one per distinct exit code plus the read
 #       guard case. Everything else calls these functions in-process, where a non-zero code is caught by
-#       running the call through a command substitution: a bare fork is on the order of
-#       ~4 ms {{component:bash-subprocess-startup}} against an objcopy at ~31 ms {{component:objcopy-invocation}}.
+#       running the call through a command substitution: a bare fork is far cheaper than
+#       an objcopy.
 #   C3  A case reads a fixture once and then works on the bytes it got, rather than re-opening a file
 #       to test arithmetic. Nothing opens the same image twice inside one process.
 #   C4  No `cargo build`, `cargo clippy`, `cargo objcopy`, `cargo objdump` or `make`, and no path under
 #       firmware/target/: those either rebuild or re-point the artifact the provenance gate audits.
 #
-# Measured against those rules: ~1 s {{gate:elf-provenance-selftest}} as the commit tier runs it, which holds
-# AC #3's sub-second budget but misses the plan's stricter target. The gap is the tools
-# themselves: seven rust-objcopy invocations at ~31 ms {{component:objcopy-invocation}} each and the two
-# memoized `cargo metadata` runs at ~52 ms {{component:cargo-metadata-invocation}}, every
+# What the suite still pays is the tools themselves: seven rust-objcopy invocations and the two
+# memoized `cargo metadata` runs, every
 # one of them the subject of a case rather than scaffolding. Making the suite cheaper means making it
 # read fewer real tools, which means testing less.
 

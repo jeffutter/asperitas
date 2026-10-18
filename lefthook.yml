@@ -9,9 +9,8 @@
 #
 # What that shape trades away, recorded so nobody "fixes" the silence later: lefthook captures a
 # command's stdout and replays it when the command finishes, so a hook now prints nothing until its
-# tier ends. How long that silence lasts is whatever the tier costs, and this file does not restate it -
-# docs/gate-costs.json holds the figure, and the third gate of the commit tier runs
-# `scripts/gate-costs.sh --check` to fail a commit over anything here that stops agreeing with it. What
+# tier ends. How long that silence lasts is whatever the tier takes, and this file does not restate it -
+# `scripts/gates.sh` prints a time per gate and per tier. What
 # comes back for the muteness is per-gate headers
 # and wall times in the log, fail-fast naming the gate that died, and an order the script declares rather
 # than one lefthook infers - it sorts a stage's commands by priority, then leading digits, then name ascending, NOT by
