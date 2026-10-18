@@ -91,7 +91,7 @@ expect_has() { # <what> <needle> <haystack>   - fixed-string: these contain rege
 
 # The exit code is the assertion most likely to be got backwards, because `make` turns any nonzero
 # recipe status into its own 2. Cases therefore ask for zero or nonzero and grade the MESSAGE, which
-# is what a driver has to match on anyway (docs/reference/daisy-seed3.md's exit-code table).
+# is what a driver has to match on anyway (docs/reference/flashing.md's exit-code table).
 expect_zero() { # <what>
   [ "$MAKE_RC" = 0 ] || fail "$1: 'make $MAKE_GOAL' exited $MAKE_RC, wanted 0: $MAKE_OUT"
 }

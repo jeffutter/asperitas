@@ -52,7 +52,7 @@ make flash-all BINARY=blinky
 
 Blinky drives **Pod LED 1**: red for a flicker during pre-init, then steady green once USB is up. A running board enumerates as a CDC serial device (`ls /dev/tty.usbmodem*` on macOS). `BINARY` defaults to `main`, so a bare `make flash-all` flashes the main firmware.
 
-DFU mode is not sticky, the `dfu-util: Error during download get_status` line is expected, and the `LAYOUT=bootloaded` flow, probe flashing and RTT logging are all covered in [`docs/reference/daisy-seed3.md`](docs/reference/daisy-seed3.md). For a dead-looking board, the panic path and reading console captures, see [`docs/reference/asperitas-rig.md`](docs/reference/asperitas-rig.md).
+DFU mode is not sticky, the `dfu-util: Error during download get_status` line is expected, and the `LAYOUT=bootloaded` flow, probe flashing and RTT logging are all covered in [`docs/reference/flashing.md`](docs/reference/flashing.md). For a dead-looking board, the panic path and reading console captures, see [`docs/reference/asperitas-rig.md`](docs/reference/asperitas-rig.md).
 
 ## DSP iteration loop
 
@@ -91,7 +91,9 @@ Hardware status, measurements and open questions live in the tickets under `back
 
 ## Reference
 
-- [`docs/reference/daisy-seed3.md`](docs/reference/daisy-seed3.md) - Seed3 hardware, SAI config, DFU and probe flashing, console protocol, capture budgets
+- [`docs/reference/daisy-seed3.md`](docs/reference/daisy-seed3.md) - Seed3 hardware, SAI config, capture budgets
+- [`docs/reference/flashing.md`](docs/reference/flashing.md) - DFU and probe flashing runbook, bootloaded layout
+- [`docs/investigations/`](docs/investigations/) - measured evidence behind the flashing runbook
 - [`docs/reference/daisy-pod.md`](docs/reference/daisy-pod.md) - Pod pin map, controls, line-level audio warning
 - [`docs/reference/asperitas-rig.md`](docs/reference/asperitas-rig.md) - `rig` firmware workflow, capture runner, analysis, console debugging
 - [`docs/reference/rust-daisy-stack.md`](docs/reference/rust-daisy-stack.md) - Crate landscape, daisy-embassy status, DSP library options

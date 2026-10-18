@@ -111,7 +111,7 @@ the same configuration as this project — confirmed:
   Cortex-M under `--connect-under-reset` unless an earlier session left `DHCSR.C_DEBUGEN` set,
   and on this board's renamed chip entry that means it always fails. Switch back to nixpkgs'
   `probe-rs-tools` once a release containing #4441 reaches the pinned nixpkgs. Commands and caveats:
-  [daisy-seed3.md](./daisy-seed3.md#flashing-and-logging-over-an-st-link-probe)
+  [flashing.md](./flashing.md#st-link-probe)
 - `dfu-util` — probe-free flashing over the Seed3's USB-C; see
-  [daisy-seed3.md](./daisy-seed3.md#flashing-the-seed3)
+  [flashing.md](./flashing.md#dfu)
 - `cargo-binutils` / `llvm-tools` — `objcopy` to produce the raw `.bin` DFU needs

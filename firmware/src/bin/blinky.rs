@@ -20,7 +20,7 @@ bind_interrupts!(pub struct UsbIrqs {
 /// milliseconds, so the red stage is a flicker in practice — `blink_task` would
 /// blink it at ~1 Hz, but it isn't running yet while the state is still PreInit.
 /// On panic, the LED turns steady red.
-/// Flash via DFU; see `docs/reference/daisy-seed3.md` or run `make flash-all`.
+/// Flash via DFU; see `docs/reference/flashing.md` or run `make flash-all`.
 #[embassy_executor::main]
 async fn main(_spawner: embassy_executor::Spawner) {
     let config = daisy_embassy::default_rcc();

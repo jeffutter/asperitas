@@ -446,7 +446,7 @@ pub fn emit_panic_record(body: &[u8]) {
 /// set. Only the *future* is missing someone to poll it, which is what the loop below
 /// provides. The `log-defmt` sibling is immune to this failure mode for a different reason:
 /// RTT is polled by the probe rather than by any interrupt of ours (and `docs/reference/
-/// daisy-seed3.md` records its own opposite hazard, a stalled RTT host), which is why the
+/// flashing.md` records its own opposite hazard, a stalled RTT host), which is why the
 /// USB path is the fragile twin.
 ///
 /// Returns once the bytes are sent, or once the `SpinBudget` is spent — processor cycles

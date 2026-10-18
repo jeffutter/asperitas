@@ -5,7 +5,7 @@
 #   - No additional setup needed; the flake provides everything.
 #
 # DFU flashing requires holding BOOT, tapping RESET, releasing BOOT
-# to enter the STM32 system bootloader. See docs/reference/daisy-seed3.md.
+# to enter the STM32 system bootloader. See docs/reference/flashing.md.
 
 # The image each target builds is named after the binary it came from: `make build BINARY=rig`
 # writes `rig.bin`, never a shared `firmware.bin`. A single name would be a trap on this project,
@@ -29,7 +29,7 @@ TARGET   = thumbv7em-none-eabihf
 # `bootloaded`: the image links for the stock Daisy bootloader (memory-bootloaded.x). It runs from
 # AXI SRAM, is stored in QSPI from 0x90040000, and is written there with the bootloader's DFU
 # interface. That layout exists because rig with the excerpt install path no longer fits 128 KB
-# (TASK-038.04.07). The bootloader itself is installed once, see docs/reference/daisy-seed3.md.
+# (TASK-038.04.07). The bootloader itself is installed once, see docs/reference/flashing.md.
 #
 # The layout reaches build.rs as ASPERITAS_LAYOUT, which stamps it into the ELF's .asp.prov and
 # selects the linker script. Each layout builds into its own target directory (see VARIANT_DIR), so
@@ -82,7 +82,7 @@ export ASPERITAS_LAYOUT = $(LAYOUT)
 # the command line.
 # Not `STM32H750IBKx`: probe-rs picks its STM32H7 debug sequence by chip-name prefix, and that
 # sequence sets DBGMCU_CR.TRACECLKEN on connect, which kills the debug port on this board until a
-# power cycle (docs/reference/daisy-seed3.md, "Setting DBGMCU_CR.TRACECLKEN..."). `ASPERITAS_H750IB`
+# power cycle (docs/reference/flashing.md, "Never name a stock STM32H7 chip"). `ASPERITAS_H750IB`
 # is the stock STM32H750IB entry renamed in `asperitas-h750.yaml`, so probe-rs uses its default ARM
 # sequence. Because that sequence never writes DBGMCU_CR, nothing enables debug-in-sleep for us:
 # see the WFI note above `probe-log`.
@@ -346,7 +346,7 @@ build-elf:
 ## No BOOT/RESET handshake: --connect-under-reset drives nRESET low while attaching,
 ## which is the mechanism that takes the hand out of the loop. On any native ST-Link
 ## probe-rs skips its custom reset sequence and only drives the pin - see
-## "Flashing and logging over an ST-Link probe" in docs/reference/daisy-seed3.md.
+## "Under reset" in docs/reference/flashing.md.
 ## Stock probe-rs 0.32.0 never halts this core under reset (it arms vector catch before
 ## enabling halting debug), so this depends on the probe-rs-from-main (upstream PR #4441)
 ## the flake builds. With it, under-reset flashes reliably here.

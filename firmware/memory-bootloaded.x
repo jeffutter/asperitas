@@ -3,8 +3,8 @@
  * ASPERITAS_LAYOUT=bootloaded (build.rs); `memory-internal.x` is the internal-flash layout and stays the
  * default for blinky, ledtest, podtest and panictest.
  *
- * Measured on Seed3 2026-10-15 (TASK-038.04.07.01, docs/reference/daisy-seed3.md "The stock Daisy
- * bootloader on Seed3"). The bootloader's app region starts at QSPI 0x90040000. It reads the reset
+ * Measured on Seed3 2026-10-15 (TASK-038.04.07.01, docs/investigations/bootloaded-layout.md "Bootloader
+ * facts"). The bootloader's app region starts at QSPI 0x90040000. It reads the reset
  * vector (word at +4): an address in AXI SRAM (0x24xxxxxx) makes it copy the image from QSPI into
  * AXI SRAM, about 480 KB, and jump. So:
  *

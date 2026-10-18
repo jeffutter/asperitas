@@ -417,7 +417,7 @@ until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootlo
 ### Installing an excerpt
 
 An excerpt is mono 48 kHz 16-bit WAV (the corpus in `audio/instruments/` already is). Flash the
-bootloaded layout once (`make flash LAYOUT=bootloaded`, see `daisy-seed3.md`, *Flashing the bootloaded app, and the probe*), then stream the
+bootloaded layout once (`make flash LAYOUT=bootloaded`, see `flashing.md`, *Bootloaded layout*), then stream the
 clip into a slot (`0..=13`, 14 slots) with a name of 1 to 16 characters of `[a-z0-9_]`, with the board running
 `rig` and its console visible on the host:
 

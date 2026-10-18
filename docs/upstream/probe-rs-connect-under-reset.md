@@ -140,4 +140,4 @@ DHCSR problem above rather than only after power-up. As far as we know the two p
 
 Bench notes are in backlog ticket TASK-037
 (`backlog/tasks/task-037 - Attach-the-ST-Link-and-verify-the-probe-path-on-hardware.md`). The pad
-layout and the TRACECLKEN finding are in `docs/reference/daisy-seed3.md`.
+layout and the TRACECLKEN finding are in `docs/reference/flashing.md` and `docs/investigations/nreset-and-reset-catch.md`.

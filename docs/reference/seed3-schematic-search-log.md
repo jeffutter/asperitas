@@ -1,11 +1,11 @@
 # Seed3 schematic search: what is public, and what isn't
 
 The evidence trail behind the nRESET answer in
-[daisy-seed3.md](./daisy-seed3.md#flashing-and-logging-over-an-st-link-probe), kept so the negative
+[nreset-and-reset-catch.md](../investigations/nreset-and-reset-catch.md), kept so the negative
 results don't have to be rediscovered. Assembled on 2026-09-10 while working TASK-050. Every URL below
 was fetched (curl HEAD/GET, or in-memory download plus text extraction); nothing here is inferred from
 vendor marketing. Section 3 lists the drawings that do exist; the reset net itself is traced in
-daisy-seed3.md, using vector geometry and pixel-level reads of those sheets rather than text extraction
+nreset-and-reset-catch.md, using vector geometry and pixel-level reads of those sheets rather than text extraction
 alone.
 
 ## Summary
@@ -86,7 +86,7 @@ All are EAGLE exports; I decoded their embedded CID→Unicode CMaps and read the
 
 - **Verified absent from every public Seed3 document**: no schematic exists, and the databrief contains no reset text at all (counts above). I could not open a Seed3 schematic because there is none to open.
 - **Verified present in public *earlier* schematics**: Seed Rev4 full sheet has nets `NRST` and `RESET` and a `PTS815` tactile switch; Seed Rev7 reduced sheet has `RESET` only (it is explicitly a reduced drawing — staff have said the public Seed schematic is intentionally incomplete).
-- **Connectivity, once the sheets were opened properly**: text extraction recovers label strings, not wires, so it cannot say what sits on `NRST`. Rendering the sheets as vectors and reading them at high zoom does: on Rev4 (2020-06-08), Rev7 (2024-02-01), Seed2 DFM Rev5-reduced (2025-02-17) and Patch SM (2024-02-08) the `RESET` net carries a 10 KΩ pull-up to `+3V3_D`, one tactile switch to GND, the MCU's `NRST` pin and the 10-pin mini-JTAG header's pin 10 — and Rev7 alone adds a 100 nF capacitor to GND. Values, designators and the full trace are in [daisy-seed3.md](./daisy-seed3.md#flashing-and-logging-over-an-st-link-probe).
+- **Connectivity, once the sheets were opened properly**: text extraction recovers label strings, not wires, so it cannot say what sits on `NRST`. Rendering the sheets as vectors and reading them at high zoom does: on Rev4 (2020-06-08), Rev7 (2024-02-01), Seed2 DFM Rev5-reduced (2025-02-17) and Patch SM (2024-02-08) the `RESET` net carries a 10 KΩ pull-up to `+3V3_D`, one tactile switch to GND, the MCU's `NRST` pin and the 10-pin mini-JTAG header's pin 10 — and Rev7 alone adds a 100 nF capacitor to GND. Values, designators and the full trace are in [nreset-and-reset-catch.md](../investigations/nreset-and-reset-catch.md).
 - **No supervisor or buffer part number observed** in any of those four drawings, by label scan *or* by looking at the drawn net. Still absence of evidence rather than proof about the Seed3: three of the four are explicitly reduced sheets, Seed3's own sheet is not public, and a supervisor could in principle hide as an unlabelled footprint there.
 
 ## Sources
@@ -113,5 +113,5 @@ Dropped:
 
 1. **Ask Electrosmith directly** (community.daisy.audio, ideally replying in topic 9440 or a new Hardware topic): will the Seed3 schematic be published as the Rev7 one was ("Seed Rev7 Schematic Is Now Live!" precedent, topic 4846)? The narrow question left is only whether the Seed3 kept its predecessors' reset net — a 10 KΩ pull-up to `+3V3_D`, the front-panel button to GND, and (on Rev7) a 100 nF capacitor, with no supervisor or buffer anywhere.
 2. **Bench route, now demoted to a tiebreaker**: an oscilloscope on header pin 10 during an under-reset attach settles the Seed3 question directly. It is worth doing only if `--connect-under-reset` actually misbehaves — TASK-037 passing on the first try is itself evidence, and a scope adds nothing to a pass.
-3. ~~Open the two PDFs visually~~ — done, along with the Seed2 DFM and Patch SM sheets; see the trace in [daisy-seed3.md](./daisy-seed3.md#flashing-and-logging-over-an-st-link-probe). What product photography cannot do is settle the Seed3 question: at the resolution of the published images a SOT23-class supervisor near the reset button would be barely a package outline, let alone a readable marking, and the compliance zip holds FCC photographs rather than design data.
+3. ~~Open the two PDFs visually~~ — done, along with the Seed2 DFM and Patch SM sheets; see the trace in [nreset-and-reset-catch.md](../investigations/nreset-and-reset-catch.md). What product photography cannot do is settle the Seed3 question: at the resolution of the published images a SOT23-class supervisor near the reset button would be barely a package outline, let alone a readable marking, and the compliance zip holds FCC photographs rather than design data.
 4. Re-check `https://docs.daisy.audio/hardware/Seed3/` periodically; a schematic would appear as a new `products/seed3/*.pdf` key, and the bucket's absent-key response (403) makes probing cheap.

@@ -12,13 +12,16 @@ code.
 - **[docs/reference/daisy-seed3.md](docs/reference/daisy-seed3.md)** — Seed3 hardware.
   What differs from earlier Seeds (only the codec and USB-C), the exact SAI
   configuration, and why **the TAC5242 codec is hardware-strapped rather than
-  I²C-configured**. Two flashing routes and two log channels:
-  **DFU over the onboard USB-C** or **an ST-Link probe on the SWD pads**, logged over
-  the **framed USB console** or **`defmt`/RTT** through that probe.
-  The probe is the way into a board that never brings USB up (verified on the bench, with
-  probe-rs built from main for `--connect-under-reset`), and RTT keeps no loss
-  ledger, so a drop count from the console does not describe an RTT capture. Also records that libDaisy (C++) has no
+  I²C-configured**. Also records that RTT keeps no loss ledger, so a drop count from the
+  console does not describe an RTT capture, and that libDaisy (C++) has no
   Seed3 support at all, so "prove it in C++ first" is not an available fallback.
+- **[docs/reference/flashing.md](docs/reference/flashing.md)** — Flashing runbook. Two routes
+  and two log channels: **DFU over the onboard USB-C** or **an ST-Link probe on the SWD pads**,
+  logged over the **framed USB console** or **`defmt`/RTT** through that probe.
+  The probe is the way into a board that never brings USB up (verified on the bench, with
+  probe-rs built from main for `--connect-under-reset`). Never name a stock `STM32H7...` chip
+  to probe-rs: it wedges the debug port until the USB-C is replugged. Evidence lives in
+  [docs/investigations/](docs/investigations/).
 - **[docs/reference/daisy-pod.md](docs/reference/daisy-pod.md)** — Pod control pin map
   (knobs, encoder, buttons, RGB LEDs), libDaisy's defaults, and the fact that **Pod
   audio I/O is line level, not hi-Z instrument level** — a gain-staging trap that reads
