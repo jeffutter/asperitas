@@ -3,13 +3,15 @@ id: TASK-121
 title: >-
   Comments: describe current state only - remove ticket numbers, dates,
   measurement history and cross-file line numbers
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:36'
+updated_date: '2026-10-18 22:18'
 labels:
   - review-2026-10
   - docs
+  - planned
 dependencies: []
 priority: medium
 type: chore
@@ -24,7 +26,25 @@ Owner convention (now in CLAUDE.md): comments reflect the current state of the c
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No TASK- numbers, dates or measurement tables remain in code comments across crates/ and firmware/
-- [ ] #2 Every comment listed in the description as wrong is corrected or deleted
-- [ ] #3 No comment cites a line number in another file
+- [x] #1 No TASK- numbers, dates or measurement tables remain in code comments across crates/ and firmware/
+- [x] #2 Every comment listed in the description as wrong is corrected or deleted
+- [x] #3 No comment cites a line number in another file
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by 579d70c. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Swept crates/, firmware/src, firmware/Cargo.toml, firmware/Makefile, memory*.x, scripts/ and lefthook.yml: zero TASK- references remain in the scanned files, dates were stripped from comments (fixture file names kept as identifiers). Many of the wrong comments in the description had already been fixed by earlier refactors (lib.rs GLOBAL_BACKEND, spin_budget, measure capture.rs, knob v4 partly). Corrected this pass: dump.rs block size (255 chunks), frame.rs CRC iterations (8 bits, 1 760) and scan() return, rig.rs header, firmware Cargo.toml executor-interrupt, memory-internal.x QSPI, encoder.rs state table, knob.rs embassy-stm32 version. Verified: cargo fmt, cargo test --workspace, firmware rig cargo check, doc-artifact-names, elf-staleness and load-addresses selftests. Left alone: the large comment-density trims (Makefile, gates.sh, rig.rs bulk) were not rewritten wholesale.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Removed ticket numbers and dates from comments across crates, firmware and scripts, corrected the specifically wrong comments listed, and kept scripts/tests green.
+<!-- SECTION:FINAL_SUMMARY:END -->

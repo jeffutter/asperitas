@@ -3,7 +3,7 @@
  * ASPERITAS_LAYOUT=bootloaded (build.rs); `memory-internal.x` is the internal-flash layout and stays the
  * default for blinky, ledtest, podtest and panictest.
  *
- * Measured on Seed3 2026-10-15 (TASK-038.04.07.01, docs/investigations/bootloaded-layout.md "Bootloader
+ * Measured on Seed3 (docs/investigations/bootloaded-layout.md "Bootloader
  * facts"). The bootloader's app region starts at QSPI 0x90040000. It reads the reset
  * vector (word at +4): an address in AXI SRAM (0x24xxxxxx) makes it copy the image from QSPI into
  * AXI SRAM, about 480 KB, and jump. So:
@@ -19,7 +19,7 @@
  *
  * QSPI budget. The image is stored from QSPI offset 0x40000 (the bootloader occupies the first
  * 0x40000 bytes of the part). Excerpt slots start at QSPI offset 0x100000
- * (`asperitas_wire::excerpt::EXCERPT_AREA_START`, TASK-038.04.01), so the image must end below
+ * (`asperitas_wire::excerpt::EXCERPT_AREA_START`), so the image must end below
  * it. FLASH LENGTH is what bounds the image, and `scripts/check-image-load-addresses.sh` fails if
  * QSPI_APP_OFFSET + LENGTH reaches that constant. It parses both from this file and the Rust source;
  * the offset is stated once, on the marker line below.
@@ -42,7 +42,7 @@ SECTIONS {
   } > RAM_D2
 } INSERT BEFORE .bss;
 
-/* Rig's excerpt replay staging (`REPLAY`, firmware/src/bin/rig.rs, TASK-074). Not DTCM: whether MDMA, the
+/* Rig's excerpt replay staging (`REPLAY`, firmware/src/bin/rig.rs). Not DTCM: whether MDMA, the
  * master `Flash::read_async` refills it with, can write DTCM at 0x20000000 was not confirmed from RM0433
  * (the TCMs hang off MDMA's separate AHBS port, and a transfer must be steered to it; nothing in this tree
  * does that), and a refill that lands nowhere would play zeros. AXI SRAM is reached by MDMA's ordinary
@@ -60,7 +60,7 @@ SECTIONS {
 /* cortex-m-rt zeroes [__sbss, __ebss) and sets __ebss, and the stack end, from the location counter
  * after .bss. A section inserted AFTER .bss that lives in another region leaves that counter in the
  * other region, so the zeroing loop ran from DTCM across unmapped memory to D2 and took an imprecise
- * bus fault before main (measured 2026-10-15, TASK-038.04.07.04: HFSR FORCED, CFSR 0x400, stacked PC
+ * bus fault before main (measured: HFSR FORCED, CFSR 0x400, stacked PC
  * in Reset, __ebss = 0x30000400). .sram1_bss is NOLOAD and needs no zeroing; inserting it BEFORE .bss leaves
  * .bss as the last section placed, so the counter ends in RAM, and this assert keeps __ebss inside RAM. */
 ASSERT(__ebss <= ORIGIN(RAM) + LENGTH(RAM), "__ebss left RAM: a section inserted after .bss lives in another region")

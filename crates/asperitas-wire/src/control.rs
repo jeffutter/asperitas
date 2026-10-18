@@ -4,8 +4,8 @@
 //! Control rides the same ordinary v1 `~` frames as excerpt install ([`crate::inbound`]), so
 //! nothing about framing, CRC or backpressure is restated here. This module owns only the body
 //! grammar and the routing decision. It touches no hardware and holds no knob state: the knob
-//! table and range checks belong to the layer that applies a value (TASK-032.02), and the
-//! firmware wiring is TASK-032.03.
+//! table and range checks belong to the layer that applies a value, and the
+//! firmware wiring lives in the firmware crate.
 //!
 //! # Why this module is not behind `log-usb`
 //!

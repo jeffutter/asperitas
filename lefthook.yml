@@ -5,7 +5,7 @@
 # budget. The gate set is defined once, in scripts/gates.sh; adding a check means adding a `gate`
 # line there and never anything here. Before that script existed, this file hand-maintained 25
 # `run:` lines across two stages and CI kept a second copy of the same list, and every check added
-# since TASK-018 drifted between them - TASK-060 exists because firmware was invisible to both.
+# since early on drifted between them - firmware was added late because it was firmware was invisible to both.
 #
 # What that shape trades away, recorded so nobody "fixes" the silence later: lefthook captures a
 # command's stdout and replays it when the command finishes, so a hook now prints nothing until its
@@ -25,12 +25,12 @@
 # Nothing here filters paths, and nothing may: no `root`, `glob`, `files` or `local` key, and no
 # staged-files or push-files template token survives anywhere in this file. A filtered job whose set
 # is empty exits 0 without running, so a lint behind one reads as green having checked nothing -
-# `firmware-cross-compile` sat behind the last such filter until TASK-061.02 deleted it. Every key
+# `firmware-cross-compile` sat behind the last such filter until it was deleted. Every key
 # listed above greps to zero in this file, which makes grep the durable check rather than this prose.
 #
 # One skip remains and it is benign by construction: lefthook skips a stage whose staged-file set is
 # empty, so `git commit --allow-empty` runs nothing and a manual `lefthook run <stage>` on an empty
-# index needs `-f`. Measured, not assumed (TASK-061.02), and it is not a choice this file gets to
+# index needs `-f`. Measured, not assumed, and it is not a choice this file gets to
 # make: 2.1.10 has no key for it. Upstream's builder returns a SkipError("no matching staged files")
 # for every command whenever the staged set is empty and `--force` was not passed, before looking at
 # anything configurable, and its published schema.json carries no option to turn that off. So the
@@ -47,7 +47,7 @@
 # Any check that runs in one tier and not another is an exception written down with its price at the
 # gate itself in scripts/gates.sh - currently one: the `pod-hw` crate test, ci-only.
 #
-# No `forward_stderr:` key here, though every command carried one until TASK-061 asked whether it
+# No `forward_stderr:` key here, though every command carried one until someone asked whether it
 # does anything. It does not: the key exists in no lefthook release - absent from the 2.1.10 this
 # repo pins and from 2.1.12's source, in the Go structs, the JSON schema, and the docs alike - and
 # an unrecognised key is accepted and ignored without a warning, which is how it survived a dozen

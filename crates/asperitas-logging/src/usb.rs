@@ -115,7 +115,7 @@ static PANIC_DEV: AtomicPtr<UsbDev> = AtomicPtr::new(core::ptr::null_mut());
 /// A panic means the executor is gone, so the drain task that would carry a ring write to
 /// the endpoint never runs again: anything put in the ring after that sits there until
 /// reset. The record buffers belong to the commit lock, which the panic path must not take
-/// (AC #6 in TASK-030.02), so this path gets storage of its own instead. 228 bytes of
+/// (the lock-guarded record buffers), so this path gets storage of its own instead. 228 bytes of
 /// `.bss` buys a final record that decodes like every other one, and keeps a `MAX_FRAME`
 /// local off a stack that may already be nearly exhausted.
 static PANIC_FRAME: PanicFrame = PanicFrame(UnsafeCell::new([0; frame::MAX_FRAME]));

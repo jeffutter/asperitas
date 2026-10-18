@@ -5,116 +5,116 @@
 
 /// Loop gain of the Pod self-loopback at the rig's -20 dBFS sine, in dB (capture minus stimulus).
 ///
-/// Origin: TASK-038.05 baseline, 2026-10-07 300 s run (`audio/captures/2026-10-07-rig-sine-300s.console.zst`).
+/// Origin: the rig baseline, the 300 s run (`audio/captures/2026-10-07-rig-sine-300s.console.zst`).
 pub const LOOP_GAIN_DB: f64 = -0.41;
 
 /// Noise plus distortion of that capture, in LSB RMS of the 16-bit capture.
 ///
-/// Origin: TASK-038.05 baseline, same run.
+/// Origin: the rig baseline, same run.
 pub const NOISE_DISTORTION_LSB_RMS: f64 = 0.35;
 
 /// DC offset of that capture, in 16-bit LSB.
 ///
-/// Origin: TASK-038.05 baseline, same run.
+/// Origin: the rig baseline, same run.
 pub const DC_LSB: f64 = -0.49;
 
 /// Alignment window, samples (1 s at 48 kHz). Long enough for a sharp correlation peak against
 /// the rig's noise floor, short enough that a slip is localised to a second.
 ///
-/// Origin: chosen for TASK-035.02; confirmed against the 2026-10-07 and 2026-10-13 fixtures.
+/// Origin: chosen for the alignment stage; confirmed against the 2026-10-07 and 2026-10-13 fixtures.
 pub const ALIGN_WINDOW_SAMPLES: usize = 48_000;
 
 /// Largest loopback delay searched, samples. Delay is determined modulo the period for a periodic
 /// stimulus, so this is also the span over which a sine delay is unambiguous only if below one period.
 ///
-/// Origin: TASK-035.02, set from measured fixture delays (see tests in `align.rs`).
+/// Origin: set from measured fixture delays (see tests in `align.rs`).
 pub const ALIGN_MAX_DELAY_SAMPLES: usize = 1_000;
 
 /// Largest allowed change in delay between windows or repeat captures, samples.
 ///
-/// Origin: TASK-035.02, set from measured fixture spread (see tests in `align.rs`).
+/// Origin: set from measured fixture spread (see tests in `align.rs`).
 pub const ALIGN_STABLE_TOL_SAMPLES: f64 = 0.25;
 
 /// Half-width of the delay search around the first window's delay once anchored, samples. Below
 /// half the shortest stimulus period (48 samples for the rig's 1 kHz sine) so tracking cannot jump
 /// to a neighbouring period, and above any plausible one-window slip.
 ///
-/// Origin: TASK-035.02.
+/// Origin: calibrated against the fixtures.
 pub const ALIGN_TRACK_SAMPLES: usize = 8;
 
 /// A correlation peak counts as tied with the maximum above this fraction of it. Used only to pick
 /// the smallest delay among the equal peaks a periodic stimulus produces, so the anchor is the same
 /// across repeat captures.
 ///
-/// Origin: TASK-035.02; fixture sine peaks agree to far better than this.
+/// Origin: fixture sine peaks agree to far better than this.
 pub const ALIGN_TIE_FRACTION: f32 = 0.98;
 
 /// Largest allowed deviation of measured loop gain from [`LOOP_GAIN_DB`], dB.
 ///
-/// Origin: TASK-035.03, set from the 2026-10-07 and 2026-10-15 fixture deviations (see
+/// Origin: set from the 2026-10-07 and 2026-10-15 fixture deviations (see
 /// `metrics.rs` tests) with margin: both fixtures measured within 0.005 dB.
 pub const LEVEL_DEVIATION_TOL_DB: f64 = 0.05;
 
 /// A sample counts as silent when its magnitude is at most this, 16-bit LSB.
 ///
-/// Origin: TASK-035.03; the rig noise floor is 0.35 LSB RMS and DC is -0.49 LSB
+/// Origin: the rig noise floor is 0.35 LSB RMS and DC is -0.49 LSB
 /// ([`NOISE_DISTORTION_LSB_RMS`], [`DC_LSB`]), so 2 LSB is several sigma of idle noise.
 pub const SILENCE_LSB: i16 = 2;
 
 /// A silent run is reported once it lasts this many samples (1 ms at 48 kHz). The 1 kHz sine
 /// crosses zero for only a few samples at a time, so this cannot trigger on the stimulus itself.
 ///
-/// Origin: TASK-035.03.
+/// Origin: calibrated against the fixtures.
 pub const SILENCE_MIN_RUN_SAMPLES: usize = 48;
 
 /// A discontinuity candidate is a sample where the aligned residual (capture minus gain-scaled,
 /// delayed stimulus) jumps by more than this from the previous sample, 16-bit LSB.
 ///
-/// Origin: TASK-035.03, set from the largest residual jump in the fixtures (see `metrics.rs` tests).
+/// Origin: set from the largest residual jump in the fixtures (see `metrics.rs` tests).
 pub const DISCONTINUITY_JUMP_LSB: f64 = 8.0;
 
 /// Candidates closer together than this many samples are one event (a dropout produces a jump at
 /// each edge, a step produces one).
 ///
-/// Origin: TASK-035.03.
+/// Origin: calibrated against the fixtures.
 pub const DISCONTINUITY_MERGE_SAMPLES: usize = 8;
 
 /// Most discontinuity positions stored in the report; the count stays exact.
 ///
-/// Origin: TASK-035.03; keeps the JSON bounded for a badly broken capture.
+/// Origin: keeps the JSON bounded for a badly broken capture.
 pub const DISCONTINUITY_MAX_POSITIONS: usize = 64;
 
 /// Spectrum frame length, samples (a 2.9 Hz bin at 48 kHz, fine enough to separate mains-related
 /// hum from the 1 kHz fundamental).
 ///
-/// Origin: TASK-035.03.
+/// Origin: calibrated against the fixtures.
 pub const SPUR_FFT_SAMPLES: usize = 16_384;
 
 /// Bins either side of the fundamental treated as the fundamental itself (a Hann main lobe is
 /// +-2 bins; one more for the peak's off-bin position).
 ///
-/// Origin: TASK-035.03.
+/// Origin: calibrated against the fixtures.
 pub const SPUR_EXCLUDE_BINS: usize = 3;
 
 /// Number of largest non-fundamental spectral peaks reported.
 ///
-/// Origin: TASK-035.03.
+/// Origin: calibrated against the fixtures.
 pub const SPUR_REPORT_COUNT: usize = 8;
 
 /// Highest allowed spur level relative to the fundamental, dB (negative).
 ///
-/// Origin: TASK-035.03, set from the fixtures' measured worst spur (see `metrics.rs` tests).
+/// Origin: set from the fixtures' measured worst spur (see `metrics.rs` tests).
 pub const SPUR_MAX_DBC: f64 = -80.0;
 
 /// Block length for the parameter-step envelope, samples (1 ms at 48 kHz, a whole number of
 /// periods of the rig's 1 kHz sine so a steady tone has constant block RMS).
 ///
-/// Origin: TASK-035.04.
+/// Origin: calibrated against the fixtures.
 pub const PARAM_STEP_BLOCK_SAMPLES: usize = 48;
 
 /// Largest allowed change in block RMS between blocks one or two apart, dB.
 ///
-/// Origin: TASK-035.04, set from `param_step.rs` tests: a 10.4 dB level change (`gain_db` 10.4) through the
+/// Origin: set from `param_step.rs` tests: a 10.4 dB level change (`gain_db` 10.4) through the
 /// smoothed `Gain` (10 ms time constant) peaks at 2.8 dB over two blocks, the same change snapped
 /// (unsmoothed) reads 10.4 dB. 5 dB sits between with 1.5x margin either side.
 pub const PARAM_STEP_MAX_DB: f64 = 5.0;
@@ -122,18 +122,18 @@ pub const PARAM_STEP_MAX_DB: f64 = 5.0;
 /// Blocks quieter than this RMS (linear, full scale 1.0) are ignored, so a dB ratio against idle
 /// noise cannot read as a step. About 2 LSB of 16-bit, as [`SILENCE_LSB`].
 ///
-/// Origin: TASK-035.04.
+/// Origin: calibrated against the fixtures.
 pub const PARAM_STEP_FLOOR_RMS: f32 = 2.0 / 32768.0;
 
 /// Step flags closer together than this many blocks are one event (a step falling inside a block
 /// flags both its boundaries).
 ///
-/// Origin: TASK-035.04.
+/// Origin: calibrated against the fixtures.
 pub const PARAM_STEP_MERGE_BLOCKS: usize = 3;
 
 /// Most step positions stored in the report; the count stays exact.
 ///
-/// Origin: TASK-035.04; keeps the JSON bounded, as [`DISCONTINUITY_MAX_POSITIONS`].
+/// Origin: keeps the JSON bounded, as [`DISCONTINUITY_MAX_POSITIONS`].
 pub const PARAM_STEP_MAX_POSITIONS: usize = 64;
 
 /// Largest allowed residual RMS of an excerpt replay against the `asperitas-cli` reference, in dB
@@ -147,7 +147,7 @@ pub const PARAM_STEP_MAX_POSITIONS: usize = 64;
 /// comparison fits rather than assumes; and a DC offset ([`DC_LSB`]) that it removes. Of those the
 /// converter response dominates for a loud musical signal, so the limit is relative to the reference.
 ///
-/// The same budget applies at every `CTL FX` setting (TASK-035.07.02): the reference is processed
+/// The same budget applies at every `CTL FX` setting: the reference is processed
 /// at the commanded setting, so the fitted loop gain stays comparable to [`LOOP_GAIN_DB`] and is
 /// judged by [`LEVEL_DEVIATION_TOL_DB`]; a capture processed at another gain misses it by the dB
 /// difference, and a low-pass mismatch shows as residual or an alignment slip. Synthetic captures
@@ -155,9 +155,9 @@ pub const PARAM_STEP_MAX_POSITIONS: usize = 64;
 /// +6 and -38 dB, -32.1 and -33.1 dB for low-pass (the filter removes the attack content that
 /// dominates the residual), loop-gain deviation -0.009 dB throughout. Synthetic captures scale or
 /// filter the loopback noise with the signal, which a real DAC/ADC would not (its noise floor is
-/// fixed), so heavy attenuation on the device may need a looser limit: revisit in TASK-035.07.03.
+/// fixed), so heavy attenuation on the device may need a looser limit: revisit once measured on the device.
 ///
-/// Origin: TASK-035.05, set from the `mand_soft` replay fixture (`compare.rs` tests): residual
+/// Origin: set from the `mand_soft` replay fixture (`compare.rs` tests): residual
 /// -30.9 dB. -25 dB leaves about 6 dB of margin, while a one-sample misalignment (about -17.5 dB), a
 /// wrong excerpt and a 2000-sample dropout all land above it.
 pub const COMPARE_RESIDUAL_RMS_DB: f64 = -25.0;
@@ -166,13 +166,13 @@ pub const COMPARE_RESIDUAL_RMS_DB: f64 = -25.0;
 /// reason bit-exactness is not claimed as [`COMPARE_RESIDUAL_RMS_DB`]; the peak is looser because a
 /// pluck's attack transient excites the converter filters hardest.
 ///
-/// Origin: TASK-035.05, set from the `mand_soft` replay fixture: residual peak
+/// Origin: set from the `mand_soft` replay fixture: residual peak
 /// -21.5 dB (803 LSB at sample 1502, the attack), so -15 dB leaves 6.5 dB of margin.
 pub const COMPARE_RESIDUAL_PEAK_DB: f64 = -15.0;
 
 /// Number of equal parameter-value buckets a knob sweep is divided into for the response curve.
 ///
-/// Origin: TASK-019.03.02. The rig sweeps at 20 SET/s, so on a 10 s sweep each bucket is 0.5 s and
+/// Origin: The rig sweeps at 20 SET/s, so on a 10 s sweep each bucket is 0.5 s and
 /// 10 `SET`s; 20 buckets resolve a plateau a tenth of the travel wide while leaving each
 /// bucket enough samples to average the response of music.
 pub const SWEEP_BUCKETS: usize = 20;
@@ -182,19 +182,19 @@ pub const SWEEP_BUCKETS: usize = 20;
 /// start and the first `SET` (the session sidecar's start is an estimate): the central half of a 0.5 s
 /// bucket stays valid for an offset error of up to 125 ms.
 ///
-/// Origin: TASK-019.03.02.
+/// Origin: calibrated against the fixtures.
 pub const SWEEP_BUCKET_TRIM: f64 = 0.25;
 
 /// Fewest samples a bucket's trimmed window may hold; a shorter sweep is a failed verdict, not a
 /// measurement. 10 ms at 48 kHz.
 ///
-/// Origin: TASK-019.03.02.
+/// Origin: calibrated against the fixtures.
 pub const SWEEP_MIN_WINDOW_SAMPLES: usize = 480;
 
 /// Smallest total end-to-end response change, dB, for a sweep to count as having a direction. Less
 /// than this the knob moved the sound by no more than level wander in the source.
 ///
-/// Origin: TASK-019.03.02, set from the synthetic fixtures in `sweep.rs`, whose healthy curves span
+/// Origin: set from the synthetic fixtures in `sweep.rs`, whose healthy curves span
 /// 24 dB.
 pub const SWEEP_MIN_SPAN_DB: f64 = 6.0;
 
@@ -202,27 +202,27 @@ pub const SWEEP_MIN_SPAN_DB: f64 = 6.0;
 /// best so far (so a slow drift backwards counts, not just one step). Bucket levels of music wander
 /// by the dynamics of the passage; this is that allowance.
 ///
-/// Origin: TASK-019.03.02, set from the synthetic fixtures: ripple of 0.4 dB RMS on a healthy
+/// Origin: set from the synthetic fixtures: ripple of 0.4 dB RMS on a healthy
 /// curve stays under 1.0 dB, a 3 dB reversal sits above it with 3x margin. Revisit with the first
-/// real capture in TASK-019.03.04.
+/// real capture on the board.
 pub const SWEEP_MONOTONIC_TOL_DB: f64 = 1.0;
 
 /// A bucket-to-bucket response change smaller than this, dB, is "no change".
 ///
-/// Origin: TASK-019.03.02, set from the synthetic fixtures: a healthy 24 dB sweep over
+/// Origin: set from the synthetic fixtures: a healthy 24 dB sweep over
 /// [`SWEEP_BUCKETS`] moves about 1.3 dB per bucket; 0.5 dB sits below that and above ripple.
 pub const SWEEP_FLAT_EPS_DB: f64 = 0.5;
 
 /// Consecutive "no change" bucket steps that make a flat region (a dead zone or plateau). Three
 /// steps span four buckets, a fifth of the travel.
 ///
-/// Origin: TASK-019.03.02.
+/// Origin: calibrated against the fixtures.
 pub const SWEEP_FLAT_MIN_STEPS: usize = 3;
 
 /// Shortest capture a soak verdict is given for, seconds. The ticket asks for "a 5+ minute
 /// capture"; a shorter run is a failed verdict, not a shorter soak.
 ///
-/// Origin: TASK-019.03 acceptance criterion 2, TASK-019.03.03.
+/// Origin: the soak acceptance criterion.
 pub const SOAK_MIN_SECONDS: f64 = 300.0;
 
 /// Time added after the end of a parameter sweep, and before its start, that still counts as
@@ -230,7 +230,7 @@ pub const SOAK_MIN_SECONDS: f64 = 300.0;
 /// (several time constants) and the error in the caller's estimate of when the first `SET` landed
 /// (the capture does not record it), as [`SWEEP_BUCKET_TRIM`] does for the sweep analysis.
 ///
-/// Origin: TASK-019.03.03; attribution only, never changes a verdict.
+/// Origin: attribution only, never changes a verdict.
 pub const SOAK_MOTION_MARGIN_S: f64 = 1.0;
 
 /// Block over which the soak's discontinuity detector refits the loop gain, samples: 10 ms, ten
@@ -238,5 +238,5 @@ pub const SOAK_MOTION_MARGIN_S: f64 = 1.0;
 /// per block, so the residual of a healthy swept capture stays far under
 /// [`DISCONTINUITY_JUMP_LSB`], while a dropout or a snapped step still jumps inside the block.
 ///
-/// Origin: TASK-019.03.03, set from the synthetic fixtures in `soak.rs`.
+/// Origin: set from the synthetic fixtures in `soak.rs`.
 pub const SOAK_GAIN_FIT_BLOCK_SAMPLES: usize = 480;

@@ -121,7 +121,7 @@ mod tests {
         // Simulate the poll loop structure to prove the guard correctly
         // identifies the stall point and does not re-trigger on normal gaps.
         //
-        // Before guard (TASK-026 bug): Ticker::next() fires ~97 times back-to-back
+        // Without the guard: Ticker::next() fires ~97 times back-to-back
         // after a 97ms stall, each with near-zero elapsed time.
         //
         // With guard: should_reset() returns true once at the stall boundary,

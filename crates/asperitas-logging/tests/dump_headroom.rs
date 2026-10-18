@@ -210,7 +210,7 @@ fn a_dump_can_never_take_the_last_max_frame() {
                     free - frame_len,
                 );
                 // Monotone in capacity: a ring can only get emptier while a dumper waits, so a
-                // retry never becomes *less* able. That is what lets TASK-038.03 back off on a
+                // retry never becomes *less* able. That is what lets the rig back off on a
                 // timer instead of reasoning about orderings.
                 if free < RING {
                     assert!(
@@ -240,7 +240,7 @@ fn a_dump_can_never_take_the_last_max_frame() {
     assert!(dump::dump_fits(0, dump::RESERVE + PREFIX_LEN + TRAILER_LEN));
 }
 
-/// The claim TASK-038.03's bench criterion rests on, expressed as something CI can check: with a
+/// The claim the rig's bench criterion rests on, expressed as something CI can check: with a
 /// draining consumer, a maximum-size log record is never refused while at least [`MAX_FRAME`] bytes
 /// were free — so a drop counter read during a dump cannot be blamed on the dump.
 #[test]

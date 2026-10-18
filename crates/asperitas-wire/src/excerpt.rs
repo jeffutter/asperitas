@@ -5,7 +5,7 @@
 //! otherwise be discovered at the bench - a write that erases its neighbour, a header that reads as
 //! valid on blank flash, a WAV that is stereo or 44.1 kHz, a record body one byte over the frame
 //! budget - are settled on the host. The install state machine ([`Installer`], in
-//! `excerpt/install.rs`) and the device's flash task (TASK-038.04.05) consume
+//! `excerpt/install.rs`) and the device's flash task consume
 //! this module, as does `asperitas-host`, which parses WAV files and emits the install stream; none
 //! restates a number it owns.
 //!
@@ -63,8 +63,8 @@
 //!
 //! | field | meaning |
 //! |---|---|
-//! | `slot` | Target slot, `0..SLOT_COUNT`. TASK-038.04's AC #2 omits it, but the device has to be told where to write; deriving a slot from the name would mean scanning headers before every install. |
-//! | `name` | 1 to [`TAG_MAX`] characters from `[a-z0-9_]`. The charset is what keeps `<` `>` (reserved host-to-device by TASK-032), `~` (the record start marker) and space (the field separator) out of the body. |
+//! | `slot` | Target slot, `0..SLOT_COUNT`. The device has to be told where to write; deriving a slot from the name would mean scanning headers before every install. |
+//! | `name` | 1 to [`TAG_MAX`] characters from `[a-z0-9_]`. The charset is what keeps `<` `>` (reserved host-to-device by the control channel), `~` (the record start marker) and space (the field separator) out of the body. |
 //! | `bytes` | PCM length, fixed width like `dump`'s `bytes`. Even, non-zero and at most [`PCM_CAPACITY`]. |
 //! | `crc16` | CRC-16/CCITT-FALSE over the PCM bytes, the same function the frame trailer and `AUDEND` use. |
 //! | `i` | Chunk index. Chunk `i` carries PCM bytes `i * EXC_CHUNK_RAW ..`. |

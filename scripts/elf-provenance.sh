@@ -86,7 +86,7 @@ read_blob() {
   #   rust-objcopy --dump-section .asp.prov=out ELF /dev/null -> ELF untouched
   #
   # Content comes out byte-identical either way (same sha256 before and after), which is exactly why
-  # this is easy to miss: all a reader sees is a timestamp moving. Since TASK-056 that timestamp is no
+  # this is easy to miss: all a reader sees is a timestamp moving. That timestamp is no
   # longer what firmware/Makefile's staleness test reads -- elf-check hashes bytes now, so an inert
   # rewrite of identical bytes defeats nothing -- but the rule it was written for stands on its own:
   # don't mutate the artifact you are auditing. The ELF is the host's only copy of the symbols
@@ -116,7 +116,7 @@ parse_blob() {
   PROV_FEATURES=""
   PROV_DEFMT_LOG=""
   PROV_SOURCE_DIGEST=""
-  # Absent from an ELF older than TASK-038.04.07.02, and every one of those linked into internal flash.
+  # Absent from an ELF older than the layout field, and every one of those linked into internal flash.
   PROV_LAYOUT="internal"
   local seen_default=0 seen_features=0
 
@@ -134,7 +134,7 @@ parse_blob() {
       features) PROV_FEATURES=$(printf '%s' "$value" | normalize_features); seen_features=1 ;;
       defmt_log) PROV_DEFMT_LOG=$value ;;
       layout) PROV_LAYOUT=$value ;;
-      source_digest) PROV_SOURCE_DIGEST=$value ;; # optional: absent from an ELF older than TASK-071
+      source_digest) PROV_SOURCE_DIGEST=$value ;; # optional: absent from an ELF older than the source digest
       *) : ;; # unknown key: forward-compatible, ignore it rather than refuse a newer stamp
     esac
   done <<<"$blob"
@@ -526,7 +526,7 @@ case_normalize_features_table() {
 # which moves the mtime and can shrink the file, all while the bytes it prints stay correct. Both halves
 # are asserted because each one fires where the other does not: the mtime moves at any size, the size
 # only moves on a multi-megabyte image. Neither half is about firmware/Makefile any more -- since
-# TASK-056 elf-check compares content, not timestamps -- so what they guard is the audit's own premise,
+# elf-check compares content, not timestamps -- so what they guard is the audit's own premise,
 # that reading an artifact leaves it alone.
 case_read_leaves_the_elf_untouched() {
   local f=$FX_DIR/guarded.elf marker=$FX_DIR/marker sha_before sha_after moved

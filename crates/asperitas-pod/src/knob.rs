@@ -5,11 +5,11 @@
 //!
 //! ## Jitter suppression
 //!
-//! embassy-stm32 v4 ADC supports hardware averaging via `AdcConfig::averaging`.
+//! embassy-stm32 ADC supports hardware averaging via `AdcConfig::averaging`.
 //! We use `Averaging::Samples16`, which gives ~4x noise reduction (√16 = 4)
 //! per ST AN2834, at ~105 µs latency (16 × ~6.6 µs conversion). This is well
 //! within a 1 ms budget for 1 kHz polling. If residual jitter is visible on
-//! hardware (TASK-018.04), the sample count may be increased to Samples32 or
+//! hardware, the sample count may be increased to Samples32 or
 //! an EMA filter layered on top.
 //!
 //! Note that `Averaging` sets the oversampling right-shift (OVSS) to match the
@@ -27,7 +27,7 @@
 //!
 //! ## Curve shaping
 //!
-//! NOT included here. Log/exponential taper belongs in TASK-019 parameter
+//! NOT included here. Log/exponential taper belongs in the parameter
 //! mapping. This BSP reports physical position only — the DSP owns parameter
 //! semantics, the host owns the knob-to-parameter mapping, and the BSP owns
 //! neither.
@@ -81,7 +81,7 @@ mod hw {
 
     /// Tie the normalisation divisor to the resolution actually programmed.
     ///
-    /// This is the invariant whose breakage produced the TASK-018.04 knob bug:
+    /// This is the invariant whose breakage produced the old knob bug:
     /// 16-bit conversions were divided by the 12-bit full scale (4095), so any
     /// reading past 6.25% of pot travel clamped to 1.0 and both knobs behaved
     /// as near-binary switches. A mismatch is now a build failure.
@@ -130,7 +130,7 @@ mod hw {
         /// Read both knobs simultaneously.
         ///
         /// Returns `(knob1, knob2)` as normalised f32 values in [0.0, 1.0],
-        /// **increasing clockwise** — verified on hardware 2026-08-08, both
+        /// **increasing clockwise** — verified on hardware, both
         /// knobs reaching exactly 0.0 and 1.0 at their physical stops. This is
         /// the conventional direction, so nothing is inverted here.
         ///
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn twelve_bit_full_scale_is_not_full_scale() {
-        // Regression test for the TASK-018.04 knob bug. Dividing a 16-bit
+        // Regression test for the old knob bug. Dividing a 16-bit
         // conversion by the 12-bit full scale clamped everything past 4095 —
         // 6.25% of pot travel — to 1.0. A pot 6% off its stop must read ~0.06,
         // not 1.0.
@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn spans_the_full_unit_interval() {
         // The endpoints are actually reachable — the property AC #1 of
-        // TASK-018.04 checks by hand at the physical stops.
+        // The bench check is by hand at the physical stops.
         assert_eq!(normalize(0), 0.0);
         assert_eq!(normalize(u16::MAX), 1.0);
     }

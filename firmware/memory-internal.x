@@ -1,9 +1,8 @@
 MEMORY
 {
   /* Internal flash — 128 KB, the region used by DFU bootloader.
-     QSPI flash (8 MB at 0x90000000) is not included here; add it via
-     a separate MEMORY region or linker script when using the Daisy
-     bootloader for larger applications. */
+     QSPI flash (8 MB at 0x90000000) is not part of this layout; the
+     bootloaded layout (memory-bootloaded.x) stores the image there. */
   FLASH : ORIGIN = 0x08000000, LENGTH = 128K
 
   /* AXI SRAM — 512 KB, NOT 1 MB.
@@ -66,7 +65,7 @@ SECTIONS {
 } INSERT AFTER .bss;
 
 /*
- * Rig's excerpt replay staging (`REPLAY`, TASK-074). The bootloaded layout moves it to the AXI tail
+ * Rig's excerpt replay staging (`REPLAY`). The bootloaded layout moves it to the AXI tail
  * (memory-bootloaded.x has the reasoning); here AXI SRAM is the whole RAM region, so the same section name
  * lands in it. NOLOAD and zeroed by rig at boot, as there. Keeping one name keeps rig.rs layout-blind.
  */

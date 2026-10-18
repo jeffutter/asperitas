@@ -7,7 +7,7 @@
 # by hand, because a list kept by hand is the thing that went stale:
 #
 #   R1  Every `*.bin` token in README.md or docs/**/*.md must be an image firmware/Makefile really
-#       builds, or one of the explicitly allowlisted non-images below. TASK-057 found `firmware.bin`
+#       builds, or one of the explicitly allowlisted non-images below. An audit found `firmware.bin`
 #       still quoted in six places (README.md, firmware/Cargo.toml) long after each target started
 #       writing `$(BINARY).bin`, and nothing could see it: at that point every gate in the repo was a
 #       cargo invocation, so make was nobody's input and no check compared a doc string against what
@@ -15,21 +15,21 @@
 #
 #   R2  No `cargo objcopy` invocation appears in those files at all. The recipe belongs in
 #       firmware/Makefile's `build:` target (:118-120) and nowhere else, because a second
-#       copy in prose fails silently. Measured 2026-09-12:
+#       copy in prose fails silently. Measured:
 #
 #         llvm-objcopy -O binary --only-section=.no_such_section elf out.bin
 #
 #       exits 0 and writes a 0-byte file, no warning. A doc that transcribes the keep-list is a doc
 #       that can turn into instructions for producing a truncated image, and the only symptom is a
-#       board that does not boot. TASK-057's prose copy had already lost the flags.
+#       board that does not boot. A prose copy had already lost the flags.
 #
-#   R3  firmware/Makefile's `build:` recipe passes no `--only-section` flag. Until TASK-059 landed,
+#   R3  firmware/Makefile's `build:` recipe passes no `--only-section` flag. Before the `(NOLOAD)` rule landed,
 #       six of them were load-bearing: `.sram1_bss` loaded where it runs, so a plain `-O binary`
 #       spanned flash to AXI SRAM and padded the gap with zeros (469,763,480 bytes for `main`). That
 #       section is `(NOLOAD)` placement now, so the plain image is what flash must hold and a
 #       keep-list can only subtract something real -- silently, per R2's measurement. Deleting the
 #       flags without forbidding their return would leave the next plausible-looking "optimisation"
-#       free to re-add one. TASK-059.02 replaces this proxy with the direct check: no file-backed
+#       free to re-add one. `check-image-load-addresses.sh` replaces this proxy with the direct check: no file-backed
 #       section may load outside flash.
 #
 # THE -n FLAG ON EVERY make INVOCATION HERE IS LOAD-BEARING. firmware/Makefile's default goal is
@@ -160,7 +160,7 @@ check_no_keep_list() {
   fi
 
   if printf '%s' "$rules" | grep -qE -- '--only-section'; then
-    VIOLATIONS+=("firmware/Makefile: the build: recipe passes --only-section. Since TASK-059 the \
+    VIOLATIONS+=("firmware/Makefile: the build: recipe passes --only-section. Since the (NOLOAD) rule the \
 plain -O binary image is exactly what flash holds, so a keep-list can only remove something real \
 - and it removes it silently, per R2's measurement. Delete the flags; if you think one is needed \
 again, an ALLOC section is loading outside flash, which is the thing to fix.")

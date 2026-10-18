@@ -28,7 +28,7 @@
 //! | encoding | raw per 4 wire bytes | verdict |
 //! |---|---|---|
 //! | hex | 2 | survives sanitisation, but spends 50% more wire than base64 for nothing gained |
-//! | Ascii85 / Z85 | ~5 | denser, but those alphabets contain `~` — the record start marker — and `<>`, which TASK-032 reserves host→device. A corrupted body could then be reassembled into a fake record boundary |
+//! | Ascii85 / Z85 | ~5 | denser, but those alphabets contain `~` — the record start marker — and `<>`, which the control channel reserves host→device. A corrupted body could then be reassembled into a fake record boundary |
 //! | **base64** | 3 | alphabet is `[A-Za-z0-9+/]` plus `=`: all printable, none reserved, no control bytes, no `~` |
 //!
 //! Base64 loses the density contest and wins the safety one. The arithmetic deciding how much
@@ -93,7 +93,7 @@
 //! assumed were reachable fit in no header at all. Dropping keys entirely would buy 6 bytes (4.6%)
 //! and cost whoever greps a cold capture everything the names say. Payload rounds down to whole
 //! 4-character groups, so *any* header between 25 and 28 bytes yields the same 129 — the letters are
-//! free. Full budget table and rejected alternatives: TASK-038.02's Implementation Notes.
+//! free. Full budget table and rejected alternatives: the table above.
 //!
 //! **Sample bytes cannot be mangled by framing**, because they are base64 before they are framed: the
 //! alphabet is printable ASCII, so [`crate::frame::sanitize_byte`] has nothing to substitute. That is
@@ -101,9 +101,9 @@
 //! `tests/console_dump.rs::round_trips_through_the_real_decoder` exercises it with payloads holding
 //! every byte a substitution would target.
 //!
-//! **Chunking recommendation for the device writer (TASK-038.03): 64 chunks per block** — 8,256 raw
-//! bytes ≈ 86 ms of mono 16-bit capture. Small enough that one lost block costs 86 ms of measurement
-//! rather than the ring, and well inside the 255 the `n` field can name.
+//! **Block size: up to [`MAX_CHUNKS_PER_BLOCK`] (255) chunks** — the most the `n` field can name,
+//! 32,895 raw bytes. The rig's 32 KiB ring block uses all of them (see `capture`), so one lost
+//! block costs one ring block of measurement rather than the whole capture.
 
 use log::Level;
 
@@ -437,7 +437,7 @@ pub const COUNT_FIELD_MODULUS: usize = 1 << (COUNT_HEX_DIGITS * 4);
 
 /// Most chunks one block may hold: 255 — one less than the field's modulus, because 256 has no
 /// two-digit representation and emitting it would write `00`, handing the assembler a block that
-/// claims no chunks at all. Where TASK-038.02's notes say 256 they mean this modulus; the capacity
+/// claims no chunks at all. The 256 in older budget notes means this modulus; the capacity
 /// is what a writer must stay inside.
 pub const MAX_CHUNKS_PER_BLOCK: usize = COUNT_FIELD_MODULUS - 1;
 
@@ -467,7 +467,7 @@ pub const MAX_AUDEND_BODY_LEN: usize = AUDEND_PREFIX.len()
     + SEP_CRC16.len()
     + CRC_HEX_DIGITS;
 
-// The pins. Each one restates a figure this module's documentation and TASK-038.06 publish; if a
+// The pins. Each one restates a figure this module's documentation and the rig docs publish; if a
 // template or a width changes shape, the build stops here rather than the paper going stale.
 const _: () = assert!(AUDIO_HEADER_LEN == 27);
 const _: () = assert!(FULL_B64_CHARS == 172);
@@ -685,7 +685,7 @@ pub fn audend_body(
 ///
 /// The composite callers should reach for: it does the body and [`frame::encode`] in one step, so no
 /// caller re-derives the two-buffer dance. Both buffers are explicit rather than a hidden static
-/// because the device supplies `frame` from the existing `RECORD_BUFS` (TASK-030.02's lock-guarded
+/// because the device supplies `frame` from the existing `RECORD_BUFS` (the lock-guarded
 /// set) and pays nothing on the stack for it.
 ///
 /// `level` is the caller's, and [`Level::Info`] is what BOOT and STATUS use: these are

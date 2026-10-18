@@ -11,7 +11,7 @@
 //! CDC-ACM hands the host an undifferentiated byte stream: no message boundaries,
 //! no length, no sequence. A record whose tail vanished at a ring-buffer wrap is
 //! therefore *indistinguishable from a short record*, which is how truncated knob
-//! lines came to be filed as an ADC glitch (TASK-018.04). v1 makes damage visible
+//! lines came to be filed as an ADC glitch. v1 makes damage visible
 //! while keeping every record human-legible: `screen` output stays readable, `grep`
 //! on a raw capture keeps working, and a reader can tell validated data from loss.
 //!
@@ -23,7 +23,7 @@
 //! mandatory CRLF, and a hard maximum sentence length that is part of the grammar
 //! rather than a convention.
 //!
-//! # Grammar (normative: TASK-030 §3)
+//! # Grammar (normative)
 //!
 //! ```text
 //! record := '~' level SP seq SP t_ms SP body '*' crc CRLF
@@ -262,8 +262,8 @@ pub(crate) const fn check_decimal_fits(max_value: u32, digits: usize) {
 ///
 /// Deliberately a table-less bit loop rather than a 256-entry table: identical
 /// source on both ends of the link, no extra data segment, and the cost is at most
-/// 220 × 16 = 3 520 iterations per record. Measuring what that costs inside the
-/// device's locked region is TASK-030.04's job, not a comment's.
+/// 220 × 8 = 1 760 iterations per record. Measuring what that costs inside the
+/// device's locked region is a hardware check, not a comment's job.
 ///
 /// The whole-buffer form of [`crc16_ccitt_update`]: this one delegates, so there is one
 /// implementation of the polynomial and the two agree by construction. That construction is
@@ -350,7 +350,7 @@ pub struct Encoded {
 ///
 /// `(level, seq, now_ms, body)` all come from the caller and this function reads no
 /// clock, no counter and no global: sequencing and timing belong to the device log
-/// path (TASK-030.02), which keeps this codec deterministic and testable. `out` is
+/// path, which keeps this codec deterministic and testable. `out` is
 /// likewise the caller's — the device passes its one lock-guarded buffer, tests pass
 /// stack arrays — so this module holds no static and needs no `unsafe`.
 ///
@@ -693,7 +693,7 @@ pub struct Stats {
 /// How many validated records may sit undelivered at once.
 ///
 /// Delivery is a queue rather than a single slot because one chunk routinely validates
-/// several records: 4 KiB, the size TASK-032 reads, can hold 145 of the shortest legal
+/// several records: 4 KiB, the size the control channel reads, can hold 145 of the shortest legal
 /// ones. A single slot would leave [`Decoder::push`] choosing between dropping bytes it
 /// was handed and overwriting a record nobody had read yet — both ways a reader loses
 /// history without learning anything happened.
@@ -733,7 +733,7 @@ pub const RECORD_SLOTS: usize = 8;
 /// # Resynchronisation
 ///
 /// On failure the decoder advances **strictly past** the disqualified start byte and
-/// never guesses a shorter body. This refines TASK-030 §3's “discard one candidate
+/// never guesses a shorter body. This refines the grammar's “discard one candidate
 /// start and retry at the next `~`”: same contract, decided locally, therefore
 /// chunk-independent. The hazard worth naming is documented upstream — ArduPilot's C
 /// MAVLink parser desynchronised permanently when a bad-CRC message happened to end in
@@ -984,8 +984,8 @@ impl Decoder {
 
     /// Run the two-state machine until nothing more can be decided.
     ///
-    /// Returns whether anything left the window or changed state; `push` uses that to
-    /// recognise the impossible full-window stall rather than looping on it.
+    /// Returns nothing: `push` recognises the impossible full-window stall from the window length
+    /// instead of from a return value.
     fn scan(&mut self) {
         loop {
             if !self.in_candidate {
@@ -1310,7 +1310,7 @@ mod tests {
     #[test]
     fn sanitiser_replaces_control_bytes_but_keeps_printable_punctuation() {
         let (out, enc) = encoded(Level::Info, 1, 1, b"cr\r\nlf\x00\x7f~*|");
-        // `~`, `*` and `|` surviving is deliberate (TASK-030 §3 sanitises only control
+        // `~`, `*` and `|` surviving is deliberate (the grammar sanitises only control
         // bytes) and the decoder's adversarial suite depends on it: the invariant the
         // parse proof needs is "no CR or LF", not "no tilde".
         assert_eq!(
@@ -1368,7 +1368,7 @@ mod tests {
         assert_eq!(exact.len, MAX_FRAME);
     }
 
-    /// Pin the equivalence that let TASK-047 delete `try_emit_dump`'s `debug_assert!(!encoded
+    /// Pin the equivalence that let the encoder delete `try_emit_dump`'s `debug_assert!(!encoded
     /// .truncated)` instead of converting it to a reported value.
     ///
     /// The deleted assert was a tautology on that path: `Encoded::truncated` *is* the predicate
@@ -1503,7 +1503,7 @@ mod tests {
 
     #[test]
     fn finish_moves_the_pending_window_into_discarded_bytes() {
-        // The lie TASK-030 exists to prevent: a capture that ends mid-record must not
+        // The lie the framing exists to prevent: a capture that ends mid-record must not
         // summarise as zero loss.
         let (out, enc) = encoded(Level::Info, 1, 1, b"tail-truncated");
         let whole = &out[..enc.len];

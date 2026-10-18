@@ -5,7 +5,7 @@
 #
 # Why this is not `probe-rs attach --list-rtt`. That flag is documented to list the channels and exit,
 # and on probe-rs 0.32.0 against a live target it does neither: it attaches, finds the control block,
-# and then streams until killed, printing no table at all (TASK-037, 2026-10-07). Wrapping it in a
+# and then streams until killed, printing no table at all. Wrapping it in a
 # `timeout` would only turn a hang into a permanent failure. The question the target exists to answer
 # is "is there a valid control block where the ELF says, and what is in it", and that is two memory
 # reads. Reading memory does not halt the core, reset it, or consume anything from the ring, so this is

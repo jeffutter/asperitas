@@ -23,7 +23,7 @@
 //! restarted the numbering.
 //!
 //! Exits 0 whatever the capture contains. This tool reports; deciding whether a capture
-//! passed is TASK-031's job. The exception is this program failing to read its own
+//! passed is the rig runner's job. The exception is this program failing to read its own
 //! input — either the file could not be opened at all, or a read failed partway through
 //! — because reporting on less than the whole capture is not the same as reporting a
 //! clean one.
@@ -144,7 +144,7 @@ impl Emitter {
 /// itself, the other being a read that fails partway through (see `main`'s `unread`
 /// handling). The distinction matters because the exit code means “this capture was read
 /// in full and reported on”: contents — corrupt frames, truncation, garbage — still exit
-/// 0, since whether such a capture passed is TASK-031's call. A typo'd path or a read
+/// 0, since whether such a capture passed is the rig runner's call. A typo'd path or a read
 /// that dies early exiting 0 would let a scripted rig report success having decoded only
 /// part of a capture, or none at all.
 fn open_input() -> Box<dyn Read> {

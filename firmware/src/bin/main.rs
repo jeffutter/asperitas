@@ -88,8 +88,8 @@ static CHAIN: StaticCell<KnobChain> = StaticCell::new();
 /// Async task that polls knobs at ~1 kHz and stores values for the audio callback.
 ///
 /// Uses `Ticker` for fixed-period scheduling so ADC read duration does not
-/// accumulate drift into the poll interval (TASK-025).
-/// Bounded catch-up (TASK-026): if the executor stalls, the ticker is reset
+/// accumulate drift into the poll interval.
+/// Bounded catch-up: if the executor stalls, the ticker is reset
 /// on overrun rather than replaying missed ticks back-to-back.
 #[embassy_executor::task]
 async fn knob_poll_task(knob_state: &'static KnobState, mut knobs: Knobs) {

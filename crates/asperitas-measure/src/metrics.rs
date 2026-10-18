@@ -1,7 +1,7 @@
 //! Objective metrics of an aligned loopback capture, as serde JSON.
 //!
 //! [`analyze`] reports peak and RMS level, runs of silence, sample-discontinuity candidates, and a
-//! spectral spur report. Levels are normalized against [`thresholds::LOOP_GAIN_DB`], the TASK-034
+//! spectral spur report. Levels are normalized against [`thresholds::LOOP_GAIN_DB`], the baseline
 //! baseline, so `deviation_db` says how far this run is from the known-good rig.
 //!
 //! # What a deviation can and cannot be attributed to
@@ -10,7 +10,7 @@
 //! deviation is therefore attributable to the output converter and input converter COMBINED; it
 //! cannot be split between them. Faults common to both sides are invisible: a shared clock error
 //! scales stimulus and capture alike, and a left/right channel swap leaves a single-lane loopback
-//! looking healthy (TASK-034 criterion 2). A clean report is evidence about the loop, not proof of
+//! looking healthy (the loop-gain criterion). A clean report is evidence about the loop, not proof of
 //! the Pod's individual converters.
 //!
 //! # Discontinuity candidates
@@ -51,7 +51,7 @@ pub struct Level {
     pub rms_dbfs: f64,
     /// Capture RMS over stimulus RMS, dB.
     pub gain_db: f64,
-    /// `gain_db` minus the TASK-034 baseline loop gain, dB.
+    /// `gain_db` minus the baseline baseline loop gain, dB.
     pub deviation_db: f64,
 }
 

@@ -4,7 +4,7 @@
 # sources, and never from their timestamps.
 #
 # Why a gate and not a transcript: the check this replaced compared mtimes (`find -newer`), so it went
-# red on a tree nobody had edited -- TASK-056 measured `make probe-log` refusing to run with `git
+# red on a tree nobody had edited -- an earlier run showed `make probe-log` refusing to run with `git
 # status` clean and 2975 s separating a freshly linked ELF from files a checkout had just refreshed.
 # A fix for that is only worth what its assertion is worth, and a hand-run transcript asserts nothing
 # after the next edit to either side. So every case below drives the SHIPPED recipe through make's own
@@ -24,7 +24,7 @@
 # firmware/build.rs on every link), so a "link" here is the stub writing the fixture's digest beside
 # the fixture, and the stub reader hands it back. That exercises the comparison and the forced-relink
 # decision in the Makefile. Whether cargo really links after build-elf's touch, and whether build.rs
-# embeds the right bytes, are facts measured elsewhere (firmware/Makefile's comment, TASK-071.01), not
+# embeds the right bytes, are facts measured elsewhere (firmware/Makefile's comment), not
 # something a fake compiler can speak to.
 #
 # Cost rules, obeyed so this stays a commit-tier gate: fixtures are written at runtime under a
@@ -171,7 +171,7 @@ case_raw_cargo_relink_passes() {
   expect_zero "an ELF linked by raw cargo carrying the right digest"
 }
 
-# AC #1 and #2 in one case, and the one that is red against the pre-TASK-056 Makefile by design:
+# AC #1 and #2 in one case, and the one that is red against the old mtime-based Makefile by design:
 # refresh every mtime in the tree without changing a byte and the check must stay out of the way. That
 # is what `git checkout`, `git stash pop` and worktree operations do to a tree, which is how the loop
 # was hitting it.
@@ -280,8 +280,8 @@ case_no_mtime_operator_in_elf_check() {
       if (!f) exit 3 }' "$MAKEFILE") || fail "no elf-check recipe found in $MAKEFILE"
   [ -n "$recipe" ] || fail "the elf-check recipe in $MAKEFILE is empty"
   case $recipe in
-    *-newer*) fail "elf-check compares mtimes again (-newer): restarts the false positive TASK-056 ends" ;;
-    *-nt\ *|*'-nt '*) fail "elf-check compares mtimes again (-nt): restarts the false positive TASK-056 ends" ;;
+    *-newer*) fail "elf-check compares mtimes again (-newer): restarts the false positive the content check ends" ;;
+    *-nt\ *|*'-nt '*) fail "elf-check compares mtimes again (-nt): restarts the false positive the content check ends" ;;
   esac
   expect_has "elf-check reads the embedded digest" '$(PROV) digest' "$recipe"
   expect_has "and the digest" 'ELF_INPUTS_SHA256' "$recipe"
@@ -297,7 +297,7 @@ run_selftest() {
 
   local base
   base=$(mktemp -d) || die "mktemp -d failed, so the selftest has nowhere to write its fixtures"
-  # Stand-ins for the real linker and .asp.prov reader (TASK-071). The "embedded" digest lives beside
+  # Stand-ins for the real linker and .asp.prov reader. The "embedded" digest lives beside
   # the fixture (<fixture>.embedded), outside the hashed input set.
   STUB_PROV=$base/prov-stub.sh
   STUB_CARGO=$base/cargo-stub.sh

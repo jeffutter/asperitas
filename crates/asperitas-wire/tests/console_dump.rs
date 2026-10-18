@@ -39,7 +39,7 @@ use asperitas_wire::Level;
 // ---------------------------------------------------------------------------
 
 /// Longest raw input the properties generate: one full dump payload (129 bytes, the chunk size the
-/// grammar will pin in TASK-038.02.02) plus enough slack to reach past a padded group, so group
+/// grammar pins) plus enough slack to reach past a padded group, so group
 /// boundaries and tails both get exercised at realistic size.
 const MAX_PROBE_RAW: usize = 136;
 
@@ -503,7 +503,7 @@ fn size_arithmetic_holds_at_every_length() {
 // Everything in this section checks `AUDIO`/`AUDEND` bodies against something the encoder did not
 // compute: hand-written wire bytes, CRCs produced by a separate implementation (CPython's, quoted in
 // each row's doc comment), the catalogue's own CRC-16/CCITT-FALSE check value, and arithmetic done on
-// paper in TASK-038.02's Implementation Notes. Two of our own functions agreeing with each other
+// paper (the dump budget derivation). Two of our own functions agreeing with each other
 // proves only that they share a mistake.
 
 /// Width of the `crc16` field on the wire.
@@ -929,11 +929,11 @@ fn refuses_instead_of_truncating() {
 ///
 /// This is AC #6 made mechanical: change a template, a field width, or `MAX_BODY`, and one of these
 /// lines fails and names the document that went stale. The prose form of each claim lives in
-/// `dump`'s module doc and TASK-038.06's rig notes.
+/// `dump`'s module doc and the rig docs.
 ///
-/// For the record: TASK-038.02 originally assumed 150 raw bytes per record. That was never reachable
+/// An early budget assumed 150 raw bytes per record. That was never reachable
 /// — `MAX_BODY` bounds the whole body, keys included — and the corrected budget table is in
-/// TASK-038.02's Implementation Notes.
+/// the dump budget derivation.
 #[test]
 fn published_efficiency_matches_the_encoder() {
     // Useful fraction: 129 raw bytes inside a 227-byte frame.
@@ -965,11 +965,7 @@ fn published_efficiency_matches_the_encoder() {
     );
 
     // One block at the recommended 64 chunks, and the ceiling the grammar can describe at all.
-    assert_eq!(
-        64 * dump::CHUNK_RAW,
-        8_256,
-        "TASK-038.03's recommended block"
-    );
+    assert_eq!(64 * dump::CHUNK_RAW, 8_256, "the recommended block");
     assert_eq!(
         dump::MAX_BLOCK_BYTES,
         32_895,

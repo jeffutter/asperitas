@@ -6,8 +6,8 @@
 # tagged with the cheapest tier that runs it. Three callers each ask for one tier and add nothing:
 # .github/workflows/ci.yml asks for `ci`, and lefthook's pre-commit and pre-push ask for `commit`
 # and `push`. Before this file the same list existed twice, by hand -- 25 `run:` lines in
-# lefthook.yml plus a second copy in CI's step -- and every check added since TASK-018 drifted
-# between them. TASK-060 itself exists because firmware was invisible to both copies, and four
+# lefthook.yml plus a second copy in CI's step -- and every check added drifted
+# between them. The gates script exists because firmware was invisible to both copies, and four
 # closed tickets declined to notice.
 #
 # Why a script and not "CI just runs the hooks": lefthook sorts the commands in a stage by
@@ -232,7 +232,7 @@ gate commit gate-definition-parses "=== gate definition parses ===" bash -n scri
 # Docs name firmware image files; legal names come from the build rules themselves via `make -n`,
 # so this is the only place in the gate set that invokes make, and it stays a dry run -- see the
 # "THE -n FLAG ... IS LOAD-BEARING" paragraph near the top of scripts/check-doc-artifact-names.sh.
-# Covers names only: it does not read a line of Rust. Landed with TASK-058.
+# Covers names only: it does not read a line of Rust.
 gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-artifact-names.sh
 
 # The provenance reader's own checks: the next edit to build.rs's blob encoding or to the feature
@@ -251,7 +251,7 @@ gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-
 # rather than a hook failure.
 gate commit elf-provenance-selftest "=== elf-provenance --selftest ===" scripts/elf-provenance.sh --selftest
 
-# The staleness mechanism's own checks (TASK-056): elf-check decides "was this ELF built from these
+# The staleness mechanism's own checks: elf-check decides "was this ELF built from these
 # sources?" by hashing the input set against the digest build.rs embedded in the ELF, and a check of that kind is only
 # as good as the case that would notice it quietly passing. The cases drive the SHIPPED recipe through
 # make's command-line overrides (ELF / ELF_INPUTS / MAIN_SRC / CARGO / PROV), so the thing graded is
@@ -262,7 +262,7 @@ gate commit elf-provenance-selftest "=== elf-provenance --selftest ===" scripts/
 # artifact. Most of its cost is make parsing the Makefile once per case.
 gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/check-elf-staleness.sh --selftest
 
-# The load-address checker's own checks (TASK-068). The push-tier `=== image load addresses ===` gate far
+# The load-address checker's own checks. The push-tier `=== image load addresses ===` gate far
 # below reads one column of `rust-objdump -h --show-lma` by POSITION, and a parser that stops matching
 # does not turn that gate red: an empty section table satisfies all three rules by having nothing to fail,
 # so it turns it green for the wrong reason. Four traps of that kind were measured while planning this
@@ -293,7 +293,7 @@ gate commit load-addresses-selftest "=== load-addresses --selftest ===" scripts/
 gate commit cargo-fmt "=== cargo fmt ===" cargo fmt --all --check
 
 # Root Cargo.toml:3 declares exclude = ["firmware"], so the check above never meant all: firmware/
-# is its own workspace and has drifted under this gate twice (TASK-044, TASK-060). `--check` is not
+# is its own workspace and has drifted under this gate twice. `--check` is not
 # optional, and not because of any expiry date: a bare `cargo fmt` would rewrite firmware/src/**/*.rs,
 # which are ELF inputs (ELF_INPUTS in firmware/Makefile), so a commit would move the very bytes the
 # next `make elf-check` hashes and send the bench red for a change it never made. A commit has no
@@ -304,7 +304,7 @@ gate commit cargo-fmt-firmware "=== cargo fmt (firmware workspace) ===" \
 gate commit cargo-clippy "=== cargo clippy ===" cargo clippy --workspace --all-targets -- -D warnings
 
 # Default features build asperitas-logging without `log-usb`, so every record-path function in it
-# goes unlinted above. This is the only gate that sees them. Landed with TASK-047.
+# goes unlinted above. This is the only gate that sees them.
 gate commit cargo-clippy-log-usb "=== cargo clippy (asperitas-logging log-usb) ===" \
   cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
 
@@ -328,7 +328,7 @@ gate push dump-reassemble-selftest "=== dump_reassemble --selftest ===" \
 # intra-doc-link lints via the root table; RUSTDOCFLAGS raises that to every rustdoc warning.
 # Two runs because neither feature set is a superset of the other: default features document
 # logging's fn.init() but not usb.rs / led.rs / panic_handler.rs, while --all-features gains those
-# (and pod's led / pins) and drops fn.init(). Landed with TASK-049. Do not merge them.
+# (and pod's led / pins) and drops fn.init(). Do not merge them.
 gate push cargo-doc "=== cargo doc (workspace) ===" \
   env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 

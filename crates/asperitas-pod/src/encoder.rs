@@ -5,7 +5,7 @@
 //! - AC #5 requires a single approach across all inputs
 //! - Software quadrature decoding needs cross-edge state tracking that doesn't
 //!   split cleanly across independent interrupt handlers
-//! - TASK-018.02 already polls knobs; one control-surface task is simpler than
+//! - The knob task already polls knobs; one control-surface task is simpler than
 //!   mixing polled and interrupt paths
 //! - PD11 (encoder A) has no timer alternate function, ruling out hardware QEI
 //!
@@ -29,7 +29,7 @@
 //! counts nothing, so that click contributes fewer than four quarter-steps and
 //! its detent is *deferred* rather than lost. Widening the poll interval makes
 //! that aliasing worse, which is why this sits on the ~1 kHz precondition below
-//! (TASK-025/TASK-026); the measured numbers are in
+//! (the drift-free ticker and the catch-up guard); the measured numbers are in
 //! `docs/reference/daisy-pod.md` § "Encoder detent ratio".
 //!
 //! Buttons / click switch: consecutive-stable-readings debouncer. An edge is
@@ -84,19 +84,15 @@ pub enum ControlEvent {
 
 /// Software quadrature decoder using a Gray-code transition table.
 ///
-/// Rotary encoders output Gray code on two channels (A and B). As the shaft
-/// rotates one detent, exactly one channel changes state at a time:
-///
-/// | State | Meaning          |
-/// |-------|------------------|
-/// | 00    | Reference        |
-/// | 01    | +1 detent        |
-/// | 10    | -1 detent        |
-/// | 11    | Reference        |
+/// Rotary encoders output Gray code on two channels (A and B). One click walks
+/// all four Gray states, 00 → 01 → 11 → 10 → 00 in one direction and the reverse
+/// in the other, and each step changes exactly one channel. Every such step is a
+/// valid transition worth ±1: clockwise is positive.
 ///
 /// The transition table maps each (previous_state, current_state) pair to a
-/// signed delta. Bounce states where both bits change simultaneously (00→11,
-/// 01→10) map to delta = 0, providing inherent self-debouncing.
+/// signed delta. Pairs that change no channel (no movement) or both channels at
+/// once (00↔11, 01↔10: a missed sample or contact bounce) map to delta = 0,
+/// providing inherent self-debouncing.
 ///
 /// The LUT is indexed as `[previous_state << 2 | current_state]`, giving a
 /// flat 16-entry array.
@@ -112,8 +108,7 @@ pub struct EncoderDecoder {
 
 /// Quadrature transitions per physical detent on the Pod's encoder.
 ///
-/// The Pod's encoder is detented at every **fourth** quadrature state: measured
-/// 2026-08-08, ten deliberate detents produced a net ±40 LUT counts. See
+/// The Pod's encoder is detented at every **fourth** quadrature state: ten deliberate detents produced a net ±40 LUT counts. See
 /// `docs/reference/daisy-pod.md` § "Encoder detent ratio".
 const QUARTER_STEPS_PER_DETENT: i16 = 4;
 
@@ -875,20 +870,20 @@ mod tests {
         assert_eq!(dec.quarter_steps, 0);
     }
 
-    // ── Reconstructed hardware capture (TASK-024 AC #3) ───────────────
+    // ── Reconstructed hardware capture ───────────────
     //
     // These walks are RECONSTRUCTIONS, not raw captures. No raw per-transition
     // capture exists anywhere: ~/podtest.log is gone from disk and
     // firmware/src/bin/podtest.rs logs only the decoded sum, never the 2-bit
     // state. What survives is aggregate — the per-detent cluster sizes recorded
-    // in TASK-024's description, measured 2026-08-08 at ~625 Hz polling:
+    // from a bench capture at ~625 Hz polling:
     //
     //   clockwise:        [4, 4, 3, 4, 4, 3, 4, 4, 4, 4, 4]  (stated net +40)
     //   counter-clockwise: [4, 4, 3, 4, 4, 4, 3, 4, 3, 4]    (stated net -38)
     //
     // Neither array sums to its stated net (+42 vs +40, -37 vs -38), which is
     // why these tests assert the carry invariant rather than those totals. Raw
-    // captures arrive with TASK-029.01 / TASK-029.
+    // captures arrive from the podtest harness.
 
     /// Recorded cluster sizes: counted LUT transitions per physical click.
     const CLOCKWISE_CLUSTERS: [usize; 11] = [4, 4, 3, 4, 4, 3, 4, 4, 4, 4, 4];
@@ -1048,7 +1043,7 @@ mod tests {
         // in the accumulator. Pinning nine is deliberate: it documents the limit
         // of this fix. Recovering the aliased counts (direction-guarded diagonal
         // recovery, or the rest-state machine) must update this on purpose — see
-        // TASK-029 AC #4 for filing the residual if it reproduces at ~1 kHz.
+        // the bench protocol for filing the residual if it reproduces at ~1 kHz.
         for diagonal_at in ALIAS_POSITIONS {
             let run =
                 replay_captured_run(&COUNTER_CLOCKWISE_CLUSTERS, false, diagonal_at, usize::MAX);
@@ -1213,7 +1208,7 @@ mod tests {
         // DebouncedSwitch has no wall-clock awareness — if DEBOUNCE_TICKS
         // readings arrive in rapid succession (as happens when Ticker replays
         // a backlog after an executor stall), it emits an edge despite zero
-        // real time elapsing. The call-site guard (TASK-026) prevents this
+        // real time elapsing. The call-site guard prevents this
         // by resetting the ticker on overrun so at most one tick fires.
         let mut sw = DebouncedSwitch::new(false);
         // Feed DEBOUNCE_TICKS identical "pressed" readings back-to-back.
@@ -1226,7 +1221,7 @@ mod tests {
             }
         }
         // An edge was emitted based purely on call count with no temporal
-        // separation — exactly the failure mode TASK-026's call-site guard
+        // separation — exactly the failure mode the call-site guard
         // prevents in production.
         assert_eq!(edge_count, 1, "burst input produces spurious edge");
     }

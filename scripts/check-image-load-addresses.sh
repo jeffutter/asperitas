@@ -30,7 +30,7 @@
 #
 #   R6  A bootloaded image leaves at least MIN_SPARE bytes of its FLASH region unused. The region is
 #       the bootloader's copy budget, and an image that fills it to the byte is one dependency bump from
-#       failing to link. 2 KB is the headroom TASK-038.04.07.02 asked for. Not applied to the internal
+#       failing to link. 2 KB is the headroom the bootloader needs. Not applied to the internal
 #       layout, where the linker's own overflow error is the existing (and tighter) contract.
 #
 #   R5  A bootloaded image's `.sram1_bss` lies inside the RAM_D2 region. AXI SRAM is image space there
@@ -43,7 +43,7 @@
 # the internal-flash region and refused by R1 when it does not fit. Which layout an ELF was BUILT for is
 # the provenance stamp's business (`make elf-check LAYOUT=...`), not this gate's.
 #
-# WHY THIS IS LOAD-BEARING. Before TASK-059 put the `(NOLOAD)` rule in firmware/memory-internal.x, `.sram1_bss`
+# WHY THIS IS LOAD-BEARING. Before the `(NOLOAD)` rule in firmware/memory-internal.x, `.sram1_bss`
 # was one of those orphans, and `llvm-objcopy -O binary` writes a memory image spanning lowest to
 # highest *load* address -- so `main.bin` came out at 469,763,536 bytes of mostly zeros. Nothing was
 # red: `make build` succeeded, DFU reported a clean transfer, and the board booted whatever prefix of
@@ -63,7 +63,7 @@
 # Reads artifacts and builds nothing. That is why it calls the bare cargo-binutils shims
 # (`rust-objdump`, `rust-objcopy`) and never `cargo objdump` / `cargo objcopy`: the cargo forms rebuild,
 # and an audit that builds is grading its own side effect. A missing ELF is therefore exit 2 and not a
-# skip: a skip path is how elf-check's own remedy hint became useless (TASK-062).
+# skip: a skip path is how elf-check's own remedy hint became useless.
 #
 # Three modes:
 #
@@ -241,7 +241,7 @@ derive_elfs() {
 }
 
 # An ELF this check cannot read is a hard failure naming the command that produces it. Never
-# `test -f ... || true`: a skip path is how elf-check's hint became useless (TASK-062).
+# `test -f ... || true`: a skip path is how elf-check's hint became useless.
 require_elf() {
   local path=$1 name=$2
   [ -f "$path" ] || die "no ELF at ${path#"$ROOT"/} - run 'bash scripts/gates.sh push', or 'make -C firmware build-elf BINARY=$name FEATURES=\"seed3 log-defmt\" NO_DEFAULT=1'"
@@ -449,7 +449,7 @@ evaluate_sections() { # <display-name>
     if [ -z "$SPAN_HIGH" ] || (( end > SPAN_HIGH )); then SPAN_HIGH=$end; fi
 
     if (( lma < FLASH_ORIGIN || end > FLASH_END )); then
-      VIOLATIONS+=("${name}: ${SEC_NAMES[$IDX]}: LMA $(hex8 "$lma")..$(hex8 "$end") is outside FLASH $(hex8 "$FLASH_ORIGIN")..$(hex8 "$FLASH_END") - a file-backed section loading outside flash makes 'objcopy -O binary' span the gap, which is the 469 MB image of TASK-059; give the section '(NOLOAD)' placement in $FLASH_FILE, or a load address with AT>")
+      VIOLATIONS+=("${name}: ${SEC_NAMES[$IDX]}: LMA $(hex8 "$lma")..$(hex8 "$end") is outside FLASH $(hex8 "$FLASH_ORIGIN")..$(hex8 "$FLASH_END") - a file-backed section loading outside flash makes 'objcopy -O binary' span the gap, which is the 469 MB image; give the section '(NOLOAD)' placement in $FLASH_FILE, or a load address with AT>")
       R1_FAILED=1
       continue
     fi
@@ -480,7 +480,7 @@ evaluate_sections() { # <display-name>
   # real image size on all six ELFs in both cfg sets, twelve measurements. It cannot be provoked by
   # patching a linked ELF, because objdump derives the LMA column from PT_LOAD deltas (see
   # read_sections), so any hand-edited sh_size / sh_offset / p_filesz moves the reconstructed LMA and R1
-  # refuses first. Hand-emitted fixtures are what cover it, which is TASK-068.
+  # refuses first. Hand-emitted fixtures are what cover it, which are the self-test cases below.
   if [ -n "$HIGH" ]; then
     EXPECTED=$(( HIGH - FLASH_ORIGIN ))
   fi
@@ -511,7 +511,7 @@ evaluate_sections() { # <display-name>
 
 # Everything the `image=` column says that needs no bytes on disk: the two refusals, and the die under
 # them. Leaves IMAGE empty when the layout is sound, which is check_one_elf's cue to go measure it. Split
-# out of check_one_elf so a case can grade the sentence the TASK-059 defect is read from -- `plain '-O
+# out of check_one_elf so a case can grade the sentence the 469 MB defect is read from -- `plain '-O
 # binary' would write N bytes` -- against rows rather than against a mutated link.
 #
 # The refusal is written only while R1 held, because on a tree with a section far outside flash a plain
@@ -526,7 +526,7 @@ decide_image() { # <display-name>
     IMAGE="not-written(sections-outside-flash)"
     if [ -n "$SPAN_HIGH" ]; then
       would=$(( SPAN_HIGH - SPAN_LOW ))
-      VIOLATIONS+=("${name}: plain '-O binary' would write $would bytes ($(hex8 "$SPAN_LOW")..$(hex8 "$SPAN_HIGH")) where the parts inside flash hold ${EXPECTED:-nothing} - the image spans from the lowest to the highest LOAD address, so this is the TASK-059 defect: a board flashed with it boots only the prefix that fit. Length computed from the section table; the image was not written here because R1 already named the section responsible.")
+      VIOLATIONS+=("${name}: plain '-O binary' would write $would bytes ($(hex8 "$SPAN_LOW")..$(hex8 "$SPAN_HIGH")) where the parts inside flash hold ${EXPECTED:-nothing} - the image spans from the lowest to the highest LOAD address, so this is the 469 MB defect: a board flashed with it boots only the prefix that fit. Length computed from the section table; the image was not written here because R1 already named the section responsible.")
       IMAGE="not-written(would-be-$would)"
     fi
     return
@@ -599,7 +599,7 @@ report() {
     printf '%s\n' "${VIOLATIONS[@]}"
     printf '\n'
     printf '%s\n' 'The rule is that a section with file content loads inside flash. Data that exists only in'
-    printf '%s\n' 'RAM gets (NOLOAD) placement in firmware/memory-internal.x, the way .sram1_bss has since TASK-059.'
+    printf '%s\n' 'RAM gets (NOLOAD) placement in firmware/memory-internal.x, the way .sram1_bss has since the rule landed.'
   } >&2
   return 1
 }
@@ -608,7 +608,7 @@ report() {
 #
 # Every rule above rests on one positional read of `rust-objdump -h --show-lma`, and a parser that stops
 # working does not turn this gate red. It turns it green for the wrong reason. Four traps were measured
-# while planning TASK-059.02, each of which produces a pass that checked nothing:
+# while planning this gate, each of which produces a pass that checked nothing:
 #
 #   *  Bash matches leftmost-longest, so the name capture keeps objdump's column padding. Untrimmed, the
 #      `.sram1_bss` comparison never fires and R2 answers `absent` for every binary -- which is what both
@@ -904,7 +904,7 @@ ROWS_WIDE='  0                                          00000000 00000000 000000
 
 # The case that makes the positional LMA parse non-vacuous. `.data` runs from AXI SRAM and loads from
 # flash, so every number below comes out of the LMA column: capture the VMA instead and this goes red
-# naming `.data` with a 469 MB span, which is the TASK-059 defect reproduced by a fixture. The objcopy
+# naming `.data` with a 469 MB span, which is the 469 MB defect reproduced by a fixture. The objcopy
 # equality pins the same column from the other side, since objcopy writes by load address.
 case_real_elf_lma_column() {
   spawn_script "$FX_OK"
@@ -940,7 +940,7 @@ case_guard_wrong_format() {
   expect_refused "a valid ELF of another width" "$SPAWN_RC" "$SPAWN_OUT" "is not elf32-littlearm"
 }
 
-# The affordance TASK-062 was about: a missing ELF is a hard failure that names the command producing it,
+# The affordance: a missing ELF is a hard failure that names the command producing it,
 # never a skip.
 case_guard_missing_elf() {
   spawn_script "$FX_DIR/never-written.elf"

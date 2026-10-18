@@ -824,7 +824,7 @@ fn degenerate_parameters_become_ordinary_output() {
 }
 
 // ---------------------------------------------------------------------------
-// one_shot_samples(): which sources a capture has to start (TASK-038.08)
+// one_shot_samples(): which sources a capture has to start
 // ---------------------------------------------------------------------------
 
 /// `rig` starts a one-shot source inside its capture window and plays a periodic one from boot, so

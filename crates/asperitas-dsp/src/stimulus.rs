@@ -157,7 +157,7 @@ const _: () = assert!(DESCRIBE_SCALE == 1_000_000);
 /// Deliberately not `core`'s float formatter. Printing a float with `{}` pulls in
 /// `core::num::flt2dec`, the Dragon/Grisu pair, and the bill is large enough to settle the choice:
 /// replacing this function's last line with `{value}` moved the `rig` image (release, `debug = 2`,
-/// `log-usb`, measured 2026-09-12) from `.text` 89,804 to 108,172 and `.rodata` 15,808 to 19,116 -
+/// `log-usb`) from `.text` 89,804 to 108,172 and `.rodata` 15,808 to 19,116 -
 /// 21.4 KB spent to render four numbers, which against the 131,072-byte internal-flash sector
 /// would have left 2.5 KB where that binary now has 24. Its cost is also the wrong shape for
 /// firmware: those algorithms iterate until a representation short enough to round-trip falls out,

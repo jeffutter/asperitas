@@ -1,7 +1,7 @@
 //! Host-to-device console records: the byte-level half of the CDC OUT reader.
 //!
 //! The device has always allocated a CDC OUT endpoint and never read it. The first thing that
-//! needs it is excerpt install (TASK-038.04), which streams ordinary v1 `~` frames from the host
+//! needs it is excerpt install, which streams ordinary v1 `~` frames from the host
 //! with a plain `cat stream.bin > /dev/cu.usbmodem…`. This module turns those raw bytes into
 //! whole, CRC-checked records; `usb.rs` owns the endpoint and the channel the binary reads.
 //!
@@ -36,15 +36,15 @@
 //!
 //! This is the minimum inbound path excerpt install needs: frames in, records out, counters
 //! for what was rejected. It parses no commands and assigns no meaning to a body — the
-//! consumer (`excerpt::parse_record` today) does that. TASK-032 (host control) can reuse all of
+//! consumer (`excerpt::parse_record` today) does that. Host control can reuse all of
 //! it unchanged: [`InboundFeed`], [`InboundRecord`], [`INBOUND`]'s counters and `usb.rs`'s
-//! channel are transport, not install policy. TASK-032 added the dispatcher that routes records by verb to
+//! channel are transport, not install policy. The dispatcher that routes records by verb to
 //! more than one consumer; it lives in [`asperitas_wire::control`] and reads [`InboundRecord`] unchanged.
 //!
 //! # Counters
 //!
 //! [`INBOUND`] is separate from [`asperitas_wire::console::CONSOLE`] and nothing here changes `STATUS`:
-//! its field set is a contract TASK-031 parses, and inbound traffic only exists in binaries
+//! its field set is a contract the rig runner parses, and inbound traffic only exists in binaries
 //! that opt in. A consumer that wants these numbers on the wire reports them in its own
 //! records. Like the console counters they are cumulative since boot and saturate rather than
 //! wrap; see `console`'s module docs for why.

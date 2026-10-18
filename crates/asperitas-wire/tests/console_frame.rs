@@ -3,8 +3,8 @@
 //! Run with: `cargo test -p asperitas-wire`
 //!
 //! Nothing else in this repo proves that a corrupted capture cannot be mistaken for clean
-//! data, so this file is the deliverable rather than a formality: TASK-031's rig runner and
-//! TASK-032's control channel link against this decoder instead of writing their own. Two
+//! data, so this file is the deliverable rather than a formality: the rig runner and
+//! the control channel link against this decoder instead of writing their own. Two
 //! ideas hold the design together and each gets its own section below:
 //!
 //! * **Integrity is not absence.** A record that never arrived leaves no trace in
@@ -221,7 +221,7 @@ struct Row {
 /// Assert that a stream produces exactly one row of the canonical statistics table.
 ///
 /// Every row was derived independently of this decoder — first by a reference model
-/// written from TASK-030 §3 during planning, then again by hand while this file was
+/// written from the grammar during planning, then again by hand while this file was
 /// written — so agreement here is two implementations saying the same thing rather than
 /// one agreeing with itself. When a row disagrees, suspect the construction above it first:
 /// two of the four disagreements found while writing this file were the stream, not the
@@ -452,7 +452,7 @@ fn shapes() -> Vec<Vec<u8>> {
 ///
 /// Every other test builds its stream with `encode`, so if `encode` and the decoder shared
 /// a wrong idea about where the CRC is computed, they would agree and this suite would pass.
-/// These bytes come from TASK-030.01.01’s golden tests instead, and the assertion below
+/// These bytes come from the golden tests instead, and the assertion below
 /// checks the literal against an independent CRC rather than against the encoder.
 #[test]
 fn decodes_bytes_the_encoder_never_produced() {
@@ -560,7 +560,7 @@ fn detects_multi_byte_corruption() {
 /// payload, and the search below finds such a pair in milliseconds. The forged frame then
 /// decodes with `bad_frames = 0`: nothing anywhere says this record is not genuine.
 ///
-/// This is pinned rather than avoided because the rig runner’s threat model matters. TASK-031
+/// This is pinned rather than avoided because the rig runner’s threat model matters. The rig runner
 /// reads captures written by a device it trusts over a wire it does not, and a 16-bit checksum
 /// answers “did the wire corrupt this?” and nothing else. Anyone tempted to treat `records`
 /// minus `bad_frames` as an authenticity statement should read this test first; the honest
@@ -849,7 +849,7 @@ proptest! {
 
 /// Interleaving two producers’ output decodes every record and reports nothing suspicious.
 ///
-/// Byte-level interleaving is TASK-031’s stated threat model, and the answer is that framing
+/// Byte-level interleaving is the rig runner’s stated threat model, and the answer is that framing
 /// is robust enough to ignore it: four records arrive intact with zero counters moved. What
 /// interleaving defeats is timestamp interpretation, not framing, which is why §6 makes
 /// `t_ms` per-producer.
@@ -973,7 +973,7 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// The canonical statistics table (TASK-030 §6)
+// The canonical statistics table
 //
 // Each stream below was built from the row’s prose description, independently of this
 // decoder, and the counters were derived by hand before any of them ran. `expect_row`

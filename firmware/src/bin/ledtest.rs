@@ -15,7 +15,7 @@
 //! assumption of its own to prove the core is running.
 //!
 //! Polarity itself is settled: the LEDs are **active-low**, identified with this
-//! very sequence on 2026-08-01 (see `docs/reference/daisy-pod.md`), so in practice
+//! very sequence (see `docs/reference/daisy-pod.md`), so in practice
 //! you should now see the left-hand column. A right-hand-column reading would mean
 //! the board differs from the one that was characterised.
 //!

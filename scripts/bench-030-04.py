@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""bench-030-04.py - guided bench session for TASK-030.04 (framed console on hardware).
+"""bench-030-04.py - guided bench session for the framed console on hardware.
 
 usage:
   scripts/bench-030-04.py            flash podtest over the probe, capture, coach each action live, decode
@@ -227,7 +227,7 @@ def podtest_session():
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     session = os.path.join(ROOT, "target", "bench", "030.04", stamp)
     os.makedirs(session, exist_ok=True)
-    say(f"TASK-030.04 bench session  (files: {os.path.relpath(session, ROOT)})")
+    say(f"Framed console bench session  (files: {os.path.relpath(session, ROOT)})")
     say("Before we start: close any screen / cat / serial reader. Only this script may hold the port.")
     say("Have the board powered, ST-Link attached, USB-C to this Mac, hands free for the Pod controls.")
     ask("Press Enter when ready... ")
@@ -321,7 +321,7 @@ def write_report(session, a, actual, audio, secs, summ, con):
     rate = a["records"] / a["span_s"] if a["span_s"] else 0.0
     exp = {"encoder clockwise": a["enc_cw"], "encoder counter-clockwise": a["enc_ccw"],
            "encoder click": a["click"], "button 1": a["btn1"], "button 2": a["btn2"]}
-    lines = ["# TASK-030.04 bench report", "",
+    lines = ["# Framed console bench report", "",
              f"- capture: {con.total} bytes, {secs:.0f} s wall clock",
              f"- decoded records: {a['records']} over {a['span_s']:.1f} s of device time = {rate:.1f} records/s",
              f"- BOOT records seen: {a['boots']} (0 = reader attached late; 2+ = board restarted mid-capture)",

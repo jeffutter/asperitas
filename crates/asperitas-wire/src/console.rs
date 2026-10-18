@@ -9,14 +9,14 @@
 //! section, no clock, no pipe — so `cargo test --workspace` compiles and tests it on the
 //! host even though the root workspace never enables `log-usb`, for the same reason
 //! [`crate::frame`] is ungated. That matters because
-//! [`status_body`] and [`StatusGate::due`] *are* the protocol: TASK-030.03 documents the
-//! field set and TASK-031 parses it. A change to either should fail a host test in CI,
+//! [`status_body`] and [`StatusGate::due`] *are* the protocol: the protocol index documents the
+//! field set and the rig runner parses it. A change to either should fail a host test in CI,
 //! not first show up on a board three time zones away.
 //!
 //! The commit path that *uses* this lives in `lib.rs`; the drain task that reports it
 //! lives in `usb.rs`.
 //!
-//! # Counter semantics (TASK-030 §5, amendment A3)
+//! # Counter semantics
 //!
 //! Counters are cumulative-since-boot and the host recovers rates by differencing
 //! successive `STATUS` records. A counter that wrapped would turn into an enormous
@@ -266,7 +266,7 @@ fn add(counter: &AtomicU32, n: u32) {
 
 /// Render the `BOOT` banner into `out`, returning the bytes written.
 ///
-/// Field order is normative (TASK-030 §3): `proto` first so a reader can handshake
+/// Field order is normative: `proto` first so a reader can handshake
 /// before trusting anything, then what produced the capture. `fw_version` is the
 /// `asperitas-wire` crate version, which is the version that ships the console — the
 /// firmware binaries have no separate release process.
@@ -289,7 +289,7 @@ pub fn boot_body(
 
 /// Render a `STATUS` record body into `out`, returning the bytes written.
 ///
-/// The field set and their order are the contract TASK-030.03 documents and TASK-031
+/// The field set and their order are the contract the protocol index documents and the rig runner
 /// parses; the unit test below fails if either changes. Values are absolute
 /// since-boot counts, never per-interval deltas — the host owns the differencing.
 ///
@@ -403,7 +403,7 @@ impl StatusRecord {
 }
 
 // ---------------------------------------------------------------------------
-// Measurement-rig verbs (TASK-038.03.02)
+// Measurement-rig verbs
 // ---------------------------------------------------------------------------
 
 /// How many decimal digits a saturated `u32` renders as: `4294967295`.
@@ -784,7 +784,7 @@ pub fn dumpend_body(d: &DumpSummary, out: &mut [u8; BODY_WINDOW]) -> usize {
     w.filled()
 }
 
-/// One completed replay pass, as one `EXCPLAY` record (TASK-038.04.03.02).
+/// One completed replay pass, as one `EXCPLAY` record.
 ///
 /// Sent once per boot, from thread mode, after the callback has handed the last source sample to the
 /// DAC encoder.
@@ -795,7 +795,7 @@ pub fn dumpend_body(d: &DumpSummary, out: &mut [u8; BODY_WINDOW]) -> usize {
 /// (`asperitas_replay`). `want` is the CRC the slot header stored when the excerpt was installed, which
 /// the install verified against the host's. Equal CRCs with `clean=1` say the QSPI-to-DAC-encoder
 /// path delivered the excerpt intact and unbroken. They say **nothing** about the codec, the analog
-/// stage or the cable: what comes back through them is the capture's business (TASK-035 AC #4).
+/// stage or the cable: what comes back through them is the capture's business.
 #[derive(Clone, Copy, Debug)]
 pub struct ExcerptPlay {
     /// Slot played, `0..excerpt::SLOT_COUNT`.

@@ -29,7 +29,7 @@ TARGET   = thumbv7em-none-eabihf
 # `bootloaded`: the image links for the stock Daisy bootloader (memory-bootloaded.x). It runs from
 # AXI SRAM, is stored in QSPI from 0x90040000, and is written there with the bootloader's DFU
 # interface. That layout exists because rig with the excerpt install path no longer fits 128 KB
-# (TASK-038.04.07). The bootloader itself is installed once, see docs/reference/flashing.md.
+# internal flash. The bootloader itself is installed once, see docs/reference/flashing.md.
 #
 # The layout reaches build.rs as ASPERITAS_LAYOUT, which stamps it into the ELF's .asp.prov and
 # selects the linker script. Each layout builds into its own target directory (see VARIANT_DIR), so
@@ -59,7 +59,7 @@ export ASPERITAS_LAYOUT = $(LAYOUT)
 #
 # probe-rs needs that single `.defmt` section to exist at all, and only a `log-defmt` build has
 # one: build.rs passes `-Tdefmt.x`, which consolidates the per-call-site `.defmt_*` sections into
-# it. Measured on this workspace with probe-rs-tools 0.32.0 on 2026-09-12, nothing attached:
+# it. Measured on this workspace with probe-rs-tools 0.32.0, nothing attached:
 # `probe-rs attach` and `probe-rs run` refuse a console-only ELF before they look for a probe,
 # rc=1, with exactly this chain:
 #
@@ -147,11 +147,11 @@ all: build
 ##
 ## What this buys is worth one sentence of vigilance. Before that `(NOLOAD)` rule the section was
 ## an orphan rust-lld placed with LMA == VMA in AXI SRAM, and a plain `-O binary` of `main` came
-## out at 469,763,480 bytes of mostly zeros (TASK-059) while `blinky`, which links no audio, stayed
+## out at 469,763,480 bytes of mostly zeros while `blinky`, which links no audio, stayed
 ## at 65,638 -- so the symptom looked intermittent. Nothing fails if that comes back: the image
-## silently spans the gap instead. TASK-059.02 files the gate that reads load addresses off the ELF.
+## silently spans the gap instead. `check-image-load-addresses.sh` is the gate that reads load addresses off the ELF.
 ##
-## Measured 2026-09-13 at `[profile.release] debug = 2`, against the 131,072-byte internal-flash
+## Measured at `[profile.release] debug = 2`, against the 131,072-byte internal-flash
 ## budget:
 ##
 ##   FEATURES="seed3"                        main.bin 88,581   rig.bin 106,811
@@ -162,7 +162,7 @@ all: build
 ## this commit, not constants: debug info moves .text (see firmware/Cargo.toml).
 ##
 ## `LAYOUT=bootloaded` links the same sources into the 480K AXI SRAM image the stock Daisy bootloader
-## copies from QSPI (memory-bootloaded.x). Measured 2026-10-15, `-O binary`, FEATURES="seed3":
+## copies from QSPI (memory-bootloaded.x). Measured, `-O binary`, FEATURES="seed3":
 ## blinky 78,438, main 107,621, rig 125,762 (stim-ess 127,586, stim-pulse 125,986), against 491,520.
 ## scripts/firmware-variants.sh builds that matrix (scripts/firmware-variants.table) and requires 2 KB spare in each.
 ##
@@ -241,7 +241,7 @@ flash-all: build flash
 # Two halves, and they only work as one thing: every link embeds a digest of every input's bytes in the
 # ELF's .asp.prov (firmware/build.rs), and `elf-check` recomputes it and compares. No timestamp enters either half, which
 # is the entire point. What it replaces was `find $(ELF_INPUTS) -newer $(ELF)`, so it could not tell
-# "the sources moved on" from "something rewrote the filesystem metadata": TASK-056 measured
+# "the sources moved on" from "something rewrote the filesystem metadata": an earlier measurement showed
 # `make probe-log` going red on a tree `git status` called clean, 2975 s of pure metadata apart.
 # The churn behind it was files `git checkout` had just refreshed. Bulk metadata churn of exactly that
 # shape is ordinary housekeeping here, and a check that cries wolf on it is a check the loop learns to
@@ -286,7 +286,7 @@ SHA256 = $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo 
 CARGO_BUILD = $(CARGO) build --release $(CARGO_DIR) $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
 
 # ELF_INPUTS_SH is the one implementation; the input set itself is firmware/elf-inputs.manifest, shared
-# with build.rs, which embeds the same digest in .asp.prov (TASK-071.01). The notes below describe the
+# with build.rs, which embeds the same digest in .asp.prov. The notes below describe the
 # algorithm that script implements.
 ELF_INPUTS_SH = $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-inputs-digest.sh
 
@@ -444,8 +444,8 @@ probe-log: elf-check
 ## anything that takes the board down. Like `probe-log` it builds nothing, for the same reason.
 ##
 ## It reads memory with `probe-rs read` rather than running `probe-rs attach --list-rtt`, which on
-## probe-rs 0.32.0 against a live target attaches and then streams forever without printing a table
-## (TASK-037). See the header of scripts/probe-rtt-list.sh.
+## probe-rs 0.32.0 against a live target attaches and then streams forever without printing a table.
+## See the header of scripts/probe-rtt-list.sh.
 probe-rtt-list: elf-check
 	bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/probe-rtt-list.sh $(ELF) $(CHIP) $(CHIP_DESC) $(PROBE_EXTRA)
 
@@ -467,7 +467,7 @@ check:
 ## docs-artifact-name lint, and only with `-n` (see its header warning about why that flag is not
 ## optional). Cost of those two gates: cheap when nothing changed, several times dearer straight
 ## after a build, tens of seconds in a fresh target dir. Landed
-## with TASK-060.03, re-pointed by TASK-061.02 when the hook job names died.
+## with the gates script, and was re-pointed when the hook job names died.
 clippy:
 	cargo clippy --release $(CARGO_DIR) $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- -D warnings
 

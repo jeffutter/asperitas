@@ -33,7 +33,7 @@ use static_cell::StaticCell;
 /// `Low` lights it, `High` turns it off. This matches libDaisy, whose LED
 /// driver also inverts.
 ///
-/// Verified on hardware 2026-08-01 via `firmware/src/bin/ledtest.rs`, which
+/// Verified on hardware via `firmware/src/bin/ledtest.rs`, which
 /// drives the channel pins directly and bypasses this constant entirely.
 /// See `docs/reference/daisy-pod.md` for the observed sequence.
 pub(crate) const LED_ACTIVE_LOW: bool = true;

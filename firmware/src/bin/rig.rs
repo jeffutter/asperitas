@@ -1,7 +1,7 @@
 //! Measurement-rig binary: plays a known stimulus, captures one lane, and hands the bytes to
-//! the host for objective measurement (TASK-038).
+//! the host for objective measurement.
 //!
-//! This file is deliberately a near-copy of `main.rs`. Everything it keeps - the preamble, the
+//! This file deliberately stays close to `main.rs`. Everything it keeps - the preamble, the
 //! board setup, the codec start, the block geometry, the encode step - behaves exactly as it
 //! does in the binary already proven on hardware, which is the only reason to trust the parts
 //! that are new. Three things differ, and they are the whole point:
@@ -19,10 +19,10 @@
 //! What it then does with the input is the measurement. One lane of the codec's input is truncated
 //! to `i16` and copied into a 32 MiB ring in SDRAM, the ring is shipped to the host over the framed
 //! console once the window closes, and the timing of every callback is measured against DWT so the
-//! host can tell a clean capture from a starved one. The run is a fixed timeline with no inbound
+//! host can tell a clean capture from a starved one. The run is a fixed timeline with no runtime
 //! control: see "Capture timeline" below.
 //!
-//! The one thing rig does read from the host is an excerpt install (TASK-038.04): framed records on
+//! The one thing rig does read from the host is an excerpt install: framed records on
 //! the CDC OUT endpoint, written sector by sector into a QSPI slot and verified by readback. See
 //! "Excerpt install" below; it never runs alongside a capture.
 
@@ -229,7 +229,7 @@ fn emit_console(_body: &[u8]) {}
 // The ring is uncached by memory type, not by luck: no MPU region covers 0xC000_0000 (daisy-embassy
 // puts its cacheable region at 0xD000_0000, an unconfigured FMC bank), so the default map makes the
 // window Device memory, and enabling the D-cache does not touch it. That was measured off the
-// running board on 2026-10-08 (docs/reference/daisy-seed3.md, "External SDRAM"). What would change
+// running board (docs/reference/daisy-seed3.md, "External SDRAM"). What would change
 // this hand-off is an MPU region over 0xC000_0000: whoever adds one owns the coherence argument for
 // the FMC window and revisits these orderings in the same change. Device memory also takes no
 // unaligned accesses, so the ring is only ever touched through aligned copies.
@@ -237,7 +237,7 @@ fn emit_console(_body: &[u8]) {}
 /// Which input lane the ring keeps.
 ///
 /// Left, matching `main.rs`'s `decode_block`, which reads `words[0]` as left from the same
-/// interleaved layout. Which physical jack that is on the Pod is TASK-038.05's observation to make
+/// interleaved layout. Which physical jack that is on the Pod is a bench observation to make
 /// at the bench; if it is the wrong one, flipping this constant is the whole fix, because
 /// [`MONO_WORD`] and `RIGCFG`'s `lane` both derive from it.
 const MONO_LANE: console::MonoLane = console::MonoLane::Left;
@@ -255,7 +255,7 @@ enum Window {
     Seconds(usize),
     /// No deadline of its own: the window runs until the producer finds no `Free` block and
     /// disarms itself, so it holds exactly the whole ring. This is the run that checks `CAPMAX`'s
-    /// `seconds_max` against the wall clock (TASK-038.07).
+    /// `seconds_max` against the wall clock.
     RingFill,
 }
 
@@ -810,7 +810,7 @@ fn report_stimulus_start(first_block: u32, end_block: u32, samples: u32) {
 // ---------------------------------------------------------------------------
 //
 // rig arms itself. There is no inbound control channel to arm it through (runtime control is
-// TASK-032; the inbound path rig does read carries excerpt installs and nothing else), so the run is a
+// the control channel; the inbound path rig does read carries excerpt installs and nothing else), so the run is a
 // fixed timeline, repeated by resetting the board, which `slow-boot` keeps safe for DFU:
 //
 //   boot      BOOT, RIGCFG, RIGGEN, CAPMAX, then audio starts; a periodic stimulus plays from here,
@@ -1039,7 +1039,7 @@ async fn dump_ring(_ring: Ring, first: u32, end: u32) {
 //
 // Wall clock is dominated by erases: a full 516,096-byte slot is 127 PCM sectors plus the header
 // sector, and at the IS25LP064A's typical sector erase (tens of milliseconds) that is seconds; a
-// 288,000-byte corpus clip is 71 + 1. Predicted against observed is TASK-038.04.06's table, not a
+// 288,000-byte corpus clip is 71 + 1. Predicted against observed is the bench table's job, not a
 // figure this comment can know.
 //
 // ### Why an install cannot disturb the capture
@@ -1071,7 +1071,7 @@ type RigFlash = daisy_embassy::flash::Flash<'static, hal::mode::Async>;
 /// The one flash handle, built once in `main` before audio starts.
 ///
 /// A mutex because two thread-mode tasks will want it: the excerpt installer here, and the replay
-/// refill (TASK-038.04.03.02). `ThreadModeRawMutex` because thread mode is the only place flash is
+/// refill. `ThreadModeRawMutex` because thread mode is the only place flash is
 /// ever touched - the raw mutex panics if an interrupt tries - and the `Option` because a `static`
 /// cannot run `build_async`. The rule for every user: hold the guard across your own flash awaits
 /// only, never across a channel receive or a timer, or the other user stalls behind a host that is
@@ -1349,7 +1349,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 // `zero_staging`) and always in AXI SRAM: the whole RAM region under `memory-internal.x`, and the 32 KB
 // `AXI_TAIL` above the 480 KB bootloaded image under `memory-bootloaded.x`. AXI SRAM is cacheable by the
 // default memory map. It is deliberately not the DTCM that plain `.bss` is under the bootloaded layout
-// (TASK-074): MDMA, the master `Flash::read_async` uses, reaches the TCMs only through its separate AHBS
+//: MDMA, the master `Flash::read_async` uses, reaches the TCMs only through its separate AHBS
 // port, DMA1/DMA2 cannot reach DTCM at all, and nothing here confirmed from RM0433 that an MDMA refill into
 // DTCM lands. `scripts/firmware-variants.sh` (the `replay` action) checks the symbol's address in the bootloaded image.
 // The argument for either cache state, which `fill_half` carries out:
@@ -1374,7 +1374,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 // of the 666 us period against the ~590 us of headroom the sine generator leaves today, and it replaces
 // the generator's own per-sample work rather than adding to it, so `max_block_us` is not worsened by
 // more than the estimate and is expected to fall. An estimate, not a reading: the observed figure is
-// `CAPSTAT`'s `max_block_us` on hardware (TASK-038.09). No bench claim is made here.
+// `CAPSTAT`'s `max_block_us` on hardware. No bench claim is made here.
 //
 // ### Replay effect
 //
@@ -1408,7 +1408,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 //
 // It is the CRC of the samples handed to the DAC encoder (`asperitas_replay::PassReport::crc16`). With `want`
 // (the stored header CRC) and `clean=1` it says QSPI-to-encoder delivered the excerpt intact and
-// unbroken. It says nothing about the codec, the analog path or the cable (TASK-035 AC #4).
+// unbroken. It says nothing about the codec, the analog path or the cable.
 // ---------------------------------------------------------------------------
 // Replay effect control (every build)
 // ---------------------------------------------------------------------------

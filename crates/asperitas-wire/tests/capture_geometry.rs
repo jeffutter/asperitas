@@ -281,7 +281,7 @@ fn useful_fraction_is_567_per_mille_at_block_level() {
     );
 }
 
-/// The five-minute window TASK-019.03 asks for fits the ring, so ring-full stays a backstop.
+/// The five-minute capture window fits the ring, so ring-full stays a backstop.
 #[test]
 fn a_five_minute_capture_fits_the_ring() {
     assert_eq!(capture::CAPTURE_WINDOW_SECONDS, 300);
@@ -409,7 +409,7 @@ fn state_round_trips_through_u8_and_refuses_garbage() {
 }
 
 // ---------------------------------------------------------------------------
-// Positions inside a capture window (TASK-038.08)
+// Positions inside a capture window
 // ---------------------------------------------------------------------------
 
 /// `STIMSTART`'s offset is a sample index into the PCM `dump_reassemble` writes, which is the

@@ -3,7 +3,7 @@
 //! One SDRAM ring and one console stream describe the same capture, so they must agree on the
 //! numbers that size them. Before this module those numbers lived in two places that could not see
 //! each other: [`crate::dump`] owned the wire grammar, and the ring's shape existed only as prose in
-//! TASK-038.03's notes. Nothing checked that a 32 KiB ring block is *encodable* — and it is, by
+//! the rig notes. Nothing checked that a 32 KiB ring block is *encodable* — and it is, by
 //! exactly zero margin: [`RING_BLOCK_BYTES`] is 254 full chunks plus a 2-byte tail, i.e. 255 chunks,
 //! which *is* [`crate::dump::MAX_CHUNKS_PER_BLOCK`]. Exceed that and [`crate::dump::audio_body`]
 //! refuses at runtime mid-dump, discovered at the bench with ears on the line.
@@ -84,13 +84,13 @@ use crate::frame::{PREFIX_LEN, TRAILER_LEN};
 ///
 /// A deliberate copy of the rate the firmware configures — `daisy_embassy`'s `AudioConfig::default`
 /// — because this module cannot name that type without dragging the HAL into a crate whose tests run
-/// on the host. TASK-038.03.02 restores the link with a const assert in `rig.rs`, where both sides
+/// on the host. A const assert in `rig.rs` restores the link, where both sides
 /// are visible.
 pub const SAMPLE_RATE_HZ: u32 = 48_000;
 
 /// Bytes per captured sample: mono `i16`.
 ///
-/// The rig stores the loop channel only (TASK-038.03.02), so the ring's footprint is half what a
+/// The rig stores the loop channel only, so the ring's footprint is half what a
 /// stereo capture would cost; a second channel doubles [`BYTES_PER_SECOND`] and halves the ring's
 /// seconds, which is why the figure is named rather than inlined.
 pub const CAPTURE_BYTES_PER_SAMPLE: usize = 2;
@@ -98,7 +98,7 @@ pub const CAPTURE_BYTES_PER_SAMPLE: usize = 2;
 /// Samples per audio callback per channel: 32.
 ///
 /// A deliberate copy of `daisy_embassy::audio::BLOCK_LENGTH`, with the same reasoning as
-/// [`SAMPLE_RATE_HZ`]. TASK-038.03.02 asserts equality against the real constant **in samples**.
+/// [`SAMPLE_RATE_HZ`]. `rig.rs` asserts equality against the real constant **in samples**.
 /// Comparing [`CALLBACK_BYTES`] against `HALF_DMA_BUFFER_LENGTH` instead is a category error — that
 /// constant counts 64 `u32` *words* per callback (32 stereo frames) while [`CALLBACK_BYTES`] counts
 /// 64 *bytes* of one mono channel — and their numeric coincidence (64 == 64) is exactly why the
@@ -132,7 +132,7 @@ pub const RING_BLOCK_BYTES: usize = 32_768;
 /// enough that the per-block state array, one byte per block held in internal RAM, stays inside
 /// [`u16::MAX`] so an index is storable atomically. Gate 5 below checks that bound; no headroom
 /// figure is quoted here, because the "roughly 69 KB free" this used to carry traced back to the
-/// 86.13 % `.bss` baseline TASK-038.03.02.02 records as never having been measured.
+/// 86.13 % `.bss` baseline, which was never measured.
 pub const RING_BLOCKS: usize = 1_024;
 
 /// Total ring capacity in raw bytes: 33 554 432 (32 MiB).
@@ -144,7 +144,7 @@ pub const RING_BYTES: usize = RING_BLOCK_BYTES * RING_BLOCKS;
 /// Ring footprint per second of capture in bytes: 96 000 for mono 16-bit at 48 kHz.
 pub const BYTES_PER_SECOND: usize = SAMPLE_RATE_HZ as usize * CAPTURE_BYTES_PER_SAMPLE;
 
-/// Default capture window in seconds: 300, the five minutes TASK-019.03 asks to be verified
+/// Default capture window in seconds: 300, the five minutes the soak verifies
 /// objectively.
 ///
 /// Gate 6 below fails the build if the ring ever stops fitting this window. A rig that raises the
@@ -266,7 +266,7 @@ pub const fn ring_duration_micros() -> u64 {
 /// Rounded **up**, because a run that spills into a block consumes that block: 300 s × 96 000 B/s
 /// needs 879 blocks, and a helper that reported 878 would understate what the ring has to hold,
 /// which is the one thing a capacity estimate may not do. The argument is `usize` to match the
-/// index arithmetic at the call site (TASK-038.03.02's `rig.rs`); the product is still taken in
+/// index arithmetic at the call site (`rig.rs`); the product is still taken in
 /// `u64`, since `seconds × BYTES_PER_SECOND` passes `u32::MAX` near 44 700 s and the const evaluator
 /// rejects the 32-bit form outright rather than leaving it behind a `debug_assert`.
 #[must_use]
@@ -330,7 +330,7 @@ const _: () = assert!(
 
 // 5. The per-block state array lives in internal RAM, so block indices must fit a u16 the firmware
 //    can store atomically. Deliberately no headroom figure: the "~69 KB free" this once quoted came
-//    from the 86.13 % `.bss` baseline TASK-038.03.02.02 shows was never measured.
+//    from the 86.13 % `.bss` baseline, which was never measured.
 const _: () = assert!(
     RING_BLOCKS <= u16::MAX as usize,
     "ring block indices no longer fit the u16 the state array stores"

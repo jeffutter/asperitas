@@ -6,7 +6,7 @@
 //! The rig plays an excerpt stored in QSPI flash ([`asperitas_wire::excerpt`]). The audio callback has about
 //! 590 us of its 666 us block budget to spare and must never wait on flash, so the samples reach it
 //! through two halves of a staging buffer: a thread-mode task reads the next stretch of the
-//! excerpt into whichever half is idle (`Flash::read_async` over MDMA, wired in TASK-038.04.03.02)
+//! excerpt into whichever half is idle (`Flash::read_async` over MDMA, wired in `rig.rs`)
 //! while the callback pops 32-sample blocks out of the other one. Everything about that hand-off
 //! that can be wrong without a board - which half each side may touch, what happens when the
 //! refill is late, how the final partial block is padded, what the reported CRC covers - lives
@@ -42,14 +42,14 @@
 //! silence and the zero padding after the last sample are excluded. After a pass it equals the slot
 //! header's PCM CRC ([[`asperitas_wire::excerpt`]]) and the host's CRC of the WAV data chunk. It proves the
 //! bytes reached the DAC encoder intact and in order. It says nothing about what comes back through
-//! the codec and the cable; that is TASK-035's measurement, not this one.
+//! the codec and the cable; that is a hardware measurement, not this one.
 //!
 //! # Staging depth
 //!
 //! The constants below are a justification table evaluated at compile time. A half must play for
 //! at least [`MARGIN_FACTOR`] times the worst-case time to refill the other one, and the build
 //! fails if it does not. Each input is labelled ASSUMED or MEASURED; today every refill input is
-//! assumed, and TASK-038.09's bench reading is what replaces them. If a measured figure degrades
+//! assumed, and a bench reading is what replaces them. If a measured figure degrades
 //! the margin, the assert is where [`HALF_BYTES`] has to change.
 //!
 //! Durations carry explicit widths with `u64` intermediates for the reason [`asperitas_wire::capture`]'s

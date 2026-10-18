@@ -13,7 +13,7 @@ edition = "2021"
 # console build stays exactly what it was. Only `--no-default-features` drops it.
 default = ["log-usb"]
 # Seed3 hardware always carries the boot-stage LED and the shared panic handler. They are not a
-# transport — they are how a board with no host attached reports how far boot got (TASK-036.02),
+# transport — they are how a board with no host attached reports how far boot got,
 # and every binary here exists partly to exercise them. Gating them on a transport instead left
 # `--no-default-features` with no diagnostics at all and five binaries that could not link.
 seed3 = ["asperitas-logging/boot-led"]
@@ -38,12 +38,12 @@ log-defmt = ["asperitas-logging/log-defmt", "dep:defmt-rtt"]
 stim-sine = []
 stim-ess = []
 stim-pulse = []
-# Replay an excerpt installed in QSPI (TASK-038.04): the generator reads its slot through an internal-RAM
+# Replay an excerpt installed in QSPI: the generator reads its slot through an internal-RAM
 # ping-pong instead of computing a waveform. Counts as one stimulus for rig's exclusion assert. The slot
 # is `ASP_RIG_EXCERPT_SLOT` at build time (default 0). Needs the async flash, so it builds only with the
 # bootloaded layout like the rest of the install path. See "Excerpt replay" in `src/bin/rig.rs`.
 stim-excerpt = []
-# Remove parameter smoothing from the excerpt replay's effect (TASK-019.03.01), so a knob override
+# Remove parameter smoothing from the excerpt replay's effect, so a knob override
 # steps the parameter instantly. An intentionally click-prone build, used only to prove the
 # discontinuity detector can see what smoothing hides. Additive and never in `default`; it changes
 # nothing without `stim-excerpt`. See "Replay effect" in `src/bin/rig.rs`.
@@ -63,7 +63,7 @@ unsmoothed-params = []
 # `Error: No connected probes were found.` Only `debug = 2` is silent. Locations are worth
 # having, so `2` ships.
 #
-# Cost, measured 2026-09-13 against the RTT-only image (`--no-default-features --features
+# Cost, measured against the RTT-only image (`--no-default-features --features
 # "seed3 log-defmt"`), one fresh target dir per row, `main.bin` cut by `make build`'s plain
 # `-O binary` with no section list:
 #
@@ -73,8 +73,8 @@ unsmoothed-params = []
 #   1                   -C debuginfo=1                  4,738,792  4,476,827    1,183,176      48,124
 #   2 (shipped)         -C debuginfo=2                  9,496,376  9,233,747    3,559,850      48,360
 #
-# Read the table as one snapshot of one commit. Every cell above was re-cut on 2026-09-13; the
-# copy it replaced, cut 2026-09-12 and partly at `a1376f3`, said 48,084 / 48,084 / 48,228 / 48,320
+# Read the table as one snapshot of one commit. Every cell above was re-cut; the
+# copy it replaced, partly cut at `a1376f3`, said 48,084 / 48,084 / 48,228 / 48,320
 # down the `main.bin` column and `.text` 39,096 in the shipped row. Both sets are quoted rather than
 # one deleted because the gap is code added between the measurements, not a dispute about either,
 # and 48,360 is what `firmware/Makefile` reports today for the same feature set. Setting
@@ -105,8 +105,8 @@ unsmoothed-params = []
 #
 # Deliberately no `strip`, `panic` or `lto`: the custom #[panic_handler] assumes the default
 # unwinding strategy, and changing it is a call to make after someone has seen a real backtrace
-# (TASK-037). Whether `2` decodes a panic backtrace further than line tables did is also
-# TASK-037's to measure; its notes carry why probe-rs #896/#2274/#3309 make a truncated trace
+# (open question). Whether `2` decodes a panic backtrace further than line tables did is also
+# still to be measured; the notes carry why probe-rs #896/#2274/#3309 make a truncated trace
 # normal at any level.
 debug = 2
 
@@ -116,8 +116,8 @@ asperitas-pod = { path = "../crates/asperitas-pod", features = ["pod-hw"] }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"
 daisy-embassy = { git = "https://github.com/daisy-embassy/daisy-embassy", branch = "master", features = ["seed3"] }
-# `executor-interrupt` is for `rig`, whose audio callback runs on an `InterruptExecutor` woken by
-# SAI1. It changes the compiled executor unit for every binary here, which is why CI's two firmware
+# `executor-interrupt` is for the audio callback, which runs on an `InterruptExecutor` woken by
+# SAI1 in every audio binary. It changes the compiled executor unit for every binary here, which is why CI's two firmware
 # builds (neither of which passes `--bin`) are what prove the other five still link.
 embassy-executor = { version = "0.10.0", features = ["platform-cortex-m", "executor-thread", "executor-interrupt"] }
 embassy-stm32 = { version = "0.6.0", features = ["stm32h750ib", "memory-x", "exti"] }
@@ -130,12 +130,12 @@ asperitas-replay = { path = "../crates/asperitas-replay" }
 # `defmt 0.3.100` (Cargo.lock:279) beside our 1.1.1, pulled by two of our own transitive deps:
 # embassy-stm32's `defmt` feature enables stm32-metapac's, and embassy-net-driver asks for 0.3
 # directly (reproduce with `cargo tree -e features -i defmt@0.3.100 --features seed3,log-defmt`,
-# measured 2026-09-12). That 0.3 is a shim over 1.x, so the wire format is still single-major; its
+# measured). That 0.3 is a shim over 1.x, so the wire format is still single-major; its
 # own docs say so (`defmt-0.3.100/src/lib.rs:9-11`): "This is a defmt-0.3 compatbility [sic]
 # crate. It depends upon `defmt-1.0` and re-exports the items that were available in `defmt-0.3`.
 # This allows you to mix defmt-0.3 and defmt-1.0 within the same compilation." Its sole lock entry
 # dependency is `defmt 1.1.1` (Cargo.lock:283-285). Both parents are at their latest published
-# versions as of 2026-09-12 - embassy-net-driver 0.2.0, stm32-metapac 21.0.0 - so removing the shim
+# versions - embassy-net-driver 0.2.0, stm32-metapac 21.0.0 - so removing the shim
 # is waiting on upstream, not a bump we can make.
 defmt = "1"
 # The RTT logger: supplies `_defmt_write` / `_defmt_acquire` / `_defmt_release` / `_defmt_flush`.
@@ -149,7 +149,7 @@ defmt-rtt = { version = "1", optional = true }
 embassy-time = "0.5"
 embassy-futures = "0.1"
 # `rig` keeps its QSPI flash handle in a `Mutex<ThreadModeRawMutex, _>` so the excerpt install task
-# and the replay refill (TASK-038.04.03.02) can share it. Major 0.6 on purpose: it is the one
+# and the replay refill can share it. Major 0.6 on purpose: it is the one
 # asperitas-logging already links, so this adds an edge to the graph and no new crate.
 embassy-sync = "0.6"
 static_cell = "2"

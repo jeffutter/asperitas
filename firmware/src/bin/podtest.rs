@@ -39,7 +39,7 @@ const LED_COLORS: [Led2Color; 8] = [
 /// silent detent drops (see `crates/asperitas-pod/src/encoder.rs`).
 ///
 /// Used with `embassy_time::Ticker::every()` for fixed-period scheduling;
-/// work duration does not accumulate drift into the interval (TASK-025).
+/// work duration does not accumulate drift into the interval.
 const POLL_INTERVAL_MS: u64 = 1;
 
 /// Throttle factor for knob-value logging over USB CDC.
@@ -60,11 +60,11 @@ const LED_TICKS_PER_COLOR: u32 = 1000;
 const ENCRAW_MAX_LINES_PER_DETENT: u32 = 4;
 
 /// Deliberate detents per second a hand can turn while keeping the clicks
-/// discrete — the fast end of what TASK-029's capture protocol asks for.
+/// discrete — the fast end of what the capture protocol asks for.
 const ENCRAW_MAX_DETENTS_PER_SECOND: u32 = 10;
 
 /// Worst-case `ENCRAW` rate during deliberate turning: 4 lines/detent × 10
-/// detents/s = **40 lines/s**, against the ~58 lines/s at which the 2026-08-08
+/// detents/s = **40 lines/s**, against the ~58 lines/s at which the bench
 /// capture lost about 8.8% of its lines (13968 delivered over 240 s, measured
 /// across all line types — see
 /// `backlog/tasks/task-018.04 - Verify-every-Pod-control-on-hardware.md`).
@@ -89,7 +89,7 @@ const _: () = assert!(ENCRAW_WORST_CASE_LINES_PER_SECOND < 58);
 ///
 /// ASCII bits rather than a decimal number because the Gray walk is the thing
 /// being read off a capture: `00 01 11 10` reads as a clockwise cycle at a
-/// glance, which is how TASK-029 measures per-detent cluster shape and the
+/// glance, which is how the capture protocol measures per-detent cluster shape and the
 /// shaft's mechanical rest state.
 const ENCRAW_STATE_LABELS: [&str; 4] = ["00", "01", "10", "11"];
 
@@ -120,7 +120,7 @@ async fn main(spawner: embassy_executor::Spawner) {
     // Linger on the pre-init red so it can actually be seen. Boot takes a few
     // milliseconds, so without the delay red → green reads as "always green"
     // and the two stages can't be distinguished by eye — which is exactly what
-    // TASK-018.04 AC #6 asks a human to confirm. Mirrors main.rs.
+    // A human confirms this on the bench. Mirrors main.rs.
     #[cfg(feature = "slow-boot")]
     embassy_time::Timer::after_secs(3).await;
 
@@ -170,7 +170,7 @@ async fn main(spawner: embassy_executor::Spawner) {
 
     // Main polling loop — ~1 kHz (ControlSurface contract).
     // Uses Ticker for fixed-period scheduling so work duration does not
-    // accumulate drift into the poll interval (see TASK-025).
+    // accumulate drift into the poll interval.
     let mut ticker =
         embassy_time::Ticker::every(embassy_time::Duration::from_millis(POLL_INTERVAL_MS));
     let mut tick: u32 = 0;
@@ -189,7 +189,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         color_name(LED_COLORS[color_idx])
     );
 
-    // Bound catch-up bursts after executor stalls (TASK-026).
+    // Bound catch-up bursts after executor stalls.
     let mut last_tick = embassy_time::Instant::now();
 
     let poll_fut = async {
@@ -204,7 +204,7 @@ async fn main(spawner: embassy_executor::Spawner) {
             // serial readable.
             //
             // Logged as RAW ADC counts, not normalised permille. Jitter is the
-            // measurement this harness exists for (TASK-018.04 AC #2), and
+            // measurement this harness exists for, and
             // permille quantises to 1/1000 — coarse enough to floor the very
             // number being measured. Full scale is 65535; see
             // asperitas_pod::knob::POT_FULL_SCALE_COUNTS.
@@ -217,7 +217,7 @@ async fn main(spawner: embassy_executor::Spawner) {
             controls.poll(|event| match event {
                 ControlEvent::EncoderDelta(delta) => {
                     // Units are physical DETENTS, not quadrature transitions:
-                    // one per click, clockwise positive (TASK-024). TASK-029's
+                    // one per click, clockwise positive. The capture protocol's
                     // capture reads this ratio off the board.
                     info!("[podtest] t={} ENC {:+}", now_ms, delta);
                 }

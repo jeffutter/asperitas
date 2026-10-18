@@ -49,7 +49,7 @@
 //! **An RTT build with `DEFMT_LOG` unset carries ERROR frames only.** When the variable is absent
 //! entirely, defmt-macros uses `LEVEL_WHEN_NOTHING_IS_SPECIFIED = Some(Level::Error)`
 //! (defmt-macros-1.1.1 src/function_like/log/env_filter.rs:35), so four of this module's five arms
-//! expand to nothing and only `log::error!` survives. Measured 2026-09-12 on `main.bin` from
+//! expand to nothing and only `log::error!` survives. Measured on `main.bin` from
 //! `make build NO_DEFAULT=1 FEATURES="seed3 log-defmt"`, at the shipped `[profile.release]
 //! debug = 2`: an unset build and a `DEFMT_LOG=error` build are the same
 //! size exactly (48320 bytes); `warn` is 48376, `debug` 48380, `trace` 49748, `off` 44740, and
@@ -58,7 +58,7 @@
 //! Treat those as one set of numbers at one DWARF level. The same seven builds at
 //! `debug = "line-tables-only"` came out 48084 (unset and `error` alike), `warn` 48136, `info`
 //! 48304, `debug` 48984, `trace` 49712, `off` 44592, with `info` above the baseline instead of
-//! under it. Debug info perturbs codegen - TASK-054's table in `firmware/Cargo.toml` is that
+//! under it. Debug info perturbs codegen - the table in `firmware/Cargo.toml` is that
 //! measurement - so a size claim here is good for the profile it was taken at, and re-measuring
 //! costs about 20 seconds.
 //!
@@ -172,7 +172,7 @@ pub(crate) fn emit(record: &log::Record) {
 /// Reaching defmt from a panic that happened *inside* a defmt frame hits defmt-rtt's
 /// reentrancy check and panics again — a recursive panic, not a quiet loss. Nothing here can
 /// detect that without keeping state the handler would have to trust after a stack unwind, so
-/// the trade stands as it does for the LED write beside it: best effort, and TASK-037 is where
+/// the trade stands as it does for the LED write beside it: best effort, and the RTT probe path is where
 /// anyone finds out whether it bites.
 pub(crate) fn emit_panic(body: &[u8]) {
     emit_frame(Level::Error, body);
