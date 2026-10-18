@@ -340,113 +340,32 @@ gate push cargo-doc "=== cargo doc (workspace) ===" \
 gate push cargo-doc-all-features "=== cargo doc (workspace, all features) ===" \
   env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude asperitas-measure --no-deps --all-features
 
-# rig's non-default stimulus generators and its shortened capture window. Exactly one generator links
-# per image (rig.rs rejects two at compile time), so the sweep and the pulse train are code no other
-# build compiles: the pair below links rig with the implicit sine only. These four are the only builds
-# that prove the capture path, its rate gates and its flash footprint still hold with the other
-# generators in, that `ASP_RIG_CAPTURE_SECONDS` still passes the ring gate when shortened, and that its
-# `ring` arm (TASK-038.07.01: capture until no Free block remains) still compiles and links. The pulse
-# train sat 197 bytes under the 128 KB flash until TASK-038.03.02.04, so its build is a size gate as much
-# as a compile gate. Each builds into its own target directory.
-# The bootloaded link layout (firmware/memory-bootloaded.x, TASK-038.04.07.02): main, blinky and rig's
-# three stimulus sets built for the stock Daisy bootloader and each built into its own target directory and
-# graded by the load-address gate. rig is the reason it exists - with the excerpt install path it no
-# longer fits the 128 KB internal flash.
-gate push bootloaded-builds "=== firmware bootloaded layout builds ===" scripts/check-bootloaded-builds.sh
+# Every firmware image variant -- layout, cfg set, ASP_RIG_* build inputs, binaries -- is a row of
+# scripts/firmware-variants.table, and these four gates just run the driver over it. A new binary or
+# variant is a table edit and no gate here changes. The coverage check is source-level and builds nothing,
+# so it runs at the commit tier: it fails when a src/bin file has no row that builds, lints and grades it.
+gate commit firmware-variants-coverage "=== firmware variants cover every src/bin ===" \
+  scripts/firmware-variants.sh check
 
-# TASK-076: main's audio callback stays on its own interrupt executor. On the thread executor it starved
-# usb::run() and the console never enumerated in the bootloaded layout. Source-level, so it runs without
-# a board.
+# Cross-builds, each into its own target directory (see vd above), so the bench's `make probe-*`
+# decodes the ELF of the variant it names whatever ran after.
+gate push firmware-builds "=== firmware builds (every variant) ===" scripts/firmware-variants.sh build
 
-gate push rig-stim-ess-build "=== firmware rig build (stim-ess) ===" -C firmware \
-  env ASPERITAS_LAYOUT=bootloaded cargo build --release --target-dir $(vd bootloaded 0 seed3,stim-ess) --features seed3,stim-ess --bin rig
+# Where the images load. Asserts no file-backed section loads outside the layout's region parsed from
+# firmware/memory-internal.x or memory-bootloaded.x, that `.sram1_bss` stays NOBITS when present, and that
+# each plain `-O binary` image is exactly as long as the highest flash LMA end implies -- the invariant
+# whose absence made `main.bin` 469,763,536 bytes of mostly zeros with every gate green. Reads the artifacts
+# the gate above wrote and asks cargo for nothing: bare `rust-objdump` / `rust-objcopy` only, because the
+# cargo forms rebuild. A missing ELF is a hard failure, never a skip. `push` tier because pre-commit builds
+# no firmware. Its parser's own assertions are the commit-tier `load-addresses --selftest` gate.
+gate push image-load-addresses "=== image load addresses (every variant) ===" scripts/firmware-variants.sh grade
 
-gate push rig-stim-pulse-build "=== firmware rig build (stim-pulse) ===" -C firmware \
-  env ASPERITAS_LAYOUT=bootloaded cargo build --release --target-dir $(vd bootloaded 0 seed3,stim-pulse) --features seed3,stim-pulse --bin rig
-
-# The replay generator (TASK-038.04.03.02). Its console build is a row in the bootloaded matrix above, which
-# also grades its load addresses; this is the RTT-only one, where the emit shim discards. Slot 13 rather than
-# the default, so the build also proves a non-default `ASP_RIG_EXCERPT_SLOT` parses.
-# The replay effect on the default sine (TASK-019.03.05): the stage every generator now carries, and the
-# unsmoothed variant the soak's negative control is taken on. The plain sine is the bootloaded matrix row.
-gate push rig-sine-unsmoothed-build "=== firmware rig build (sine, unsmoothed-params) ===" -C firmware \
-  env ASPERITAS_LAYOUT=bootloaded cargo build --release --target-dir $(vd bootloaded 0 seed3,unsmoothed-params) --features seed3,unsmoothed-params --bin rig
-
-gate push rig-stim-excerpt-rtt-build "=== firmware rig build (stim-excerpt, RTT-only) ===" -C firmware \
-  env ASPERITAS_LAYOUT=bootloaded ASP_RIG_EXCERPT_SLOT=13 cargo build --release --target-dir $(vd bootloaded 1 seed3,log-defmt,stim-excerpt slot13) --no-default-features --features seed3,log-defmt,stim-excerpt --bin rig
-
-# The unsmoothed-parameter variant of the replay effect (TASK-019.03.01): the step-prone build the
-# discontinuity detector's sensitivity proof needs. The default replay build is the bootloaded matrix row.
-gate push rig-stim-excerpt-unsmoothed-build "=== firmware rig build (stim-excerpt, unsmoothed-params) ===" -C firmware \
-  env ASPERITAS_LAYOUT=bootloaded ASP_RIG_EXCERPT_SLOT=13 cargo build --release --target-dir $(vd bootloaded 0 seed3,stim-excerpt,unsmoothed-params slot13) --features seed3,stim-excerpt,unsmoothed-params --bin rig
-
-gate push rig-window-override-build "=== firmware rig build (shortened capture window) ===" -C firmware \
-  env ASPERITAS_LAYOUT=bootloaded ASP_RIG_CAPTURE_SECONDS=30 cargo build --release --target-dir $(vd bootloaded 0 seed3 capture30) --features seed3 --bin rig
-
-gate push rig-ring-fill-build "=== firmware rig build (ring-fill capture window) ===" -C firmware \
-  env ASPERITAS_LAYOUT=bootloaded ASP_RIG_CAPTURE_SECONDS=ring cargo build --release --target-dir $(vd bootloaded 0 seed3 capture-ring) --features seed3 --bin rig
-
-# One spelling of the RTT-only cfg set, shared by every gate that builds, lints or grades it.
-RTT_ONLY_FEATURES="seed3 log-defmt"
-
-# The console and RTT-only cross-builds, each into its own target directory (see vd above), so the
-# bench's `make probe-*` decodes the ELF of the variant it names whatever ran after.
-# rig is left out of the console build: with the excerpt install path it no longer links into the 128 KB
-# internal flash, and the bootloaded-builds gate above builds it for the layout it does fit.
-gate push firmware-cross-compile "=== firmware cross-compile ===" -C firmware \
-  cargo build --release --target-dir "$(vd internal 0 seed3)" --features seed3 --bin main --bin blinky --bin podtest --bin ledtest --bin panictest
-
-# The RTT-only image is the only build that links build.rs's `-Tdefmt.x` fragment and the
-# `#[cfg(not(feature = "log-defmt"))]` logger stubs in the same binary; the console build above
-# leaves both uncompiled. DEFMT_LOG is deliberately unset: it selects which frames get compiled in,
-# not whether this compiles.
-gate push firmware-cross-compile-rtt "=== firmware cross-compile (RTT-only, log-defmt) ===" -C firmware \
-  cargo build --release --target-dir "$(vd internal 1 "$RTT_ONLY_FEATURES")" --no-default-features --features "$RTT_ONLY_FEATURES"
-
-# Where the six images load. Asserts no file-backed section loads outside the FLASH region parsed from
-# firmware/memory-internal.x, that `.sram1_bss` stays NOBITS when present, and that each plain `-O binary`
-# image is exactly as long as the highest flash LMA end implies -- the invariant whose absence made
-# `main.bin` 469,763,536 bytes of mostly zeros with every gate green (TASK-059). Reads the artifacts the
-# RTT-only build above wrote - the one variant that links all six binaries - and asks cargo for
-# nothing: bare `rust-objdump` / `rust-objcopy` only, because the cargo forms rebuild.
-#
-# `push` tier and placed here because pre-commit builds no firmware, so the ELFs it reads may not exist
-# at all -- and inventing a skip path for that is the blind spot TASK-062 had to remove from elf-check.
-# It costs twelve child
-# processes, six objdumps and six objcopies. Its parser's own assertions are a separate commit-tier gate,
-# `=== load-addresses --selftest ===`, placed with the other selftests ahead of every cargo invocation --
-# which is where a check with no inputs to wait for belongs; this one stays the only place that grades the
-# six linked images.
-gate push image-load-addresses "=== image load addresses ===" \
-  bash scripts/check-image-load-addresses.sh --target-dir "firmware/$(vd internal 1 "$RTT_ONLY_FEATURES")"
-
-# Lint the same two cfg sets the two builds above just compiled, into the same target directories and
-# placed after them so clippy reuses their artifacts: cheap when nothing has changed since the last lint, several times dearer directly
-# after a build, and tens of seconds in a fresh target dir. --bins is the whole package over there (no lib target, six entries under src/bin/), and
-# --all-targets is unusable on a no_std target with no test harness to link. firmware/ is a second
-# workspace, so every host clippy above says nothing about the six bins that actually run on the
-# board. The RTT-only cfg set is where TASK-036.03's warnings actually surfaced, so linting only the
-# console build leaves it unchecked. Landed with TASK-060.03.
-gate commit firmware-clippy "=== firmware clippy (all bins) ===" -C firmware \
-  cargo clippy --release --target-dir "$(vd internal 0 seed3)" --features seed3 --bins -- -D warnings
-
-gate commit firmware-clippy-rtt "=== firmware clippy (all bins, RTT-only, log-defmt) ===" -C firmware \
-  cargo clippy --release --target-dir "$(vd internal 1 "$RTT_ONLY_FEATURES")" --no-default-features --features "$RTT_ONLY_FEATURES" --bins -- -D warnings
-
-# The stimulus code the two cfg sets above never compile: each generator behind its own feature, linted
-# with the same -D warnings so a sweep- or pulse-only warning cannot hide until someone builds that
-# image. --bin rig because no other binary reads those features.
-gate commit rig-stim-ess-clippy "=== firmware clippy (rig, stim-ess) ===" -C firmware \
-  cargo clippy --release --target-dir "$(vd internal 0 seed3,stim-ess)" --features seed3,stim-ess --bin rig -- -D warnings
-
-gate commit rig-stim-pulse-clippy "=== firmware clippy (rig, stim-pulse) ===" -C firmware \
-  cargo clippy --release --target-dir "$(vd internal 0 seed3,stim-pulse)" --features seed3,stim-pulse --bin rig -- -D warnings
-
-gate commit rig-stim-excerpt-clippy "=== firmware clippy (rig, stim-excerpt) ===" -C firmware \
-  cargo clippy --release --target-dir "$(vd internal 0 seed3,stim-excerpt)" --features seed3,stim-excerpt --bin rig -- -D warnings
-
-gate commit rig-stim-excerpt-clippy-rtt "=== firmware clippy (rig, stim-excerpt, RTT-only) ===" -C firmware \
-  cargo clippy --release --target-dir "$(vd internal 1 seed3,log-defmt,stim-excerpt)" --no-default-features --features seed3,log-defmt,stim-excerpt --bin rig -- -D warnings
+# Lint after the builds so clippy reuses their dependency artifacts: cheap when nothing changed since the
+# last lint, several times dearer directly after a build, and tens of seconds in a fresh target dir.
+# --bins is the whole package (no lib target), and --all-targets is unusable on a no_std target with no
+# test harness to link. firmware/ is a second workspace, so every host clippy above says nothing about the
+# bins that actually run on the board.
+gate commit firmware-clippy "=== firmware clippy (every variant) ===" scripts/firmware-variants.sh clippy
 
 gate push cargo-test "=== cargo test ===" cargo test --workspace
 

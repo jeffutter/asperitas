@@ -164,7 +164,7 @@ all: build
 ## `LAYOUT=bootloaded` links the same sources into the 480K AXI SRAM image the stock Daisy bootloader
 ## copies from QSPI (memory-bootloaded.x). Measured 2026-10-15, `-O binary`, FEATURES="seed3":
 ## blinky 78,438, main 107,621, rig 125,762 (stim-ess 127,586, stim-pulse 125,986), against 491,520.
-## scripts/check-bootloaded-builds.sh builds that matrix and requires 2 KB spare in each.
+## scripts/firmware-variants.sh builds that matrix (scripts/firmware-variants.table) and requires 2 KB spare in each.
 ##
 ## The output carries `$(BINARY)` in its name so the artifact cannot outlive the command that made
 ## it. See the note beside `BINARY` above.

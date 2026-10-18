@@ -1351,7 +1351,7 @@ async fn run_install(inbound: asperitas_logging::usb::InboundReceiver) {
 // default memory map. It is deliberately not the DTCM that plain `.bss` is under the bootloaded layout
 // (TASK-074): MDMA, the master `Flash::read_async` uses, reaches the TCMs only through its separate AHBS
 // port, DMA1/DMA2 cannot reach DTCM at all, and nothing here confirmed from RM0433 that an MDMA refill into
-// DTCM lands. `scripts/check-bootloaded-builds.sh` checks the symbol's address in the bootloaded image.
+// DTCM lands. `scripts/firmware-variants.sh` (the `replay` action) checks the symbol's address in the bootloaded image.
 // The argument for either cache state, which `fill_half` carries out:
 //
 // * D-cache off (nothing in this stack enables it today; RIGCFG reports the live bit): MDMA's writes

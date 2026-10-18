@@ -1,0 +1,44 @@
+# Every firmware image variant the gates build, lint and grade. One row per variant;
+# scripts/firmware-variants.sh reads it and nothing else names a firmware build.
+#
+# Columns, whitespace separated, `-` for empty:
+#
+#   layout    internal or bootloaded (ASPERITAS_LAYOUT; the link script)
+#   rtt       1 builds with --no-default-features (the RTT-only, log-defmt cfg set), 0 with defaults
+#   features  cargo features, comma separated
+#   tag       names an input that changes the image without being a feature (the ASP_RIG_* variables);
+#             part of the target directory name (scripts/variant-dir.sh)
+#   env       NAME=value,NAME=value exported to the build and the lint
+#   bins      comma separated binary names; `*` is every firmware/src/bin/*.rs, and `-name` drops one
+#             from it, so `*,-rig` is every binary except rig
+#   actions   comma separated, any of:
+#               build    cargo build --release
+#               clippy   cargo clippy --release -D warnings
+#               grade    scripts/check-image-load-addresses.sh on the built ELFs
+#               replay   rig's REPLAY staging buffer sits in the AXI tail (bootloaded layout only)
+#
+# A binary under src/bin with no row that builds it, lints it and grades it fails
+# `scripts/firmware-variants.sh check`. The `*` rows below cover a new binary with no edit here; a new
+# feature set or environment variant is one new row.
+#
+# rig is left out of the internal console build: with the excerpt install path it no longer fits the
+# 128 KB internal flash, and the bootloaded rows build it for the layout it does fit. Exactly one
+# stimulus generator links per rig image (rig.rs rejects two at compile time), so each generator's
+# row is the only build that compiles that code. The RTT-only internal row is the one build that
+# links build.rs's `-Tdefmt.x` fragment and the logger stubs behind `not(feature = "log-defmt")`
+# in every binary.
+
+# layout     rtt  features                              tag       env                         bins                    actions
+internal     0    seed3                                 -         -                           *,-rig                  build
+internal     0    seed3                                 -         -                           *                       clippy
+internal     1    seed3,log-defmt                       -         -                           *                       build,grade,clippy
+
+bootloaded   0    seed3                                 -         -                           blinky,main,rig         build,grade
+bootloaded   0    seed3,stim-ess                        -         -                           rig                     build,grade,clippy
+bootloaded   0    seed3,stim-pulse                      -         -                           rig                     build,grade,clippy
+bootloaded   0    seed3,stim-excerpt                    -         -                           rig                     build,grade,clippy,replay
+bootloaded   0    seed3,unsmoothed-params               -         -                           rig                     build,grade
+bootloaded   1    seed3,log-defmt,stim-excerpt          slot13    ASP_RIG_EXCERPT_SLOT=13     rig                     build,grade,clippy
+bootloaded   0    seed3,stim-excerpt,unsmoothed-params  slot13    ASP_RIG_EXCERPT_SLOT=13     rig                     build,grade
+bootloaded   0    seed3                                 capture30 ASP_RIG_CAPTURE_SECONDS=30  rig                     build,grade
+bootloaded   0    seed3                                 capture-ring ASP_RIG_CAPTURE_SECONDS=ring rig                 build,grade

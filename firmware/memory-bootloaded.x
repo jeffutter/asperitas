@@ -48,7 +48,7 @@ SECTIONS {
  * does that), and a refill that lands nowhere would play zeros. AXI SRAM is reached by MDMA's ordinary
  * master port. NOLOAD, no AT>: the image is not grown, and rig zeroes the section itself at boot
  * (`excerpt_play::zero_staging`) because cortex-m-rt zeroes only [__sbss, __ebss). The region LENGTH is the
- * overflow check: the linker refuses a staging that does not fit. scripts/check-bootloaded-builds.sh
+ * overflow check: the linker refuses a staging that does not fit. scripts/firmware-variants.sh
  * checks the symbol's final address. */
 SECTIONS {
   .replay_bss (NOLOAD) : ALIGN(32) {
