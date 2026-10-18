@@ -7,8 +7,9 @@
 //! it. The format only earns the word "self-verifying" because something acts on that proof, and
 //! this is that something.
 
+use asperitas_wire::body::BodyReader;
 use asperitas_wire::dump::{
-    decode, max_raw_for, BodyReader, DecodeError, AUDEND_PREFIX, AUDIO_HEADER_LEN, AUDIO_PREFIX,
+    decode, max_raw_for, DecodeError, AUDEND_PREFIX, AUDIO_HEADER_LEN, AUDIO_PREFIX,
     BLK_HEX_DIGITS, BYTES_DEC_DIGITS, CHUNK_RAW, COUNT_FIELD_MODULUS, COUNT_HEX_DIGITS,
     CRC_HEX_DIGITS, MAX_AUDEND_BODY_LEN, SEP_BYTES, SEP_C, SEP_CRC16, SEP_D, SEP_N,
 };

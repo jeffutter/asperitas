@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 533138b6d8d4b691d0d4afdbf21537b9a88f1362b489615fd38e8f579207549c # shrinks to c = OverrideSet { knob: 0, value: 0 }
+cc 76f845239fb0fde8e7dd38517a6ef6dc1e5d02745846b09513d5ea4bef7cf375 # shrinks to c = OverrideSet { knob: 0, value: 0 }

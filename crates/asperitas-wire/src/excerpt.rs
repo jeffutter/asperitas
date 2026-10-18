@@ -128,9 +128,8 @@
 //! QSPI-to-encoder path delivered the excerpt intact and in order. They prove nothing about the
 //! codec, the analog path or the cable.
 
-use crate::dump::{
-    decode, encode, encoded_len, put, put_decimal, put_hex, BodyReader, DecodeError,
-};
+use crate::body::{BodyReader, BodyWriter};
+use crate::dump::{decode, encode, encoded_len, DecodeError};
 use crate::frame::{check_decimal_fits, check_hex_width, crc16_ccitt, MAX_BODY};
 
 mod install;
@@ -544,16 +543,16 @@ pub fn exc_start_body(
         return Err(RecordError::SlotOutOfRange { slot });
     }
     check_pcm_len(bytes).map_err(RecordError::Length)?;
-    let dst = &mut out[..];
-    let mut at = put(dst, 0, START_PREFIX);
-    at = put_hex(dst, at, u32::from(slot), SLOT_HEX_DIGITS);
-    at = put(dst, at, SEP_NAME);
-    at = put(dst, at, name.as_bytes());
-    at = put(dst, at, SEP_BYTES);
-    at = put_decimal(dst, at, bytes, BYTES_DEC_DIGITS);
-    at = put(dst, at, SEP_CRC16);
-    at = put_hex(dst, at, u32::from(crc16), CRC_HEX_DIGITS);
-    Ok(at)
+    let mut w = BodyWriter::new(&mut out[..]);
+    w.put(START_PREFIX);
+    w.hex(u32::from(slot), SLOT_HEX_DIGITS);
+    w.put(SEP_NAME);
+    w.put(name.as_bytes());
+    w.put(SEP_BYTES);
+    w.decimal(bytes, BYTES_DEC_DIGITS);
+    w.put(SEP_CRC16);
+    w.hex(u32::from(crc16), CRC_HEX_DIGITS);
+    Ok(w.filled())
 }
 
 /// Write `EXCDATA i=.. b64=..` carrying `raw` into `out`, returning its length.
@@ -572,19 +571,22 @@ pub fn exc_data_body(
     if raw.len() > EXC_CHUNK_RAW {
         return Err(RecordError::ChunkTooLong { len: raw.len() });
     }
-    let dst = &mut out[..];
-    let mut at = put(dst, 0, DATA_PREFIX);
-    at = put_hex(dst, at, u32::from(index), INDEX_HEX_DIGITS);
-    at = put(dst, at, SEP_B64);
+    let mut w = BodyWriter::new(&mut out[..]);
+    w.put(DATA_PREFIX);
+    w.hex(u32::from(index), INDEX_HEX_DIGITS);
+    w.put(SEP_B64);
     // Cannot fail: the length checks above bound the encoding inside MAX_DATA_BODY_LEN.
     let written =
-        encode(raw, &mut dst[at..]).map_err(|_| RecordError::ChunkTooLong { len: raw.len() })?;
-    Ok(at + written)
+        encode(raw, w.rest_mut()).map_err(|_| RecordError::ChunkTooLong { len: raw.len() })?;
+    w.advance(written);
+    Ok(w.filled())
 }
 
 /// Write `EXCEND` into `out`, returning its length.
 pub fn exc_end_body(out: &mut [u8; MAX_BODY]) -> usize {
-    put(&mut out[..], 0, END_BODY)
+    let mut w = BodyWriter::new(&mut out[..]);
+    w.put(END_BODY);
+    w.filled()
 }
 
 /// Parse one frame body as an excerpt record.

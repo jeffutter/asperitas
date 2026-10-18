@@ -35,7 +35,7 @@ use core::panic::PanicInfo;
 use core::fmt::Write;
 
 #[cfg(any(feature = "log-usb", feature = "log-defmt"))]
-use asperitas_wire::TruncWriter;
+use asperitas_wire::body::BodyWriter;
 
 /// Size of the panic message buffer, in bytes.
 ///
@@ -113,7 +113,7 @@ pub fn handle_panic(info: &PanicInfo) -> ! {
 fn format_panic_message(info: &PanicInfo) -> ([u8; PANIC_MSG_BUF], usize) {
     let mut buf = [0u8; PANIC_MSG_BUF];
 
-    let mut w = TruncWriter::new(&mut buf);
+    let mut w = BodyWriter::new(&mut buf);
     let _ = core::write!(w, "PANIC: {}", info.message());
     if let Some(loc) = info.location() {
         let _ = core::write!(w, " at {}:{}:{}", loc.file(), loc.line(), loc.column());

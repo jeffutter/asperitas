@@ -62,7 +62,7 @@ use super::{
     parse_record, slot_base, slot_pcm_base, ExcRecord, RecordError, SlotHeader, Tag, EXC_CHUNK_RAW,
     HEADER_LEN, SECTOR,
 };
-use crate::dump::{put, put_decimal, put_hex};
+use crate::body::BodyWriter;
 use crate::frame::{crc16_ccitt_update, CRC16_INITIAL, MAX_BODY};
 
 const SECTOR_BYTES: usize = SECTOR as usize;
@@ -436,26 +436,27 @@ const _: () = assert!(MAX_FAIL_BODY_LEN <= MAX_BODY);
 
 /// Write `EXCOK name=<tag> bytes=<6 dec> crc16=<4 hex>` into `out`, returning its length.
 pub fn exc_ok_body(header: &SlotHeader, out: &mut [u8; MAX_BODY]) -> usize {
-    let dst = &mut out[..];
-    let mut at = put(dst, 0, OK_PREFIX);
-    at = put(dst, at, header.name().as_bytes());
-    at = put(dst, at, SEP_BYTES);
-    at = put_decimal(dst, at, header.pcm_bytes(), 6);
-    at = put(dst, at, SEP_CRC16);
-    put_hex(dst, at, u32::from(header.pcm_crc16()), 4)
+    let mut w = BodyWriter::new(&mut out[..]);
+    w.put(OK_PREFIX);
+    w.put(header.name().as_bytes());
+    w.put(SEP_BYTES);
+    w.decimal(header.pcm_bytes(), 6);
+    w.put(SEP_CRC16);
+    w.hex(u32::from(header.pcm_crc16()), 4);
+    w.filled()
 }
 
 /// Write `EXCFAIL got=<4 hex> want=<4 hex>`, plus ` why=<tag>` for anything but a plain CRC
 /// mismatch, into `out`, returning its length.
 pub fn exc_fail_body(failure: &Failure, out: &mut [u8; MAX_BODY]) -> usize {
-    let dst = &mut out[..];
-    let mut at = put(dst, 0, FAIL_PREFIX);
-    at = put_hex(dst, at, u32::from(failure.got), 4);
-    at = put(dst, at, SEP_WANT);
-    at = put_hex(dst, at, u32::from(failure.want), 4);
+    let mut w = BodyWriter::new(&mut out[..]);
+    w.put(FAIL_PREFIX);
+    w.hex(u32::from(failure.got), 4);
+    w.put(SEP_WANT);
+    w.hex(u32::from(failure.want), 4);
     if let Some(tag) = failure.why.tag() {
-        at = put(dst, at, SEP_WHY);
-        at = put(dst, at, tag.as_bytes());
+        w.put(SEP_WHY);
+        w.put(tag.as_bytes());
     }
-    at
+    w.filled()
 }

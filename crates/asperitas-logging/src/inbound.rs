@@ -49,7 +49,7 @@
 //! records. Like the console counters they are cumulative since boot and saturate rather than
 //! wrap; see `console`'s module docs for why.
 
-use core::sync::atomic::{AtomicU32, Ordering};
+use asperitas_wire::counter::SaturatingCounter;
 
 use asperitas_wire::frame::{Decoder, Stats};
 pub use asperitas_wire::inbound::InboundRecord;
@@ -79,11 +79,11 @@ pub struct InboundCounters {
 /// [`asperitas_wire::console::ConsoleStats`]: single core, snapshotted, ordering nothing.
 #[derive(Debug, Default)]
 pub struct InboundStats {
-    records: AtomicU32,
-    bad_frames: AtomicU32,
-    resyncs: AtomicU32,
-    discarded_bytes: AtomicU32,
-    ep_errors: AtomicU32,
+    records: SaturatingCounter,
+    bad_frames: SaturatingCounter,
+    resyncs: SaturatingCounter,
+    discarded_bytes: SaturatingCounter,
+    ep_errors: SaturatingCounter,
 }
 
 /// The device's inbound counters, written by `usb.rs`'s reader.
@@ -93,11 +93,11 @@ impl InboundStats {
     /// Zeroed, as at boot.
     pub const fn new() -> Self {
         Self {
-            records: AtomicU32::new(0),
-            bad_frames: AtomicU32::new(0),
-            resyncs: AtomicU32::new(0),
-            discarded_bytes: AtomicU32::new(0),
-            ep_errors: AtomicU32::new(0),
+            records: SaturatingCounter::new(),
+            bad_frames: SaturatingCounter::new(),
+            resyncs: SaturatingCounter::new(),
+            discarded_bytes: SaturatingCounter::new(),
+            ep_errors: SaturatingCounter::new(),
         }
     }
 
@@ -109,24 +109,18 @@ impl InboundStats {
     /// Every counter in one read.
     pub fn snapshot(&self) -> InboundCounters {
         InboundCounters {
-            records: self.records.load(Ordering::Relaxed),
-            bad_frames: self.bad_frames.load(Ordering::Relaxed),
-            resyncs: self.resyncs.load(Ordering::Relaxed),
-            discarded_bytes: self.discarded_bytes.load(Ordering::Relaxed),
-            ep_errors: self.ep_errors.load(Ordering::Relaxed),
+            records: self.records.load(),
+            bad_frames: self.bad_frames.load(),
+            resyncs: self.resyncs.load(),
+            discarded_bytes: self.discarded_bytes.load(),
+            ep_errors: self.ep_errors.load(),
         }
     }
 }
 
-/// Add `n`, saturating at `u32::MAX`.
-fn add(counter: &AtomicU32, n: u64) {
-    let n = u32::try_from(n).unwrap_or(u32::MAX);
-    if n == 0 {
-        return;
-    }
-    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-        Some(v.saturating_add(n))
-    });
+/// Add a `u64` movement to `counter`, clamping it to `u32::MAX` first.
+fn add(counter: &SaturatingCounter, n: u64) {
+    counter.add(u32::try_from(n).unwrap_or(u32::MAX));
 }
 
 // ---------------------------------------------------------------------------

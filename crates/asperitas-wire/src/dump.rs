@@ -107,9 +107,10 @@
 
 use log::Level;
 
+use crate::body::BodyWriter;
 use crate::frame::{
-    self, check_decimal_fits, check_hex_width, parse_decimal, parse_hex, write_decimal, write_hex,
-    Encoded, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
+    self, check_decimal_fits, check_hex_width, Encoded, MAX_BODY, MAX_FRAME, PREFIX_LEN,
+    TRAILER_LEN,
 };
 
 /// The RFC 4648 §4 standard alphabet, in order. Index with a 6-bit value.
@@ -571,24 +572,6 @@ pub enum BodyError {
     BlockTooLarge { total_bytes: usize },
 }
 
-/// Append `template` at `at` in `dst`, returning the offset past it.
-pub(crate) fn put(dst: &mut [u8], at: usize, template: &[u8]) -> usize {
-    dst[at..at + template.len()].copy_from_slice(template);
-    at + template.len()
-}
-
-/// Append `value` as `digits` lowercase hex digits at `at`, returning the offset past them.
-pub(crate) fn put_hex(dst: &mut [u8], at: usize, value: u32, digits: usize) -> usize {
-    write_hex(value, &mut dst[at..at + digits]);
-    at + digits
-}
-
-/// Append `value` as `digits` decimal digits at `at`, returning the offset past them.
-pub(crate) fn put_decimal(dst: &mut [u8], at: usize, value: u32, digits: usize) -> usize {
-    write_decimal(value, &mut dst[at..at + digits]);
-    at + digits
-}
-
 /// Write an `AUDIO blk=… n=… c=… d=…` body into `out`, returning its length.
 ///
 /// One chunk of one block. `chunks` is how many chunks the block will have in total, `chunk_index`
@@ -626,22 +609,23 @@ pub fn audio_body(
         return Err(BodyError::ChunkTooLong { len: raw.len() });
     }
 
-    let dst = &mut out[..];
-    let mut at = 0usize;
-    at = put(dst, at, AUDIO_PREFIX);
-    at = put_hex(dst, at, block_index % BLOCK_ID_MODULUS, BLK_HEX_DIGITS);
-    at = put(dst, at, SEP_N);
-    at = put_hex(dst, at, chunks as u32, COUNT_HEX_DIGITS);
-    at = put(dst, at, SEP_C);
-    at = put_hex(dst, at, chunk_index as u32, COUNT_HEX_DIGITS);
-    at = put(dst, at, SEP_D);
+    let mut w = BodyWriter::new(&mut out[..]);
+    w.put(AUDIO_PREFIX);
+    w.hex(block_index % BLOCK_ID_MODULUS, BLK_HEX_DIGITS);
+    w.put(SEP_N);
+    w.hex(chunks as u32, COUNT_HEX_DIGITS);
+    w.put(SEP_C);
+    w.hex(chunk_index as u32, COUNT_HEX_DIGITS);
+    w.put(SEP_D);
 
     // The budget check above means this cannot fail; mapping rather than unwrapping keeps the
     // refusal path free of panics regardless.
-    let written = encode(raw, &mut dst[at..at + chars])
-        .map_err(|_| BodyError::ChunkTooLong { len: raw.len() })?;
+    let too_long = || BodyError::ChunkTooLong { len: raw.len() };
+    let payload = w.rest_mut().get_mut(..chars).ok_or_else(too_long)?;
+    let written = encode(raw, payload).map_err(|_| too_long())?;
     debug_assert_eq!(written, chars);
-    Ok(at + written)
+    w.advance(written);
+    Ok(w.filled())
 }
 
 /// Write an `AUDEND blk=… n=… bytes=… crc16=…` body into `out`, returning its length.
@@ -668,17 +652,16 @@ pub fn audend_body(
         });
     }
 
-    let dst = &mut out[..];
-    let mut at = 0usize;
-    at = put(dst, at, AUDEND_PREFIX);
-    at = put_hex(dst, at, block_index % BLOCK_ID_MODULUS, BLK_HEX_DIGITS);
-    at = put(dst, at, SEP_N);
-    at = put_hex(dst, at, chunks as u32, COUNT_HEX_DIGITS);
-    at = put(dst, at, SEP_BYTES);
-    at = put_decimal(dst, at, total_bytes, BYTES_DEC_DIGITS);
-    at = put(dst, at, SEP_CRC16);
-    at = put_hex(dst, at, u32::from(crc), CRC_HEX_DIGITS);
-    Ok(at)
+    let mut w = BodyWriter::new(&mut out[..]);
+    w.put(AUDEND_PREFIX);
+    w.hex(block_index % BLOCK_ID_MODULUS, BLK_HEX_DIGITS);
+    w.put(SEP_N);
+    w.hex(chunks as u32, COUNT_HEX_DIGITS);
+    w.put(SEP_BYTES);
+    w.decimal(total_bytes, BYTES_DEC_DIGITS);
+    w.put(SEP_CRC16);
+    w.hex(u32::from(crc), CRC_HEX_DIGITS);
+    Ok(w.filled())
 }
 
 /// Build and frame a complete `AUDIO` record, returning what landed in `frame`.
@@ -729,52 +712,4 @@ pub fn audend_record(
 ) -> Result<Encoded, BodyError> {
     let len = audend_body(block_index, chunks, total_bytes, crc, body)?;
     Ok(frame::encode(level, seq, now_ms, &body[..len], frame_buf))
-}
-
-/// Positional reader over a body's fixed-width skeleton.
-///
-/// On failure `at` stays where it was, which is what lets a caller point at the byte that broke
-/// the shape instead of merely reporting that something was wrong.
-pub struct BodyReader<'b> {
-    body: &'b [u8],
-    pub at: usize,
-}
-
-impl<'b> BodyReader<'b> {
-    pub fn new(body: &'b [u8]) -> Self {
-        Self { body, at: 0 }
-    }
-
-    /// Consume `template`, or fail without moving.
-    pub fn literal(&mut self, template: &[u8]) -> Option<()> {
-        let end = self.at.checked_add(template.len())?;
-        if self.body.get(self.at..end) == Some(template) {
-            self.at = end;
-            Some(())
-        } else {
-            None
-        }
-    }
-
-    /// Consume exactly `digits` lowercase hex digits. Uppercase is not in the grammar, so the frame
-    /// parser's rule is reused rather than restated: two spellings of “valid” is one too many.
-    pub fn hex(&mut self, digits: usize) -> Option<u32> {
-        let end = self.at.checked_add(digits)?;
-        let value = parse_hex(self.body.get(self.at..end)?)?;
-        self.at = end;
-        Some(value)
-    }
-
-    pub fn decimal(&mut self, digits: usize) -> Option<u32> {
-        let end = self.at.checked_add(digits)?;
-        let value = parse_decimal(self.body.get(self.at..end)?)?;
-        self.at = end;
-        Some(value)
-    }
-
-    /// Everything from here to the end of the body. Reached only after successful steps, so `at` is
-    /// inside the body by construction.
-    pub fn rest(&self) -> &'b [u8] {
-        &self.body[self.at..]
-    }
 }

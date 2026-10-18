@@ -101,7 +101,8 @@
 use core::fmt::Write;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::TruncWriter;
+use crate::body::BodyWriter;
+use crate::counter::SaturatingCounter;
 
 /// How many bytes of body a producer may format into.
 ///
@@ -147,11 +148,11 @@ pub struct ConsoleCounters {
 #[derive(Debug)]
 pub struct ConsoleStats {
     seq: AtomicU32,
-    records_sent: AtomicU32,
-    dropped_full: AtomicU32,
-    bytes_dropped: AtomicU32,
-    truncated: AtomicU32,
-    endpoint_errors: AtomicU32,
+    records_sent: SaturatingCounter,
+    dropped_full: SaturatingCounter,
+    bytes_dropped: SaturatingCounter,
+    truncated: SaturatingCounter,
+    endpoint_errors: SaturatingCounter,
 }
 
 /// The device's console state. Producers use it inside the record lock; the drain task
@@ -169,11 +170,11 @@ impl ConsoleStats {
     pub const fn new() -> Self {
         Self {
             seq: AtomicU32::new(0),
-            records_sent: AtomicU32::new(0),
-            dropped_full: AtomicU32::new(0),
-            bytes_dropped: AtomicU32::new(0),
-            truncated: AtomicU32::new(0),
-            endpoint_errors: AtomicU32::new(0),
+            records_sent: SaturatingCounter::new(),
+            dropped_full: SaturatingCounter::new(),
+            bytes_dropped: SaturatingCounter::new(),
+            truncated: SaturatingCounter::new(),
+            endpoint_errors: SaturatingCounter::new(),
         }
     }
 
@@ -199,7 +200,7 @@ impl ConsoleStats {
         clippy::panic
     )]
     pub fn record_committed(&self) {
-        bump(&self.records_sent);
+        self.records_sent.bump();
     }
 
     /// A record was refused because it did not fit. `bytes` is the size of the frame that
@@ -211,11 +212,9 @@ impl ConsoleStats {
         clippy::panic
     )]
     pub fn record_dropped_for_space(&self, bytes: usize) {
-        bump(&self.dropped_full);
-        add(
-            &self.bytes_dropped,
-            u32::try_from(bytes).unwrap_or(u32::MAX),
-        );
+        self.dropped_full.bump();
+        self.bytes_dropped
+            .add(u32::try_from(bytes).unwrap_or(u32::MAX));
     }
 
     /// A body exceeded [`crate::frame::MAX_BODY`] and shipped shortened.
@@ -226,38 +225,26 @@ impl ConsoleStats {
         clippy::panic
     )]
     pub fn body_shortened(&self) {
-        bump(&self.truncated);
+        self.truncated.bump();
     }
 
     /// An endpoint write failed.
     pub fn endpoint_error(&self) {
-        bump(&self.endpoint_errors);
+        self.endpoint_errors.bump();
     }
 
     /// Snapshot every counter in one place, so no caller hand-rolls six loads and gets
     /// the set out of date when a counter is added.
     pub fn snapshot(&self) -> ConsoleCounters {
         ConsoleCounters {
-            records_sent: self.records_sent.load(Ordering::Relaxed),
-            dropped_full: self.dropped_full.load(Ordering::Relaxed),
-            bytes_dropped: self.bytes_dropped.load(Ordering::Relaxed),
-            truncated: self.truncated.load(Ordering::Relaxed),
-            endpoint_errors: self.endpoint_errors.load(Ordering::Relaxed),
+            records_sent: self.records_sent.load(),
+            dropped_full: self.dropped_full.load(),
+            bytes_dropped: self.bytes_dropped.load(),
+            truncated: self.truncated.load(),
+            endpoint_errors: self.endpoint_errors.load(),
             seq_next: self.seq.load(Ordering::Relaxed),
         }
     }
-}
-
-/// Add one, stopping at `u32::MAX` rather than rolling over.
-fn bump(counter: &AtomicU32) {
-    add(counter, 1);
-}
-
-/// Add `n`, saturating at `u32::MAX` (see the module docs for why).
-fn add(counter: &AtomicU32, n: u32) {
-    // `fetch_update` returns `Err` once the closure says "no change", i.e. once we are
-    // saturated — which is exactly the state we want to sit in.
-    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| v.checked_add(n));
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +263,7 @@ pub fn boot_body(
     pipe_bytes: usize,
     max_body: usize,
 ) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(
         w,
         "BOOT proto=1 fw={} pipe={} maxbody={}",
@@ -297,7 +284,7 @@ pub fn boot_body(
 /// a drop storm diagnosable after the fact: it shows how close to full the ring was
 /// rather than merely that something was dropped.
 pub fn status_body(out: &mut [u8; BODY_WINDOW], snap: &ConsoleCounters, pipe_free: usize) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(
         w,
         "STATUS proto=1 sent={} dropped_full={} bytes_dropped={} trunc={} ep_err={} seq_next={} pipe_free={}",
@@ -416,7 +403,7 @@ const U32_MAX_DIGITS: usize = 10;
 
 /// Worst-case length of a body: its literal prefix, plus `1 + name + 1 + width` per field.
 ///
-/// This is the arithmetic the [`TruncWriter`]-based builders above cannot express in types - a
+/// This is the arithmetic the [`BodyWriter`]-based builders above cannot express in types - a
 /// format string says nothing about how long its result gets. Computing the sum here and
 /// asserting against [`crate::frame::MAX_BODY`] moves *"this verb fits one record"* from a
 /// nightly test run to the build itself, so a field added to a table fails compilation rather
@@ -512,7 +499,7 @@ const RIGCFG_WORST: usize = saturated_len("RIGCFG proto=1 capture=mono16", &RIGC
 /// pulse-train description (97), so any string that could actually be sent would blow the
 /// record. Splitting them keeps both verbs provably one-record.
 pub fn rigcfg_body(cfg: &RigConfig, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(
         w,
         "RIGCFG proto=1 capture=mono16 lane={} blocks={} block_bytes={} bytes_per_s={} capsec_us={} window_s={} cpu_hz={} icache={} dcache={}",
@@ -548,7 +535,7 @@ const RIGGEN_WORST: usize = "RIGGEN proto=1 ".len() + RIGGEN_MAX_GEN_BYTES;
 /// host parses. Clipping is silent for the same reason [`status_body`] truncates: this runs on
 /// a path that must not panic.
 ///
-/// Unlike its siblings this one does not go through `TruncWriter`. Its payload is `&[u8]`,
+/// Unlike its siblings this one does not go through `BodyWriter`. Its payload is `&[u8]`,
 /// and `fmt::Write` only accepts `&str`: converting would mean either panicking on invalid
 /// UTF-8 or replacing bytes the device actually measured, and `describe()`'s output is plain
 /// ASCII anyway, so neither failure mode is worth paying for. The bytes are copied, not
@@ -624,7 +611,7 @@ const _: () = assert!(CAPSTAT_MAX_BODY <= crate::frame::MAX_BODY);
 
 /// Render a `CAPSTAT` record body into `out`, returning the bytes written.
 pub fn capstat_body(st: &CaptureStatus, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(
         w,
         "CAPSTAT proto=1 delivered={} expected={} overrun={} max_block_us={} worst_gap_us={} audio_exit={} dumped={} dropped_full={}",
@@ -673,7 +660,7 @@ const CAPMAX_WORST: usize = saturated_len("CAPMAX proto=1", &CAPMAX_FIELDS);
 
 /// Render a `CAPMAX` record body into `out`, returning the bytes written.
 pub fn capmax_body(cap: &RingCapacity, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(
         w,
         "CAPMAX proto=1 total_bytes={} ring_bytes={} seconds_max={} us_max={} unused_headroom_bytes={}",
@@ -711,7 +698,7 @@ const STIMSTART_WORST: usize = saturated_len("STIMSTART proto=1", &STIMSTART_FIE
 
 /// Render a `STIMSTART` record body into `out`, returning the bytes written.
 pub fn stimstart_body(st: &StimulusStart, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(
         w,
         "STIMSTART proto=1 first_block={} offset={}",
@@ -767,7 +754,7 @@ const DUMPEND_WORST: usize = saturated_len("DUMPEND proto=1", &DUMPEND_FIELDS);
 
 /// Render a `DUMPEND` record body into `out`, returning the bytes written.
 pub fn dumpend_body(d: &DumpSummary, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(
         w,
         "DUMPEND proto=1 blocks={} chunks={} bytes={} elapsed_ms={} refused={} stall_ms={} sent={} dropped_full={} bytes_dropped={}",
@@ -827,7 +814,7 @@ const EXCPLAY_WORST: usize = saturated_len("EXCPLAY proto=1", &EXCPLAY_FIELDS);
 
 /// Render an `EXCPLAY` record body into `out`, returning the bytes written.
 pub fn exc_play_body(play: &ExcerptPlay, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(
         w,
         "EXCPLAY proto=1 slot={} bytes={} crc16={:04x} want={:04x} underruns={} clean={}",
@@ -871,7 +858,7 @@ const EXCPLAYFAIL_WORST: usize = saturated_len("EXCPLAYFAIL proto=1", &EXCPLAYFA
 ///
 /// The record a boot sends instead of playing silence when its slot holds no playable excerpt.
 pub fn exc_play_refused_body(slot: u8, why: PlayRefusal, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = TruncWriter::new(out);
+    let mut w = BodyWriter::new(out);
     let _ = core::write!(w, "EXCPLAYFAIL proto=1 slot={} why={}", slot, why.as_str());
     w.filled()
 }
@@ -1143,7 +1130,7 @@ mod tests {
     fn counters_saturate_instead_of_wrapping() {
         let stats = ConsoleStats::new();
         // One refusal larger than `u32::MAX` bytes cannot happen, but it is the cheapest
-        // way to land on the ceiling: `bump` and `add` share the same checked path.
+        // way to land on the ceiling: `bump` and `add` share one saturating path.
         stats.record_dropped_for_space(usize::MAX);
         let snap = stats.snapshot();
         assert_eq!(snap.dropped_full, 1);

@@ -205,7 +205,7 @@ fn describe_prefix(out: &mut DescWriter, name: &str, sample_rate_hz: u32, level_
 
 /// A `fmt::Write` that stops at the end of its buffer instead of overflowing it.
 ///
-/// Duplicated from `asperitas-wire`'s `TruncWriter` on purpose: `asperitas-dsp` is a leaf
+/// Duplicated from `asperitas-wire`'s `BodyWriter` on purpose: `asperitas-dsp` is a leaf
 /// crate that cli, firmware and rig all sit on, so depending on logging to borrow twenty lines
 /// would invert the hierarchy for less than the cost of the copy.
 struct DescWriter<'a> {

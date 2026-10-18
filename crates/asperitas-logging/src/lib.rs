@@ -488,7 +488,7 @@ fn emit_log_record(record: &log::Record) {
 fn format_body(record: &log::Record, out: &mut [u8; console::BODY_WINDOW]) -> usize {
     use core::fmt::Write;
 
-    let mut w = asperitas_wire::TruncWriter::new(out);
+    let mut w = asperitas_wire::body::BodyWriter::new(out);
     let _ = core::write!(w, "{}", record.args());
     w.filled()
 }

@@ -20,48 +20,12 @@
 
 pub use log::Level;
 
+pub mod body;
 pub mod capture;
 pub mod console;
 pub mod control;
+pub mod counter;
 pub mod dump;
 pub mod excerpt;
 pub mod frame;
 pub mod inbound;
-
-/// A `fmt::Write` that stops at the end of its buffer instead of overflowing it.
-///
-/// Log bodies may neither allocate nor panic, so running past the window has to be a
-/// quiet stop rather than an error path. A piece that does not fit at all returns
-/// [`core::fmt::Error`], which aborts the enclosing `write!` and leaves whatever already
-/// landed - a shortened record, which the encoder then reports on the wire as `trunc`.
-pub struct TruncWriter<'a> {
-    buf: &'a mut [u8],
-    pos: usize,
-}
-
-impl<'a> TruncWriter<'a> {
-    pub fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
-
-    /// Bytes written so far.
-    pub fn filled(&self) -> usize {
-        self.pos
-    }
-}
-
-impl core::fmt::Write for TruncWriter<'_> {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if s.is_empty() {
-            return Ok(());
-        }
-        let available = self.buf.len() - self.pos;
-        let len = s.len().min(available);
-        if len == 0 {
-            return Err(core::fmt::Error);
-        }
-        self.buf[self.pos..self.pos + len].copy_from_slice(&s.as_bytes()[..len]);
-        self.pos += len;
-        Ok(())
-    }
-}

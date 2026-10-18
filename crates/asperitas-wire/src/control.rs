@@ -43,7 +43,8 @@
 //! [`route`] hands the control consumer only a fully parsed [`Command`]. Anything else bumps a
 //! [`ControlStats`] counter, is dropped, and yields a [`Reply::Error`] the caller may send back.
 
-use core::sync::atomic::{AtomicU32, Ordering};
+use crate::body::{BodyReader, BodyWriter};
+use crate::counter::SaturatingCounter;
 
 use crate::frame::MAX_BODY;
 use crate::inbound::InboundRecord;
@@ -195,7 +196,7 @@ impl Command {
 
     /// Write the body into `dst`, returning its length.
     pub fn encode(&self, dst: &mut BodyBuf) -> usize {
-        let mut w = Writer::new(dst);
+        let mut w = BodyWriter::new(dst);
         w.put(CMD_PREFIX);
         w.put(self.verb().token());
         match *self {
@@ -217,7 +218,7 @@ impl Command {
             }
             _ => {}
         }
-        w.len
+        w.filled()
     }
 }
 
@@ -233,26 +234,34 @@ pub fn parse_command(body: &[u8]) -> Result<Command, ControlError> {
         .into_iter()
         .find(|v| v.token() == verb)
         .ok_or(ControlError::UnknownVerb)?;
-    let mut r = Reader::new(args, at + verb_len);
+    let mut r = BodyReader::new(args);
+    // Offsets in errors count from the start of the whole body, not from the arguments.
+    let args_at = at + verb_len;
+    let field = |r: &mut BodyReader<'_>, label: &[u8], digits: usize| {
+        r.labelled_hex(label, digits)
+            .ok_or(ControlError::Malformed { at: args_at + r.at })
+    };
     let cmd = match verb {
         Verb::Version => Command::GetVersion,
         Verb::ResetReason => Command::GetResetReason,
         Verb::Restart => Command::Restart,
         Verb::Set => {
-            let knob = r.field(b" k=", 2)? as u8;
-            let value = r.field(b" v=", 4)? as u16;
+            let knob = field(&mut r, b" k=", 2)? as u8;
+            let value = field(&mut r, b" v=", 4)? as u16;
             Command::OverrideSet { knob, value }
         }
         Verb::Release => Command::OverrideRelease {
-            knob: r.field(b" k=", 2)? as u8,
+            knob: field(&mut r, b" k=", 2)? as u8,
         },
         Verb::Fx => {
-            let fx = r.field(b" f=", 2)? as u8;
-            let value = r.field(b" v=", 4)? as u16;
+            let fx = field(&mut r, b" f=", 2)? as u8;
+            let value = field(&mut r, b" v=", 4)? as u16;
             Command::ReplayFx { fx, value }
         }
     };
-    r.finish()?;
+    if !r.is_empty() {
+        return Err(ControlError::Malformed { at: args_at + r.at });
+    }
     Ok(cmd)
 }
 
@@ -329,7 +338,7 @@ pub enum Reply {
 impl Reply {
     /// Write the body into `dst`, returning its length.
     pub fn encode(&self, dst: &mut BodyBuf) -> usize {
-        let mut w = Writer::new(dst);
+        let mut w = BodyWriter::new(dst);
         w.put(REPLY_PREFIX);
         match self {
             Reply::Version(t) => {
@@ -349,7 +358,7 @@ impl Reply {
                 w.put(c.token());
             }
         }
-        w.len
+        w.filled()
     }
 }
 
@@ -416,8 +425,8 @@ pub fn dispatch(rec: &InboundRecord) -> Routed<'_> {
 /// Counters for records the router refused. Cumulative since boot, saturating.
 #[derive(Debug, Default)]
 pub struct ControlStats {
-    unknown_verbs: AtomicU32,
-    malformed: AtomicU32,
+    unknown_verbs: SaturatingCounter,
+    malformed: SaturatingCounter,
 }
 
 /// One read of [`ControlStats`].
@@ -436,23 +445,17 @@ impl ControlStats {
     /// Zeroed, as at boot.
     pub const fn new() -> Self {
         Self {
-            unknown_verbs: AtomicU32::new(0),
-            malformed: AtomicU32::new(0),
+            unknown_verbs: SaturatingCounter::new(),
+            malformed: SaturatingCounter::new(),
         }
     }
 
     /// Both counters in one read.
     pub fn snapshot(&self) -> ControlCounters {
         ControlCounters {
-            unknown_verbs: self.unknown_verbs.load(Ordering::Relaxed),
-            malformed: self.malformed.load(Ordering::Relaxed),
+            unknown_verbs: self.unknown_verbs.load(),
+            malformed: self.malformed.load(),
         }
-    }
-
-    fn bump(counter: &AtomicU32) {
-        let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
-            Some(v.saturating_add(1))
-        });
     }
 }
 
@@ -478,13 +481,13 @@ pub fn route(
         }
         Routed::Control(Err(e)) => {
             match e {
-                ControlError::Malformed { .. } => ControlStats::bump(&stats.malformed),
-                _ => ControlStats::bump(&stats.unknown_verbs),
+                ControlError::Malformed { .. } => stats.malformed.bump(),
+                _ => stats.unknown_verbs.bump(),
             }
             Some(Reply::Error(e.code()))
         }
         Routed::Unknown => {
-            ControlStats::bump(&stats.unknown_verbs);
+            stats.unknown_verbs.bump();
             Some(Reply::Error(ErrorCode::UnknownVerb))
         }
     }
@@ -528,73 +531,6 @@ pub fn reset_reason_from_rsr(rsr: u32) -> ReasonText {
         b"unknown"
     };
     ReasonText::reason(token).unwrap_or_else(|_| ReasonText::reason(b"unknown").unwrap())
-}
-
-// ---------------------------------------------------------------------------
-// Byte helpers
-// ---------------------------------------------------------------------------
-
-struct Writer<'a> {
-    dst: &'a mut BodyBuf,
-    len: usize,
-}
-
-impl<'a> Writer<'a> {
-    fn new(dst: &'a mut BodyBuf) -> Self {
-        Self { dst, len: 0 }
-    }
-
-    // Every body this module builds is far below MAX_BODY (longest: "CTLR VER " + 32).
-    fn put(&mut self, s: &[u8]) {
-        self.dst[self.len..self.len + s.len()].copy_from_slice(s);
-        self.len += s.len();
-    }
-
-    fn hex(&mut self, v: u32, width: usize) {
-        for i in (0..width).rev() {
-            let nib = ((v >> (4 * i)) & 0xf) as u8;
-            self.dst[self.len] = b"0123456789abcdef"[nib as usize];
-            self.len += 1;
-        }
-    }
-}
-
-struct Reader<'a> {
-    rest: &'a [u8],
-    at: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn new(rest: &'a [u8], at: usize) -> Self {
-        Self { rest, at }
-    }
-
-    /// Consume `label` then exactly `width` lowercase hex digits.
-    fn field(&mut self, label: &[u8], width: usize) -> Result<u32, ControlError> {
-        let bad = ControlError::Malformed { at: self.at };
-        let after = self.rest.strip_prefix(label).ok_or(bad)?;
-        let digits = after.get(..width).ok_or(bad)?;
-        let mut v = 0u32;
-        for &d in digits {
-            let n = match d {
-                b'0'..=b'9' => d - b'0',
-                b'a'..=b'f' => d - b'a' + 10,
-                _ => return Err(bad),
-            };
-            v = (v << 4) | u32::from(n);
-        }
-        self.rest = &after[width..];
-        self.at += label.len() + width;
-        Ok(v)
-    }
-
-    fn finish(self) -> Result<(), ControlError> {
-        if self.rest.is_empty() {
-            Ok(())
-        } else {
-            Err(ControlError::Malformed { at: self.at })
-        }
-    }
 }
 
 #[cfg(test)]
