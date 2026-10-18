@@ -1,5 +1,5 @@
 //! Judge a knob sweep: as a parameter moves across its travel under host control
-//! (`asperitas-rig override --sweep FROM:TO`), does the measured response move monotonically in the
+//! (`asperitas-rig session` with a sweep), does the measured response move monotonically in the
 //! intended direction without a flat region?
 //!
 //! The rig's `SET` schedule is linear in time (`control.rs` `schedule`), so the capture is divided
@@ -25,16 +25,6 @@ use crate::thresholds;
 pub enum SweepKind {
     Gain,
     LowPass,
-}
-
-impl SweepKind {
-    pub fn from_name(s: &str) -> Option<Self> {
-        match s {
-            "gain" => Some(Self::Gain),
-            "lowpass" => Some(Self::LowPass),
-            _ => None,
-        }
-    }
 }
 
 /// Where the sweep sits in the capture. Knob levels are `0..=1`, as `asperitas-rig` takes them.

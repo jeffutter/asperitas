@@ -6,7 +6,9 @@
 //! reads one file instead of repeating the session's flags. The device times it can supply itself
 //! (`arm_t_ms`, `first_set_t_ms`) are copied from the stream by the recorder and are optional.
 
+use std::ffi::OsString;
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 const MAGIC: &str = "asperitas-session v1";
 
@@ -65,6 +67,16 @@ pub struct Sidecar {
     pub first_set_t_ms: Option<u32>,
 }
 
+/// Where the sidecar for the stream at `out` lives: `out` with `.session` appended.
+pub fn sidecar_path(out: &Path) -> PathBuf {
+    let mut name: OsString = out.as_os_str().to_owned();
+    name.push(".session");
+    PathBuf::from(name)
+}
+
+/// Device `t_ms` is transmitted modulo this many milliseconds.
+const T_MS_MODULUS: i64 = 100_000_000;
+
 /// Why a sidecar did not parse.
 #[derive(Debug, PartialEq, Eq)]
 pub struct SidecarError(pub String);
@@ -78,6 +90,19 @@ impl fmt::Display for SidecarError {
 impl std::error::Error for SidecarError {}
 
 impl Sidecar {
+    /// Seconds from the capture arming to the first scheduled `SET`. Prefers the device clock
+    /// (first `SET` reply minus the arming status record, wrapped as the stream wraps), which
+    /// includes real scheduling latency; falls back to the host's planned delay when the recorder
+    /// could not read one of the two times.
+    pub fn sweep_start_s(&self) -> f64 {
+        match (self.arm_t_ms, self.first_set_t_ms) {
+            (Some(arm), Some(set)) => {
+                (i64::from(set) - i64::from(arm)).rem_euclid(T_MS_MODULUS) as f64 / 1000.0
+            }
+            _ => self.start_after_arm_s,
+        }
+    }
+
     /// Render as `key=value` lines after a version line.
     pub fn render(&self) -> String {
         let snaps: Vec<String> = self.snaps.iter().map(f64::to_string).collect();
@@ -206,6 +231,35 @@ mod tests {
             ..sample()
         };
         assert_eq!(Sidecar::parse(&h.render()), Ok(h));
+    }
+
+    #[test]
+    fn sweep_start_prefers_the_device_clock_and_wraps() {
+        let s = Sidecar {
+            arm_t_ms: Some(4210),
+            first_set_t_ms: Some(14_710),
+            ..sample()
+        };
+        assert_eq!(s.sweep_start_s(), 10.5);
+        let wrapped = Sidecar {
+            arm_t_ms: Some(99_999_000),
+            first_set_t_ms: Some(9_500),
+            ..sample()
+        };
+        assert_eq!(wrapped.sweep_start_s(), 10.5);
+        let planned = Sidecar {
+            first_set_t_ms: None,
+            ..sample()
+        };
+        assert_eq!(planned.sweep_start_s(), 10.0);
+    }
+
+    #[test]
+    fn sidecar_path_appends_session() {
+        assert_eq!(
+            sidecar_path(Path::new("a/b.console.zst")),
+            PathBuf::from("a/b.console.zst.session")
+        );
     }
 
     #[test]

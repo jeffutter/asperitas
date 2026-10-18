@@ -3,38 +3,44 @@
 //!
 //! ```text
 //! asperitas-measure analyze <capture.console.zst> [--stimulus sine|sweep|pulse]
-//! asperitas-measure analyze <capture.console.zst> --excerpt <clip.wav> \
-//!     [--fx bypass|patch] [--fx-knob K=<0..65535 | 0xHEX>]...
-//! asperitas-measure analyze <capture.console.zst> --sweep FROM:TO --sweep-kind gain|lowpass \
-//!     [--sweep-start-s S] [--sweep-duration-s D]
-//! asperitas-measure analyze <capture.console.zst> --soak FROM:TO [--stimulus sine] \
-//!     [--sweep-start-s S] [--sweep-duration-s D] [--expect-fail]
+//! asperitas-measure analyze <capture.console.zst> --excerpt <clip.wav>
+//! asperitas-measure analyze <capture.console.zst> [--expect-fail]
 //! ```
 //!
-//! The soak form judges a long (5+ minute) capture taken while a knob moves: silence, discontinuity
-//! and parameter-step candidates over the whole run, attributed to the parameter-motion window or
-//! outside it (see [`crate::soak`]). `--sweep-start-s` and `--sweep-duration-s` place the motion as
-//! for `--sweep`; `FROM == TO` is a held parameter. `--expect-fail` inverts the verdict for an
-//! unsmoothed build: exit 0 only when the step detector fired (and no dropout is present), exit 1
-//! when the capture unexpectedly passes.
+//! A capture recorded by `asperitas-rig session` has a sidecar beside it
+//! ([`asperitas_host::session::sidecar_path`]) naming the effect selection, the knob, the motion
+//! and when it started. When the sidecar exists it decides what is judged, and no other mode flag
+//! is accepted (exit 2):
 //!
-//! The sweep form judges a knob sweep from `asperitas-rig override --sweep FROM:TO` (knob levels
-//! `0..=1`): the response curve against knob value, its direction, monotonicity and flat regions
-//! (see [`crate::sweep`]). `--sweep-start-s` is the capture time of the first `SET` (default 0) and
-//! `--sweep-duration-s` the sweep length (default: the rest of the capture); the capture does not
-//! record either, and the rig's final ack grace follows the sweep, so pass the duration the rig was
-//! given when it is known.
+//! - a sweep session is judged as a knob sweep ([`crate::sweep`]): the response curve against knob
+//!   value, its direction, monotonicity and flat regions. Knob 0 is the low-pass cutoff and knob 1
+//!   the gain;
+//! - a soak or hold session is judged as a long capture taken while a knob moves, or is held
+//!   ([`crate::soak`]): silence, discontinuity and parameter-step candidates over the whole run,
+//!   attributed to the motion window or to the time outside it. A hold has no motion window.
+//!   `--expect-fail` inverts the verdict for an unsmoothed build: exit 0 only when the step
+//!   detector fired (and no dropout is present), exit 1 when the capture unexpectedly passes;
+//! - with `--excerpt`, the replay is judged against the `asperitas-cli` reference run at the
+//!   sidecar's effect selection, and for a hold at its knob level. A sweep or soak moves the knob
+//!   during the capture, which the reference cannot follow, so that combination is a usage error.
 //!
-//! The first form judges a steady-stimulus loopback capture. Only the sine is judged against the
-//! TASK-034 baseline (level, silence, discontinuities, spurs, parameter steps); the sweep and
-//! pulse are reported and checked for alignment stability only, because the baseline limits are
-//! defined for the sine. The second form judges an excerpt replay against the `asperitas-cli`
-//! reference run at the same `CTL FX` selection (`--fx`, `--fx-value` take the wire values sent to
-//! the board; default bypass). Exit 0 passes, 1 is a failed verdict, 2 is a usage, load or I/O error.
+//! The motion starts at [`Sidecar::sweep_start_s`] into the capture: the device clock's span from
+//! the capture arming to the first `SET` when both were recorded, the host's planned delay
+//! otherwise.
+//!
+//! Without a sidecar the capture is a steady-stimulus loopback. Only the sine is judged against
+//! the baseline in [`crate::thresholds`] (level, silence, discontinuities, spurs, parameter
+//! steps); the sweep and pulse are reported and checked for alignment stability only, because the
+//! baseline limits are defined for the sine. `--excerpt` then judges an excerpt replay at the
+//! device's default effect (bypass). Exit 0 passes, 1 is a failed verdict, 2 is a usage, load or
+//! I/O error.
 
 use std::io::Write;
 
+use std::path::Path;
+
 use asperitas_dsp::stimulus::{ExponentialSweepParams, PulseTrainParams, SineParams};
+use asperitas_host::session::{sidecar_path, Mode as Motion, Sidecar};
 use serde_json::{json, Value};
 
 use crate::align::{align, assert_stable};
@@ -66,9 +72,16 @@ impl Outcome {
 }
 
 const USAGE: &str = "usage: asperitas-measure analyze <capture.console.zst> \
-[--stimulus sine|sweep|pulse | --excerpt <clip.wav> [--fx bypass|patch] [--fx-knob K=<0..65535|0xHEX>]... \
-| --sweep FROM:TO --sweep-kind gain|lowpass [--sweep-start-s S] [--sweep-duration-s D] \
-| --soak FROM:TO [--stimulus sine] [--sweep-start-s S] [--sweep-duration-s D] [--expect-fail]]";
+[--stimulus sine|sweep|pulse | --excerpt <clip.wav> | --expect-fail]\n\
+a sidecar written by `asperitas-rig session` beside the capture decides the mode; \
+with one, only --excerpt (hold sessions) and --expect-fail (soak and hold) are accepted";
+
+/// What the command line asked for; the sidecar, if any, decides the rest.
+struct Flags {
+    stimulus: Option<String>,
+    excerpt: Option<String>,
+    expect_fail: bool,
+}
 
 enum Mode {
     Stimulus(String),
@@ -78,7 +91,6 @@ enum Mode {
 }
 
 struct SoakArgs {
-    stimulus: String,
     from: f64,
     to: f64,
     start_s: f64,
@@ -97,7 +109,10 @@ struct SweepArgs {
 /// Run the command with `args` (without the program name). The JSON report goes to `out`;
 /// diagnostics go to `err`.
 pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Outcome {
-    let (path, mode) = match parse(args) {
+    let (path, mode) = match parse(args).and_then(|(path, flags)| {
+        let mode = resolve(&path, flags)?;
+        Ok((path, mode))
+    }) {
         Ok(v) => v,
         Err(e) => {
             let _ = writeln!(err, "error: {e}\n{USAGE}");
@@ -146,7 +161,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Outcome
     }
 }
 
-fn parse(args: &[String]) -> Result<(String, Mode), String> {
+fn parse(args: &[String]) -> Result<(String, Flags), String> {
     let mut it = args.iter();
     match it.next().map(String::as_str) {
         Some("analyze") => {}
@@ -154,136 +169,96 @@ fn parse(args: &[String]) -> Result<(String, Mode), String> {
         None => return Err("missing subcommand".into()),
     }
     let mut path = None;
-    let mut stimulus = None;
-    let mut excerpt = None;
-    let mut fx_name = None;
-    let mut fx_knobs: Vec<(usize, u16)> = Vec::new();
-    let mut sweep = None;
-    let mut sweep_kind = None;
-    let mut sweep_start = None;
-    let mut sweep_duration = None;
-    let mut soak = None;
-    let mut expect_fail = false;
+    let mut flags = Flags {
+        stimulus: None,
+        excerpt: None,
+        expect_fail: false,
+    };
     while let Some(a) = it.next() {
         match a.as_str() {
-            "--stimulus" => stimulus = Some(it.next().ok_or("--stimulus needs a value")?.clone()),
-            "--excerpt" => excerpt = Some(it.next().ok_or("--excerpt needs a value")?.clone()),
-            "--fx" => fx_name = Some(it.next().ok_or("--fx needs a value")?.clone()),
-            "--fx-knob" => {
-                fx_knobs.push(parse_fx_knob(it.next().ok_or("--fx-knob needs K=VALUE")?)?)
+            "--stimulus" => {
+                flags.stimulus = Some(it.next().ok_or("--stimulus needs a value")?.clone())
             }
-            "--sweep" => sweep = Some(it.next().ok_or("--sweep needs FROM:TO")?.clone()),
-            "--soak" => soak = Some(it.next().ok_or("--soak needs FROM:TO")?.clone()),
-            "--expect-fail" => expect_fail = true,
-            "--sweep-kind" => {
-                sweep_kind = Some(it.next().ok_or("--sweep-kind needs a value")?.clone())
+            "--excerpt" => {
+                flags.excerpt = Some(it.next().ok_or("--excerpt needs a value")?.clone())
             }
-            "--sweep-start-s" => sweep_start = Some(parse_seconds("--sweep-start-s", it.next())?),
-            "--sweep-duration-s" => {
-                sweep_duration = Some(parse_seconds("--sweep-duration-s", it.next())?)
-            }
+            "--expect-fail" => flags.expect_fail = true,
             s if s.starts_with("--") => return Err(format!("unknown flag {s}")),
             _ if path.is_none() => path = Some(a.clone()),
             _ => return Err(format!("unexpected argument {a:?}")),
         }
     }
-    let path = path.ok_or("missing capture path")?;
-    if excerpt.is_none() && (fx_name.is_some() || !fx_knobs.is_empty()) {
-        return Err("--fx and --fx-knob need --excerpt".into());
-    }
-    if let Some(range) = soak {
-        if sweep.is_some() || excerpt.is_some() || fx_name.is_some() || !fx_knobs.is_empty() {
-            return Err("--soak is exclusive with --sweep, --excerpt, --fx, --fx-knob".into());
+    Ok((path.ok_or("missing capture path")?, flags))
+}
+
+/// Choose what to judge from the flags and the sidecar beside `path`, if there is one.
+fn resolve(path: &str, flags: Flags) -> Result<Mode, String> {
+    let side_path = sidecar_path(Path::new(path));
+    let sidecar = match std::fs::read_to_string(&side_path) {
+        Ok(text) => {
+            Some(Sidecar::parse(&text).map_err(|e| format!("{}: {e}", side_path.display()))?)
         }
-        if sweep_kind.is_some() {
-            return Err("--sweep-kind does not apply to --soak".into());
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", side_path.display())),
+    };
+    let Some(side) = sidecar else {
+        if flags.expect_fail {
+            return Err("--expect-fail needs a session sidecar beside the capture".into());
         }
-        let (from, to) = parse_range("--soak", &range)?;
-        return Ok((
-            path,
-            Mode::Soak(SoakArgs {
-                stimulus: stimulus.unwrap_or_else(|| "sine".into()),
-                from,
-                to,
-                start_s: sweep_start.unwrap_or(0.0),
-                duration_s: sweep_duration,
-                expect_fail,
-            }),
-        ));
+        return match (flags.stimulus, flags.excerpt) {
+            (Some(_), Some(_)) => Err("--stimulus and --excerpt are exclusive".into()),
+            (None, Some(wav)) => Ok(Mode::Excerpt(wav, FxSetting::BYPASS)),
+            (Some(s), None) => Ok(Mode::Stimulus(s)),
+            (None, None) => Ok(Mode::Stimulus("sine".into())),
+        };
+    };
+    if flags.stimulus.is_some() {
+        return Err("--stimulus does not apply to a capture with a session sidecar".into());
     }
-    if expect_fail {
-        return Err("--expect-fail needs --soak".into());
-    }
-    if let Some(range) = sweep {
-        if stimulus.is_some() || excerpt.is_some() || fx_name.is_some() || !fx_knobs.is_empty() {
-            return Err("--sweep is exclusive with --stimulus, --excerpt, --fx, --fx-knob".into());
+    let held = side.mode == Motion::Hold;
+    if let Some(wav) = flags.excerpt {
+        if flags.expect_fail {
+            return Err("--excerpt and --expect-fail are exclusive".into());
         }
-        let (from, to) = parse_range("--sweep", &range)?;
-        let kind_name = sweep_kind.ok_or("--sweep needs --sweep-kind gain|lowpass")?;
-        let kind = SweepKind::from_name(&kind_name)
-            .ok_or_else(|| format!("unknown --sweep-kind {kind_name:?} (gain, lowpass)"))?;
-        return Ok((
-            path,
-            Mode::Sweep(SweepArgs {
-                kind,
-                from,
-                to,
-                start_s: sweep_start.unwrap_or(0.0),
-                duration_s: sweep_duration,
-            }),
-        ));
+        if !held {
+            return Err(
+                "--excerpt needs a hold session: the reference cannot follow a moving knob".into(),
+            );
+        }
+        let mut fx = FxSetting::from_code(side.fx_f);
+        let wire = (side.from * f64::from(u16::MAX)).round() as u16;
+        fx = fx
+            .with_knob(usize::from(side.knob), wire)
+            .ok_or_else(|| format!("sidecar knob {} is not a knob of the patch", side.knob))?;
+        return Ok(Mode::Excerpt(wav, fx));
     }
-    if sweep_kind.is_some() || sweep_start.is_some() || sweep_duration.is_some() {
-        return Err("--sweep-kind, --sweep-start-s and --sweep-duration-s need --sweep".into());
-    }
-    let mode = match (stimulus, excerpt) {
-        (Some(_), Some(_)) => return Err("--stimulus and --excerpt are exclusive".into()),
-        (None, Some(w)) => {
-            let name = fx_name.unwrap_or_else(|| "bypass".into());
-            let mut fx = FxSetting::from_name(&name)
-                .ok_or_else(|| format!("unknown --fx {name:?} (bypass, patch)"))?;
-            for (knob, value) in fx_knobs {
-                fx = fx
-                    .with_knob(knob, value)
-                    .ok_or_else(|| format!("--fx-knob {knob}: the patch has knobs 0 and 1"))?;
+    let start_s = side.sweep_start_s();
+    match side.mode {
+        Motion::Sweep => {
+            if flags.expect_fail {
+                return Err("--expect-fail needs a soak or hold session".into());
             }
-            Mode::Excerpt(w, fx)
+            let kind = match side.knob {
+                0 => SweepKind::LowPass,
+                1 => SweepKind::Gain,
+                k => return Err(format!("sidecar knob {k} has no sweep judgement (0, 1)")),
+            };
+            Ok(Mode::Sweep(SweepArgs {
+                kind,
+                from: side.from,
+                to: side.to,
+                start_s,
+                duration_s: Some(side.duration_s),
+            }))
         }
-        (Some(s), None) => Mode::Stimulus(s),
-        (None, None) => Mode::Stimulus("sine".into()),
-    };
-    Ok((path, mode))
-}
-
-fn parse_range(flag: &str, range: &str) -> Result<(f64, f64), String> {
-    range
-        .split_once(':')
-        .and_then(|(a, b)| Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?)))
-        .filter(|(a, b)| (0.0..=1.0).contains(a) && (0.0..=1.0).contains(b))
-        .ok_or_else(|| format!("{flag} wants FROM:TO knob levels in 0..=1, got {range:?}"))
-}
-
-fn parse_seconds(flag: &str, v: Option<&String>) -> Result<f64, String> {
-    v.ok_or_else(|| format!("{flag} needs a value"))?
-        .parse::<f64>()
-        .ok()
-        .filter(|s| s.is_finite() && *s >= 0.0)
-        .ok_or_else(|| format!("{flag} wants non-negative seconds"))
-}
-
-/// An `--fx-knob K=VALUE` pair: knob id, then a `CTL SET v=` value, decimal or `0x` hex,
-/// `0..=0xFFFF`.
-fn parse_fx_knob(s: &str) -> Result<(usize, u16), String> {
-    let bad = || format!("--fx-knob {s:?} is not K=<0..=65535 | 0x0000..=0xFFFF>");
-    let (knob, value) = s.split_once('=').ok_or_else(bad)?;
-    let value = match value
-        .strip_prefix("0x")
-        .or_else(|| value.strip_prefix("0X"))
-    {
-        Some(h) => u16::from_str_radix(h, 16),
-        None => value.parse::<u16>(),
-    };
-    Ok((knob.parse().map_err(|_| bad())?, value.map_err(|_| bad())?))
+        Motion::Soak | Motion::Hold => Ok(Mode::Soak(SoakArgs {
+            from: side.from,
+            to: side.to,
+            start_s: if held { 0.0 } else { start_s },
+            duration_s: (!held).then_some(side.duration_s),
+            expect_fail: flags.expect_fail,
+        })),
+    }
 }
 
 /// `Ok((report, failures))` when the analysis ran; `Err` only for conditions that are not a
@@ -411,10 +386,7 @@ fn judge_sweep_capture(capture: &Capture, args: &SweepArgs) -> (Value, Vec<Strin
 }
 
 fn judge_soak_capture(capture: &Capture, args: &SoakArgs) -> Result<(Value, Vec<String>), String> {
-    let stimulus = match args.stimulus.as_str() {
-        "sine" => Stimulus::Sine(SineParams::default()),
-        other => return Err(format!("--soak judges the sine stimulus, not {other:?}")),
-    };
+    let stimulus = Stimulus::Sine(SineParams::default());
     let rate = f64::from(capture.sample_rate_hz);
     let duration_s = args
         .duration_s

@@ -210,12 +210,11 @@ Move the patch with `CTL SET`/`REL`: knob `00` is the filter cutoff (20 Hz to 20
   `--features seed3,stim-excerpt,unsmoothed-params` (excerpt) builds the effect without smoothing, so an override steps the parameter on the next sample. It exists only
   to prove the discontinuity detector can see a step; never use it for ordinary captures.
 
-To judge a capture taken with a `CTL FX` selection, pass the same selection to `analyze`:
-`--fx bypass|patch` and one `--fx-knob K=<0..65535 or 0xHEX>` per knob you overrode with `SET` (the `v=`
-sent to the board; a knob not named stays at its default). The reference then runs `ReplayFx` at that
-selection, and the report carries an `fx` object. The limits are the same at every setting; a capture
-taken at a different setting than the one passed fails on loop gain (gain) or residual/alignment
-(cutoff). Host-synthesized captures cover this.
+To judge a capture taken with a `CTL FX` selection, record it with `asperitas-rig session`: the
+sidecar carries the selection, and for a hold session the knob level, so `analyze --excerpt` runs
+`ReplayFx` at that selection and the report carries an `fx` object. The limits are the same at every
+setting; a capture taken at a different setting than the reference fails on loop gain (gain) or
+residual/alignment (cutoff). Host-synthesized captures cover this.
 
 Measured on the board 2026-10-15 (TASK-035.07.03), on the earlier build whose `FX` codes `01` and `02` were separate gain and low-pass effects driven by `v`; the rows below name that build's settings and are not reproducible with the current wire. `mandolin_single_note_soft` in slot 0, 10 s window, each
 setting sent right after the console attached and answered `CTLR OK FX`:
@@ -253,31 +252,35 @@ the two, and reports metrics as one JSON document on stdout. Every numeric limit
 ```sh
 cargo run -p asperitas-measure --release -- analyze <capture.console.zst> [--stimulus sine|sweep|pulse]
 cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav
-cargo run -p asperitas-measure --release -- analyze <replay.console.zst> --excerpt audio/instruments/<clip>.wav --fx patch --fx-knob 1=43690
-cargo run -p asperitas-measure --release -- analyze <sweep.console.zst> --sweep 0:1 --sweep-kind gain|lowpass [--sweep-start-s S] [--sweep-duration-s D]
-cargo run -p asperitas-measure --release -- analyze <soak.console.zst> --soak FROM:TO [--sweep-start-s S] [--sweep-duration-s D] [--expect-fail]
+cargo run -p asperitas-measure --release -- analyze <session.console.zst> [--expect-fail]
+cargo run -p asperitas-measure --release -- analyze <hold-session.console.zst> --excerpt audio/instruments/<clip>.wav
 ```
 
-`--sweep FROM:TO` judges a capture taken under `asperitas-rig override --sweep FROM:TO` (knob
-levels 0..1). The capture is split into 20 equal slices of the knob travel (the rig's `SET`
-schedule is linear in time), each trimmed at both ends, and the response per slice is measured:
-block RMS for `gain`, RMS of the first difference (a high-band level that follows the cutoff) for
-`lowpass`. The report lists the curve against knob value, `direction`, `span_db`, `monotonic` and
-`max_reversal_db`, and `flat_regions`. It fails when the response does not rise with the knob by
-at least the minimum span, falls back by more than the monotonic tolerance, or holds still for a
-run of slices (a plateau or dead zone). The capture records neither the first `SET` nor the
-sweep length, so pass `--sweep-start-s` (default 0) and `--sweep-duration-s` (default: the rest of
-the capture, which includes the rig's final ack grace, so give the rig's `--duration` when known).
-Limits are the `SWEEP_*` constants in `thresholds.rs`, to be revisited with the first real capture
-(TASK-019.03.04).
+**A capture recorded by `asperitas-rig session` needs no further flags.** `analyze` reads the
+sidecar beside it (`<capture>.session`) for the effect selection, the knob, the motion and its
+start, and judges the session accordingly; `--stimulus` is refused (exit 2) because the sidecar
+already decided. Without a sidecar the capture is a steady-stimulus loopback, judged as the first
+two forms above (an excerpt at the device's default bypass).
 
-`--soak FROM:TO` judges a 5+ minute sine capture taken while a knob moves (`FROM == TO` is a held
-knob). One verdict over silence runs, discontinuity candidates and parameter steps for the whole
-run: any of them, anywhere, fails. The JSON attributes each to the motion window (sweep start and
+A **sweep** session is judged as a knob sweep (knob 0 is the low-pass cutoff, knob 1 the gain;
+other knobs have no judgement). The knob levels are the sidecar's `from` and `to`. The capture is
+split into 20 equal slices of the knob travel (the rig's `SET` schedule is linear in time), each
+trimmed at both ends, and the response per slice is measured: block RMS for the gain, RMS of the
+first difference (a high-band level that follows the cutoff) for the low-pass. The report lists
+the curve against knob value, `direction`, `span_db`, `monotonic` and `max_reversal_db`, and
+`flat_regions`. It fails when the response does not rise with the knob by at least the minimum
+span, falls back by more than the monotonic tolerance, or holds still for a run of slices (a
+plateau or dead zone). The sweep starts at the device-clock span from the capture arming to the
+first `SET` when the recorder read both, the planned `--start-after-arm` otherwise, and runs for
+the sidecar's duration. Limits are the `SWEEP_*` constants in `thresholds.rs`.
+
+A **soak** session (a 5+ minute sine capture taken while a knob moves) and a **hold** session
+(one level for the whole capture, no motion window) are judged as a soak. One verdict over silence runs, discontinuity candidates and parameter steps for the whole
+run: any of them, anywhere, fails. The JSON attributes each to the motion window (motion start and
 duration, plus 1 s each side) or outside it, as `inside_motion`, `outside_motion` and
 `unattributed` (counted but past the detector's position cap). The discontinuity detector refits
 the loop gain every 10 ms so a swept gain does not read as a discontinuity. Keep sweep ranges above
-the silence floor, since a sweep to zero legitimately produces silence runs. `--expect-fail` is for
+the silence floor, since a sweep to zero legitimately produces silence runs. `--expect-fail` (soak and hold sessions only) is for
 the unsmoothed-build capture: exit 0 only when the step detector fired and no silence is present
 (`expected_failure_observed`), exit 1 when the capture passes or fails some other way; the
 detectors' findings are kept under `detector_failures`. Limits are the `SOAK_*` constants in
@@ -287,7 +290,9 @@ Exit codes match `asperitas-rig`: **0** pass, **1** failed verdict (the JSON lis
 each also on stderr), **2** usage, load or I/O error. The default stimulus is the sine. Only the
 sine is judged against the TASK-034 baseline; `sweep` and `pulse` are reported and checked for
 alignment stability only. `--excerpt` instead compares an excerpt replay with the
-`asperitas-cli` reference of the same clip.
+`asperitas-cli` reference of the same clip; with a sidecar the reference runs at the session's
+effect selection and, for a hold session, its knob level (a sweep or soak session is refused, since
+the reference cannot follow a moving knob).
 
 ### Metrics
 
@@ -335,8 +340,7 @@ What the runs taught, for whoever plans the next one:
   detector (6.3 dB per ms, over the 5 dB limit); that capture's report is `captures/task-019-03-04-exploratory-soak-18db-snaps-smoothed.json`.
 - **A low-pass sweep needs a broadband stimulus.** On the 1 kHz sine the first-difference level is flat once the cutoff passes
   1 kHz, so use the pulse train for it. The gain sweep and the soak use the sine.
-- **Sweep and soak need the sweep start and duration.** `analyze` cannot recover them from the capture, so derive the start as
-  above.
+- **Sweep and soak need the motion start and duration.** The stream cannot supply them; the session sidecar does.
 - No threshold was changed to make any of these pass.
 
 ### Blind spots

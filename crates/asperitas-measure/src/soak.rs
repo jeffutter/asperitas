@@ -1,4 +1,4 @@
-//! Judge a long capture taken while a parameter moves (`asperitas-rig override --sweep`): one
+//! Judge a long capture taken while a parameter moves (`asperitas-rig session` with a soak or hold): one
 //! verdict over silence dropouts, discontinuity candidates and parameter steps for the whole run,
 //! with each candidate attributed to the parameter-motion window or to the steady time outside it.
 //!

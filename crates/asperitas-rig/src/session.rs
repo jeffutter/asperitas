@@ -16,12 +16,11 @@
 //! * once anything has been sent, the knob is released on every way out: a finished schedule, a
 //!   write error, a read error, a timeout before the capture armed.
 
-use std::ffi::OsString;
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
-use asperitas_host::session::{Mode, Sidecar};
+use asperitas_host::session::{sidecar_path, Mode, Sidecar};
 use asperitas_wire::console::is_boot;
 use asperitas_wire::control::{parse_reply, Command, ErrorCode, Reply, Verb};
 use asperitas_wire::frame::{Decoder, Record, MAX_FRAME};
@@ -507,13 +506,6 @@ pub fn run_session<P: Read + Write>(port: P, plan: &SessionPlan, opts: &SessionO
     }
 }
 
-/// Where the sidecar for the stream at `out` lives: `out` with `.session` appended.
-pub fn sidecar_path(out: &Path) -> PathBuf {
-    let mut name: OsString = out.as_os_str().to_owned();
-    name.push(".session");
-    PathBuf::from(name)
-}
-
 /// Write the raw stream zstd-compressed to `out` and the sidecar beside it. Does nothing when the
 /// session read nothing.
 pub fn write_session(out: &Path, plan: &SessionPlan, run: &SessionRun) -> io::Result<()> {
@@ -756,10 +748,6 @@ mod tests {
         assert_eq!(
             side,
             plan.sidecar(run.observed.arm_t_ms, run.observed.first_set_t_ms)
-        );
-        assert_eq!(
-            sidecar_path(Path::new("a/b.console.zst")),
-            PathBuf::from("a/b.console.zst.session")
         );
     }
 

@@ -179,7 +179,7 @@ pub const SWEEP_BUCKETS: usize = 20;
 
 /// Fraction of each bucket's time span discarded at both ends before measuring it. Covers the
 /// smoothing settle after the bucket's first `SET` and the unrecorded offset between the capture's
-/// start and the first `SET` (`--sweep-start-s` is an estimate): the central half of a 0.5 s
+/// start and the first `SET` (the session sidecar's start is an estimate): the central half of a 0.5 s
 /// bucket stays valid for an offset error of up to 125 ms.
 ///
 /// Origin: TASK-019.03.02.

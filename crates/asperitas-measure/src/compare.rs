@@ -47,17 +47,12 @@ impl FxSetting {
         knobs: [None; KNOB_COUNT],
     };
 
-    /// Parse the `--fx` name (`bypass`, `patch`) with no knob overridden.
-    pub fn from_name(name: &str) -> Option<FxSetting> {
-        let code = match name {
-            "bypass" => 0,
-            "patch" => 1,
-            _ => return None,
-        };
-        Some(FxSetting {
+    /// The effect with wire code `code` and no knob overridden.
+    pub fn from_code(code: u8) -> FxSetting {
+        FxSetting {
             code,
             knobs: [None; KNOB_COUNT],
-        })
+        }
     }
 
     /// This setting with knob `knob` overridden to wire value `value`; `None` for a knob the
@@ -466,13 +461,12 @@ mod tests {
 
     #[test]
     fn knob_overrides_land_on_the_right_knob() {
-        let s = FxSetting::from_name("patch").unwrap();
+        let s = FxSetting::from_code(1);
         assert_eq!(s.knob_positions(), Controls::default().knobs);
         let k = s.with_knob(1, u16::MAX).unwrap().knob_positions();
         assert_eq!(k[0], Controls::default().knobs[0]);
         assert_eq!(k[1], 1.0);
         assert!(s.with_knob(KNOB_COUNT, 0).is_none());
-        assert!(FxSetting::from_name("gain").is_none());
     }
 
     #[test]
