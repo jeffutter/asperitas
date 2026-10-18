@@ -3,7 +3,7 @@
 use crate::param::{ParamSpec, Taper};
 use crate::processor::{Frame, Processor};
 use crate::smooth::{sanitize, Smoother};
-use libm::expf as exp;
+use libm::{expf as exp, logf as ln};
 
 /// Parameter table for [`OnePoleLowPass`]; the only source of its range, taper and default.
 pub const FILTER_PARAMS: [ParamSpec; 1] = [ParamSpec {
@@ -14,6 +14,13 @@ pub const FILTER_PARAMS: [ParamSpec; 1] = [ParamSpec {
     taper: Taper::Log,
     default: 20_000.0,
 }];
+
+/// Smoothing time constant for the log-cutoff glide, in milliseconds.
+const SMOOTH_MS: f32 = 5.0;
+
+/// Lowest cutoff the log-domain smoother can hold. A requested cutoff at or below this freezes
+/// the filter state (alpha is exactly 0), because `ln(0)` is not representable.
+const MIN_CUTOFF_HZ: f32 = 1e-3;
 
 /// Parameters for the one-pole low-pass filter.
 #[derive(Clone, Debug)]
@@ -30,15 +37,17 @@ impl Default for FilterParams {
     }
 }
 
-/// One-pole low-pass filter per channel with smoothed coefficient transitions.
+/// One-pole low-pass filter per channel with smoothed cutoff transitions.
 ///
 /// Uses the standard first-order IIR: `out = prev + alpha * (in - prev)`
-/// where `alpha = 1 - exp(-2π·f_c / f_s)`.
+/// where `alpha = 1 - exp(-2π·f_c / f_s)`. The smoothed quantity is `ln(f_c)`, and alpha is
+/// derived from it every sample (see the module `smooth`), so a glide is uniform in pitch.
 pub struct OnePoleLowPass {
     sample_rate_hz: f32,
     /// Sanitised requested cutoff; the coefficient is derived from this and the sample rate, so
     /// the order of `set_params` and `set_sample_rate` does not matter.
     cutoff_hz: f32,
+    /// Smooths `ln(cutoff_hz)`, with the cutoff already clamped to `[MIN_CUTOFF_HZ, nyquist]`.
     smoother: Smoother,
     prev_l: f32,
     prev_r: f32,
@@ -49,7 +58,7 @@ impl Default for OnePoleLowPass {
         Self {
             sample_rate_hz: 48_000.0,
             cutoff_hz: 48_000.0 / 2.0,
-            smoother: Smoother::new(1.0, 5.0, 48_000.0),
+            smoother: Smoother::new(ln(48_000.0 / 2.0), SMOOTH_MS, 48_000.0),
             prev_l: 0.0,
             prev_r: 0.0,
         }
@@ -62,7 +71,7 @@ impl Processor for OnePoleLowPass {
     fn set_sample_rate(&mut self, hz: f32) {
         if hz > 0.0 {
             self.sample_rate_hz = hz;
-            self.smoother.update_sample_rate(5.0, hz);
+            self.smoother.update_sample_rate(SMOOTH_MS, hz);
             self.recompute();
         }
     }
@@ -74,7 +83,8 @@ impl Processor for OnePoleLowPass {
     }
 
     fn tick(&mut self, input: Frame) -> Frame {
-        let alpha = self.smoother.advance();
+        let ln_cutoff = self.smoother.advance();
+        let alpha = self.alpha(ln_cutoff);
         let (in_l, in_r) = (sanitize(input[0]), sanitize(input[1]));
         self.prev_l = sanitize(self.prev_l + alpha * (in_l - self.prev_l));
         self.prev_r = sanitize(self.prev_r + alpha * (in_r - self.prev_r));
@@ -99,14 +109,24 @@ impl OnePoleLowPass {
         f
     }
 
-    /// Derive the coefficient from the stored cutoff and sample rate. The cutoff is clamped to
-    /// `[0, nyquist]` here, so a later sample-rate change re-clamps it, and alpha stays in
-    /// `[0, 1]`.
+    /// Set the smoother target from the stored cutoff and sample rate. The cutoff is clamped to
+    /// `[MIN_CUTOFF_HZ, nyquist]` here, so a later sample-rate change re-clamps it.
     fn recompute(&mut self) {
-        let cutoff = self.cutoff_hz.min(self.sample_rate_hz / 2.0);
+        let cutoff = self
+            .cutoff_hz
+            .min(self.sample_rate_hz / 2.0)
+            .max(MIN_CUTOFF_HZ);
+        self.smoother.set_target(ln(cutoff));
+    }
+
+    /// Coefficient for a smoothed `ln(cutoff_hz)`; always in `[0, 1]`.
+    fn alpha(&self, ln_cutoff: f32) -> f32 {
+        let cutoff = exp(ln_cutoff);
+        if cutoff <= MIN_CUTOFF_HZ * 1.001 {
+            return 0.0;
+        }
         // alpha = 1 - exp(-2π · fc / fs)
-        let exponent = -(2.0 * core::f32::consts::PI) * cutoff / self.sample_rate_hz;
-        self.smoother.set_target(1.0 - exp(exponent));
+        1.0 - exp(-(2.0 * core::f32::consts::PI) * cutoff / self.sample_rate_hz)
     }
 
     /// Jump the smoothed coefficient to its target now, keeping the filter state. Unlike

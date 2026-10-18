@@ -16,6 +16,9 @@ pub const GAIN_PARAMS: [ParamSpec; 1] = [ParamSpec {
     default: 0.0,
 }];
 
+/// Smoothing time constant for the linear gain, in milliseconds.
+const SMOOTH_MS: f32 = 10.0;
+
 /// Parameters for the gain processor.
 #[derive(Clone, Debug)]
 pub struct GainParams {
@@ -31,19 +34,18 @@ impl Default for GainParams {
     }
 }
 
-/// Stereo gain processor with per-channel exponential smoothing.
+/// Stereo gain processor; one exponential smoother serves both channels because they always
+/// share a target.
 pub struct Gain {
     sample_rate_hz: f32,
-    smoother_l: Smoother,
-    smoother_r: Smoother,
+    smoother: Smoother,
 }
 
 impl Default for Gain {
     fn default() -> Self {
         Self {
             sample_rate_hz: 48_000.0,
-            smoother_l: Smoother::new(1.0, 10.0, 48_000.0),
-            smoother_r: Smoother::new(1.0, 10.0, 48_000.0),
+            smoother: Smoother::new(1.0, SMOOTH_MS, 48_000.0),
         }
     }
 }
@@ -54,8 +56,7 @@ impl Processor for Gain {
     fn set_sample_rate(&mut self, hz: f32) {
         if hz > 0.0 {
             self.sample_rate_hz = hz;
-            self.smoother_l.update_sample_rate(10.0, hz);
-            self.smoother_r.update_sample_rate(10.0, hz);
+            self.smoother.update_sample_rate(SMOOTH_MS, hz);
         }
     }
 
@@ -70,19 +71,16 @@ impl Processor for Gain {
         };
         let gain_linear = powf(10.0, gain_db / 20.0);
         let gain_clamped = gain_linear.clamp(0.0, 8192.0); // ~78 dB ceiling
-        self.smoother_l.set_target(gain_clamped);
-        self.smoother_r.set_target(gain_clamped);
+        self.smoother.set_target(gain_clamped);
     }
 
     fn tick(&mut self, input: Frame) -> Frame {
-        let g_l = self.smoother_l.advance();
-        let g_r = self.smoother_r.advance();
-        [sanitize(input[0]) * g_l, sanitize(input[1]) * g_r]
+        let g = self.smoother.advance();
+        [sanitize(input[0]) * g, sanitize(input[1]) * g]
     }
 
     fn reset(&mut self) {
-        self.smoother_l.snap();
-        self.smoother_r.snap();
+        self.smoother.snap();
     }
 }
 
@@ -99,8 +97,7 @@ impl Gain {
     /// Jump the smoothed gain to its target now. Gain has no signal history, so this is what
     /// [`Processor::reset`] does too; it exists as its own name for the unsmoothed path.
     pub fn snap_params(&mut self) {
-        self.smoother_l.snap();
-        self.smoother_r.snap();
+        self.reset();
     }
 
     /// Convert a normalised knob position [0.0, 1.0] to [`GainParams`].

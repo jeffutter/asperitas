@@ -113,7 +113,7 @@ pub fn align(capture: &Capture, stimulus: &[f32]) -> Result<Alignment, AlignErro
         let mut c = vec![Complex::new(0.0f32, 0.0); fft_len];
         let mut s = vec![Complex::new(0.0f32, 0.0); fft_len];
         for (dst, &v) in c.iter_mut().zip(&capture.samples[start..start + w]) {
-            dst.re = f32::from(v) / 32768.0;
+            dst.re = asperitas_dsp::pcm::i16_to_f32(v);
         }
         for (j, dst) in s.iter_mut().take(ref_len).enumerate() {
             if let Some(&v) = (start + j)

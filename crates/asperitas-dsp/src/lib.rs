@@ -5,6 +5,7 @@ pub mod filter;
 pub mod fx_chain;
 pub mod gain;
 pub mod param;
+pub mod pcm;
 pub mod processor;
 pub mod replay_fx;
 mod smooth;

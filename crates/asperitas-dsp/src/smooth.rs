@@ -2,6 +2,21 @@
 //!
 //! One-pole exponential smoothing with a time-constant-based alpha. Keeps parameter
 //! transitions free of clicks and pops.
+//!
+//! # Smoothing-domain convention
+//!
+//! Smooth the perceptual parameter, then derive whatever the signal path needs from the
+//! smoothed value every sample. A frequency is smoothed as `ln(Hz)`, so a glide moves equal
+//! pitch intervals per unit time, and the filter coefficient is computed from it per sample.
+//! Smoothing the coefficient itself is not allowed for a recursive filter: the coefficient is a
+//! nonlinear function of frequency, so the glide is non-uniform in pitch, and for a resonator
+//! (poles, not just one real pole) interpolated coefficient pairs can leave the stable region.
+//!
+//! The one exception is a memoryless multiplier such as [`crate::gain::Gain`]: it has no
+//! recursion to destabilise, so it smooths the linear amplitude directly and avoids a `powf`
+//! per sample.
+//!
+//! Time constants live next to the processor that uses them as a named `SMOOTH_MS` constant.
 
 use libm::expf as exp;
 

@@ -9,7 +9,7 @@ use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 
 /// Read a WAV file and return its spec and interleaved stereo frames as f32.
 ///
-/// 16-bit PCM is scaled by `i16::MAX` into [-1, 1]; 32-bit float is taken as is, so values
+/// 16-bit PCM is scaled by 32768 into [-1, 1); 32-bit float is taken as is, so values
 /// outside [-1, 1] survive. Mono input is widened to stereo by copying the single channel
 /// into both slots, so callers never have to branch on channel count. The returned spec
 /// still reports the file's original channel count.
@@ -24,7 +24,7 @@ pub fn read_wav(path: &str) -> Result<(WavSpec, Vec<Frame>), String> {
     let samples: Vec<f32> = match spec.sample_format {
         SampleFormat::Int => reader
             .samples::<i16>()
-            .map(|s| s.map(|v| v as f32 / i16::MAX as f32))
+            .map(|s| s.map(asperitas_dsp::pcm::i16_to_f32))
             .collect::<Result<Vec<_>, _>>(),
         SampleFormat::Float => reader.samples::<f32>().collect::<Result<Vec<_>, _>>(),
     }
@@ -156,7 +156,7 @@ mod tests {
         );
         assert_eq!(frames.len(), samples.len(), "one frame per mono sample");
         for (frame, &sample) in frames.iter().zip(samples.iter()) {
-            let expected = sample as f32 / i16::MAX as f32;
+            let expected = asperitas_dsp::pcm::i16_to_f32(sample);
             assert_eq!(frame[0], expected);
             assert_eq!(frame[1], expected, "mono must be copied into both channels");
         }

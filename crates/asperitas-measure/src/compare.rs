@@ -100,11 +100,11 @@ impl Reference {
         let kind = fx.kind().ok_or(CompareError::UnknownFx(fx.code))?;
         let mut replay = ReplayFx::new();
         replay.select(kind, fx.knob_positions());
-        // `asperitas-cli` widens int16 by dividing by i16::MAX and feeds the same value to both lanes.
+        // `asperitas-cli` widens int16 with `asperitas_dsp::pcm::i16_to_f32` and feeds the same value to both lanes.
         let mut frames: Vec<[f32; 2]> = pcm
             .chunks_exact(2)
             .map(|b| {
-                let v = f32::from(i16::from_le_bytes([b[0], b[1]])) / f32::from(i16::MAX);
+                let v = asperitas_dsp::pcm::i16_to_f32(i16::from_le_bytes([b[0], b[1]]));
                 [v, v]
             })
             .collect();
