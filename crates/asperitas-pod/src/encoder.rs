@@ -260,20 +260,107 @@ impl DebouncedSwitch {
     }
 }
 
+/// Raw pin levels for the Pod's five digital inputs, as `Input::is_high` reports
+/// them (`true` = High).
+///
+/// The pins are pulled up and the switches close to ground, so High means
+/// released / contact open and Low means pressed / contact closed. The
+/// inversion lives in [`ControlDecoder::step`], not in the caller.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub struct PodInputs {
+    pub a_high: bool,
+    pub b_high: bool,
+    pub click_high: bool,
+    pub button1_high: bool,
+    pub button2_high: bool,
+}
+
+/// Everything between the five pin reads and the [`ControlEvent`]s: active-low
+/// inversion, quadrature packing (A as bit 1, B as bit 0), the per-poll detent
+/// drain and the debounced switch edges. Hardware-free so it is host-tested;
+/// the pod-hw driver only samples pins and forwards the result.
+pub struct ControlDecoder {
+    encoder: EncoderDecoder,
+    click: DebouncedSwitch,
+    button1: DebouncedSwitch,
+    button2: DebouncedSwitch,
+}
+
+impl ControlDecoder {
+    /// All switches start released, matching pulled-up pins at rest.
+    pub fn new() -> Self {
+        Self {
+            encoder: EncoderDecoder::new(),
+            click: DebouncedSwitch::new(false),
+            button1: DebouncedSwitch::new(false),
+            button2: DebouncedSwitch::new(false),
+        }
+    }
+
+    /// Consume one poll's pin levels. Slots are fixed: encoder delta, click,
+    /// button 1, button 2, so iterating in order yields events in that order.
+    ///
+    /// The encoder delta slot is `Some` only when a whole detent completed on
+    /// this poll; sub-detent residue stays inside the decoder, which is what
+    /// makes draining every poll correct rather than lossy.
+    pub fn step(&mut self, inputs: PodInputs) -> [Option<ControlEvent>; 4] {
+        let a_active = !inputs.a_high;
+        let b_active = !inputs.b_high;
+        self.encoder
+            .update((u8::from(a_active) << 1) | u8::from(b_active));
+        let detents = self.encoder.drain_detents();
+
+        let edge_event = |edge: Option<Edge>, press, release| {
+            edge.map(|e| match e {
+                Edge::Press => press,
+                Edge::Release => release,
+            })
+        };
+
+        [
+            (detents != 0).then_some(ControlEvent::EncoderDelta(detents)),
+            edge_event(
+                self.click.update(!inputs.click_high),
+                ControlEvent::ClickPress,
+                ControlEvent::ClickRelease,
+            ),
+            edge_event(
+                self.button1.update(!inputs.button1_high),
+                ControlEvent::Button1Press,
+                ControlEvent::Button1Release,
+            ),
+            edge_event(
+                self.button2.update(!inputs.button2_high),
+                ControlEvent::Button2Press,
+                ControlEvent::Button2Release,
+            ),
+        ]
+    }
+
+    /// The last quadrature state consumed, A as bit 1 and B as bit 0.
+    pub fn state(&self) -> u8 {
+        self.encoder.state()
+    }
+}
+
+impl Default for ControlDecoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Hardware driver — requires embassy-stm32 (pod-hw feature)
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "pod-hw")]
 mod hw {
-    use super::{DebouncedSwitch, EncoderDecoder};
+    use super::{ControlDecoder, PodInputs};
     use embassy_stm32::{
         self as hal,
         gpio::{Input, Pull},
         Peri,
     };
-
-    use super::ControlEvent;
 
     /// Unified Pod control-surface driver.
     ///
@@ -289,10 +376,7 @@ mod hw {
         click: Input<'static>,
         button1: Input<'static>,
         button2: Input<'static>,
-        encoder: EncoderDecoder,
-        click_switch: DebouncedSwitch,
-        button1_switch: DebouncedSwitch,
-        button2_switch: DebouncedSwitch,
+        decoder: ControlDecoder,
     }
 
     impl ControlSurface {
@@ -313,15 +397,8 @@ mod hw {
             let button1 = Input::new(button1.into(), Pull::Up);
             let button2 = Input::new(button2.into(), Pull::Up);
 
-            // Initial levels: unpressed switches read High with pull-up.
-            // We invert to "pressed" semantics: true = pressed (Low), false = released (High).
-            let initial_pressed = false;
-
             Self {
-                encoder: EncoderDecoder::new(),
-                click_switch: DebouncedSwitch::new(initial_pressed),
-                button1_switch: DebouncedSwitch::new(initial_pressed),
-                button2_switch: DebouncedSwitch::new(initial_pressed),
+                decoder: ControlDecoder::new(),
                 enc_a,
                 enc_b,
                 click,
@@ -341,46 +418,15 @@ mod hw {
         /// documentation for why this matters). Do NOT call from the audio
         /// callback — GPIO reads are blocking and would disrupt audio timing.
         pub fn poll(&mut self, mut events: impl FnMut(super::ControlEvent)) {
-            // Read encoder state: A is bit 1, B is bit 0.
-            // Pin is inverted (pull-up, active-low): Low = active.
-            let a_active = !self.enc_a.is_high();
-            let b_active = !self.enc_b.is_high();
-            let encoder_state = (if a_active { 2 } else { 0 }) | (if b_active { 1 } else { 0 });
-            self.encoder.update(encoder_state);
-
-            // Drain whole detents. Any sub-detent residue stays inside the
-            // decoder, which is what makes calling this every poll correct
-            // rather than lossy. Only report non-zero detents to avoid flooding
-            // the event stream with no-op samples.
-            let detents = self.encoder.drain_detents();
-            if detents != 0 {
-                events(ControlEvent::EncoderDelta(detents));
-            }
-
-            // Sample switches. Active-low: Low = pressed = true.
-            let click_pressed = !self.click.is_high();
-            let btn1_pressed = !self.button1.is_high();
-            let btn2_pressed = !self.button2.is_high();
-
-            if let Some(edge) = self.click_switch.update(click_pressed) {
-                events(match edge {
-                    super::Edge::Press => ControlEvent::ClickPress,
-                    super::Edge::Release => ControlEvent::ClickRelease,
-                });
-            }
-
-            if let Some(edge) = self.button1_switch.update(btn1_pressed) {
-                events(match edge {
-                    super::Edge::Press => ControlEvent::Button1Press,
-                    super::Edge::Release => ControlEvent::Button1Release,
-                });
-            }
-
-            if let Some(edge) = self.button2_switch.update(btn2_pressed) {
-                events(match edge {
-                    super::Edge::Press => ControlEvent::Button2Press,
-                    super::Edge::Release => ControlEvent::Button2Release,
-                });
+            let inputs = PodInputs {
+                a_high: self.enc_a.is_high(),
+                b_high: self.enc_b.is_high(),
+                click_high: self.click.is_high(),
+                button1_high: self.button1.is_high(),
+                button2_high: self.button2.is_high(),
+            };
+            for event in self.decoder.step(inputs).into_iter().flatten() {
+                events(event);
             }
         }
 
@@ -394,7 +440,7 @@ mod hw {
         /// events `poll()` yields are identical whether or not anyone reads
         /// this.
         pub fn encoder_state(&self) -> u8 {
-            self.encoder.state()
+            self.decoder.state()
         }
     }
 }
@@ -408,7 +454,187 @@ pub use hw::ControlSurface;
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
+    use std::vec;
+    use std::vec::Vec;
+
+    // ── ControlDecoder::step tests ────────────────────────────────────
+
+    const IDLE: PodInputs = PodInputs {
+        a_high: true,
+        b_high: true,
+        click_high: true,
+        button1_high: true,
+        button2_high: true,
+    };
+
+    #[test]
+    fn step_idle_emits_nothing_and_state_is_zero() {
+        let mut d = ControlDecoder::new();
+        for _ in 0..20 {
+            assert_eq!(d.step(IDLE), [None; 4]);
+        }
+        assert_eq!(d.state(), 0);
+    }
+
+    #[test]
+    fn step_packs_a_as_bit1_b_as_bit0_active_low() {
+        let mut d = ControlDecoder::new();
+        d.step(PodInputs {
+            a_high: false,
+            ..IDLE
+        });
+        assert_eq!(d.state(), 0b10);
+        d.step(PodInputs {
+            b_high: false,
+            ..IDLE
+        });
+        assert_eq!(d.state(), 0b01);
+        d.step(PodInputs {
+            a_high: false,
+            b_high: false,
+            ..IDLE
+        });
+        assert_eq!(d.state(), 0b11);
+        d.step(IDLE);
+        assert_eq!(d.state(), 0b00);
+    }
+
+    /// Walk the Gray cycle 00,01,11,10 (clockwise) one detent, as pin levels.
+    fn walk(d: &mut ControlDecoder, states: &[u8]) -> Vec<ControlEvent> {
+        let mut out = Vec::new();
+        for &s in states {
+            let r = d.step(PodInputs {
+                a_high: s & 0b10 == 0,
+                b_high: s & 0b01 == 0,
+                ..IDLE
+            });
+            out.extend(r.into_iter().flatten());
+        }
+        out
+    }
+
+    #[test]
+    fn step_clockwise_detent_emits_exactly_on_completing_step() {
+        let mut d = ControlDecoder::new();
+        // Three transitions: residue retained, nothing emitted.
+        assert!(walk(&mut d, &[0b01, 0b11, 0b10]).is_empty());
+        // Fourth transition completes the detent.
+        assert_eq!(walk(&mut d, &[0b00]), vec![ControlEvent::EncoderDelta(1)]);
+        // Residue is gone: another full cycle yields exactly one more.
+        assert_eq!(
+            walk(&mut d, &[0b01, 0b11, 0b10, 0b00]),
+            vec![ControlEvent::EncoderDelta(1)]
+        );
+    }
+
+    #[test]
+    fn step_counter_clockwise_detent_is_negative() {
+        let mut d = ControlDecoder::new();
+        assert_eq!(
+            walk(&mut d, &[0b10, 0b11, 0b01, 0b00]),
+            vec![ControlEvent::EncoderDelta(-1)]
+        );
+    }
+
+    #[test]
+    fn step_sub_detent_residue_carries_across_polls() {
+        let mut d = ControlDecoder::new();
+        assert!(walk(&mut d, &[0b01, 0b11]).is_empty());
+        // Reverse two steps cancels the residue: no event, no spurious delta.
+        assert!(walk(&mut d, &[0b01, 0b00]).is_empty());
+        assert_eq!(
+            walk(&mut d, &[0b01, 0b11, 0b10, 0b00]),
+            vec![ControlEvent::EncoderDelta(1)]
+        );
+    }
+
+    fn pressed_after(
+        d: &mut ControlDecoder,
+        inputs: PodInputs,
+        n: usize,
+    ) -> Vec<[Option<ControlEvent>; 4]> {
+        (0..n).map(|_| d.step(inputs)).collect()
+    }
+
+    #[test]
+    fn step_switch_edges_map_to_their_own_events_in_slot_order() {
+        let cases: [(PodInputs, usize, ControlEvent, ControlEvent); 3] = [
+            (
+                PodInputs {
+                    click_high: false,
+                    ..IDLE
+                },
+                1,
+                ControlEvent::ClickPress,
+                ControlEvent::ClickRelease,
+            ),
+            (
+                PodInputs {
+                    button1_high: false,
+                    ..IDLE
+                },
+                2,
+                ControlEvent::Button1Press,
+                ControlEvent::Button1Release,
+            ),
+            (
+                PodInputs {
+                    button2_high: false,
+                    ..IDLE
+                },
+                3,
+                ControlEvent::Button2Press,
+                ControlEvent::Button2Release,
+            ),
+        ];
+        for (pressed, slot, press, release) in cases {
+            let mut d = ControlDecoder::new();
+            let steps = pressed_after(&mut d, pressed, DEBOUNCE_TICKS as usize);
+            for s in &steps[..steps.len() - 1] {
+                assert_eq!(*s, [None; 4]);
+            }
+            let mut expect = [None; 4];
+            expect[slot] = Some(press);
+            assert_eq!(steps[steps.len() - 1], expect);
+            // Held: no repeat.
+            assert_eq!(d.step(pressed), [None; 4]);
+            let steps = pressed_after(&mut d, IDLE, DEBOUNCE_TICKS as usize);
+            let mut expect = [None; 4];
+            expect[slot] = Some(release);
+            assert_eq!(steps[steps.len() - 1], expect);
+        }
+    }
+
+    #[test]
+    fn step_simultaneous_events_fill_distinct_slots() {
+        let mut d = ControlDecoder::new();
+        let all_down = PodInputs {
+            click_high: false,
+            button1_high: false,
+            button2_high: false,
+            ..IDLE
+        };
+        let steps = pressed_after(&mut d, all_down, DEBOUNCE_TICKS as usize);
+        assert_eq!(
+            steps[steps.len() - 1],
+            [
+                None,
+                Some(ControlEvent::ClickPress),
+                Some(ControlEvent::Button1Press),
+                Some(ControlEvent::Button2Press),
+            ]
+        );
+    }
+
+    #[test]
+    fn step_high_levels_mean_released_not_pressed() {
+        let mut d = ControlDecoder::new();
+        for _ in 0..(DEBOUNCE_TICKS as usize * 2) {
+            assert_eq!(d.step(IDLE), [None; 4]);
+        }
+    }
 
     // ── EncoderDecoder LUT tests ──────────────────────────────────────
 
