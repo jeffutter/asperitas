@@ -192,9 +192,10 @@ Move the patch with `CTL SET`/`REL`: knob `00` is the filter cutoff (20 Hz to 20
   other `CTL` verb, which this binary does not serve. `FX`, `SET` and `REL` are served by every
   stimulus build with the console (`log-usb`); the RTT-only builds have no console to send them on.
 - **Timing (excerpt).** The pass is held until the capture's first callback, `ARM_DELAY_MS` (2 s) after audio
-  starts. Send `FX` in that window, i.e. right after the console attaches. The `rig` host
-  subcommand for this is not written yet; `cargo run -p asperitas-wire --example ctl_frame -- <fx hex> <value hex>` (or `set <knob> <value>` / `rel <knob>`) prints the
-  framed command to send, and `scripts/rig-session.py` runs the whole sequence, and a session script that sends it the moment the console attaches (about 3.7 s after a probe reset) lands inside the window.
+  starts. Send `FX` in that window, i.e. right after the console attaches. `asperitas-rig session`
+  (see the Bench session section) does this: it sends `FX` the moment the console attaches, inside the window.
+  `cargo run -p asperitas-wire --example ctl_frame -- <fx hex> <value hex>` (or `set <knob> <value>` / `rel <knob>`) prints the
+  framed command to send by hand.
 - **CRC.** The effect runs after the block is taken, so `EXCPLAY`'s CRC still describes the raw
   stored samples and cannot detect the effect.
 - **Applied at the next block** after the reply; the processor starts from a clean state with no
@@ -310,11 +311,12 @@ the reference cannot follow a moving knob).
 
 Taken on the earlier build in which `CTL FX` chose a lone gain or low-pass and knob `00` moved whichever was chosen. On the current rig the gain is knob `01` and the cutoff knob `00` of the patch.
 
-All on `rig` in the bootloaded layout, each run started by `scripts/rig-session.py` (probe reset, a fresh `BOOT`
+All on `rig` in the bootloaded layout, each run started by a since-retired session script (probe reset, a fresh `BOOT`
 record, `CTL FX` on attach, then a `SET` schedule at 20 per second ending in `REL`), console held by that one
 reader, 2026-10-15. Captures are `audio/captures/2026-10-15-rig-{sweep,soak,hold}-*.console.zst`, reports
 `captures/task-019-03-04-*.json`. The sweep start is `arm_ms` (the median of `t_ms - (delivered + 0.5) * 341.3` over
 the `CAPSTAT` rows) against the first `CTLR OK SET` reply's `t_ms`; it was 4.90 s into the capture.
+To reproduce a run like these, use `asperitas-rig session`.
 
 | Run | Build | Result |
 |---|---|---|
