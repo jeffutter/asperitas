@@ -857,12 +857,10 @@ fn payload_offset(payload_at: usize) -> usize {
 /// The byte a [`DecodeError`] points at, for the variants that name one.
 fn error_offset(error: &DecodeError) -> usize {
     match error {
-        DecodeError::Char { at, .. }
-        | DecodeError::Padding { at }
-        | DecodeError::TrailingBits { at } => *at,
+        DecodeError::Char { at, .. } | DecodeError::TrailingBits { at } => *at,
         // A string that is not a whole number of groups is wrong as a whole, and an output buffer
         // too small for a payload the grammar bounds cannot happen: name the payload's start either
         // way rather than invent an offset the error did not report.
-        DecodeError::Length(_) | DecodeError::OutputTooSmall { .. } => 0,
+        DecodeError::Length(_) | DecodeError::Padding | DecodeError::OutputTooSmall { .. } => 0,
     }
 }
