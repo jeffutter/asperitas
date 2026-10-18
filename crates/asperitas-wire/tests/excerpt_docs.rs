@@ -1,24 +1,21 @@
-//! Doc-consistency check: the layout table in `docs/reference/daisy-seed3.md` ("Instrument excerpts
-//! in QSPI") must quote the `excerpt` module's constants. The module owns the numbers; this test
-//! fails when the doc is left behind.
+//! Doc-consistency check: the layout table in the `excerpt` module's own rustdoc must quote the
+//! module's constants. The constants own the numbers; this test fails when the prose is left behind.
 //!
 //! Run with: `cargo test -p asperitas-wire --test excerpt_docs`
 
 use asperitas_wire::excerpt::{
-    slot_base, BOOTLOADER_END, EXCERPT_AREA_START, EXC_CHUNK_RAW, HEADER_LEN, PCM_CAPACITY,
-    RESERVED_SECTOR_START, SLOT_COUNT, SLOT_STRIDE,
+    BOOTLOADER_END, EXCERPT_AREA_START, EXC_CHUNK_RAW, PCM_CAPACITY, RESERVED_SECTOR_START,
+    SLOT_COUNT, SLOT_STRIDE,
 };
 
-const DOC: &str = include_str!("../../../docs/reference/daisy-seed3.md");
+const DOC: &str = include_str!("../src/excerpt.rs");
 
-/// The excerpt section, from its heading to the next level-2 heading.
-fn section() -> &'static str {
-    let start = DOC
-        .find("\n## Instrument excerpts in QSPI\n")
-        .expect("doc has the 'Instrument excerpts in QSPI' section");
-    let rest = &DOC[start + 1..];
-    let end = rest[3..].find("\n## ").map_or(rest.len(), |i| i + 3);
-    &rest[..end]
+/// The module's `//!` header, up to the first line that is not a doc comment.
+fn section() -> String {
+    DOC.lines()
+        .take_while(|l| l.starts_with("//!"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn thousands(n: u32) -> String {
@@ -36,23 +33,20 @@ fn thousands(n: u32) -> String {
 #[test]
 fn layout_table_quotes_the_module_constants() {
     let doc = section();
-    let last = slot_base(SLOT_COUNT - 1).expect("last slot exists");
     let wanted = [
-        format!("`0x{BOOTLOADER_END:X}`"),
-        format!("`0x{EXCERPT_AREA_START:X}`"),
-        format!("`0x{SLOT_STRIDE:X}`"),
-        format!("{SLOT_COUNT} slots"),
-        format!("`0x{last:X}`"),
-        format!("`0x{RESERVED_SECTOR_START:X}`"),
-        format!("{} B per slot", thousands(PCM_CAPACITY)),
-        format!("{HEADER_LEN} B used"),
-        format!("{EXC_CHUNK_RAW} raw bytes"),
+        format!("`0x000000..0x{BOOTLOADER_END:06X}`"),
+        format!("`0x{EXCERPT_AREA_START:06X}"),
+        format!("* 0x{SLOT_STRIDE:X}`"),
+        format!("(0..{SLOT_COUNT})"),
+        format!("`0x{RESERVED_SECTOR_START:X}..0x800000`"),
+        format!("{} bytes", thousands(PCM_CAPACITY)),
+        format!("is {EXC_CHUNK_RAW} rather"),
     ];
     for needle in &wanted {
         assert!(
             doc.contains(needle.as_str()),
-            "docs/reference/daisy-seed3.md section 'Instrument excerpts in QSPI' no longer \
-             contains {needle:?}; update the table to match crates/asperitas-wire/src/excerpt.rs"
+            "the `excerpt` module docs no longer contain {needle:?}; update the layout prose to match \
+             the constants"
         );
     }
 }

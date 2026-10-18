@@ -25,6 +25,9 @@ code.
   as a DSP bug. Also: **plugging both output jacks (headphone out and line out) mixes the
   channels**, so a one-channel signal comes out of both sides; use one output at a time for
   left/right checks.
+- **[docs/reference/protocol.md](docs/reference/protocol.md)** - index from each wire grammar
+  (console frame, `BOOT`/`STATUS`, rig records, dump, excerpts, host control, capture geometry) to the
+  rustdoc module that owns it. The grammar is in rustdoc, not in the Seed3 page.
 - **[docs/reference/asperitas-rig.md](docs/reference/asperitas-rig.md)** — host capture runner
   for the framed USB console: flags, exit codes (0 pass, 1 failed verdict, 2 error), the
   artifact format, and the convention of committing artifacts with hardware verification

@@ -205,200 +205,11 @@ loses* covers why you can't read one off the other. In order of usefulness:
 Neither speaks before USB enumerates, which is exactly where boot faults live. That window is
 the probe's own ground, and the reason it earns a place on the bench.
 
-#### Console protocol v1: every record verifies itself
+#### Console protocol
 
-CDC-ACM delivers an undifferentiated byte stream: no boundaries, no length, no sequence. A record
-whose tail vanished at a ring wrap is therefore indistinguishable from a short log line, which is how
-truncated knob lines came to be filed as an ADC glitch (TASK-018.04). v1 puts a sequence number and a
-checksum on every line while keeping each one readable in `screen` and greppable in a raw capture.
-The normative copy is `crates/asperitas-wire/src/frame.rs`; this is a transcription, and where the
-two disagree the code is right.
-
-```text
-record := '~' level SP seq SP t_ms SP body '*' crc CRLF
-```
-
-- **`~`** — start marker, device→host only (`>` is reserved the other way).
-- **`level`** — one of `I W E D T` (`level_letter`); the decoder accepts exactly those five letters.
-- **`seq`** — exactly 8 lowercase hex digits, a `u32` incremented once per record within a boot.
-  Assigned *inside* the record lock (`take_seq` called from `emit` in `lib.rs`), which is what makes
-  numeric order equal wire order. It wraps mod 2³² on purpose; the loss counters do the opposite.
-- **`t_ms`** — exactly 8 decimal digits, milliseconds since boot, transmitted modulo 100 000 000
-  (`T_MS_WRAP`) so the field never widens and invalidates the fixed offsets behind it. It wraps after
-  ~27.8 h, and neither field reveals the wrap on its own — continuity comes from `BOOT` plus `seq`.
-- **`body`** — 0–200 bytes (`MAX_BODY`), sanitised on the way out.
-- **`crc`** — `*`, then 4 lowercase hex digits, then `CR LF` (`TRAILER_LEN` 7).
-
-The prefix is 21 bytes (`PREFIX_LEN`), so overhead is 28 bytes per record — and 28 bytes is also the
-shortest legal record, the one with an empty body. Longest is 228 (`MAX_FRAME`).
-
-Example records. These are the shipped encoder's own bytes, pinned by the `encode_golden_*` tests in
-`frame.rs`, not a bench capture:
-
-```text
-~I 00000042 00004567 ENC +1*9c17
-~D 00000000 00000000 *91d4
-~W deadbeef 76980377 knob r2=298 ✓*b321
-```
-
-34, 28 and 43 bytes counting the closing CRLF. The second is pure overhead. The third carries a
-wrapped `t_ms` (0x9999_9999 ms → `76980377`) and is the truncated knob line that nearly became an ADC
-bug report; the checkmark crosses the wire as its three UTF-8 bytes.
-
-**Checksum: CRC-16/CCITT-FALSE.** Width 16, poly `0x1021`, init `0xFFFF`, `refin=false`,
-`refout=false`, `xorout=0x0000`, check `0x29b1` for the 9-byte ASCII string `123456789`, alias
-CRC-16/IBM-3740, catalogue <https://reveng.sourceforge.io/crc-catalogue/16.htm>. Copy the parameters,
-not the name: "CRC-16/CCITT" is routinely misidentified — the reflected form is KERMIT, check `0x2189`,
-and XMODEM is the init-`0x0000` variant — so anyone who implements whichever function their library
-calls CCITT gets a capture in which every record fails. The covered range is
-`level SP seq SP t_ms SP body`: every byte after the `~` up to but excluding the `*`, the separator
-spaces included — 20, 26 and 220 bytes for the three lines above. Deliberately a table-less bit loop
-(≤ 220 × 16 iterations per record) so both ends of the link can share identical source. Integrity is
-not authenticity: the checksum is affine over GF(2), so two edits whose contributions cancel leave it
-valid while changing the payload. That sets the ceiling on what a clean CRC proves.
-
-**CRLF is a trustworthy delimiter because the producer sanitises the body.** `sanitize_byte` replaces
-every byte `< 0x20` — CR and LF among them — and DEL (`0x7F`) with `'_'`, while bytes ≥ 0x80 pass
-through untouched so UTF-8 survives. The fixed-width prefix contains no CR or LF either, so the first
-complete CRLF after a candidate start *must* be that record's terminator. Printable punctuation
-deliberately survives, `~`, `*` and `|` included: framing strength comes from the grammar plus the CRC
-and above all the no-CR/LF invariant, not from a supposedly tilde-free payload, so a stray `~` or `*`
-inside a body can only cause a CRC mismatch, never a false-valid record. SLIP (RFC 1055) and COBS buy
-delimiter uniqueness by escaping bytes; this transport buys it at the producer, which is cheaper and
-keeps every line legible. The same sanitisation is the log-injection fix (CWE-117).
-
-**Locate the `*` backwards from the CRLF, never forwards from the `~`.** Sanitisation only neutralises
-control bytes and DEL, so a body may legitimately contain `*`, and a forward search mis-decodes exactly
-those records. The `*` sits 5 bytes before CR and the CRC digits start 4 bytes before it.
-
-**Resynchronisation: advance strictly past the disqualified start byte.** On any failure — a level
-letter off `I W E D T`, a misplaced separator space, a non-hex `seq`, a non-decimal `t_ms`, a missing
-`*`, a CRC mismatch, a CRLF landing where no legal body length fits, or a window that fills to
-`MAX_FRAME` without ever finding a terminator — drop that one `~`, charge the skipped bytes once, and
-retry at the next `~`; never repair a record, never guess a shorter body. The hazard is documented
-upstream: ArduPilot's C MAVLink parser desynchronised permanently when a bad-CRC message happened to end
-in a byte equal to the STX magic, because resuming at "the next plausible-looking byte" can land *inside*
-the next real frame (<https://github.com/ArduPilot/pymavlink/issues/881>). What the rule buys is stated
-by the code: corruption costs one record, not the capture, and because records come only from fully
-validated frames, **no record is ever invented**. Two limits belong in the same breath as that promise.
-A record whose leading `~` was lost produces no integrity failure at all — the decoder never saw a
-candidate start — and only a `seq` gap or a `STATUS` counter reveals it. And a byte-level splice between
-two producers legitimately decodes as two good records plus one integrity failure, because the frames
-around the splice really are intact.
-
-#### `BOOT` and `STATUS`: the reserved body prefixes
-
-Two bodies are wire contract, rendered in `crates/asperitas-wire/src/console.rs` and riding ordinary
-records — same framing, same CRC, same chance of being dropped:
-
-```text
-BOOT proto=1 fw=0.1.0 pipe=2048 maxbody=200
-STATUS proto=1 sent=12 dropped_full=3 bytes_dropped=4096 trunc=1 ep_err=2 seq_next=18 pipe_free=2048
-```
-
-`proto` comes first so a reader can handshake before trusting anything. `fw` is the
-`asperitas-logging` crate version, which is the version that ships the console — the firmware binaries
-have no separate release process. `pipe` is the log ring in bytes (`LOG_PIPE_SIZE`) and `maxbody` the
-encoder's cap. `BOOT` consumes `seq 0` and is emitted only once the USB backend is installed (`asperitas_logging::init`
-installs the logger, switches the backend, then announces), so ordering it before the switch discards it
-with no trace in any counter.
-
-`STATUS` fields and their order *are* the contract: TASK-031 parses them, and a unit test fails if either
-moves. Values are absolute since-boot counts, never deltas — the host owns the differencing.
-
-| Field | Counts |
-|---|---|
-| `sent` | Records committed to the ring whole. Cross-check against the host's decoded count. |
-| `dropped_full` | Records refused for lack of space — never partially written. |
-| `bytes_dropped` | Bytes those refused records would have occupied. |
-| `trunc` | Bodies shortened by the 200-byte cap. **Those records shipped**, which is why they are not in `dropped_full`. |
-| `ep_err` | Endpoint writes that failed: link loss or stalls. |
-| `seq_next` | The value the next record will carry. |
-| `pipe_free` | Ring free bytes at the instant of rendering — how close to full the ring was, which is what makes a drop storm diagnosable after the fact rather than merely deniable. |
-
-Pacing: at most once per second (`STATUS_MIN_INTERVAL_MS`) and only when a counter actually moved,
-emitted from the drain loop only when the ring is empty. Debouncing is not politeness — during a
-full-ring condition the `STATUS` record competes for the very space that is missing, so an undebounced
-emitter starves the logs it is reporting on.
-
-**Counters saturate at `u32::MAX`; `seq` wraps.** A wrapped byte counter becomes an enormous negative
-rate and reads as a decoder bug, and roughly 24 days of sustained dropping at ring capacity is
-reachable on a rig left running. `seq` does the opposite because a saturated sequence number would emit
-the *same* `seq` twice and invent a record, while a wrapped one is recoverable by modular subtraction —
-a jump ≥ 2³¹ means restart or corruption, not loss. A counter describes an amount, a sequence number
-describes a position.
-
-**Why `seq` alone cannot tell a reboot from a loss:** CRC and `seq` detect damage, never absence. A hole
-in the stream leaves no bytes behind, so a gap is equally consistent with "bytes lost" and "board
-rebooted and restarted numbering at 0". The second `BOOT` is what breaks the tie — or a `seq`
-regression. There is deliberately no boot-id in v1: it would need `.noinit` persistence or a peripheral
-read for no gain over the banner's presence, and reset *reason* is TASK-032's. The honest limit is that a
-lost `STATUS` record is indistinguishable from nothing having changed, except through the `seq` gap it
-leaves behind — silence means "probably nothing changed", not "nothing changed".
-
-`AUDIO` and `AUDEND` are a third reserved pair carrying base64 audio dumps over the same framing
-(`crates/asperitas-wire/src/dump.rs`); the rig verbs and the dump pair are tabled together in
-*Rig record grammar* below, and the workflow around them is the README's *Measurement rig* section.
-
-#### Rig record grammar
-
-Everything `rig` says that is not a log line, in one place. Bodies ride `frame` untouched, so `level`,
-`seq` and `t_ms` belong to the frame. Field names and order are the contract, and each row is pinned by
-the host test named beside it. The worked lines are test fixtures, not captures. The excerpt verbs
-(`EXCSTART`, `EXCDATA`, `EXCEND`, `EXCOK`, `EXCFAIL`, `EXCPLAY`) are tabled under *Instrument excerpts
-in QSPI*.
-
-| Record | Sent | Worked line | Pinned by |
-|---|---|---|---|
-| `RIGCFG` | once at boot | `RIGCFG proto=1 capture=mono16 lane=L blocks=879 block_bytes=32768 bytes_per_s=96000 capsec_us=349525333 window_s=300 cpu_hz=480000000 icache=1 dcache=0` | `rigcfg_body_pins_field_names_and_order` in `crates/asperitas-wire/src/console.rs` |
-| `RIGGEN` | once at boot | `RIGGEN proto=1 name=sine sample_rate_hz=48000 level_dbfs=-20.0 frequency_hz=1000 period_samples=48` (generator text clipped to 160 B) | `riggen_body_carries_the_generator_text_verbatim` in `console.rs` |
-| `CAPMAX` | once at boot | `CAPMAX proto=1 total_bytes=28800000 ring_bytes=33554432 seconds_max=349 us_max=349525333 unused_headroom_bytes=4754432` | `capmax_body_pins_field_names_and_order` in `console.rs` |
-| `CAPSTAT` | about 1 Hz | `CAPSTAT proto=1 delivered=412 expected=467 overrun=0 max_block_us=731 worst_gap_us=1102 audio_exit=0 dumped=100 dropped_full=3` | `capstat_body_pins_field_names_and_order` in `console.rs` |
-| `STIMSTART` | once, one-shot stimulus builds | `STIMSTART proto=1 first_block=4 offset=0` | `stimstart_body_pins_field_names_and_order` in `console.rs` |
-| `AUDIO` | per chunk, during the dump | `AUDIO blk=1234 n=40 c=3f d=8J9hAH//XA==` (final chunk, 7 raw bytes) | `golden_padded_final_chunks_survive_framing` in `crates/asperitas-wire/tests/console_dump.rs` |
-| `AUDEND` | closes each block | `AUDEND blk=0000 n=03 bytes=00009 crc16=29b1` | `golden_audend_frame_is_reproduced_byte_for_byte` in `console_dump.rs` |
-| `DUMPEND` | once, the dump summary | `DUMPEND proto=1 blocks=879 chunks=224145 bytes=28800000 elapsed_ms=311402 refused=17 stall_ms=940 sent=4118 dropped_full=3 bytes_dropped=12288` | `dumpend_body_pins_field_names_and_order` in `console.rs` |
-
-`AUDIO` and `AUDEND` carry their widths and size table in the module docs of
-`crates/asperitas-wire/src/dump.rs`, which is normative. `RIGCFG` and `CAPMAX` report constants the
-firmware was compiled with, not measurements. `CAPSTAT` counters are since-boot. `DUMPEND` is the
-tightest body on the wire (194 of 200 bytes at saturation). Its `elapsed_ms` is a reading; a dump rate
-computed from it is derived from that reading (see *Capture budgets*).
-
-**Direction:** `~` is device→host only. `>` (0x3E) is reserved host→device for TASK-032's commands, with
-identical field and CRC rules so one parser serves both directions. The audio dump rejected Ascii85 and
-Z85 partly because those alphabets contain `~` and `<>`, which would let a corrupted body reassemble into
-a fake record boundary — the same reason the reservation is worth honouring before the first command
-exists.
-
-**What this replaced:** roughly 8.8 % of log lines were truncated over USB CDC — 1226 of 13968, counted
-by hand across a 240 s `podtest` capture on 2026-08-08 (TASK-018.04's notes). One of them read
-`r2=298`, cut mid-number, and nearly got reported as an ADC glitch. Root cause: `Pipe::try_write`
-short-writes at every ring wrap even when the ring is empty, and the old path treated a short write as
-success. Treat 8.8 % as a baseline, not a reproducible measurement — the raw capture no longer exists,
-which is itself part of the case for TASK-031.
-
-#### The USB short-packet rule, for whoever writes the reader
-
-Bulk transfers must end with a short packet. If the final packet of a transaction is exactly
-`max_packet_size` — 64 here — the host driver holds it, and everything it carried, until something
-shorter follows. embassy-usb says so verbatim in its own `CdcAcmClass` docs: "If you write a packet that
-is exactly `max_packet_size` bytes long, it won't be processed by the host operating system until a
-subsequent shorter packet is sent. A zero-length packet (ZLP) can be sent if there is no other data to
-send." USB 2.0 §5.8.3 is the normative statement, and the ST community thread *"STM32U5 USB (CDC) not
-transmitting data if in exact multiple of 64 bytes"* is the same MCU family showing the symptom.
-
-The firmware does it in both places that can strand a tail: the drain loop tracks
-`last_packet_was_full` and emits a ZLP before parking, and only when the ring is empty, because that
-pair is what means "I am about to stop sending"; and `emit_blocking` sends one when the panic record's
-length is a multiple of 64, where the miss would be least forgiving — the withheld record would be the
-`PANIC:` line. Without it the end-of-session tail never arrives, and this project's own framing would
-report that faithfully as a `seq` gap while the cause sat in the drain loop.
-
-So for the reader: **zero-length reads are legitimate.** Do not treat a 0-byte read as a disconnect or
-an EOF; terminate on record validation and `seq` continuity instead. Note too that the endpoint rejects
-oversize writes rather than splitting them (`EndpointError::BufferOverflow`), which is why every write
-path on the device chunks to 64.
+The framed console (record grammar, checksum, resynchronisation, `BOOT`/`STATUS`, the rig
+records, the USB short-packet rule for reader authors) is specified in rustdoc, not here. Start at
+[protocol.md](./protocol.md).
 
 ### Flashing and logging over an ST-Link probe
 
@@ -1060,9 +871,8 @@ The device paths keep different books, and a loss figure from one says nothing a
 The framed USB console reports what it failed to send: a per-record sequence number the reader
 can difference for gaps, plus cumulative `dropped_full`, `bytes_dropped`, `trunc` and `ep_err`
 counters carried in band — so a capture that lost records can prove it afterwards, and a capture
-that didn't can too. Those fields are specified above under
-[*Console protocol v1*](#console-protocol-v1-every-record-verifies-itself) and
-[*`BOOT` and `STATUS`*](#boot-and-status-the-reserved-body-prefixes); this section is only about which
+that didn't can too. Those fields are specified in the `asperitas_wire::frame` and `asperitas_wire::console` module docs
+(see [protocol.md](./protocol.md)); this section is only about which
 ledger is which. RTT keeps no ledger at all. Unattached it discards freely and
 says nothing; attached it loses nothing *while the host keeps reading and stays attached*, and
 silently stops being the thing under your control the moment the host stalls or goes away. So a clean, gapless RTT stream is
@@ -1083,45 +893,11 @@ capture.
 
 ## Host control channel (firmware wiring)
 
-Status: built and linked for `main` and `podtest` (TASK-032.03). Verified on hardware for `podtest`
-(TASK-033.01, 2026-10-15): `VER`/`RSN` query and `RST` restart with re-enumeration and
-`reset_reason=software`, over the probe-flashed image. `main` and `SET`/`REL` on a live knob path are
-not covered by that run.
-
-The protocol (`CTL VER|RSN|RST|SET|REL`, `CTLR` replies) is `asperitas_wire::control`; the knob
-table is `asperitas_pod::knob_override`. The firmware side is one shared file,
-`firmware/src/host_control.rs`, a module of the package library, imported by each binary. Console builds only (`log-usb`); the RTT-only build has no inbound path and compiles the
-module down to `capture_reset_reason` and `merge`.
-
-- **Consumer.** `host_control::spawn` calls `usb::enable_inbound()` before `Console::run()` starts and
-  spawns one executor task that `receive()`s `InboundRecord`s and hands each to `control::route`.
-  The task does nothing slow, so the 4-deep inbound channel does not stay full and the USB reader's
-  flow control does not engage in practice.
-- **Replies never block.** They go through `emit_record`, which commits whole or not at all and
-  returns `false` when the console has no room. A dropped reply is the host's timeout to handle.
-- **Override.** `SET`/`REL` write a `cortex_m::interrupt::Mutex<RefCell<KnobOverride<2>>>`. `main`
-  calls `host_control::merge` on the knob readings inside the audio callback, after the pot read
-  and before `params_from_normalised`, so injected values pass through the DSP smoothing as a
-  turned pot does. Knob ids 0 and 1; anything else is `bad-knob`. `podtest` logs raw ADC counts to
-  measure the pot itself, so it accepts and holds overrides but does not merge them into its log.
-- **Version.** `build.rs` exports `ASPERITAS_VERSION` = `CARGO_PKG_VERSION` + `+` + `git describe
-  --always --dirty --tags` (package version alone without git), filtered to printable ASCII and cut
-  to 32 bytes. `-dirty` can lag: only HEAD moves trigger a rerun.
-- **Reset reason.** `capture_reset_reason()` is the first statement of `main`: it reads `RCC_RSR`
-  into a static, then sets `RMVF` to clear it (the flags are sticky across resets). The mapping is
-  `control::reset_reason_from_rsr`, host-tested; priority is specific cause first, because a
-  power-on also sets BOR and PIN, and a software reset also sets PIN. A bootloader that cleared
-  the register before our code ran reads `unknown`.
-- **Restart.** `RST` replies `OK RST`, waits 20 ms on the control task's own timer for the
-  console drain to ship it, then `SCB::sys_reset()`. It depends on neither the audio path nor
-  channel space (only on the executor running), masks nothing, and leaves BOOT0 and NRST alone, so
-  the BOOT/RESET/DFU sequence works exactly as before. A reset lands in the application, not the
-  ROM bootloader.
-- **Panic path.** The panic handler takes no lock and touches no inbound state, so inbound traffic
-  cannot block it. After a panic the executor is dead, so `RST` is not serviced; recover with the
-  RESET button as before.
-- **Not wired:** `rig` (a one-shot timeline with no inbound channel by design, and about 24 KB of
-  flash headroom left).
+The wire grammar is `asperitas_wire::control` and the firmware wiring is documented on
+`firmware/src/host_control.rs`; see [protocol.md](./protocol.md). Hardware verification so far:
+verified on the board for `podtest` on 2026-10-15 (`VER`/`RSN` query and `RST` restart with
+re-enumeration and `reset_reason=software`, over the probe-flashed image). `main` and `SET`/`REL` on a
+live knob path are not covered by that run.
 
 ## The stock Daisy bootloader on Seed3 (measured)
 
@@ -1178,7 +954,7 @@ internal-flash layout is `firmware/memory-internal.x` and stays the default.
 - **QSPI budget:** the image is stored from QSPI offset `0x40000` and the excerpt slots start at
   `0x100000` (`EXCERPT_AREA_START`). `scripts/check-image-load-addresses.sh` parses both and fails if
   the region or an image reaches the slots, if `.sram1_bss` is outside D2, or if less than 2 KB of the
-  480K is left. `scripts/check-bootloaded-builds.sh` (a push-tier gate) builds and grades the matrix.
+  480K is left. `scripts/firmware-variants.sh` (the push-tier `firmware-builds` and `image-load-addresses` gates) builds and grades the matrix.
 - **Measured sizes** (`-O binary`, 2026-10-15, spare = 491,520 minus image): blinky 78,438, main 107,621,
   rig 125,762 (sine), 127,586 (`stim-ess`), 125,986 (`stim-pulse`). Reset vector `0x24000299`, initial
   SP `0x20020000`, `.sram1_bss` at `0x30000000` (both buffers, 1 KB).
@@ -1297,88 +1073,30 @@ What that settles:
 
 ### Capture budgets (SDRAM)
 
-Basis labels: derived = arithmetic on constants in `crates/asperitas-wire/src/capture.rs`;
-measured = a reading from a board, with its date; estimated = a guess with no measurement behind it.
-A derived figure is not a reading and must not be cited as one.
+Basis labels: measured = a reading from a board, with its date; estimated = a guess with no
+measurement behind it. The derived budgets (ring size, headroom, capturable seconds, wire cost per
+block and per second, base64 efficiency) are computed from constants and live in the module docs of
+`asperitas_wire::capture`; see [protocol.md](./protocol.md). A derived figure is not a reading and must
+not be cited as one.
 
 | Quantity | Value | Basis |
 |---|---|---|
 | SDRAM device | 64 MiB (`FMC_SDCR1` configures 9 col x 13 row x 4 banks x 32-bit) | measured 2026-10-08, register read above |
-| Capture ring | 33,554,432 B = 32 MiB (`RING_BYTES`: 1,024 blocks of 32,768 B) | derived, constants |
-| Unused SDRAM beyond the ring | 32 MiB | derived: 64 MiB minus 32 MiB |
-| Ring headroom over the default 300 s window | 4,754,432 B (`CAPMAX unused_headroom_bytes`) | derived: 33,554,432 minus 28,800,000 |
-| Capturable seconds, mono 16-bit | 349.5 s, floored to 349 (`CAPMAX seconds_max`) | derived: 33,554,432 / 96,000 |
-| Same ring, stereo 16-bit (192,000 B/s) | 174.8 s | derived; no stereo capture is built |
-| Same ring, mono 32-bit (192,000 B/s) | 174.8 s | derived; the 16-bit decision halved this cost |
 | Ring filled end to end | 349.536 s on the device clock | measured 2026-10-13 |
-| Bytes per second, mono 16-bit | 96,000 | derived: 48,000 x 2 |
-| Base64 useful-byte efficiency | 0.568 per record (129 of a 227 B frame), 0.567 per block | derived: `published_efficiency_matches_the_encoder` and `useful_fraction_per_mille` |
-| Wire cost per second of capture | about 169 kB/s (745 records/s x 227 B) | derived, same test |
-| Wire cost of one ring block | 57,788 B | derived: `wire_bytes_per_block`, confirmed by `tests/capture_geometry.rs` |
 | Dump of 300 s of audio over USB CDC, internal-flash layout | 69.4 s, 414.9 kB/s PCM, 731.7 kB/s on the wire | measured 2026-10-08, `DUMPEND elapsed_ms=69421` |
 | Same, bootloaded layout | 60.2 s | measured 2026-10-15, `DUMPEND elapsed_ms=60232` |
 | Full-speed USB bulk ceiling | not separated from the above; the measured wire rate is a lower bound | the dump may be paced by the device, so it is not the ceiling |
 | Sustained FMC write throughput | not measured | the ring kept up with 879 of 879 blocks, which bounds it only from below |
 
-Why capture is 16-bit mono: the dump is the binding constraint, not memory. At 192,000 B/s the same
-window would cost twice the wire time on a link that already needs about a fifth of the run to dump.
-
 ## Instrument excerpts in QSPI
 
-Recorded from the code at `0e12f7e`; nothing in this section has run on a board. Every observed cell
-reads `pending TASK-038.09`, which is the ticket that installs a clip and measures it on the bench.
-The owner of every constant below is `crates/asperitas-wire/src/excerpt.rs`; this table mirrors it
-and `crates/asperitas-wire/tests/excerpt_docs.rs` fails when the two drift. Change the module
-first, then this table. The README owns the workflow and *Capture budgets (SDRAM)* owns the SDRAM budget; this section
-holds only what is specific to excerpts and is linked from there, not restated there. The application
-itself is not placed in QSPI by the default layout (see *Flashing the Seed3*); the bootloaded layout
-puts its image at `0x90040000`, above the bootloader region, which is why the excerpt area starts well
-clear of it.
-
-### Layout (derived from the `excerpt` constants)
-
-| Region | Range | Notes |
-|---|---|---|
-| Daisy bootloader | `0x0` to `0x40000` | Untouched. `BOOTLOADER_END` = 0x40000. |
-| Unused | `0x40000` to `0x100000` | Headroom between the bootloader and the excerpt area. |
-| Excerpt area start | `0x100000` | `EXCERPT_AREA_START`. |
-| Slot stride | `0x80000` (512 KiB) | `SLOT_STRIDE`; slot `n` is at `0x100000 + n * 0x80000`. |
-| Slots | 14 slots, 0 to 13 | `SLOT_COUNT`. Slot 0 at `0x100000`, slot 13 at `0x780000`. |
-| Header sector | first 4096 B of each slot | `SlotHeader`, 30 B used (`HEADER_LEN`). PCM starts one sector in. |
-| PCM capacity | 516,096 B per slot | `PCM_CAPACITY`: stride minus header sector minus guard sector. 5.38 s mono 16-bit at 48 kHz. |
-| Slot guard | last sector of every stride | Never written. |
-| Reserved top sector | `0x7FF000` to `0x800000` | The guard sector of slot 13 is this sector. |
-
-Why the top sector is reserved: `daisy_embassy::flash` asserts `address + len <= 0x7FFFFF`, so byte
-`0x7FFFFF` is unreachable and its sector is left alone. Every slot gives up its top sector so all 14
-share one capacity. Erase granularity is 4096 B sectors (`SECTOR`); every slot base and PCM base is
-sector-aligned (const-asserted in the module).
-
-### Storage per second by format (derived)
-
-Derived from `PCM_CAPACITY` (516,096 B per slot) and the sample format; the only format the replay path
-plays is mono 16-bit at 48 kHz. The other rows show what a format change would cost.
-
-| Format | Bytes per second | Seconds per slot | Seconds in 14 slots |
-|---|---|---|---|
-| mono 16-bit, 48 kHz (the replay format) | 96,000 | 5.376 | 75.3 |
-| stereo 16-bit or mono 32-bit | 192,000 | 2.688 | 37.6 |
-
-Sectors per second of mono 16-bit audio: 96,000 / 4,096 = 23.4. Erase time scales with that (see
-*Costs*): at the datasheet maximum of 300 ms per sector, one second of audio costs up to 7.0 s to erase.
-
-### Rules
-
-- **Only the async flash API may be used in `rig`.** The blocking `read` / `write` / `erase` wait on
-  the chip's WIP bit in an unbounded busy loop (`wait_for_write`), which would hang thread mode and the
-  console with it. The async calls bound each wait with a timeout (600 ms per sector erase, 1.6 ms per
-  256-byte page program) and panic on a miss, which surfaces as a `PANIC` record and a red LED.
-  `firmware/build.rs` fails the build if `rig.rs` calls a blocking flash method.
-- **Writes are whole, sector-aligned, 4096-byte sectors.** The driver erases the sector containing
-  every address it writes, so a partial or unaligned write would erase its neighbour. 128 raw bytes
-  per `EXCDATA` chunk (`EXC_CHUNK_RAW`) means 32 chunks fill exactly one sector.
-- **The top sector is reserved** because the driver asserts against `0x7FFFFF` (above).
-- **The bootloader region below `0x40000` is never touched.**
+The slot layout, storage per second, flash rules, replay CRC posture and the install and replay
+record grammar are owned by the module docs of `asperitas_wire::excerpt`; see
+[protocol.md](./protocol.md). This section holds only the cost predictions and what the bench has
+observed of them. Cells reading `pending TASK-038.09` have not run on a board. The application itself
+is not placed in QSPI by the default layout (see *Flashing the Seed3*); the bootloaded layout puts its
+image at `0x90040000`, above the bootloader region, which is why the excerpt area starts well clear of
+it.
 
 ### Costs, predicted and observed
 
@@ -1405,31 +1123,6 @@ in the ticket, not re-read from a sheet in this repo; estimated = a guess with n
 
 Erase dominates the install: the USB stream and the programming are small beside it. If the observed
 erase time lands near typical rather than maximum, the install takes seconds, not tens of seconds.
-
-### Replay CRC posture
-
-The replay `crc16` in `EXCPLAY` covers only the samples handed to the DAC encoder; silence and the
-zero padding after the last sample are excluded. It equals the host's CRC of the WAV data chunk and the
-CRC stored in the slot header (`want`). Equal CRCs with `clean=1` prove the QSPI-to-encoder path
-delivered the excerpt intact and in order. They prove nothing about the codec, the analog path or the
-cable; that is TASK-035's measurement (its AC #4), not this one.
-
-### Record grammar
-
-One worked line each, with the host test that pins its format. Install records ride `frame` untouched.
-
-| Record | Direction | Worked line | Pinned by |
-|---|---|---|---|
-| `EXCSTART` | host to device | `EXCSTART slot=03 name=mand_chord bytes=288000 crc16=beef` | `bodies_have_the_documented_shape` in `crates/asperitas-wire/tests/excerpt.rs` |
-| `EXCDATA` | host to device | `EXCDATA i=002a b64=AAH+` | `bodies_have_the_documented_shape` in `crates/asperitas-wire/tests/excerpt.rs` |
-| `EXCEND` | host to device | `EXCEND` | `bodies_have_the_documented_shape` in `crates/asperitas-wire/tests/excerpt.rs` |
-| `EXCOK` | device to host | `EXCOK name=guitar_a bytes=288000 crc16=beef` | `exc_ok_body_renders_the_pinned_format` in `crates/asperitas-wire/tests/excerpt_install.rs` |
-| `EXCFAIL` | device to host | `EXCFAIL got=1234 want=abcd why=order` (plain CRC mismatch omits `why`) | `exc_fail_body_renders_got_want_and_why` in `crates/asperitas-wire/tests/excerpt_install.rs` |
-| `EXCPLAY` | device to host | `EXCPLAY proto=1 slot=3 bytes=288000 crc16=0abc want=0abc underruns=0 clean=1` | `excplay_body_pins_field_names_and_order` in `crates/asperitas-wire/src/console.rs` |
-| `EXCPLAYFAIL` | device to host | `EXCPLAYFAIL proto=1 slot=13 why=empty` | `excplayfail_body_pins_field_names_and_fits` in `crates/asperitas-wire/src/console.rs` |
-
-The whole stream, framed, is pinned byte for byte by `excerpt_stream_matches_pinned_golden_frames` (in `crates/asperitas-host/tests/excerpt_install.rs`) against the
-golden fixture in `crates/asperitas-host/tests/golden/`.
 
 ## libDaisy (C++) has no Seed3 support
 

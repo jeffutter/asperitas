@@ -50,6 +50,28 @@
 //! for the closing `AUDEND` and the short final chunk. They are not equal and never will be;
 //! `tests/capture_geometry.rs` pins both and asserts the strict inequality so neither can drift into
 //! false agreement.
+//!
+//! # Derived budgets
+//!
+//! Every row is arithmetic on the constants in this module, not a reading from a board. The
+//! measured SDRAM figures (device size, ring filled end to end, dump timings) live in
+//! `docs/reference/daisy-seed3.md`; a derived figure must not be cited as a reading.
+//!
+//! | Quantity | Value | Derivation |
+//! |---|---|---|
+//! | Capture ring | 33,554,432 B = 32 MiB | [`RING_BYTES`]: 1,024 blocks of 32,768 B |
+//! | Unused SDRAM beyond the ring | 32 MiB | 64 MiB minus the ring |
+//! | Ring headroom over the default 300 s window | 4,754,432 B | `CAPMAX unused_headroom_bytes`: 33,554,432 minus 28,800,000 |
+//! | Capturable seconds, mono 16-bit | 349.5 s, floored to 349 | `CAPMAX seconds_max`: 33,554,432 / 96,000 |
+//! | Same ring, stereo 16-bit or mono 32-bit (192,000 B/s) | 174.8 s | no stereo capture is built |
+//! | Bytes per second, mono 16-bit | 96,000 | [`BYTES_PER_SECOND`]: 48,000 x 2 |
+//! | Base64 useful-byte efficiency | 0.568 per record (129 of a 227 B frame), 0.567 per block | `published_efficiency_matches_the_encoder` and [`useful_fraction_per_mille`] |
+//! | Wire cost per second of capture | about 169 kB/s (745 records/s x 227 B) | same test |
+//! | Wire cost of one ring block | 57,788 B | [`wire_bytes_per_block`], confirmed by `tests/capture_geometry.rs` |
+//!
+//! Capture is 16-bit mono because the dump is the binding constraint, not memory: at 192,000 B/s
+//! the same window would cost twice the wire time on a link that already needs about a fifth of
+//! the run to dump.
 
 use crate::dump;
 use crate::frame::{PREFIX_LEN, TRAILER_LEN};
@@ -115,8 +137,8 @@ pub const RING_BLOCKS: usize = 1_024;
 
 /// Total ring capacity in raw bytes: 33 554 432 (32 MiB).
 ///
-/// Half the Seed3's 64 MB of SDRAM (`docs/reference/daisy-seed3.md`); the figure TASK-038.04's QSPI
-/// staging buffer and TASK-038.06's budget documentation have to quote alongside this module.
+/// Half the Seed3's 64 MB of SDRAM (`docs/reference/daisy-seed3.md`); the figure a QSPI staging
+/// buffer or a budget document has to quote alongside this module.
 pub const RING_BYTES: usize = RING_BLOCK_BYTES * RING_BLOCKS;
 
 /// Ring footprint per second of capture in bytes: 96 000 for mono 16-bit at 48 kHz.

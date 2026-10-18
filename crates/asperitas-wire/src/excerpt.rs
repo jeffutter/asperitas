@@ -14,7 +14,7 @@
 //! Same reason as [`crate::dump`]: pure logic, tested under default features, linked by firmware
 //! only where something calls it.
 //!
-//! # Storage layout (normative - TASK-038.04.06 mirrors this table into `docs/reference/daisy-seed3.md`)
+//! # Storage layout (normative)
 //!
 //! | region | range | why |
 //! |---|---|---|
@@ -77,6 +77,56 @@
 //! What this module deliberately does not decide is sequencing - whether `i` arrived in order,
 //! whether the chunks add up to `bytes`. That is the install state machine's job; a parsed record
 //! here is only guaranteed to be well-formed and in range.
+//!
+//! Device to host, each pinned by a host test:
+//!
+//! | Record | Worked line | Pinned by |
+//! |---|---|---|
+//! | `EXCOK` | `EXCOK name=guitar_a bytes=288000 crc16=beef` | `exc_ok_body_renders_the_pinned_format` in `tests/excerpt_install.rs` |
+//! | `EXCFAIL` | `EXCFAIL got=1234 want=abcd why=order` (a plain CRC mismatch omits `why`) | `exc_fail_body_renders_got_want_and_why` in `tests/excerpt_install.rs` |
+//! | `EXCPLAY` | `EXCPLAY proto=1 slot=3 bytes=288000 crc16=0abc want=0abc underruns=0 clean=1` | `excplay_body_pins_field_names_and_order` in [`crate::console`] |
+//! | `EXCPLAYFAIL` | `EXCPLAYFAIL proto=1 slot=13 why=empty` | `excplayfail_body_pins_field_names_and_fits` in [`crate::console`] |
+//!
+//! The whole install stream, framed, is pinned byte for byte by
+//! `excerpt_stream_matches_pinned_golden_frames` in `asperitas-host`'s `tests/excerpt_install.rs`
+//! against the golden fixture in `crates/asperitas-host/tests/golden/`.
+//!
+//! # Storage per second by format
+//!
+//! Derived from [`PCM_CAPACITY`] (516,096 bytes per slot) and the sample format. The only format
+//! the replay path plays is mono 16-bit at 48 kHz; the other row shows what a format change
+//! would cost.
+//!
+//! | Format | Bytes per second | Seconds per slot | Seconds in 14 slots |
+//! |---|---|---|---|
+//! | mono 16-bit, 48 kHz (the replay format) | 96,000 | 5.376 | 75.3 |
+//! | stereo 16-bit or mono 32-bit | 192,000 | 2.688 | 37.6 |
+//!
+//! Mono 16-bit audio is 96,000 / 4,096 = 23.4 sectors per second, and erase time scales with
+//! that: at the datasheet maximum of 300 ms per sector, one second of audio costs up to 7.0 s to
+//! erase.
+//!
+//! # Rules
+//!
+//! - **Only the async flash API may be used in the rig.** The blocking `read` / `write` /
+//!   `erase` wait on the chip's WIP bit in an unbounded busy loop, which would hang thread mode
+//!   and the console with it. The async calls bound each wait with a timeout (600 ms per sector
+//!   erase, 1.6 ms per 256-byte page program) and panic on a miss, which surfaces as a `PANIC`
+//!   record and a red LED. `firmware/build.rs` fails the build if `rig.rs` calls a blocking flash
+//!   method.
+//! - **Writes are whole, sector-aligned, 4096-byte sectors.** The driver erases the sector
+//!   containing every address it writes, so a partial or unaligned write would erase its
+//!   neighbour. [`EXC_CHUNK_RAW`] = 128 means 32 chunks fill exactly one sector.
+//! - **The top sector is reserved** because the driver asserts against `0x7FFFFF`.
+//! - **The bootloader region below [`BOOTLOADER_END`] is never touched.**
+//!
+//! # Replay CRC posture
+//!
+//! The `crc16` in `EXCPLAY` covers only the samples handed to the DAC encoder; silence and the
+//! zero padding after the last sample are excluded. It equals the host's CRC of the WAV data
+//! chunk and the CRC stored in the slot header (`want`). Equal CRCs with `clean=1` prove the
+//! QSPI-to-encoder path delivered the excerpt intact and in order. They prove nothing about the
+//! codec, the analog path or the cable.
 
 use crate::dump::{
     decode, encode, encoded_len, put, put_decimal, put_hex, BodyReader, DecodeError,

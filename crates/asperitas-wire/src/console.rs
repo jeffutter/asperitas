@@ -30,6 +30,73 @@
 //! subtraction (`seq_now − seq_prev` as `u32`; a jump ≥ 2^31 means restart or corruption,
 //! not loss). The asymmetry is the point — a counter describes an amount, a sequence
 //! number describes a position.
+//!
+//! # `BOOT` and `STATUS`: the reserved body prefixes
+//!
+//! Two bodies are wire contract and ride ordinary records (same framing, same CRC, same chance
+//! of being dropped):
+//!
+//! ```text
+//! BOOT proto=1 fw=0.1.0 pipe=2048 maxbody=200
+//! STATUS proto=1 sent=12 dropped_full=3 bytes_dropped=4096 trunc=1 ep_err=2 seq_next=18 pipe_free=2048
+//! ```
+//!
+//! `proto` comes first so a reader can handshake before trusting anything. `fw` is the
+//! `asperitas-logging` crate version, which is the version that ships the console. `pipe` is the
+//! log ring in bytes and `maxbody` the encoder's cap. `BOOT` consumes `seq 0` and is emitted only
+//! once the USB backend is installed (`asperitas_logging::init` installs the logger, switches the
+//! backend, then announces), so ordering it before the switch would discard it with no trace in
+//! any counter.
+//!
+//! `STATUS` fields and their order are the contract; a unit test fails if either moves. Values
+//! are absolute since-boot counts, never deltas.
+//!
+//! | Field | Counts |
+//! |---|---|
+//! | `sent` | Records committed to the ring whole. Cross-check against the host's decoded count. |
+//! | `dropped_full` | Records refused for lack of space, never partially written. |
+//! | `bytes_dropped` | Bytes those refused records would have occupied. |
+//! | `trunc` | Bodies shortened by the 200-byte cap. Those records shipped, which is why they are not in `dropped_full`. |
+//! | `ep_err` | Endpoint writes that failed: link loss or stalls. |
+//! | `seq_next` | The value the next record will carry. |
+//! | `pipe_free` | Ring free bytes at the instant of rendering. |
+//!
+//! Pacing: at most once per second ([`StatusGate`]) and only when a counter actually moved,
+//! emitted from the drain loop only when the ring is empty. Debouncing is not politeness: during
+//! a full-ring condition the `STATUS` record competes for the very space that is missing, so an
+//! undebounced emitter starves the logs it is reporting on.
+//!
+//! CRC and `seq` detect damage, never absence. A gap is equally consistent with "bytes lost" and
+//! "board rebooted and restarted numbering at 0"; the second `BOOT` (or a `seq` regression)
+//! breaks the tie. There is deliberately no boot id in v1: it would need persistence across
+//! reset for no gain over the banner's presence. A lost `STATUS` record is indistinguishable
+//! from nothing having changed, except through the `seq` gap it leaves, so silence means
+//! "probably nothing changed", not "nothing changed".
+//!
+//! # Rig record grammar
+//!
+//! Everything the measurement rig says that is not a log line. Bodies ride [`crate::frame`]
+//! untouched, so `level`, `seq` and `t_ms` belong to the frame. Field names and order are the
+//! contract, and each row is pinned by the host test named beside it. The worked lines are test
+//! fixtures, not captures. The excerpt verbs are tabled in [`crate::excerpt`].
+//!
+//! | Record | Sent | Worked line | Pinned by |
+//! |---|---|---|---|
+//! | `RIGCFG` | once at boot | `RIGCFG proto=1 capture=mono16 lane=L blocks=879 block_bytes=32768 bytes_per_s=96000 capsec_us=349525333 window_s=300 cpu_hz=480000000 icache=1 dcache=0` | `rigcfg_body_pins_field_names_and_order` |
+//! | `RIGGEN` | once at boot | `RIGGEN proto=1 name=sine sample_rate_hz=48000 level_dbfs=-20.0 frequency_hz=1000 period_samples=48` (generator text clipped to 160 B) | `riggen_body_carries_the_generator_text_verbatim` |
+//! | `CAPMAX` | once at boot | `CAPMAX proto=1 total_bytes=28800000 ring_bytes=33554432 seconds_max=349 us_max=349525333 unused_headroom_bytes=4754432` | `capmax_body_pins_field_names_and_order` |
+//! | `CAPSTAT` | about 1 Hz | `CAPSTAT proto=1 delivered=412 expected=467 overrun=0 max_block_us=731 worst_gap_us=1102 audio_exit=0 dumped=100 dropped_full=3` | `capstat_body_pins_field_names_and_order` |
+//! | `STIMSTART` | once, one-shot stimulus builds | `STIMSTART proto=1 first_block=4 offset=0` | `stimstart_body_pins_field_names_and_order` |
+//! | `AUDIO` | per chunk, during the dump | `AUDIO blk=1234 n=40 c=3f d=8J9hAH//XA==` (final chunk, 7 raw bytes) | `golden_padded_final_chunks_survive_framing` in `tests/console_dump.rs` |
+//! | `AUDEND` | closes each block | `AUDEND blk=0000 n=03 bytes=00009 crc16=29b1` | `golden_audend_frame_is_reproduced_byte_for_byte` in `tests/console_dump.rs` |
+//! | `DUMPEND` | once, the dump summary | `DUMPEND proto=1 blocks=879 chunks=224145 bytes=28800000 elapsed_ms=311402 refused=17 stall_ms=940 sent=4118 dropped_full=3 bytes_dropped=12288` | `dumpend_body_pins_field_names_and_order` |
+//!
+//! Unless a row names a file, the pinning test is in this module. `AUDIO` and `AUDEND` carry
+//! their widths and size table in [`crate::dump`], which is normative for them. `RIGCFG` and
+//! `CAPMAX` report constants the firmware was compiled with, not measurements. `CAPSTAT`
+//! counters are since-boot. `DUMPEND` is the tightest body on the wire (194 of 200 bytes at
+//! saturation). Its `elapsed_ms` is a reading; a dump rate computed from it is derived from that
+//! reading (see [`crate::capture`]).
 
 use core::fmt::Write;
 use core::sync::atomic::{AtomicU32, Ordering};

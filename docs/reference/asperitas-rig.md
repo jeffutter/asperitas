@@ -386,7 +386,7 @@ Pick the stimulus by the question. Exactly one stimulus feature goes in the imag
 
 Only the first two are available from a plain internal-flash image. Records the build prints at boot
 (`RIGCFG`, `RIGGEN`, `CAPMAX`) say what it was configured to do; their field-by-field grammar is in
-`daisy-seed3.md`, *Rig record grammar*.
+the `asperitas_wire::console` module docs (see [protocol.md](./protocol.md)).
 
 ```bash
 cd firmware
@@ -431,8 +431,9 @@ from flash and sends `EXCOK name=... bytes=... crc16=...` or `EXCFAIL got=... wa
 that record is the only verdict, so capture the console while you install (next section). Installing
 erases the slot's sectors, and erase dominates the time: the datasheet bound is about 22.5 s for a
 288 kB clip and the one reading is 5.82 s (derived upper bound versus one measurement, 2026-10-15). An
-install is refused until the replay pass of a `stim-excerpt` build has completed. Layout, costs and
-the `EXC*` grammar: `daisy-seed3.md`, *Instrument excerpts in QSPI*.
+install is refused until the replay pass of a `stim-excerpt` build has completed. Layout and the
+`EXC*` grammar: the `asperitas_wire::excerpt` module docs (see [protocol.md](./protocol.md)); costs:
+`daisy-seed3.md`, *Instrument excerpts in QSPI*.
 
 ### Capturing the console
 
@@ -521,7 +522,7 @@ It stays readable by eye and greppable in a raw capture — that legibility is w
 printable ASCII rather than COBS. The first line off a fresh boot is `BOOT proto=1 …`. `STATUS …`
 appears at most once a second and only when a counter moved, so a quiet stream usually means nothing
 changed rather than nothing working. Grammar, checksum parameters and what each loss counter means:
-`daisy-seed3.md` → *Console protocol v1*.
+the `asperitas_wire::frame` and `asperitas_wire::console` module docs (see [protocol.md](./protocol.md)).
 
 ### Watching the boot stages
 

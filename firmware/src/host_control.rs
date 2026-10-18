@@ -1,5 +1,6 @@
 //! Firmware side of the host control channel, shared by `main` and `podtest` through the package
-//! library. Design and rationale: "Host control channel" in `docs/reference/daisy-seed3.md`.
+//! library. The wire grammar (`CTL VER|RSN|RST|SET|REL`, `CTLR` replies) is `asperitas_wire::control`;
+//! the knob table is `asperitas_pod::knob_override`.
 //!
 //! Three pieces of state live here, each owned by the thing that cannot be rebuilt elsewhere:
 //!
@@ -11,6 +12,41 @@
 //! Replies and restart never wait on anything the host or the audio path controls. Replies use
 //! `emit_record`, which commits whole or not at all and returns `false` when the console has no
 //! room; a lost reply is the host's timeout to handle, a blocked task would be the board's problem.
+//!
+//! # Wiring
+//!
+//! Console builds only (`log-usb`); the RTT-only build has no inbound path and compiles this module
+//! down to [`capture_reset_reason`] and [`merge`].
+//!
+//! - **Consumer.** `spawn` calls `usb::enable_inbound()` before `Console::run()` starts and spawns
+//!   one executor task that `receive()`s `InboundRecord`s and hands each to `control::route`. The
+//!   task does nothing slow, so the 4-deep inbound channel does not stay full and the USB reader's
+//!   flow control does not engage in practice.
+//! - **Replies never block.** They go through `emit_record`, which commits whole or not at all and
+//!   returns `false` when the console has no room. A dropped reply is the host's timeout to handle.
+//! - **Override.** `SET`/`REL` write a `cortex_m::interrupt::Mutex<RefCell<KnobOverride<2>>>`.
+//!   `main` calls [`merge`] on the knob readings inside the audio callback, after the pot read and
+//!   before `params_from_normalised`, so injected values pass through the DSP smoothing as a turned
+//!   pot does. Knob ids 0 and 1; anything else is `bad-knob`. `podtest` logs raw ADC counts to
+//!   measure the pot itself, so it accepts and holds overrides but does not merge them into its log.
+//! - **Version.** `build.rs` exports `ASPERITAS_VERSION` = `CARGO_PKG_VERSION` + `+` +
+//!   `git describe --always --dirty --tags` (the package version alone without git), filtered to
+//!   printable ASCII and cut to 32 bytes. `-dirty` can lag: only HEAD moves trigger a rerun.
+//! - **Reset reason.** [`capture_reset_reason`] is the first statement of `main`: it reads `RCC_RSR`
+//!   into a static, then sets `RMVF` to clear it (the flags are sticky across resets). The mapping
+//!   is `control::reset_reason_from_rsr`, host-tested; priority is specific cause first, because a
+//!   power-on also sets BOR and PIN, and a software reset also sets PIN. A bootloader that cleared
+//!   the register before our code ran reads `unknown`.
+//! - **Restart.** `RST` replies `OK RST`, waits 20 ms on the control task's own timer for the
+//!   console drain to ship it, then `SCB::sys_reset()`. It depends on neither the audio path nor
+//!   channel space (only on the executor running), masks nothing, and leaves BOOT0 and NRST alone,
+//!   so the BOOT/RESET/DFU sequence works exactly as before. A reset lands in the application, not
+//!   the ROM bootloader.
+//! - **Panic path.** The panic handler takes no lock and touches no inbound state, so inbound
+//!   traffic cannot block it. After a panic the executor is dead, so `RST` is not serviced; recover
+//!   with the RESET button.
+//! - **Not wired:** `rig`, a one-shot timeline with no inbound channel by design and little flash
+//!   headroom left.
 
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicU32, Ordering};

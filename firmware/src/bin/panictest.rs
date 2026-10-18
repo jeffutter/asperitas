@@ -30,7 +30,7 @@
 //! # Reading the output
 //!
 //! Every serial line below is a console v1 record — `~<level> <seq> <t_ms> <body>*<crc>` then
-//! CRLF — as specified in `docs/reference/daisy-seed3.md` §Console protocol v1 and pinned by the
+//! CRLF — as specified in the `asperitas_wire::frame` module docs and pinned by the
 //! `encode_golden_*` tests in `frame.rs`. The `*` sits flush against the body: there is no space
 //! before the checksum. `<seq>` and `<t_ms>` vary between runs; nothing else does. The `BOOT`
 //! line is queued before the countdown but only leaves the device once a host attaches, so

@@ -69,6 +69,69 @@
 //!
 //! See [`Decoder`] for the consumer half.
 //!
+//! # Fields
+//!
+//! - **`level`**: one of `I W E D T`; the decoder accepts exactly those five letters.
+//! - **`seq`**: a `u32` incremented once per record within a boot. It is assigned inside the
+//!   record lock (`take_seq`, called from `emit` in `asperitas-logging`), which is what makes
+//!   numeric order equal wire order. It wraps mod 2^32 on purpose; the loss counters in
+//!   [`crate::console`] saturate instead.
+//! - **`t_ms`**: milliseconds since boot, transmitted modulo 100 000 000 so the field never
+//!   widens and invalidates the fixed offsets behind it. It wraps after about 27.8 h, and
+//!   neither field reveals the wrap on its own; continuity comes from `BOOT` plus `seq`.
+//! - **`body`**: 0 to [`MAX_BODY`] bytes, sanitised on the way out ([`sanitize_byte`]).
+//! - **`crc`**: `*`, 4 lowercase hex digits, `CR LF` ([`TRAILER_LEN`] 7). The prefix is
+//!   [`PREFIX_LEN`] 21 bytes, so overhead is 28 bytes per record, which is also the shortest
+//!   legal record (empty body). The longest is [`MAX_FRAME`] 228.
+//!
+//! The direction marker is `~` for device to host. `>` (0x3E) is reserved for host to device
+//! with identical field and CRC rules, so one parser serves both directions. The audio dump
+//! rejected Ascii85 and Z85 partly because those alphabets contain `~` and `<>`, which would
+//! let a corrupted body reassemble into a fake record boundary.
+//!
+//! Example records. These are the encoder's own bytes, pinned by the `encode_golden_*` tests
+//! below, not a bench capture:
+//!
+//! ```text
+//! ~I 00000042 00004567 ENC +1*9c17
+//! ~D 00000000 00000000 *91d4
+//! ~W deadbeef 76980377 knob r2=298 ✓*b321
+//! ```
+//!
+//! They are 34, 28 and 43 bytes counting the closing CRLF. The second is pure overhead. The
+//! third carries a wrapped `t_ms` (0x9999_9999 ms becomes `76980377`), and the checkmark
+//! crosses the wire as its three UTF-8 bytes.
+//!
+//! # Delimiter and resynchronisation
+//!
+//! CRLF is a trustworthy delimiter because the producer sanitises the body: [`sanitize_byte`]
+//! replaces every byte below 0x20 (CR and LF among them) and DEL with `_`, while bytes at or
+//! above 0x80 pass through so UTF-8 survives. Printable punctuation, `~`, `*` and `|` included,
+//! deliberately survives: framing strength comes from the grammar, the CRC and above all the
+//! no-CR/LF invariant, so a stray `~` or `*` inside a body can only cause a CRC mismatch, never
+//! a false-valid record. SLIP (RFC 1055) and COBS buy delimiter uniqueness by escaping bytes;
+//! this transport buys it at the producer, which is cheaper and keeps every line legible.
+//!
+//! On any decode failure the [`Decoder`] drops the one disqualified `~`, charges the skipped
+//! bytes once, and retries at the next `~`; see its docs for the full rule and for why it never
+//! repairs a record or guesses a shorter body.
+//!
+//! # Reading the stream: the USB short-packet rule
+//!
+//! Bulk transfers must end with a short packet. If the final packet of a transaction is exactly
+//! `max_packet_size` (64 here), the host driver holds it, and everything it carried, until
+//! something shorter follows. embassy-usb says so in its own `CdcAcmClass` docs, and USB 2.0
+//! section 5.8.3 is the normative statement. The firmware sends a zero-length packet in both
+//! places that can strand a tail: the drain loop (only when the ring is empty) and the panic
+//! path when the panic record's length is a multiple of 64 (both in `asperitas-logging`'s
+//! `usb` module). Without it the end-of-session tail never arrives, and this framing would
+//! report that faithfully as a `seq` gap.
+//!
+//! So for a reader: **zero-length reads are legitimate.** Do not treat a 0-byte read as a
+//! disconnect or an EOF; terminate on record validation and `seq` continuity instead. The
+//! endpoint also rejects oversize writes rather than splitting them
+//! (`EndpointError::BufferOverflow`), which is why every write path on the device chunks to 64.
+//!
 //! # Offset derivation
 //!
 //! Every offset in this module comes from one quantity: `j`, the absolute index of

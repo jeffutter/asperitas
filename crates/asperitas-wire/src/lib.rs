@@ -10,6 +10,8 @@
 //! - [`control`] - the host-to-device `CTL` command and `CTLR` reply grammar
 //! - [`inbound`] - the owned record a validated host-to-device frame becomes
 //!
+//! `docs/reference/protocol.md` is the one-page index from each grammar to the module that owns it.
+//!
 //! The device-side runtime that ships these bytes (USB, the log ring, counters in statics)
 //! lives in `asperitas-logging`, which depends on this crate and not the other way round. The
 //! host-only halves - block assembly, WAV parsing, the install stream - live in `asperitas-host`.
