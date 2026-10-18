@@ -72,7 +72,7 @@ usage: scripts/gates.sh [--dry-run | --list] [commit|push|ci]
 
   run       execute the tier, sequentially, cheapest-first, stopping at the first failure
   --dry-run print the commands the tier would run, executing nothing
-  --list    print the tier x gate matrix that doc-001 embeds
+  --list    print the tier x gate matrix (see docs/development.md)
   no tier argument means ci: forgetting it must never mean "ran less than everything"
 EOF
 }

@@ -19,7 +19,7 @@
 //!
 //! Since PA4 has no timer channel, uniform hardware PWM across all three colours
 //! is not possible. Software PWM would require a dedicated embassy task with no
-//! clear owner yet. Per doc-001 §3 ("abstractions must justify their cost"),
+//! clear owner yet, so
 //! on/off gives seven distinct colours (Off + R/G/B/Yellow/Cyan/Magenta/White),
 //! which is sufficient for a status indicator without adding PWM complexity.
 
