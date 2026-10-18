@@ -28,10 +28,9 @@ use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
 
 use crate::align::Alignment;
-use crate::capture::Capture;
+use crate::capture::{Capture, FULL_SCALE};
 use crate::thresholds;
 
-const FULL_SCALE: f64 = 32768.0;
 const INTERP_TAPS: usize = 16;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -272,7 +271,7 @@ pub(crate) fn discontinuities(
     let mut last_event: Option<usize> = None;
     let mut model = DelayedModel::new(stimulus, al);
     let block = match fit {
-        GainFit::Fixed(_) => 4096,
+        GainFit::Fixed(_) => thresholds::FIXED_GAIN_BLOCK_SAMPLES,
         GainFit::Tracking { block } => block.max(1),
     };
     let mut buf: Vec<Option<(f64, i64)>> = Vec::with_capacity(block);
@@ -404,7 +403,7 @@ mod tests {
 
     fn run(c: &Capture) -> Metrics {
         let st = sine(c.samples.len());
-        let a = align(c, &st).unwrap();
+        let a = align(&c.samples, &st).unwrap();
         assert_stable(&a).unwrap();
         analyze(c, &st, &a)
     }
@@ -485,8 +484,10 @@ mod tests {
     fn injected_spur_is_reported() {
         let mut c = synthetic();
         // -50 dBc at 3 kHz (bin-centred: 3000 Hz is 1024 * 48000/16384).
-        let amp =
-            0.1 * 32768.0 * 10f64.powf(-50.0 / 20.0) * 10f64.powf(thresholds::LOOP_GAIN_DB / 20.0);
+        let amp = 0.1
+            * FULL_SCALE
+            * 10f64.powf(-50.0 / 20.0)
+            * 10f64.powf(thresholds::LOOP_GAIN_DB / 20.0);
         for (i, s) in c.samples.iter_mut().enumerate() {
             let t = (2.0 * PI * 3000.0 * i as f64 / 48_000.0).sin();
             *s = s.saturating_add((amp * t).round() as i16);

@@ -5,6 +5,7 @@
 //! - [`stimulus`] regenerates the played signal from the same `asperitas-dsp` processors the rig
 //!   firmware runs.
 //! - [`align`] finds the loopback delay per window and flags slips.
+//! - [`baseline`] judges a steady-stimulus loopback capture against the rig baseline.
 //! - [`compare`] checks a replayed excerpt against the `asperitas-cli` reference.
 //! - [`metrics`] reports level, silence, discontinuity candidates and spurs as JSON.
 //! - [`param_step`] flags audible level steps from unsmoothed parameter changes.
@@ -14,6 +15,7 @@
 //! - [`thresholds`] is the only place a numeric limit is written down.
 
 pub mod align;
+pub mod baseline;
 pub mod capture;
 pub mod cli;
 pub mod compare;

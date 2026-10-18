@@ -12,7 +12,7 @@
 //!   loud on purpose), or an accounting mismatch;
 //! * device-reported drops (`dropped_full` from `STATUS` records, summed per boot) above
 //!   [`Policy::max_device_dropped`];
-//! * no `STATUS` record at all, only when [`Policy::require_status`] is set.
+//! * no `STATUS` record at all, since the device's drops are then unknowable.
 //!
 //! Sequence gaps are reported but do not fail on their own: a CRC cannot prove absence,
 //! and a gap can be a restart. A gap at a `BOOT` record is counted in
@@ -89,8 +89,6 @@ pub struct Capture {
 pub struct Policy {
     /// Device-reported drops above this fail the capture. Default 0.
     pub max_device_dropped: u64,
-    /// Fail when no `STATUS` record was seen (device drops unknowable).
-    pub require_status: bool,
 }
 
 /// Why a capture failed.
@@ -104,7 +102,7 @@ pub enum Reason {
     AccountingMismatch,
     /// The device reported more drops than the policy allows.
     DeviceDropped { reported: u64, max: u64 },
-    /// `require_status` was set and no `STATUS` record parsed.
+    /// No `STATUS` record parsed, so the device's drops are unknowable.
     NoStatus,
 }
 
@@ -223,8 +221,8 @@ pub fn verdict(summary: &Summary, policy: &Policy) -> Verdict {
             reported: d,
             max: policy.max_device_dropped,
         }),
-        None if policy.require_status => reasons.push(Reason::NoStatus),
-        _ => {}
+        None => reasons.push(Reason::NoStatus),
+        Some(_) => {}
     }
     if reasons.is_empty() {
         Verdict::Pass
@@ -386,11 +384,9 @@ mod tests {
         assert_eq!(c.summary.device_dropped, Some(3));
         let at = Policy {
             max_device_dropped: 3,
-            ..Policy::default()
         };
         let below = Policy {
             max_device_dropped: 2,
-            ..Policy::default()
         };
         assert!(verdict(&c.summary, &at).is_pass());
         assert_eq!(
@@ -420,13 +416,8 @@ mod tests {
         let c = run(&stream(&[(0, "x"), (1, "STATUS proto=2 dropped_full=9")]));
         assert_eq!(c.summary.device_dropped, None);
         assert_eq!(c.summary.unparsed_status, 1);
-        assert!(verdict(&c.summary, &Policy::default()).is_pass());
-        let strict = Policy {
-            require_status: true,
-            ..Policy::default()
-        };
         assert_eq!(
-            verdict(&c.summary, &strict),
+            verdict(&c.summary, &Policy::default()),
             Verdict::Fail(vec![Reason::NoStatus])
         );
     }
@@ -465,7 +456,7 @@ mod tests {
         let expected = format!(
             "asperitas-rig capture v1\nrecords=2\nbytes_pushed={}\nbad_frames=0\nresyncs=0\n\
              discarded_bytes=0\naccounting_ok=true\nseq_gaps=0\nfirst_gap=none\nrestarts=0\n\
-             status_records=0\nunparsed_status=0\ndevice_dropped=unknown\nverdict=pass\n--\n\
+             status_records=0\nunparsed_status=0\ndevice_dropped=unknown\nverdict=fail no_status_record\n--\n\
              I 00000000 0 BOOT proto=1\nI 00000001 10 hi\n",
             first + second
         );

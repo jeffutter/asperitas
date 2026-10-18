@@ -17,7 +17,6 @@ use std::fmt;
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 
-use crate::capture::Capture;
 use crate::thresholds;
 
 /// Per-window delays of a capture against its stimulus, in samples.
@@ -80,15 +79,15 @@ impl fmt::Display for AlignError {
 
 impl std::error::Error for AlignError {}
 
-/// Delay of each full window of `capture` against `stimulus` (rendered from sample 0 of the
-/// capture's start; at least as long as the capture).
-pub fn align(capture: &Capture, stimulus: &[f32]) -> Result<Alignment, AlignError> {
+/// Delay of each full window of `samples` against `stimulus` (rendered from sample 0 of the
+/// capture's start; at least as long as the span being aligned).
+pub fn align(samples: &[i16], stimulus: &[f32]) -> Result<Alignment, AlignError> {
     let w = thresholds::ALIGN_WINDOW_SAMPLES;
     let max_d = thresholds::ALIGN_MAX_DELAY_SAMPLES;
-    let n_win = capture.samples.len() / w;
+    let n_win = samples.len() / w;
     if n_win == 0 {
         return Err(AlignError::TooShort {
-            have: capture.samples.len(),
+            have: samples.len(),
             need: w,
         });
     }
@@ -112,7 +111,7 @@ pub fn align(capture: &Capture, stimulus: &[f32]) -> Result<Alignment, AlignErro
         let start = k * w;
         let mut c = vec![Complex::new(0.0f32, 0.0); fft_len];
         let mut s = vec![Complex::new(0.0f32, 0.0); fft_len];
-        for (dst, &v) in c.iter_mut().zip(&capture.samples[start..start + w]) {
+        for (dst, &v) in c.iter_mut().zip(&samples[start..start + w]) {
             dst.re = asperitas_dsp::pcm::i16_to_f32(v);
         }
         for (j, dst) in s.iter_mut().take(ref_len).enumerate() {
@@ -209,6 +208,7 @@ pub fn assert_repeatable(a: &Alignment, b: &Alignment) -> Result<(), AlignError>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capture::Capture;
     use crate::stimulus::Stimulus;
     use asperitas_dsp::stimulus::SineParams;
 
@@ -228,7 +228,7 @@ mod tests {
     fn delayed(stim: &[f32], delay: usize, n: usize) -> Capture {
         let samples = (0..n)
             .map(|i| i.checked_sub(delay).map_or(0.0, |j| stim[j]))
-            .map(|v| (v * 0.9 * 32768.0) as i16)
+            .map(|v| (v * 0.9 * crate::capture::FULL_SCALE as f32) as i16)
             .collect();
         Capture {
             samples,
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn fixture_300s_sine_is_stable() {
         let c = load("2026-10-07-rig-sine-300s");
-        let a = align(&c, &sine(c.samples.len())).unwrap();
+        let a = align(&c.samples, &sine(c.samples.len())).unwrap();
         assert_eq!(a.delays.len(), 300);
         assert_stable(&a).unwrap();
     }
@@ -251,8 +251,8 @@ mod tests {
             load("2026-10-13-rig-10s-reset1"),
             load("2026-10-13-rig-10s-reset2"),
         );
-        let a1 = align(&c1, &sine(c1.samples.len())).unwrap();
-        let a2 = align(&c2, &sine(c2.samples.len())).unwrap();
+        let a1 = align(&c1.samples, &sine(c1.samples.len())).unwrap();
+        let a2 = align(&c2.samples, &sine(c2.samples.len())).unwrap();
         assert_stable(&a1).unwrap();
         assert_stable(&a2).unwrap();
         assert_repeatable(&a1, &a2).unwrap();
@@ -262,7 +262,7 @@ mod tests {
     fn synthetic_delay_is_recovered() {
         let n = 5 * 48_000;
         let st = sine(n);
-        let a = align(&delayed(&st, 37, n), &st).unwrap();
+        let a = align(&delayed(&st, 37, n).samples, &st).unwrap();
         assert_stable(&a).unwrap();
         assert!((a.median() - 37.0).abs() < 0.05, "median {}", a.median());
     }
@@ -275,7 +275,7 @@ mod tests {
         // Drop one sample mid-signal: everything after arrives one sample earlier.
         c.samples.remove(n / 2);
         c.samples.push(0);
-        let a = align(&c, &st).unwrap();
+        let a = align(&c.samples, &st).unwrap();
         match assert_stable(&a) {
             Err(AlignError::Slip { window, .. }) => {
                 assert!((2..=3).contains(&window), "window {window}")
@@ -288,8 +288,8 @@ mod tests {
     fn repeat_with_different_delay_is_rejected() {
         let n = 3 * 48_000;
         let st = sine(n);
-        let a = align(&delayed(&st, 37, n), &st).unwrap();
-        let b = align(&delayed(&st, 38, n), &st).unwrap();
+        let a = align(&delayed(&st, 37, n).samples, &st).unwrap();
+        let b = align(&delayed(&st, 38, n).samples, &st).unwrap();
         assert!(matches!(
             assert_repeatable(&a, &b),
             Err(AlignError::RepeatMismatch { .. })
@@ -300,6 +300,9 @@ mod tests {
     fn short_inputs_are_typed_errors() {
         let st = sine(100);
         let c = delayed(&st, 0, 100);
-        assert!(matches!(align(&c, &st), Err(AlignError::TooShort { .. })));
+        assert!(matches!(
+            align(&c.samples, &st),
+            Err(AlignError::TooShort { .. })
+        ));
     }
 }

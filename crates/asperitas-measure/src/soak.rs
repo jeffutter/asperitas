@@ -136,7 +136,8 @@ pub fn judge_soak(
     });
 
     let rendered = stimulus.render(capture.samples.len());
-    let alignment = align(capture, &rendered).map_err(|e| SoakError(format!("alignment: {e}")))?;
+    let alignment =
+        align(&capture.samples, &rendered).map_err(|e| SoakError(format!("alignment: {e}")))?;
     if let Err(e) = assert_stable(&alignment) {
         failures.push(format!("alignment: {e}"));
     }
@@ -151,12 +152,7 @@ pub fn judge_soak(
             block: thresholds::SOAK_GAIN_FIT_BLOCK_SAMPLES,
         },
     );
-    let normalized: Vec<f32> = capture
-        .samples
-        .iter()
-        .map(|&s| f32::from(s) / 32768.0)
-        .collect();
-    let steps = detect_param_steps(&normalized);
+    let steps = detect_param_steps(&capture.normalized());
 
     let silence_a = Attribution::new(silent.run_count, &silent.run_starts, rate, window.as_ref());
     let disc_a = Attribution::new(disc.count, &disc.positions, rate, window.as_ref());
@@ -189,6 +185,7 @@ pub fn judge_soak(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capture::FULL_SCALE;
     use asperitas_dsp::gain::{Gain, GainParams};
     use asperitas_dsp::processor::Processor;
     use asperitas_dsp::stimulus::SineParams;
@@ -233,7 +230,7 @@ mod tests {
             }
             let y = gain.tick([x[i], x[i]])[0] * loop_gain;
             if i >= HEAD {
-                samples[i - HEAD] = (y * 32768.0).round() as i16;
+                samples[i - HEAD] = (y * FULL_SCALE as f32).round() as i16;
             }
         }
         Capture {
@@ -319,7 +316,10 @@ mod tests {
             }
             let mut out = [[0.0f32; 2]; 32];
             chain.process_block_with(&mut out, |base| [base[0], knob]);
-            samples.extend(out.iter().map(|f| (f[0] * 32768.0).round() as i16));
+            samples.extend(
+                out.iter()
+                    .map(|f| (f[0] * FULL_SCALE as f32).round() as i16),
+            );
             block += 1;
         }
         samples.truncate(n);

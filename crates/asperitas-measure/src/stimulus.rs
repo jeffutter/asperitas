@@ -5,8 +5,7 @@ use asperitas_dsp::stimulus::{
     ExponentialSweep, ExponentialSweepParams, PulseTrain, PulseTrainParams, Sine, SineParams,
 };
 
-/// Sample rate of the rig, Hz. The firmware calls `set_sample_rate` with this value.
-pub const SAMPLE_RATE_HZ: u32 = 48_000;
+use crate::capture::SAMPLE_RATE_HZ;
 
 /// A stimulus and the parameters the rig was built with.
 ///

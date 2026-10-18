@@ -8,28 +8,7 @@ use std::time::Instant;
 
 use crate::{capture, render, verdict, Capture, Policy};
 
-/// Process exit status. Failed verdicts are kept distinct from usage and I/O errors so a
-/// script can tell "the capture is untrustworthy" from "the capture did not happen".
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Outcome {
-    /// Capture passed.
-    Pass,
-    /// Capture completed but the verdict was fail.
-    Fail,
-    /// Usage, device or I/O error.
-    Error,
-}
-
-impl Outcome {
-    /// Numeric process exit code: 0 pass, 1 failed verdict, 2 error.
-    pub fn code(self) -> u8 {
-        match self {
-            Outcome::Pass => 0,
-            Outcome::Fail => 1,
-            Outcome::Error => 2,
-        }
-    }
-}
+pub use asperitas_host::outcome::Outcome;
 
 /// Why no single device could be chosen.
 #[derive(Debug, PartialEq, Eq)]
@@ -302,7 +281,6 @@ mod tests {
         // ... but within an allowed budget.
         let policy = Policy {
             max_device_dropped: 3,
-            ..Policy::default()
         };
         assert_eq!(
             run(&b[..], &policy, &out, &mut Vec::new()).unwrap(),

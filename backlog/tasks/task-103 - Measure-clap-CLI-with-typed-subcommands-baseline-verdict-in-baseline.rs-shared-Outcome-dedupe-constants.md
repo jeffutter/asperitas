@@ -3,13 +3,15 @@ id: TASK-103
 title: >-
   Measure: clap CLI with typed subcommands, baseline verdict in baseline.rs,
   shared Outcome, dedupe constants
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-18 23:40'
 labels:
   - review-2026-10
   - measure
+  - planned
 dependencies: []
 priority: low
 type: chore
@@ -28,7 +30,25 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Typed subcommands replace the hand-rolled parser; tests/cli.rs passes
-- [ ] #2 One definition each of the sample rate, full scale, Outcome
-- [ ] #3 require_status removed
+- [x] #1 Typed subcommands replace the hand-rolled parser; tests/cli.rs passes
+- [x] #2 One definition each of the sample rate, full scale, Outcome
+- [x] #3 require_status removed
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the commit carrying Task-Id TASK-103. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+CLI kept the pinned shape: clap derive Cli with one Analyze subcommand, StimulusKind ValueEnum (clap rejects unknown stimuli), conflicts_with for stimulus/excerpt and excerpt/expect-fail. sweep/soak/hold stay sidecar-selected, so no baseline|excerpt|sweep|soak subcommands (they would break tests/cli.rs and rig docs). Sidecar::sweep_start_s renamed motion_start_s. judge_stimulus moved to baseline.rs as judge_baseline returning typed BaselineReport. --expect-fail reads the verdict from SoakReport via Judged. Outcome now lives in asperitas-host::outcome (rig re-exports it). SAMPLE_RATE_HZ is asperitas_wire::capture's, FULL_SCALE is capture::FULL_SCALE, Capture::normalized() replaces the i16-to-f32 maps, align takes &[i16], the 4096 literal is thresholds::FIXED_GAIN_BLOCK_SAMPLES. Policy::require_status removed; NoStatus is now always a failure, so two rig tests (artifact golden, Acker test reader) were updated to emit/expect STATUS. analyze JSON on the sine fixture is byte-identical before and after.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+measure CLI moved to clap derive with typed StimulusKind, baseline verdict in baseline.rs, shared Outcome in asperitas-host, single sample-rate/full-scale constants, Capture::normalized, align(&[i16]), and rig Policy::require_status removed. Workspace tests, clippy and fmt green; analyze output on the sine fixture unchanged.
+<!-- SECTION:FINAL_SUMMARY:END -->

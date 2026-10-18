@@ -143,6 +143,7 @@ dependencies = [
  "asperitas-dsp",
  "asperitas-host",
  "asperitas-wire",
+ "clap",
  "rustfft",
  "serde",
  "serde_json",

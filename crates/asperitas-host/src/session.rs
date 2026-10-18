@@ -94,7 +94,7 @@ impl Sidecar {
     /// (first `SET` reply minus the arming status record, wrapped as the stream wraps), which
     /// includes real scheduling latency; falls back to the host's planned delay when the recorder
     /// could not read one of the two times.
-    pub fn sweep_start_s(&self) -> f64 {
+    pub fn motion_start_s(&self) -> f64 {
         match (self.arm_t_ms, self.first_set_t_ms) {
             (Some(arm), Some(set)) => {
                 (i64::from(set) - i64::from(arm)).rem_euclid(T_MS_MODULUS) as f64 / 1000.0
@@ -240,18 +240,18 @@ mod tests {
             first_set_t_ms: Some(14_710),
             ..sample()
         };
-        assert_eq!(s.sweep_start_s(), 10.5);
+        assert_eq!(s.motion_start_s(), 10.5);
         let wrapped = Sidecar {
             arm_t_ms: Some(99_999_000),
             first_set_t_ms: Some(9_500),
             ..sample()
         };
-        assert_eq!(wrapped.sweep_start_s(), 10.5);
+        assert_eq!(wrapped.motion_start_s(), 10.5);
         let planned = Sidecar {
             first_set_t_ms: None,
             ..sample()
         };
-        assert_eq!(planned.sweep_start_s(), 10.0);
+        assert_eq!(planned.motion_start_s(), 10.0);
     }
 
     #[test]

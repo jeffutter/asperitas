@@ -261,7 +261,6 @@ fn go(command: Command) -> Result<Outcome, ControlError> {
             let port = open(&pick(&device)?)?;
             let policy = Policy {
                 max_device_dropped: max_drops,
-                require_status: true,
             };
             let reader = Deadline::new(port, Instant::now() + duration);
             Ok(run(reader, &policy, &out, &mut std::io::stdout())?)
@@ -333,7 +332,6 @@ fn go(command: Command) -> Result<Outcome, ControlError> {
                 .map_err(|e| ControlError::NoDevice(format!("cannot clone port: {e}")))?;
             let policy = Policy {
                 max_device_dropped: max_drops,
-                require_status: true,
             };
             run_override(port, writer, &plan, &policy, &out, &mut std::io::stdout())
         }

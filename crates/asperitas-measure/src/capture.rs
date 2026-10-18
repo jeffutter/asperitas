@@ -10,8 +10,11 @@ use std::path::Path;
 
 use asperitas_host::capture::{load_console, load_console_zst, ProvedPcm};
 
-/// Rig capture sample rate, Hz.
-pub const SAMPLE_RATE_HZ: u32 = 48_000;
+pub use asperitas_wire::capture::SAMPLE_RATE_HZ;
+
+/// Magnitude of the 16-bit scale: `i16::MIN` is `-FULL_SCALE`. Matches the divisor of
+/// [`asperitas_dsp::pcm::i16_to_f32`].
+pub const FULL_SCALE: f64 = 32768.0;
 
 /// A fully proved capture: mono 16-bit samples in block-completion order.
 #[derive(Clone, Debug)]
@@ -51,6 +54,14 @@ impl From<asperitas_host::capture::LoadError> for LoadError {
 }
 
 impl Capture {
+    /// The samples scaled into `[-1.0, 1.0)`.
+    pub fn normalized(&self) -> Vec<f32> {
+        self.samples
+            .iter()
+            .map(|&s| asperitas_dsp::pcm::i16_to_f32(s))
+            .collect()
+    }
+
     /// Load a zstd-compressed console capture from disk.
     pub fn from_console_zst(path: impl AsRef<Path>) -> Result<Capture, LoadError> {
         Capture::from_proved(load_console_zst(path)?)

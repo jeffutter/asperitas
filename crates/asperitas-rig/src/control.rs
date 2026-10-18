@@ -676,16 +676,16 @@ mod tests {
                 if self.fail_after.is_some_and(|n| cmds.len() > n) {
                     return Err(io::Error::other("unplugged"));
                 }
+                if self.seq == 0 {
+                    self.pending.extend(status_frame(self.seq));
+                    self.seq += 1;
+                }
                 for c in &cmds[self.sent..] {
                     let r = Reply::Ok(c.verb());
                     self.pending.extend(reply_frame(self.seq, r));
                     self.seq += 1;
                 }
                 self.sent = cmds.len();
-                if self.pending.is_empty() && self.seq == 0 {
-                    self.pending.extend(status_frame(self.seq));
-                    self.seq += 1;
-                }
             }
             if self.pending.is_empty() {
                 std::thread::sleep(Duration::from_millis(2));

@@ -3,6 +3,14 @@
 //! Nothing outside this module may spell a limit as a literal. Each constant cites where its value
 //! came from, so a change to one is a change to a documented decision.
 
+use crate::capture::FULL_SCALE;
+
+/// Samples per fitting block when the discontinuity model uses one fixed gain for the whole
+/// capture. The gain is constant, so this only bounds how much of the model is evaluated at once.
+///
+/// Origin: working-buffer size; any value gives the same result.
+pub const FIXED_GAIN_BLOCK_SAMPLES: usize = 4096;
+
 /// Loop gain of the Pod self-loopback at the rig's -20 dBFS sine, in dB (capture minus stimulus).
 ///
 /// Origin: the rig baseline, the 300 s run (`audio/captures/2026-10-07-rig-sine-300s.console.zst`).
@@ -123,7 +131,7 @@ pub const PARAM_STEP_MAX_DB: f64 = 5.0;
 /// noise cannot read as a step. About 2 LSB of 16-bit, as [`SILENCE_LSB`].
 ///
 /// Origin: calibrated against the fixtures.
-pub const PARAM_STEP_FLOOR_RMS: f32 = 2.0 / 32768.0;
+pub const PARAM_STEP_FLOOR_RMS: f32 = (2.0 / FULL_SCALE) as f32;
 
 /// Step flags closer together than this many blocks are one event (a step falling inside a block
 /// flags both its boundaries).

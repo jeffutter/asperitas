@@ -25,11 +25,8 @@ use asperitas_wire::frame::crc16_ccitt;
 use serde::Serialize;
 
 use crate::align::{align, assert_stable, AlignError};
-use crate::capture::Capture;
+use crate::capture::{Capture, FULL_SCALE};
 use crate::thresholds;
-
-/// Full scale of the 16-bit capture, LSB.
-const FULL_SCALE: f64 = 32768.0;
 
 /// The effect stage of the replay, as `CTL FX f=<code>` and any `CTL SET` overrides carry it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -228,12 +225,8 @@ pub fn compare(capture: &Capture, reference: &Reference) -> Result<Comparison, C
         });
     }
     // Align on whole windows the excerpt fully covers; the silence after it has nothing to correlate.
-    let head = Capture {
-        samples: capture.samples[..(n_win * w).min(capture.samples.len())].to_vec(),
-        sample_rate_hz: capture.sample_rate_hz,
-        blocks: capture.blocks,
-    };
-    let alignment = align(&head, r).map_err(CompareError::Align)?;
+    let head = &capture.samples[..(n_win * w).min(capture.samples.len())];
+    let alignment = align(head, r).map_err(CompareError::Align)?;
     assert_stable(&alignment).map_err(CompareError::Align)?;
     let delay = alignment.median().round().max(0.0) as usize;
 
@@ -400,13 +393,15 @@ mod tests {
             .samples
             .iter()
             .map(|&s| {
-                let v = f32::from(s) / 32768.0;
+                let v = asperitas_dsp::pcm::i16_to_f32(s);
                 [v, v]
             })
             .collect();
         replay_fx.process(&mut frames);
         for (s, f) in c.samples.iter_mut().zip(&frames) {
-            *s = (f[0] * 32768.0).round().clamp(-32768.0, 32767.0) as i16;
+            *s = (f64::from(f[0]) * FULL_SCALE)
+                .round()
+                .clamp(-FULL_SCALE, FULL_SCALE - 1.0) as i16;
         }
         c
     }
