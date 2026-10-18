@@ -180,19 +180,9 @@ pub(crate) fn emit_panic(body: &[u8]) {
 
 /// Render bytes as UTF-8 and emit them at `level` in a single defmt frame.
 ///
-/// Invalid UTF-8 becomes a fixed marker rather than a partial frame: a body that cannot be shown
-/// is worth less than a body that announces it was unreadable.
+/// A body cut mid-character keeps its valid prefix; see [`crate::utf8_prefix`].
 fn emit_frame(level: Level, body: &[u8]) {
-    let Ok(text) = core::str::from_utf8(body) else {
-        match level {
-            Level::Error => defmt::error!("{}", "<invalid utf8>"),
-            Level::Warn => defmt::warn!("{}", "<invalid utf8>"),
-            Level::Info => defmt::info!("{}", "<invalid utf8>"),
-            Level::Debug => defmt::debug!("{}", "<invalid utf8>"),
-            Level::Trace => defmt::trace!("{}", "<invalid utf8>"),
-        }
-        return;
-    };
+    let text = crate::utf8_prefix(body);
 
     // defmt filters at compile time from `DEFMT_LOG`, unlike the facade's runtime
     // `set_max_level`, and a filtered call expands to nothing — so a level the host did not ask

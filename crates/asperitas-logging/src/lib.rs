@@ -493,6 +493,23 @@ fn format_body(record: &log::Record, out: &mut [u8; console::BODY_WINDOW]) -> us
     w.filled()
 }
 
+/// The displayable text of a record body.
+///
+/// The body is cut at a byte count, so a long non-ASCII message can end mid-character. The
+/// bytes before the split are still good text, so they are kept. A body whose very first byte
+/// is invalid has nothing to keep and becomes a fixed marker, so an unreadable record still
+/// announces itself.
+#[cfg(any(feature = "log-defmt", test))]
+pub(crate) fn utf8_prefix(body: &[u8]) -> &str {
+    match core::str::from_utf8(body) {
+        Ok(text) => text,
+        Err(e) => match core::str::from_utf8(&body[..e.valid_up_to()]) {
+            Ok(prefix) if !prefix.is_empty() => prefix,
+            _ => "<invalid utf8>",
+        },
+    }
+}
+
 /// Emit the `BOOT` banner: proto, firmware version, ring size, body cap.
 ///
 /// Call this *after* [`set_backend_usb`], or [`Backend::NoOp`] swallows it silently — the
@@ -644,4 +661,35 @@ macro_rules! noop_defmt_logger {
             }
         }
     };
+}
+
+#[cfg(test)]
+mod utf8_prefix_tests {
+    use super::utf8_prefix;
+
+    #[test]
+    fn valid_body_is_unchanged() {
+        assert_eq!(utf8_prefix("abc é".as_bytes()), "abc é");
+    }
+
+    #[test]
+    fn body_cut_mid_character_keeps_the_prefix() {
+        let full = "abcé".as_bytes();
+        assert_eq!(utf8_prefix(&full[..4]), "abc");
+    }
+
+    #[test]
+    fn body_invalid_from_the_first_byte_is_the_marker() {
+        assert_eq!(utf8_prefix(&[0xFF, b'a']), "<invalid utf8>");
+    }
+
+    #[test]
+    fn real_truncation_path_is_emitted_as_its_prefix() {
+        use core::fmt::Write;
+        let mut buf = [0u8; 5];
+        let mut w = asperitas_wire::body::BodyWriter::new(&mut buf);
+        let _ = write!(w, "abcéé");
+        let n = w.filled();
+        assert_eq!(utf8_prefix(&buf[..n]), "abcé");
+    }
 }
