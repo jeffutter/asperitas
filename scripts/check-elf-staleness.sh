@@ -17,10 +17,8 @@
 #   ELF_INPUTS   the fixture directory, so the digest covers fake sources instead of real ones
 #   MAIN_SRC     the file `build-elf` touches to force a relink, kept inside the fixture
 #   CARGO        `true`, so no cross-toolchain runs and no firmware crate recompiles
-#   PROV         `true`, stubbing the cfg-provenance clause, which is scripts/elf-provenance.sh's
-#                business and already asserted there (TASK-067). Stubbing it also keeps this suite off
-#                `cargo metadata`. It does hide the order the two clauses run in, which neither this
-#                suite nor elf-provenance's selftest covers; read that ordering in the recipe itself.
+#   PROV         a stub reader for the embedded digest, standing in for scripts/elf-provenance.sh
+#                (asserted by its own selftest), so no objcopy runs here
 #
 # What the stubs do and do not prove: the digest lives inside the ELF (.asp.prov, written by
 # firmware/build.rs on every link), so a "link" here is the stub writing the fixture's digest beside
@@ -305,7 +303,6 @@ run_selftest() {
   STUB_CARGO=$base/cargo-stub.sh
   cat >"$STUB_PROV" <<'STUB'
 case $1 in
-  check) exit 0 ;;
   digest) f="$(dirname "$2").embedded"; [ -s "$f" ] || exit 2; cat "$f" ;;
 esac
 STUB

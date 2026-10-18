@@ -64,13 +64,9 @@ fn main() {
 
 /// Embed in every firmware ELF with the cargo cfg set it was linked against.
 ///
-/// `target/thumbv7em-none-eabihf/release/main` is one name for two different images:
-/// `scripts/gates.sh` builds the console and the RTT-only cfg sets back to back, and the top-level
-/// name alternates between the two `deps/main-<hash>` artifacts it hardlinks. Neither the path nor
-/// the mtime says which one is sitting there, and no host-side record can either -- those gates run
-/// raw cargo, never `make`, so anything a recipe writes beside the ELF describes some other
-/// artifact than the name currently holds. So the answer travels inside the image, where it cannot
-/// disagree with the bytes it travels in.
+/// The record travels inside the image, where it cannot disagree with the bytes it travels in: no
+/// host-side record can describe an artifact that was built by raw cargo, as the gates do, rather
+/// than by a `make` recipe that could write something beside the ELF.
 ///
 /// The carrier is a non-allocated ARM note: `%note` with an empty flags field gives the section
 /// VMA and LMA 0x0, exactly like defmt's own `.defmt`, so `objcopy -O binary` leaves it out of what
@@ -80,8 +76,7 @@ fn main() {
 /// The blob also carries `source_digest`, the digest of the inputs listed in `elf-inputs.manifest`
 /// (see `digest_inputs`), so the record of which sources built the image travels with it.
 ///
-/// Read by `scripts/elf-provenance.sh`, filed as TASK-062.02, which is the only thing in the repo
-/// that parses this blob.
+/// Read by `scripts/elf-provenance.sh`, which is the only thing in the repo that parses this blob.
 fn provenance(layout: &str) {
     // Section name, format tag and key order are defined here and nowhere else. The blob leads with
     // the tag so a later format change is detected by its absence instead of being misparsed.

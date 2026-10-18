@@ -89,8 +89,9 @@ unsmoothed-params = []
 # `-C link-arg=-Tlink.x` on the floor links an image unrelated to any memory map (measured: an
 # 8,896-byte `main.bin`).
 #
-# Keep the temporary target dir. Without it this relinks `target/.../release/main` and leaves the
-# RTT image where the console image was, and that ELF is the decoder every probe command reads with.
+# Keep the temporary target dir. Without it this relinks the RTT variant's own target directory
+# (`target/internal-nodefault-log-defmt+seed3`) and the ELF that every probe command decodes with
+# changes under it.
 #
 # Two prices and only one of them is flash. Host-side, the ELF goes 3.0 MB -> 9.5 MB, because
 # that is where the DWARF lives: all 9.2 MB of it sits in non-ALLOC `.debug_*` sections, which a

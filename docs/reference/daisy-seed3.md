@@ -491,9 +491,9 @@ Expanded (`make -n probe-flash probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1
 `elf-check` lines that guard `probe-log` left out):
 
 ```
-cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
-probe-rs download target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --connect-under-reset --verify && probe-rs reset --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --connect-under-reset
-probe-rs attach target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive
+cargo build --release --target-dir target/internal-nodefault-log-defmt+seed3 --no-default-features --features "seed3 log-defmt" --bin main
+probe-rs download target/internal-nodefault-log-defmt+seed3/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --connect-under-reset --verify && probe-rs reset --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --connect-under-reset
+probe-rs attach target/internal-nodefault-log-defmt+seed3/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive
 ```
 
 There are two more targets. `probe-run` flashes and then stays attached to stream; `probe-rtt-list`
@@ -573,7 +573,7 @@ built artifacts rather than at the bench:
 
   ```bash
   cd firmware && cargo build --release --no-default-features --features "seed3 log-defmt" \
-    && probe-rs attach target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --list-rtt
+    && probe-rs attach target/internal-nodefault-log-defmt+seed3/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --list-rtt
   ```
 
   Expect only `Error: No connected probes were found.` Anything else about DWARF is a profile
@@ -645,7 +645,7 @@ cd firmware && CARGO_TARGET_DIR=$(mktemp -d) cargo nm --release --no-default-fea
 ```
 
 The flags are load-bearing, because `cargo nm` re-runs the build: omit `--no-default-features` and
-`--features` and it rebuilds and overwrites `target/.../release/main` with the console image, which
+`--features` and it builds the console image, which
 links the `#[cfg(not(feature = "log-defmt"))]` no-op logger and contains no `SEGGER` magic at all -
 symptoms that read exactly like "RTT is missing from the firmware". Measured contrast: 99 frame
 symbols and zero `SEGGER` strings in the console image, 82 and the magic in the RTT one, so the byte
@@ -840,8 +840,8 @@ make probe-flash UNDER_RESET=0 FEATURES="seed3 log-defmt" NO_DEFAULT=1
 Expanded (`make -n probe-flash UNDER_RESET=0 FEATURES="seed3 log-defmt" NO_DEFAULT=1`):
 
 ```
-cargo build --release --no-default-features --features "seed3 log-defmt" --bin main
-probe-rs download target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive  --verify && probe-rs reset --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive
+cargo build --release --target-dir target/internal-nodefault-log-defmt+seed3 --no-default-features --features "seed3 log-defmt" --bin main
+probe-rs download target/internal-nodefault-log-defmt+seed3/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive  --verify && probe-rs reset --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive
 ```
 
 `UNDER_RESET=0` drops the flag from `probe-flash` and `probe-run` only; the default expansion is
@@ -984,7 +984,7 @@ make probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 \
 Expanded (`make -n probe-log FEATURES="seed3 log-defmt" NO_DEFAULT=1 PROBE_EXTRA="--no-timestamps --log-format oneline --target-output-file defmt=out.txt"`, again with the `elf-check` lines that guard `probe-log` left out):
 
 ```
-probe-rs attach target/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --no-timestamps --log-format oneline --target-output-file defmt=out.txt
+probe-rs attach target/internal-nodefault-log-defmt+seed3/thumbv7em-none-eabihf/release/main --chip ASPERITAS_H750IB --chip-description-path asperitas-h750.yaml --non-interactive --no-timestamps --log-format oneline --target-output-file defmt=out.txt
 ```
 
 `--target-output-file <channel>=<path>` writes probe-rs's *formatted* output for one channel to a

@@ -32,8 +32,8 @@ TARGET   = thumbv7em-none-eabihf
 # (TASK-038.04.07). The bootloader itself is installed once, see docs/reference/daisy-seed3.md.
 #
 # The layout reaches build.rs as ASPERITAS_LAYOUT, which stamps it into the ELF's .asp.prov and
-# selects the linker script. The two layouts share one ELF path (target/.../release/$(BINARY)), so
-# `make elf-check LAYOUT=...` refuses an ELF built for the other one. The .bin carries the layout in
+# selects the linker script. Each layout builds into its own target directory (see VARIANT_DIR), so
+# neither can overwrite the other's ELF. The .bin carries the layout in
 # its name for the same reason BINARY is in it: `main.bin` flashed to 0x08000000 and
 # `main-bootloaded.bin` flashed to 0x90040000 are not interchangeable, and a shared name would let
 # whichever build ran last own the file the next `make flash` reads.
@@ -88,7 +88,6 @@ export ASPERITAS_LAYOUT = $(LAYOUT)
 # see the WFI note above `probe-log`.
 CHIP        = ASPERITAS_H750IB
 CHIP_DESC   = asperitas-h750.yaml
-ELF         = target/$(TARGET)/release/$(BINARY)
 
 # `FEATURES` adds to the crate's default features; it can never take one away. Dropping the
 # framed console — for an RTT-only image, where the diagnostics channel shares nothing with USB —
@@ -104,6 +103,18 @@ CARGO_DEFAULTS =
 ifeq ($(NO_DEFAULT),1)
 CARGO_DEFAULTS = --no-default-features
 endif
+
+# --- One target directory per build variant -------------------------------------------------------
+#
+# Builds that differ in link layout, default features or feature list each write into their own cargo
+# target directory, named by scripts/variant-dir.sh from LAYOUT, NO_DEFAULT and FEATURES. The ELF path
+# below is therefore a function of the same knobs that choose the build, and an ELF built for another
+# variant cannot sit at it. Cost: disk space and a cold first build per variant.
+#
+# Plain `=` throughout so `make VARIANT_DIR=...` still overrides from the command line.
+VARIANT_DIR = $(shell bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/variant-dir.sh '$(LAYOUT)' '$(NO_DEFAULT)' '$(FEATURES)')
+CARGO_DIR   = --target-dir $(VARIANT_DIR)
+ELF         = $(VARIANT_DIR)/$(TARGET)/release/$(BINARY)
 
 # Escape hatch for bench experimentation without editing this file, e.g.
 #   make probe-flash PROBE_EXTRA="--speed 1000"
@@ -158,7 +169,7 @@ all: build
 ## The output carries `$(BINARY)` in its name so the artifact cannot outlive the command that made
 ## it. See the note beside `BINARY` above.
 build:
-	cargo objcopy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
+	cargo objcopy --release $(CARGO_DIR) $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
 		-O binary $(IMAGE)
 
 ## Flash $(BINARY).bin to the Seed3 via DFU and start it
@@ -245,8 +256,8 @@ flash-all: build flash
 #     pins daisy-embassy to a moving `master` branch. A lock refresh therefore turns this red even
 #     when nothing linked differently. Deliberate conservatism; the remedy is the printed relink.
 #
-# The digest covers sources, not features -- the cfg set in the same `.asp.prov` (TASK-062) is what
-# separates the console and RTT-only builds, and `elf-check` asks it first.
+# The digest covers sources, not features or layout: those are separated by the per-variant target
+# directory the ELF path is derived from.
 
 # Inputs whose bytes are what $(ELF) is compiled from. Not `git status`: a dirty tree says nothing
 # about this particular artifact. Registry crates come in through Cargo.lock/Cargo.toml, both listed;
@@ -272,7 +283,7 @@ CARGO = cargo
 # including for the names they escape.
 SHA256 = $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo 'shasum -a 256')
 
-CARGO_BUILD = $(CARGO) build --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
+CARGO_BUILD = $(CARGO) build --release $(CARGO_DIR) $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
 
 # ELF_INPUTS_SH is the one implementation; the input set itself is firmware/elf-inputs.manifest, shared
 # with build.rs, which embeds the same digest in .asp.prov (TASK-071.01). The notes below describe the
@@ -353,15 +364,14 @@ probe-run: build-elf
 	@test "$(LAYOUT)" = internal || { echo "probe-run loads the ELF where it links; a LAYOUT=$(LAYOUT) image links into AXI SRAM, which a reset erases. Flash it with 'make flash-all LAYOUT=$(LAYOUT)'." >&2; exit 1; }
 	probe-rs run $(ELF) --chip $(CHIP) --chip-description-path $(CHIP_DESC) --non-interactive $(UNDER_RESET_FLAG) $(PROBE_EXTRA)
 
-# Reading the cfg provenance out of the ELF belongs to scripts/elf-provenance.sh, which is the only
-# thing in the repo that parses the `.asp.prov` note firmware/build.rs embeds. This is the first
-# time the Makefile reaches up into scripts/; scripts/check-doc-artifact-names.sh already reaches
-# down into this file to enumerate legal image names, so the coupling is mutual and both headers say
-# so. `bash` is spelled rather than relying on the executable bit plus shebang, because a checkout
+# Reading the embedded source digest out of the ELF belongs to scripts/elf-provenance.sh, which is the
+# only thing in the repo that parses the `.asp.prov` note firmware/build.rs embeds. The Makefile
+# reaching up into scripts/ is mutual coupling: scripts/check-doc-artifact-names.sh already reaches
+# down into this file to enumerate legal image names, and both headers say so. `bash` is spelled rather than relying on the executable bit plus shebang, because a checkout
 # on another filesystem can lose the bit and turn every probe target into "command not found".
 PROV = bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-provenance.sh
 
-# What the operator asked for, spelled the way they asked for it, so the line elf-check prints is
+# What the operator asked for, spelled the way they asked for it, so the remedy elf-check prints is
 # copy-pasteable rather than a template. BINARY is included even when it is the default `main` for
 # the same reason.
 REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)' LAYOUT=$(LAYOUT)$(if $(filter 1,$(NO_DEFAULT)), NO_DEFAULT=1,)
@@ -378,18 +388,14 @@ REQUESTED = BINARY=$(BINARY) FEATURES='$(FEATURES)' LAYOUT=$(LAYOUT)$(if $(filte
 # and it reaches into cargo's private layout.
 REMEDY = touch $(MAIN_SRC) && make build-elf $(REQUESTED)
 
-## Fail if $(ELF) was not built from the sources on disk, or if it is a different cfg set than asked
-## for.
+## Fail if $(ELF) was not built from the sources on disk.
 ##
 ## A check and never a build: whether the ELF matches the sources is knowable here, whether it
 ## matches the image on the board is not, and rebuilding would overwrite the only host copy of
 ## the symbols describing whatever is running right now.
 ##
-## The provenance clause exists because `release/main` is one name for two images -- the console and
-## RTT-only builds are hardlinks to different artifacts and whichever ran last owns the name -- so an
-## ELF can be current with your sources and still be the wrong binary. Provenance is checked first:
-## asking whether the content agrees about an image built from a different cfg set answers a question
-## nobody asked.
+## Which variant's ELF this reads is not checked: $(ELF) is derived from LAYOUT, NO_DEFAULT and
+## FEATURES, so the file at that path was built with them.
 ##
 ## DEFMT_LOG travels in the blob and `show` prints it, but the check below does not compare it: it
 ## selects which frames got compiled in rather than which cfg set this is, and refusing an ELF that
@@ -400,15 +406,10 @@ elf-check:
 		echo "no $(ELF) - run 'make build-elf' with the FEATURES and NO_DEFAULT you mean to flash" >&2; \
 		exit 1; \
 	}
-	@$(PROV) check $(ELF) "$(FEATURES)" "$(NO_DEFAULT)" "$(LAYOUT)" || { \
-		echo "that ELF was built for a different cfg set than you are asking to decode with, so its symbols and defmt metadata describe a binary that is not on the board." >&2; \
-		echo "Force a real relink: $(REMEDY)" >&2; \
-		exit 1; \
-	}
 	@have=$$( $(PROV) digest $(ELF) 2>/dev/null ) || have=; \
 	if [ -z "$$have" ]; then \
 		echo "$(ELF) has no source_digest field in its .asp.prov, so nothing records which sources it came from" >&2; \
-		echo "it was linked before the digest was embedded (TASK-071), or by something other than this tree's build.rs. An ELF of unknowable provenance decodes a live stream into output that looks like data - flash the current build instead, and 'make probe-run' does that and streams in one step." >&2; \
+		echo "it was linked before the digest was embedded, or by something other than this tree's build.rs. An ELF of unknowable provenance decodes a live stream into output that looks like data - flash the current build instead, and 'make probe-run' does that and streams in one step." >&2; \
 		echo "Force a real relink: $(REMEDY)" >&2; \
 		exit 1; \
 	fi; \
@@ -450,7 +451,7 @@ probe-rtt-list: elf-check
 
 ## Check compilation without producing artifacts
 check:
-	cargo check --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
+	cargo check --release $(CARGO_DIR) $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY)
 
 ## Lint the firmware for the embedded target, warnings fatal.
 ##
@@ -468,7 +469,7 @@ check:
 ## after a build, tens of seconds in a fresh target dir. Landed
 ## with TASK-060.03, re-pointed by TASK-061.02 when the hook job names died.
 clippy:
-	cargo clippy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- -D warnings
+	cargo clippy --release $(CARGO_DIR) $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- -D warnings
 
 clean:
 	cargo clean

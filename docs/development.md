@@ -49,14 +49,17 @@ thing it could gate is HEAD's tree, already paid for by the commit that made it.
 
 `commit`, `push` and `ci`, ascending. `ci` is the default when no tier is given, because forgetting
 the argument must never mean "ran less than everything". Order within a tier is whatever the script
-declares, cheapest-first, with two rules that outrank cost:
+declares, cheapest-first, with one rule that outranks cost: the cross-clippy gates follow both
+cross-builds so they reuse the artifacts.
 
-- The console cross-build comes immediately before the RTT-only one, with nothing building firmware
-  after them. `release/main` is one name for two images (hardlinks to different `deps/main-<hash>`
-  artifacts), and whichever built last owns the path every `make probe-*` decodes with.
-- The two cross-clippy gates follow both builds so they reuse the artifacts.
+Firmware build order otherwise does not matter. Every firmware cargo invocation passes a
+`--target-dir` named by `scripts/variant-dir.sh` from the link layout, log mode and feature set
+(`firmware/target/internal-default-seed3`, `firmware/target/internal-nodefault-log-defmt+seed3`, ...),
+so no two variants write the same `release/<bin>`. The cost is disk space and a cold first build per
+variant; the `make` ELF path is derived from the same knobs, so `make probe-*` cannot decode with
+another variant's ELF.
 
-Neither rule is expressible in hook config - lefthook sorts a stage by priority, then leading
+That rule is not expressible in hook config - lefthook sorts a stage by priority, then leading
 digits, then command name, never by declaration order - which is why the definition is a script
 and not YAML.
 
@@ -69,11 +72,7 @@ selftest grades the reading (the parser, against hand-emitted fixtures); the pus
 same subject grades the artifact (the six linked images). They share no state and neither makes the
 other redundant. Their cases and cost rules are stated in the scripts' own headers.
 
-- `=== firmware ELF cfg provenance ===` reads the `.asp.prov` note of the ELF at `release/main` via
-  `scripts/elf-provenance.sh`, so swapping the build pair or inserting a gate that compiles
-  firmware after it fails the run naming both cfg sets. It only reads, and asks cargo for nothing -
-  a rebuild there would re-point the path it audits.
-- `=== image load addresses ===` (push tier, since pre-commit builds no firmware) asserts that no
+- `=== image load addresses ===` (push tier, since pre-commit builds no firmware; it reads the RTT-only variant, the one that links all six binaries) asserts that no
   file-backed section loads outside the FLASH region of the linker script in use
   (`firmware/memory-internal.x` or `firmware/memory-bootloaded.x`), that `.sram1_bss` stays NOBITS
   while the script claims to place it `(NOLOAD)`, and that each plain `-O binary` image is exactly as

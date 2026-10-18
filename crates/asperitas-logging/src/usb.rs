@@ -2,7 +2,7 @@
 //!
 //! Implements logging over the Seed3's onboard USB-C using the CDC-ACM class. Records are
 //! committed to a framed ring by the crate-private `emit_at()` and carried to the host by
-//! [`UsbConsole::run`]'s drain task, which is the only thing that touches the endpoint under
+//! `UsbConsole::run`'s drain task, which is the only thing that touches the endpoint under
 //! normal operation.
 //!
 //! # Architecture
@@ -20,7 +20,7 @@
 //! the panic path) and its OUT half (`CdcRx`, used only by the inbound reader), so the two
 //! concurrent tasks each borrow a distinct object instead of aliasing one `&mut`.
 //!
-//! [`UsbConsole`] owns all three objects, and `run` consumes it. The one thing that outlives
+//! `UsbConsole` owns all three objects, and `run` consumes it. The one thing that outlives
 //! that ownership is the panic path: it needs the IN half and the device after the executor
 //! has stopped, so `init` also records raw pointers to them in two atomics. That is the only
 //! shared access; see `emit_blocking`.
@@ -126,7 +126,7 @@ struct PanicFrame(UnsafeCell<[u8; frame::MAX_FRAME]>);
 // Safety: only `emit_panic_record` touches it, from the panic handler, with the executor stopped.
 unsafe impl Sync for PanicFrame {}
 
-/// The USB device, both CDC halves and nothing else: what [`UsbConsole::run`] drives.
+/// The USB device, both CDC halves and nothing else: what `UsbConsole::run` drives.
 pub(crate) struct UsbConsole {
     dev: &'static mut UsbDev,
     tx: &'static mut CdcTx,

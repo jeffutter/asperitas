@@ -1,49 +1,38 @@
 #!/usr/bin/env bash
 #
-# Read the cfg provenance out of a firmware ELF, and refuse an ELF that is not the set asked for.
-#
-# Why this exists: firmware/target/thumbv7em-none-eabihf/release/main is ONE NAME FOR TWO IMAGES.
-# scripts/gates.sh builds the console cfg set and the RTT-only one back to back, and the top-level
-# name alternates between the two deps/main-<hash> artifacts it hardlinks, so neither the path nor
-# the mtime says which image is sitting there. The bench decodes defmt frames with whatever that
-# path currently holds, and the wrong choice mislabels every frame without an error.
+# Read the provenance an ELF carries, and print its embedded source digest.
 #
 # The answer travels inside the image. firmware/build.rs writes a non-allocated `.asp.prov` note
 # section holding `key=value` lines led by the format tag `asp-prov1`; build.rs defines the format,
 # and this script is the ONLY thing in the repo that reads it. Nothing here restates more of the
-# format than the tag and the three keys, and nothing else should learn to parse the blob.
+# format than the tag and the keys, and nothing else should learn to parse the blob.
 #
-# Three modes:
+# Which variant an ELF is (layout, log mode, feature set) is not decided here: every variant builds
+# into its own cargo target directory, named by scripts/variant-dir.sh, so the path says it. What the
+# blob adds is the source digest, which firmware/Makefile's `elf-check` compares against the sources
+# on disk so `probe-log` refuses an ELF that is not built from them.
+#
+# Modes:
 #
 #   show       <elf>                          print the normalized provenance on stdout, exit 0
 #   digest     <elf>                          print the embedded source digest (exit 2 if the ELF has none)
-#   check      <elf> <FEATURES> <NO_DEFAULT> [LAYOUT]  exit 0 on a match, quiet; LAYOUT (internal or
-#                                             bootloaded) is compared too when given
 #   --selftest                                assert this script's own logic, exit 0/1/2
 #
-# `check` takes what the operator asked for as the raw FEATURES / NO_DEFAULT strings the Makefile
-# holds, not as a pre-digested feature list: firmware/Makefile must not have to know that `default`
-# means log-usb, so the closure is derived from cargo metadata here instead.
+# DEFMT_LOG is reported by `show` and nothing compares it: it selects which frames got compiled in,
+# not which image this is.
 #
-# DEFMT_LOG is reported by `show` and deliberately NOT compared by `check`: it selects which frames
-# got compiled in, not which cfg set an image is, and refusing a correct ELF because the shell
-# happens to export DEFMT_LOG would block the very command used to read the board.
+# Exit codes: 0 success (for `--selftest`: every case passed), 1 for `--selftest` only: at least one
+# case failed, and every failure is reported in the one run rather than stopping at the first, 2 the
+# check itself could not run - no ELF at that path, no .asp.prov section, a blob this version cannot
+# parse, or, for `--selftest`, no toolchain to run its cases against. A check that cannot run never
+# reports success, and never stays silent.
 #
-# Exit codes: 0 match (for `show`: blob read; for `--selftest`: every case passed), 1 the ELF is a
-# different cfg set than asked, naming both (for `--selftest`: at least one case failed, and every
-# failure is reported in the one run rather than stopping at the first), 2 the check itself could not
-# run - no ELF at that path, no .asp.prov section, a blob this version cannot parse, or, for
-# `--selftest`, no toolchain to run its cases against. A check that cannot run never reports success,
-# and never stays silent.
+# `--selftest` builds nothing and touches nothing outside a `mktemp -d`: the fixtures it grades are
+# hand-emitted ELF images, generated at runtime beside the parser they test so a format change moves
+# both together. See the section further down for why the fixtures are fake and what that does and
+# does not cover.
 #
-# `--selftest` is here because the behaviours below were asserted in prose and in one ticket's notes
-# and nowhere else (TASK-067). It builds nothing and touches nothing outside a `mktemp -d`: the
-# fixtures it grades are hand-emitted ELF images, generated at runtime beside the parser they test so
-# a format change moves both together. See the section further down for why the fixtures are fake and
-# what that does and does not cover.
-#
-# Coupling is mutual with firmware/Makefile: its `elf-check` target calls this, and this derives the
-# expected set from the same FEATURES / NO_DEFAULT knobs that recipe expands. scripts/check-doc-
+# Coupling is mutual with firmware/Makefile: its `elf-check` target calls this. scripts/check-doc-
 # artifact-names.sh already reaches down into the Makefile to enumerate legal image names; this is
 # the Makefile reaching up into scripts/, so both headers say so.
 
@@ -53,7 +42,6 @@ PROG=elf-provenance
 TAG=asp-prov1
 
 ROOT=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-FIRMWARE_DIR=$ROOT/firmware
 
 die() {
   printf '%s\n' "$PROG: $*" >&2
@@ -64,7 +52,6 @@ usage() {
   cat <<'EOF'
 usage: scripts/elf-provenance.sh show <elf>
        scripts/elf-provenance.sh digest <elf>
-       scripts/elf-provenance.sh check <elf> <FEATURES> <NO_DEFAULT> [LAYOUT]
        scripts/elf-provenance.sh --selftest
 EOF
 }
@@ -156,102 +143,14 @@ parse_blob() {
   [ "$seen_features" = 1 ] || die "stamped ELF has no features= line: the blob is truncated or malformed"
 }
 
-# --------------------------------------------------------------------------- what was asked for
-
-# cargo metadata answers "what does turning defaults on actually enable", so no copy of this repo
-# hard-codes that `default` means log-usb. Expanded transitively over this package's own features
-# only: entries naming another package ("foo/bar") or a optional dependency ("dep:...") are not
-# features of this crate and never appear as CARGO_FEATURE_*.
-#
-# metadata never links, so unlike `cargo objcopy` / `cargo objdump` it cannot re-point release/main
-# mid-gate - the hazard that makes those forms forbidden in scripts/gates.sh.
-#
-# Result goes out in EXPECTED_CLOSURE rather than on stdout, and the answer is remembered: a function
-# that prints is called through a command substitution, which forks, and a fork cannot cache. Without
-# the memo `--selftest` pays a `cargo metadata` per defaults-on case instead of one total.
-EXPECTED_CLOSURE=""
-EXPECTED_CLOSURE_SET=0
-expected_from_metadata() {
-  local json pkg queue cur dep out=""
-  [ "$EXPECTED_CLOSURE_SET" = 1 ] && return 0
-  if ! json=$(cd "$FIRMWARE_DIR" && cargo metadata --format-version 1 --no-deps --offline 2>&1); then
-    die "cargo metadata failed in $FIRMWARE_DIR: $json"
-  fi
-  if ! pkg=$(printf '%s' "$json" | jq -r --arg m "$FIRMWARE_DIR/Cargo.toml" \
-    '[.packages[] | select(.manifest_path == $m)] | if length == 1 then (.[0].features | tojson) else error("expected exactly one package with manifest " + $m) end' 2>&1); then
-    die "cannot identify the firmware package in cargo metadata output: $pkg"
-  fi
-
-  queue=(default)
-  while [ ${#queue[@]} -gt 0 ]; do
-    cur=${queue[0]}
-    queue=("${queue[@]:1}")
-    case $cur in
-      */* | dep:*) continue ;;
-    esac
-    printf '%s\n' "$out" | grep -qx -- "$cur" && continue
-    out+="$cur"$'\n'
-    while IFS= read -r dep; do
-      [ -n "$dep" ] && queue+=("$dep")
-    done < <(printf '%s' "$pkg" | jq -r --arg k "$cur" '.[$k] // [] | .[]')
-  done
-
-  EXPECTED_CLOSURE=$(printf '%s' "$out" | normalize_features)
-  EXPECTED_CLOSURE_SET=1
-}
-
-# The blob an ELF carries, against what the operator asked for. Split out of the `check` arm so
-# `--selftest` can grade the comparison itself instead of paying an interpreter and an objcopy per cfg
-# set it wants to argue about; the arm hands over the path the blob came from, so a refusal still
-# names a file. Exit 0 on a match, 1 on a different cfg set naming both, 2 if it could not run.
-compare_request() {
-  local elf=$1 blob=$2 asked_features=$3 asked_no_default=$4 asked_layout=${5:-}
-  local want_default=1 want_features closure=""
-
-  parse_blob "$blob" || return 2
-
-  [ "$asked_no_default" = 1 ] && want_default=0
-  if [ "$want_default" = 1 ]; then
-    expected_from_metadata || return 2
-    closure=$EXPECTED_CLOSURE
-  fi
-  want_features=$(printf '%s %s' "$asked_features" "$closure" | normalize_features)
-
-  # The layout is a property of the image like the feature set: one ELF path serves both link
-  # layouts, and a bootloaded ELF flashed to internal flash (or the reverse) boots nothing. Compared
-  # only when the caller names one, so callers that predate the layout keep their meaning.
-  if [ -n "$asked_layout" ] && [ "$PROV_LAYOUT" != "$asked_layout" ]; then
-    printf '%s\n' "$elf was linked for layout=$PROV_LAYOUT; you asked for layout=$asked_layout (LAYOUT=\"$asked_layout\")" >&2
-    return 1
-  fi
-
-  if [ "$PROV_DEFAULT" = "$want_default" ] && [ "$PROV_FEATURES" = "$want_features" ]; then
-    return 0
-  fi
-
-  printf '%s\n' "$elf was linked with default=$PROV_DEFAULT features=${PROV_FEATURES:-none}; you asked for default=$want_default features=${want_features:-none} (FEATURES=\"$asked_features\", NO_DEFAULT=${asked_no_default:-unset})" >&2
-  return 1
-}
-
 # --------------------------------------------------------------------------- selftest
 #
 # Why these fixtures are fake, and what that does and does not cover.
 #
-# TASK-062.02's commit message (7251cd8) said the `/dev/null` guard and the exit-code paths were
-# "asserted in the script's own tests". No such tests existed (TASK-067). Every behaviour below was
-# measured by hand once, into a ticket's notes, which left nothing between the next edit to build.rs's
-# blob encoding or to normalize_features above and a silent mislabel at the bench.
-#
-# Two shapes were open. Grading the ELFs the cross-build pair leaves behind is free but covers one
-# image only: after that pair, firmware/target/thumbv7em-none-eabihf/release/main holds the RTT-only
-# ELF and nothing else (ordering rule 1 in scripts/gates.sh), so asserting console agreement from real
-# artifacts costs a third firmware build - which this gate may not pay for. Synthetic images cover
-# both agreements and cost no build, so they won.
-#
-# What fixtures cannot prove is that firmware/build.rs emits these bytes. Producer drift is covered
-# elsewhere: the push-tier `=== firmware ELF cfg provenance ===` reads the REAL stamped ELF and
-# refuses anything that is not the RTT-only cfg set. That gate grades the stamp and this one grades
-# the reader; neither alone is enough, which is why both stay.
+# Synthetic images cost no build, so the reader is graded in the commit tier. What fixtures cannot
+# prove is that firmware/build.rs emits these bytes; producer drift shows up in the staleness check
+# (scripts/check-elf-staleness.sh stubs this reader) and at the bench when `make elf-check` reads a real
+# ELF.
 #
 # Fixtures are generated at runtime rather than committed as blobs: nine stamps' worth of a ~340-byte
 # file carries no information this generator does not carry more legibly, they would need a
@@ -264,24 +163,17 @@ compare_request() {
 #
 # Cost rules, because this runs inside the pre-commit hook:
 #
-#   C1  The default closure is derived once per process. The suite pays for one memoized `cargo
-#       metadata` plus one more inside the single child
-#       that asks for it, and not five of them:
-#       deriving lazily inside the cases does not memoize, because each case body runs in a command
-#       substitution and a memo filled there dies with that subshell. The first draft learned this by
-#       paying that invocation once per case.
-#   C2  At most five child invocations of the whole script - one per distinct exit code plus the read
-#       guard case. Everything else calls these functions in-process, where a non-zero code is caught by
-#       running the call through a command substitution: a bare fork is far cheaper than
-#       an objcopy.
-#   C3  A case reads a fixture once and then works on the bytes it got, rather than re-opening a file
+#   C1  At most a few child invocations of the whole script - one per exit code a caller can observe
+#       plus the read guard case. Everything else calls these functions in-process, where a non-zero
+#       code is caught by running the call through a command substitution: a bare fork is far cheaper
+#       than an objcopy.
+#   C2  A case reads a fixture once and then works on the bytes it got, rather than re-opening a file
 #       to test arithmetic. Nothing opens the same image twice inside one process.
-#   C4  No `cargo build`, `cargo clippy`, `cargo objcopy`, `cargo objdump` or `make`, and no path under
-#       firmware/target/: those either rebuild or re-point the artifact the provenance gate audits.
+#   C3  No `cargo build`, `cargo clippy`, `cargo objcopy`, `cargo objdump` or `make`, and no path under
+#       firmware/target/: those either rebuild or touch an artifact other gates read.
 #
-# What the suite still pays is the tools themselves: seven rust-objcopy invocations and the two
-# memoized `cargo metadata` runs, every
-# one of them the subject of a case rather than scaffolding. Making the suite cheaper means making it
+# What the suite still pays is the tools themselves: a handful of rust-objcopy invocations, every one
+# of them the subject of a case rather than scaffolding. Making the suite cheaper means making it
 # read fewer real tools, which means testing less.
 
 # The image is assembled as HEX TEXT in one variable and converted to bytes exactly once, at the end.
@@ -425,28 +317,11 @@ fx_elf() { # <path> <blob> [nostamp]
 
 # The stamps themselves, spelled the way build.rs writes them: tag line, then `key=value` lines, then
 # a trailing newline (the real blob ends in the NUL of an assembler `.asciz`, which read_blob strips).
-# These four are the cfg sets that exist in firmware/Cargo.toml's [features] table today.
 BLOB_CONSOLE='asp-prov1
 default=1
 features=log_usb,seed3
 defmt_log=
 '
-BLOB_RTT='asp-prov1
-default=0
-features=log_defmt,seed3
-defmt_log=
-'
-BLOB_SEED3_ONLY='asp-prov1
-default=0
-features=seed3
-defmt_log=
-'
-BLOB_STIM='asp-prov1
-default=1
-features=log_usb,seed3,stim_ess
-defmt_log=
-'
-
 # Derived variants, built by editing the literal rather than writing it twice: each is one field away
 # from a stamp above, which is what makes them realistic mutations instead of invented ones.
 BLOB_FOREIGN_TAG=${BLOB_CONSOLE/asp-prov1/asp-prov2}          # a stamp from a build.rs this script predates
@@ -460,7 +335,6 @@ BLOB_WITH_DIGEST=${BLOB_CONSOLE/defmt_log=/source_digest=0123abcd
 defmt_log=}
 BLOB_FUTURE_KEY=${BLOB_CONSOLE/defmt_log=/boot_stage=seven
 }
-BLOB_CONSOLE_WARN=${BLOB_CONSOLE/defmt_log=/defmt_log=warn}
 BLOB_BOOTLOADED=${BLOB_CONSOLE/defmt_log=/defmt_log=
 layout=bootloaded}
 
@@ -471,6 +345,7 @@ fx_make_dir() {
   trap 'if [ -n "${FX_DIR:-}" ]; then rm -rf "$FX_DIR"; fi' EXIT
   FX_SELF=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")
   FX_CONSOLE=$FX_DIR/console.elf
+  FX_DIGESTED=$FX_DIR/digested.elf
   FX_NOSTAMP=$FX_DIR/nostamp.elf
   FX_JUNK=$FX_DIR/not-an-object.bin
 }
@@ -541,66 +416,19 @@ sha_of() {
 
 # --- the CLI contract, graded through real child processes -------------------------------
 
-case_agreement_exits_zero() {
-  spawn_script check "$FX_CONSOLE" "seed3" ""
-  [ "$SPAWN_RC" = 0 ] || fail "check on the console image exited $SPAWN_RC: $SPAWN_OUT"
-}
-
-case_refusal_exits_one_naming_both_sides() {
-  spawn_script check "$FX_CONSOLE" "seed3 log-defmt" 1
-  [ "$SPAWN_RC" = 1 ] || fail "refusing a wrong ELF exited $SPAWN_RC, wanted 1: $SPAWN_OUT"
-  expect_has "refusal names what it found" "default=1 features=log_usb,seed3" "$SPAWN_OUT"
-  expect_has "refusal names what was asked" "default=0 features=log_defmt,seed3" "$SPAWN_OUT"
+case_digest_exits_zero_on_a_stamped_image() {
+  spawn_script digest "$FX_DIGESTED"
+  [ "$SPAWN_RC" = 0 ] || fail "digest on a stamped image exited $SPAWN_RC: $SPAWN_OUT"
+  expect_eq "digest printed" 0123abcd "$SPAWN_OUT"
 }
 
 case_cannot_run_exits_two() {
-  spawn_script check "$FX_DIR/no-such-file.elf" "seed3" 1
+  spawn_script digest "$FX_DIR/no-such-file.elf"
   expect_refused "missing ELF" "$SPAWN_RC" "$SPAWN_OUT" "no ELF at $FX_DIR/no-such-file.elf"
   spawn_script nonsense-mode
   expect_refused "unknown mode" "$SPAWN_RC" "$SPAWN_OUT" "usage: scripts/elf-provenance.sh"
-  spawn_script check "$FX_CONSOLE" "seed3"
-  expect_refused "check given three of its four args" "$SPAWN_RC" "$SPAWN_OUT" "usage: scripts/elf-provenance.sh"
-}
-
-# --- agreements and refusals, in-process --------------------------------------------------
-
-case_console_agreement() {
-  compare_request console.elf "$BLOB_CONSOLE" "seed3" "" || fail "console stamp refused"
-}
-
-case_rtt_only_agreement() {
-  compare_request rtt.elf "$BLOB_RTT" "seed3 log-defmt" 1 || fail "RTT-only stamp refused"
-}
-
-case_no_default_seed3_derivation() {
-  parse_blob "$BLOB_SEED3_ONLY" || fail "seed3-only stamp unparseable"
-  expect_eq "derived default" 0 "$PROV_DEFAULT"
-  expect_eq "derived features" seed3 "$PROV_FEATURES"
-  compare_request seed3only.elf "$BLOB_SEED3_ONLY" "seed3" 1 || fail "--no-default-features seed3 refused its own image"
-}
-
-case_third_cfg_set_refused_naming_both_sides() {
-  local out rc
-  out=$(compare_request stim.elf "$BLOB_STIM" "seed3" "" 2>&1)
-  rc=$?
-  [ "$rc" = 1 ] || fail "a stim build asked for without stim exited $rc, wanted 1"
-  expect_has "found side" "log_usb,seed3,stim_ess" "$out"
-  expect_has "asked side" "you asked for default=1 features=log_usb,seed3 " "$out"
-}
-
-case_feature_outside_default_closure() {
-  # EXPECTED_CLOSURE is already filled - run_selftest derives it once before any case runs (rule C1).
-  # If that call ever goes missing, the first assertion below fails rather than quietly comparing
-  # against an empty string.
-  expect_has "manifest closure" log_usb "$EXPECTED_CLOSURE"
-  case $EXPECTED_CLOSURE in
-    *stim*) fail "the closure derived from firmware/Cargo.toml contains a stim feature: $EXPECTED_CLOSURE" ;;
-  esac
-  compare_request stim.elf "$BLOB_STIM" "seed3 stim-ess" "" || fail "stim_ess refused when it was asked for"
-}
-
-case_defmt_log_not_compared() {
-  compare_request console.elf "$BLOB_CONSOLE_WARN" "seed3" "" || fail "DEFMT_LOG=warn made a correct ELF refuse"
+  spawn_script digest "$FX_CONSOLE"
+  expect_refused "an image with no source digest" "$SPAWN_RC" "$SPAWN_OUT" "has no source_digest"
 }
 
 # --- the reader and the parser ------------------------------------------------------------
@@ -652,20 +480,6 @@ case_layout_field() {
   expect_eq "a stamp with no layout= line is an internal-flash image" internal "$PROV_LAYOUT"
   parse_blob "$BLOB_BOOTLOADED" || fail "bootloaded stamp unparseable"
   expect_eq "layout" bootloaded "$PROV_LAYOUT"
-  compare_request boot.elf "$BLOB_BOOTLOADED" "seed3" "" bootloaded || fail "bootloaded image refused when bootloaded was asked for"
-  compare_request console.elf "$BLOB_CONSOLE" "seed3" "" internal || fail "a pre-layout stamp refused when internal was asked for"
-}
-
-case_layout_mismatch_refused() {
-  local out rc
-  out=$(compare_request boot.elf "$BLOB_BOOTLOADED" "seed3" "" internal 2>&1)
-  rc=$?
-  [ "$rc" = 1 ] || fail "bootloaded image asked for as internal: exited $rc, wanted 1"
-  expect_has "names both layouts" "linked for layout=bootloaded; you asked for layout=internal" "$out"
-  out=$(compare_request console.elf "$BLOB_CONSOLE" "seed3" "" bootloaded 2>&1)
-  rc=$?
-  [ "$rc" = 1 ] || fail "internal image asked for as bootloaded: exited $rc, wanted 1"
-  expect_has "names both layouts" "linked for layout=internal; you asked for layout=bootloaded" "$out"
 }
 
 case_source_digest_optional() {
@@ -757,23 +571,10 @@ run_selftest() {
   fx_elf "$FX_NOSTAMP" "" nostamp || die "could not emit the unstamped fixture into $FX_DIR"
   printf 'not an ELF, and never was\n' >"$FX_JUNK"
 
-  # The default closure is derived once here rather than lazily inside the cases that need it, and the
-  # reason is the shape of run_case: every case body runs in a command substitution, so a memo filled
-  # by one case dies with that subshell and the next case pays for `cargo metadata` again. Derived once
-  # in this shell the value is inherited by all of them, which is what keeps rule C1 honest - the only
-  # other call is the one the console-agreement child makes for itself, being a separate process.
-  expected_from_metadata || die "cargo metadata could not derive the default feature closure"
+  fx_elf "$FX_DIGESTED" "$BLOB_WITH_DIGEST" || die "could not emit the digest fixture into $FX_DIR"
 
-  run_case agreement-exits-zero case_agreement_exits_zero
-  run_case refusal-exits-one-naming-both-sides case_refusal_exits_one_naming_both_sides
+  run_case digest-exits-zero-on-a-stamped-image case_digest_exits_zero_on_a_stamped_image
   run_case cannot-run-exits-two case_cannot_run_exits_two
-
-  run_case console-agreement case_console_agreement
-  run_case rtt-only-agreement case_rtt_only_agreement
-  run_case no-default-seed3-derivation case_no_default_seed3_derivation
-  run_case third-cfg-set-refused-naming-both-sides case_third_cfg_set_refused_naming_both_sides
-  run_case feature-outside-default-closure case_feature_outside_default_closure
-  run_case defmt-log-not-compared case_defmt_log_not_compared
 
   run_case blob-survives-the-container case_blob_survives_the_container
   run_case parse-all-three-fields case_parse_all_three_fields
@@ -782,7 +583,6 @@ run_selftest() {
   run_case unknown-key-ignored case_unknown_key_ignored
   run_case source-digest-optional case_source_digest_optional
   run_case layout-field case_layout_field
-  run_case layout-mismatch-refused case_layout_mismatch_refused
   run_case no-provenance-section-refused case_no_provenance_section_refused
   run_case not-an-object-file-refused case_not_an_object_file_refused
   run_case normalize-features-table case_normalize_features_table
@@ -824,13 +624,6 @@ case $mode in
       exit 2
     fi
     printf '%s\n' "$PROV_SOURCE_DIGEST"
-    ;;
-
-  check)
-    [ $# -eq 4 ] || [ $# -eq 5 ] || { usage >&2; exit 2; }
-    blob=$(read_blob "$2") || exit 2
-    compare_request "$2" "$blob" "$3" "$4" "${5:-}"
-    exit $?
     ;;
 
   *)

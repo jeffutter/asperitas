@@ -52,24 +52,22 @@
 # opposite on purpose -- one address range plus the MEMORY block -- because a hand-kept list of section
 # names is precisely the shape that killed the keep-list.
 #
-# Out of scope, one line each. This validates ONE cfg set per run: whichever cross-build ran last,
-# which `=== firmware ELF cfg provenance ===` in scripts/gates.sh names, and in every tier that runs
-# the cross-build pair that set is the RTT-only one. Whether an ELF is stale belongs to
-# `make -C firmware elf-check`. Which cfg set an ELF is belongs to scripts/elf-provenance.sh. Where its
+# Out of scope, one line each. This validates ONE build variant per run: the cargo target directory named by
+# --target-dir (scripts/gates.sh passes the RTT-only one, the only variant that links all six
+# binaries). Whether an ELF is stale belongs to
+# `make -C firmware elf-check`. What an ELF's stamp says belongs to scripts/elf-provenance.sh. Where its
 # sections load belongs here. And the ban on re-adding a keep-list belongs to
 # scripts/check-doc-artifact-names.sh pass 2, which greps the expansion of `make -n -C firmware build`
 # for `--only-section`.
 #
 # Reads artifacts and builds nothing. That is why it calls the bare cargo-binutils shims
 # (`rust-objdump`, `rust-objcopy`) and never `cargo objdump` / `cargo objcopy`: the cargo forms rebuild,
-# and a rebuild after the cross-build pair silently re-points
-# firmware/target/thumbv7em-none-eabihf/release/main at a different cfg set -- the hazard
-# scripts/gates.sh's ordering rule 1 exists to prevent. A missing ELF is therefore exit 2 and not a
+# and an audit that builds is grading its own side effect. A missing ELF is therefore exit 2 and not a
 # skip: a skip path is how elf-check's own remedy hint became useless (TASK-062).
 #
 # Three modes:
 #
-#   <no arguments>                              every firmware image, from the release directory
+#   <no arguments>                              every firmware image, from the target directory's release dir
 #   ELF...                                      just these ELFs
 #   --selftest                                  assert this script's own parsing, exit 0/1/2
 #
@@ -124,11 +122,12 @@ die() {
 
 usage() {
   cat <<'EOF'
-usage: scripts/check-image-load-addresses.sh [ELF...]
+usage: scripts/check-image-load-addresses.sh [--target-dir DIR] [ELF...]
        scripts/check-image-load-addresses.sh --selftest
 
   no arguments  check the image of every firmware/src/bin/*.rs, read from
-                firmware/target/thumbv7em-none-eabihf/release/
+                <DIR>/thumbv7em-none-eabihf/release/ (DIR defaults to firmware/target; relative
+                paths resolve against the repo root)
   ELF...        check just these: a path to an ELF, or a bare binary name resolved in that directory
   --selftest    assert this script's own parsing against hand-emitted fixtures, exit 0/1/2
 EOF
@@ -141,13 +140,16 @@ rtrim() { printf '%s' "${1%"${1##*[![:space:]]}"}"; }
 # --------------------------------------------------------------------------- inputs, all derived
 
 # The target triple comes from the same [build] line cargo reads, so the release directory this check
-# walks is the one the build writes. A hardcoded path would keep pointing at thumbv7em after a move.
+# walks is the one the build writes, inside the cargo target directory given by --target-dir (default
+# firmware/target). A hardcoded path would keep pointing at thumbv7em after a move.
 derive_release_dir() {
   local target
+  local base=$ROOT/firmware/target
+  [ -z "$TARGET_DIR" ] || base=$TARGET_DIR
   [ -f "$CARGO_CONFIG" ] || die "no ${CARGO_CONFIG#"$ROOT"/} - the target triple lives in it"
   target=$(sed -nE 's/^[[:space:]]*target[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "$CARGO_CONFIG" | head -1)
   [ -n "$target" ] || die "no [build] target = \"...\" line in ${CARGO_CONFIG#"$ROOT"/}"
-  RELEASE_DIR=$ROOT/firmware/target/$target/release
+  RELEASE_DIR=$base/$target/release
 }
 
 # A region's extent is parsed from the linker script instead of hardcoded, because moving the image
@@ -221,6 +223,7 @@ select_layout() {
 
 ELF_PATHS=()
 ELF_NAMES=()
+TARGET_DIR=""
 
 # One entry per firmware/src/bin/*.rs -- the same derivation scripts/check-doc-artifact-names.sh uses
 # for legal image names, so a seventh bin joins this gate without anyone editing a list and "six"
@@ -624,10 +627,8 @@ report() {
 # one prefixed line per case on stderr. The harness is copied rather than shared, for the reason that
 # script already gives -- two small harnesses cost less than one harness with two callers.
 #
-# Why the fixtures are hand-emitted rather than the ELFs the cross-build pair leaves behind: after that
-# pair, firmware/target/thumbv7em-none-eabihf/release/main holds the RTT-only image and nothing else
-# (ordering rule 1 in scripts/gates.sh), and the commit tier builds no firmware at all, so grading real
-# artifacts here would cost a third build this tier may not pay for. The same limit applies as there:
+# Why the fixtures are hand-emitted rather than the ELFs the cross-builds leave behind: the commit tier
+# builds no firmware at all, so grading real artifacts here would cost a build this tier may not pay for. The same limit applies as there:
 # fixtures cannot prove the linker emits anything like them, and the push-tier `=== image load addresses
 # ===` gate over six linked ELFs stays the backstop for that. What the fixtures DO pin is the column:
 # image OK below carries `.data` at VMA 0x24001000 and LMA 0x08000040, so the LMA column this script
@@ -1227,6 +1228,11 @@ main() {
         [ $# -eq 1 ] || { usage >&2; exit 2; }
         run_selftest
         exit $?
+        ;;
+      --target-dir)
+        [ $# -ge 2 ] || { usage >&2; exit 2; }
+        case $2 in /*) TARGET_DIR=$2 ;; *) TARGET_DIR=$ROOT/$2 ;; esac
+        shift 2
         ;;
       --) shift; break ;;
       -*) printf '%s: unknown argument: %s\n\n' "$PROG" "$1" >&2; usage >&2; exit 2 ;;

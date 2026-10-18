@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
 #
 # Build every firmware binary that must link for the stock Daisy bootloader (firmware/memory-bootloaded.x)
-# and grade each result before the next build overwrites it.
+# and grade each result.
 #
-# Why this is one script rather than a gate line per build: the bootloaded and internal layouts share
-# one ELF path, target/thumbv7em-none-eabihf/release/<bin>, so a build re-points the very file the next
-# check would read. Build-then-grade has to be a unit. Per image it asserts three things:
+# Each row builds into its own target directory (scripts/variant-dir.sh), so no build can replace the
+# ELF another row, or the internal-layout builds, produced. Per image it asserts:
 #
-#   - the ELF's .asp.prov stamp says layout=bootloaded for the feature set just built
-#     (scripts/elf-provenance.sh check), so a build that silently linked the internal layout cannot
-#     pass on the strength of the other layout's numbers;
 #   - scripts/check-image-load-addresses.sh passes for it, which for a bootloaded image means R1/R3 against
 #     the AXI SRAM region, R4 (the image ends below the excerpt slots), R5 (.sram1_bss in D2) and R6
-#     (at least 2 KB spare);
-#   - the line that script prints is kept, so the sizes are in the gate log.
+#     (at least 2 KB spare). The layout is not checked separately: the directory is derived from it;
+#   - the line that script prints is kept, so the sizes are in the gate log;
+#   - for the replay generator, its staging buffer sits in the AXI tail.
 #
-# The matrix is the set TASK-038.04.07.02 names: main, blinky, and rig with each of its three stimulus
-# feature sets. rig is the one this layout exists for: with the excerpt install path it no longer fits
-# the 128 KB internal flash (TASK-038.04.07). podtest, ledtest and panictest keep the internal layout.
-#
-# Ordering: this re-points release/<bin> for the bins it builds, so scripts/gates.sh runs it before the
-# console/RTT cross-build pair (its ordering rule 1), which then leaves every image in its default state.
+# The matrix is main, blinky, and rig with each of its stimulus feature sets. rig is the one this layout
+# exists for: with the excerpt install path it no longer fits the 128 KB internal flash. podtest,
+# ledtest and panictest keep the internal layout.
 #
 # Exit codes: 0 every image built and passed, 1 a build or check failed (all of them are attempted and
 # reported), 2 the script could not run.
@@ -40,7 +34,6 @@ MATRIX=(
   "rig:seed3,stim-excerpt"
 )
 
-ELF_DIR=firmware/target/thumbv7em-none-eabihf/release
 failed=0
 
 for entry in "${MATRIX[@]}"; do
@@ -48,26 +41,22 @@ for entry in "${MATRIX[@]}"; do
   features=${entry#*:}
   printf '%s\n' "--- $bin [$features] layout=bootloaded"
 
-  if ! (cd firmware && ASPERITAS_LAYOUT=bootloaded cargo build --release --features "$features" --bin "$bin"); then
+  target_dir=firmware/$(scripts/variant-dir.sh bootloaded 0 "$features")
+  elf_dir=$target_dir/thumbv7em-none-eabihf/release
+
+  if ! (cd firmware && ASPERITAS_LAYOUT=bootloaded cargo build --release --target-dir "${target_dir#firmware/}" --features "$features" --bin "$bin"); then
     printf '%s\n' "check-bootloaded-builds: cargo build failed for $bin [$features]" >&2
     failed=1
     continue
   fi
 
-  # elf-provenance.sh takes the feature list space-separated, defaults on (NO_DEFAULT empty).
-  if ! bash scripts/elf-provenance.sh check "$ELF_DIR/$bin" "${features//,/ }" "" bootloaded; then
-    printf '%s\n' "check-bootloaded-builds: $bin [$features] was not linked for the bootloaded layout" >&2
-    failed=1
-    continue
-  fi
+  bash scripts/check-image-load-addresses.sh --target-dir "$target_dir" "$bin" || failed=1
 
-  bash scripts/check-image-load-addresses.sh "$bin" || failed=1
-
-  # TASK-074: the replay staging must sit in the AXI tail above the image (memory-bootloaded.x AXI_TAIL,
+  # The replay staging must sit in the AXI tail above the image (memory-bootloaded.x AXI_TAIL,
   # 0x24078000..0x24080000), never in DTCM where plain .bss would put it.
   case ",$features," in
     *,stim-excerpt,*)
-      replay_addr=$(rust-nm "$ELF_DIR/$bin" 2>/dev/null | awk '$3 ~ /REPLAY/ && $2 ~ /^[dDbB]$/ {print $1; exit}')
+      replay_addr=$(rust-nm "$elf_dir/$bin" 2>/dev/null | awk '$3 ~ /REPLAY/ && $2 ~ /^[dDbB]$/ {print $1; exit}')
       if [ -z "$replay_addr" ]; then
         printf '%s\n' "check-bootloaded-builds: no REPLAY symbol in $bin [$features] (rust-nm missing or symbol stripped)" >&2
         failed=1

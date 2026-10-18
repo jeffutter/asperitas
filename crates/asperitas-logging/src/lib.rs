@@ -523,7 +523,7 @@ pub(crate) fn emit_status(snap: &console::ConsoleCounters) {
 
 /// Commit one pre-built audio-dump body as a framed record, or refuse it whole.
 ///
-/// The only route by which dump traffic reaches [`LOG_PIPE`], and the only caller of
+/// The only route by which dump traffic reaches `LOG_PIPE`, and the only caller of
 /// `Policy::Dump`; the lock rules and headroom ordering are explained on `commit`. Synchronous and
 /// non-blocking: it either commits or returns `false` having written nothing, no `seq` and no
 /// drop count, so a caller on a timer can retry it without risking a deadlock in whatever context
