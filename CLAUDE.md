@@ -3,6 +3,40 @@
 A musically-interactive audio effect for acoustic and clean electric instruments, built
 in Rust for the Electro-Smith Daisy Seed3 in a Daisy Pod.
 
+## Where things live
+
+Crates (root workspace, `crates/`):
+
+- `asperitas-dsp` - hardware-independent DSP.
+- `asperitas-cli` - offline WAV `process`/`generate` and goldens.
+- `asperitas-wire` - `no_std` wire protocol shared by firmware and host.
+- `asperitas-replay` - replay staging core shared by firmware and host.
+- `asperitas-logging` - device logging runtime, USB console, panic handling, LEDs.
+- `asperitas-pod` - Pod control drivers.
+- `asperitas-measure` - host loopback analysis.
+- `asperitas-rig` - host capture engine (see the rig doc below).
+- `asperitas-host` - host tooling for the wire protocol.
+
+`firmware/` is a separate workspace (`src/bin`: main, blinky, ledtest, panictest, podtest, rig).
+
+Other docs: `backlog/docs/doc-001 - Asperitas-Project-Plan.md` (the plan),
+[idea.md](idea.md) (original research handoff), [audio/README.md](audio/README.md) (corpus, goldens,
+captures layout), [docs/development.md](docs/development.md) (gates, nix, lefthook, CI),
+[docs/reference/seed3-schematic-search-log.md](docs/reference/seed3-schematic-search-log.md),
+[docs/investigations/](docs/investigations/) (bench evidence behind the reference docs),
+[docs/upstream/](docs/upstream/) (upstream bug reports and write-ups).
+
+## How to check your work
+
+- `bash scripts/gates.sh commit` or `push` runs the gate tier; no argument runs the CI set,
+  `--list` prints every gate.
+- Host crates: `cargo test`, `cargo clippy`, `cargo fmt` at the repo root.
+- Firmware has no host test harness: `cd firmware && make check|clippy|build BINARY=... FEATURES=...`.
+  Correctness rests on the cross-build, lints and the rig.
+- Captures: `captures/` holds rig session evidence committed with hardware verification tickets;
+  `audio/captures/` holds loopback captures. Format and flags are in
+  [docs/reference/asperitas-rig.md](docs/reference/asperitas-rig.md).
+
 ## Hardware & ecosystem reference — READ BEFORE TOUCHING FIRMWARE
 
 These notes record hardware and ecosystem facts that are non-obvious, easy to get wrong,

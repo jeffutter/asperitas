@@ -1,14 +1,15 @@
 ---
 id: TASK-117
 title: 'Docs: make CLAUDE.md a working index (crate map, how to check your work)'
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
-updated_date: '2026-10-16 18:14'
+updated_date: '2026-10-18 21:28'
 labels:
   - review-2026-10
   - docs
+  - planned
 dependencies:
   - TASK-114
 priority: medium
@@ -28,5 +29,23 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 CLAUDE.md links every doc and gives the crate map and the commands to check work
+- [x] #1 CLAUDE.md links every doc and gives the crate map and the commands to check work
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by dcf3ff3. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added 'Where things live' (crate map, other docs) and 'How to check your work' (gates, cargo, firmware make, captures) sections to CLAUDE.md above the hardware section. No stale TASK-037 caveat remained.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+CLAUDE.md now links every doc, has the crate map and the check commands.
+<!-- SECTION:FINAL_SUMMARY:END -->
