@@ -1192,12 +1192,20 @@ pub(crate) fn parse_decimal(digits: &[u8]) -> Option<u32> {
 // Tests — host-only, default features, no hardware types
 // ---------------------------------------------------------------------------
 
+// Shared with the integration suites, which include the same file.
+#[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod test_common;
+
 #[cfg(test)]
 mod tests {
     extern crate std;
 
     use super::*;
     use std::{vec, vec::Vec};
+
+    use super::test_common::{decode_in_chunks, decode_whole, park_cursors_at, seeded_rng, Seen};
+    use proptest::prelude::Rng as _;
 
     /// Encode into a fresh buffer, zeroed so anything past `len` is visibly unused.
     fn encoded(level: Level, seq: u32, now_ms: u32, body: &[u8]) -> ([u8; MAX_FRAME], Encoded) {
@@ -1416,37 +1424,6 @@ mod tests {
     }
 
     // ── Decoder: the invariants worth reading first ──────────────────
-
-    /// A delivered record in a form tests can compare without borrowing the decoder.
-    type Seen = (u8, u32, u32, Vec<u8>);
-
-    /// Feed `bytes` in chunks of `sizes`, returning every record the decoder yields.
-    ///
-    /// Chunking is expressed as a count of chunk sizes rather than as bytes so a test
-    /// can say “ten pushes” without caring where the boundaries fall.
-    fn decode_in_chunks(bytes: &[u8], sizes: &[usize]) -> Vec<Seen> {
-        let mut decoder = Decoder::new();
-        let mut out = Vec::new();
-        let mut pos = 0usize;
-        while pos < bytes.len() {
-            let take = sizes[pos % sizes.len()].max(1);
-            let end = (pos + take).min(bytes.len());
-            let mut off = pos;
-            while off < end {
-                off += decoder.push(&bytes[off..end]);
-                while let Some(r) = decoder.next_record() {
-                    out.push((r.level, r.seq, r.t_ms, r.body.to_vec()));
-                }
-            }
-            pos = end;
-        }
-        decoder.finish();
-        out
-    }
-
-    fn decode_whole(bytes: &[u8]) -> Vec<Seen> {
-        decode_in_chunks(bytes, &[usize::MAX / 2])
-    }
 
     /// Push a whole stream and return the records plus the final counters.
     fn decode_stats(bytes: &[u8]) -> (Vec<Seen>, Stats) {
@@ -1752,23 +1729,6 @@ mod tests {
         )
     }
 
-    /// Advance both cursors `at` bytes into the backing array, leaving the ring empty
-    /// by occupancy — the state in which a wrap short-write happens.
-    fn park_cursors_at(
-        pipe: &embassy_sync::pipe::Pipe<embassy_sync::blocking_mutex::raw::NoopRawMutex, 512>,
-        at: usize,
-    ) {
-        let filler = vec![b'f'; at];
-        assert_eq!(pipe.try_write(&filler).ok(), Some(at));
-        let mut drained = vec![0u8; at];
-        assert_eq!(pipe.try_read(&mut drained).ok(), Some(at));
-        assert_eq!(
-            pipe.free_capacity(),
-            512,
-            "ring must report itself empty before the wrap test"
-        );
-    }
-
     #[test]
     fn a_single_try_write_short_writes_at_the_ring_wrap_even_when_empty() {
         // This pins the embassy-sync behaviour that makes the loop in `write_whole`
@@ -1830,7 +1790,7 @@ mod tests {
         const ROUNDS: usize = 20_000;
 
         let pipe = pipe512();
-        let mut rng = XorShift::new(0x1234_5678);
+        let mut rng = seeded_rng(0x1234_5678);
 
         let mut expected: Vec<u8> = Vec::new();
         let mut got: Vec<u8> = Vec::new();
@@ -1839,7 +1799,7 @@ mod tests {
         let mut drops = 0usize;
 
         for round in 0..ROUNDS {
-            let n = 20 + rng.next() % 210;
+            let n = rng.random_range(20..230usize);
             let frame: Vec<u8> = (0..n).map(|i| b'A' + (i % 26) as u8).collect();
             let free_before = pipe.free_capacity();
 
@@ -1856,7 +1816,7 @@ mod tests {
             }
 
             // Consumer: drain a random amount, like the USB task does.
-            let want = 1 + rng.next() % CAP;
+            let want = rng.random_range(1..=CAP);
             if let Ok(n) = pipe.try_read(&mut buf[..want]) {
                 got.extend_from_slice(&buf[..n]);
             }
@@ -1916,20 +1876,5 @@ mod tests {
         decoder.finish();
         assert!(decoder.accounted(wire.len() as u64));
         assert!(!decoder.accounted(wire.len() as u64 + 1));
-    }
-
-    /// Deterministic RNG so the randomized rounds replay identically on every run.
-    struct XorShift(u32);
-
-    impl XorShift {
-        fn new(seed: u32) -> Self {
-            Self(seed)
-        }
-        fn next(&mut self) -> usize {
-            // Numerical Recipes LCG step, matching the planning probe so the recorded
-            // commits/drops split stays comparable.
-            self.0 = self.0.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-            (self.0 >> 16) as usize
-        }
     }
 }

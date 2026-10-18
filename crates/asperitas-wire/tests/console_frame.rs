@@ -23,6 +23,8 @@
 
 use proptest::prelude::*;
 
+mod common;
+
 use asperitas_wire::frame::{
     crc16_ccitt, encode, sanitize_byte, Decoder, Stats, MAX_BODY, MAX_FRAME, PREFIX_LEN,
     TRAILER_LEN,
@@ -244,40 +246,6 @@ fn expect_row(stream: &[u8], expected: Row) -> Outcome {
         "counters changed when bytes arrived one at a time"
     );
     out
-}
-
-/// Deterministic xorshift64\*, so sampled corruption replays without a dependency.
-struct Rng(u64);
-
-impl Rng {
-    fn new(seed: u64) -> Self {
-        Self(seed | 1)
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        let mut x = self.0;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.0 = x;
-        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
-    }
-
-    /// Uniform enough for these sizes; the modulo bias needs a comment precisely because
-    /// it is *not* eliminated, and no conclusion here turns on it.
-    fn below(&mut self, n: usize) -> usize {
-        (self.next_u64() % u64::try_from(n).expect("usize fits in u64")) as usize
-    }
-
-    /// A non-zero byte, by rejection: a zero delta would be a weight-1 edit in disguise.
-    fn nonzero_delta(&mut self) -> u8 {
-        loop {
-            let byte = (self.next_u64() >> 32) as u8;
-            if byte != 0 {
-                return byte;
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -515,19 +483,19 @@ fn detects_multi_byte_corruption() {
         let intended: Vec<Seen> = decode_whole(shape).records;
         let body_end = shape.len() - TRAILER_LEN;
         let payload = body_end - 1;
-        let mut rng = Rng::new(0x9E37_79B9_7F4A_7C15 ^ (shape_index as u64));
+        let mut rng = common::seeded_rng(0x9E37_79B9_7F4A_7C15 ^ (shape_index as u64));
 
         // Sample until enough mutations actually land, rather than counting skipped draws
         // as trials: the rate below is a rate over frames that were really corrupted.
         let mut applied = 0usize;
         while applied < TRIALS {
-            let first = 1 + rng.below(payload);
-            let second = 1 + rng.below(payload);
+            let first = 1 + rng.random_range(0..payload);
+            let second = 1 + rng.random_range(0..payload);
             if first == second {
                 continue;
             }
             applied += 1;
-            let (d1, d2) = (rng.nonzero_delta(), rng.nonzero_delta());
+            let (d1, d2) = (rng.random_range(1..=u8::MAX), rng.random_range(1..=u8::MAX));
             let mut mutated = shape.clone();
             mutated[first] ^= d1;
             mutated[second] ^= d2;

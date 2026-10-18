@@ -395,30 +395,112 @@ impl StatusRecord {
 
 /// How many decimal digits a saturated `u32` renders as: `4294967295`.
 ///
-/// Every numeric field in the field tables below is a `u32` and therefore costs exactly this
-/// many bytes at its worst. Naming the number is what makes those tables auditable: a table
-/// that said `11` would pass the same asserts while quietly overstating the verb, and one that
-/// said `9` would understate it and let a real device overflow one record.
+/// Every `u32` field in a verb's field list costs exactly this many bytes at its worst. Naming
+/// the number keeps the widths auditable: `11` would pass the same asserts while quietly
+/// overstating the verb, and `9` would understate it and let a real device overflow one record.
 const U32_MAX_DIGITS: usize = 10;
 
-/// Worst-case length of a body: its literal prefix, plus `1 + name + 1 + width` per field.
+/// One field kind a numeric verb body can carry: how it renders and the most bytes that takes.
 ///
-/// This is the arithmetic the [`BodyWriter`]-based builders above cannot express in types - a
-/// format string says nothing about how long its result gets. Computing the sum here and
-/// asserting against [`crate::frame::MAX_BODY`] moves *"this verb fits one record"* from a
-/// nightly test run to the build itself, so a field added to a table fails compilation rather
-/// than shipping a body that silently truncates at 200 bytes. The runtime saturated tests
-/// beside each builder then prove the *builder* still renders what its table claims, by
-/// asserting the two lengths are equal.
-const fn saturated_len(prefix: &str, fields: &[(&str, usize)]) -> usize {
-    let mut total = prefix.len();
-    let mut i = 0;
-    while i < fields.len() {
-        let (name, width) = fields[i];
-        total += 1 + name.len() + 1 + width;
-        i += 1;
+/// The width is the single source for a verb's worst-case length, so a verb's field list is
+/// written once, in [`wire_verb`], and drives both the rendering and the size check.
+trait WireField {
+    type Value;
+    /// Bytes this field renders to at its worst.
+    const WIDTH: usize;
+    fn write(w: &mut BodyWriter<'_>, value: Self::Value);
+}
+
+/// A `u32` in plain decimal; ten digits at `u32::MAX`.
+struct Dec;
+impl WireField for Dec {
+    type Value = u32;
+    const WIDTH: usize = U32_MAX_DIGITS;
+    fn write(w: &mut BodyWriter<'_>, value: u32) {
+        let _ = core::write!(w, "{value}");
     }
-    total
+}
+
+/// A slot index, up to three decimal digits.
+struct Slot;
+impl WireField for Slot {
+    type Value = u8;
+    const WIDTH: usize = 3;
+    fn write(w: &mut BodyWriter<'_>, value: u8) {
+        let _ = core::write!(w, "{value}");
+    }
+}
+
+/// A `u16` as four lowercase hex digits.
+struct Hex4;
+impl WireField for Hex4 {
+    type Value = u16;
+    const WIDTH: usize = 4;
+    fn write(w: &mut BodyWriter<'_>, value: u16) {
+        w.hex(u32::from(value), 4);
+    }
+}
+
+/// A boolean as `0` or `1`.
+struct Flag;
+impl WireField for Flag {
+    type Value = bool;
+    const WIDTH: usize = 1;
+    fn write(w: &mut BodyWriter<'_>, value: bool) {
+        w.put(if value { b"1" } else { b"0" });
+    }
+}
+
+/// The captured channel, as its one-letter spelling.
+struct Lane;
+impl WireField for Lane {
+    type Value = MonoLane;
+    const WIDTH: usize = 1;
+    fn write(w: &mut BodyWriter<'_>, value: MonoLane) {
+        w.put(value.letter().as_bytes());
+    }
+}
+
+/// A refusal reason; `invalid` is the longest spelling.
+struct Why;
+impl WireField for Why {
+    type Value = PlayRefusal;
+    const WIDTH: usize = 7;
+    fn write(w: &mut BodyWriter<'_>, value: PlayRefusal) {
+        w.put(value.as_str().as_bytes());
+    }
+}
+
+/// Define a `name=value` verb body builder together with its worst-case length.
+///
+/// The field list is the only place a verb's fields are spelled: the same list renders the body
+/// and, through each kind's [`WireField::WIDTH`], computes the `const` worst-case length that the
+/// asserts below hold against [`crate::frame::MAX_BODY`]. A field added to the list therefore
+/// fails the build if the verb stops fitting one record, rather than shipping a body that
+/// silently truncates.
+macro_rules! wire_verb {
+    (
+        $(#[$meta:meta])*
+        pub fn $fn:ident($($arg:ident: $ty:ty),*) -> $worst:ident = $prefix:literal {
+            $($name:ident: $kind:ty = $value:expr,)*
+        }
+    ) => {
+        /// Worst-case body length of this verb: its literal prefix plus
+        /// `1 + name + 1 + width` for every field.
+        const $worst: usize = $prefix.len()
+            $(+ 1 + stringify!($name).len() + 1 + <$kind as WireField>::WIDTH)*;
+
+        $(#[$meta])*
+        pub fn $fn($($arg: $ty,)* out: &mut [u8; BODY_WINDOW]) -> usize {
+            let mut w = BodyWriter::new(out);
+            w.put($prefix.as_bytes());
+            $(
+                w.put(concat!(" ", stringify!($name), "=").as_bytes());
+                <$kind as WireField>::write(&mut w, $value);
+            )*
+            w.filled()
+        }
+    };
 }
 
 /// Which channel the rig captured, as `RIGCFG`'s `lane` field.
@@ -475,45 +557,25 @@ pub struct RigConfig {
     pub dcache: bool,
 }
 
-/// Field table behind [`rigcfg_body`]: `(name, worst-case width)` in wire order.
-const RIGCFG_FIELDS: [(&str, usize); 9] = [
-    ("lane", 1),
-    ("blocks", U32_MAX_DIGITS),
-    ("block_bytes", U32_MAX_DIGITS),
-    ("bytes_per_s", U32_MAX_DIGITS),
-    ("capsec_us", U32_MAX_DIGITS),
-    ("window_s", U32_MAX_DIGITS),
-    ("cpu_hz", U32_MAX_DIGITS),
-    ("icache", 1),
-    ("dcache", 1),
-];
-
-/// Worst-case `RIGCFG` body: 177 bytes, inside [`crate::frame::MAX_BODY`] with 23 to spare.
-const RIGCFG_WORST: usize = saturated_len("RIGCFG proto=1 capture=mono16", &RIGCFG_FIELDS);
-
-/// Render a `RIGCFG` record body into `out`, returning the bytes written.
-///
-/// Carries numbers only. The generator's free-text description lives in its own
-/// [`riggen_body`] record, because a body mixing one unbounded string with nine numbers has no
-/// checkable bound: `RIGCFG`'s numeric fields leave 23 bytes of slack, less than the default
-/// pulse-train description (97), so any string that could actually be sent would blow the
-/// record. Splitting them keeps both verbs provably one-record.
-pub fn rigcfg_body(cfg: &RigConfig, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = BodyWriter::new(out);
-    let _ = core::write!(
-        w,
-        "RIGCFG proto=1 capture=mono16 lane={} blocks={} block_bytes={} bytes_per_s={} capsec_us={} window_s={} cpu_hz={} icache={} dcache={}",
-        cfg.lane.letter(),
-        cfg.blocks,
-        cfg.block_bytes,
-        cfg.bytes_per_s,
-        cfg.capsec_us,
-        cfg.window_s,
-        cfg.cpu_hz,
-        u8::from(cfg.icache),
-        u8::from(cfg.dcache),
-    );
-    w.filled()
+wire_verb! {
+    /// Render a `RIGCFG` record body into `out`, returning the bytes written.
+    ///
+    /// Carries numbers only. The generator's free-text description lives in its own
+    /// [`riggen_body`] record, because a body mixing one unbounded string with nine numbers has no
+    /// checkable bound: `RIGCFG`'s numeric fields leave 23 bytes of slack, less than the default
+    /// pulse-train description (97), so any string that could actually be sent would blow the
+    /// record. Splitting them keeps both verbs provably one-record.
+    pub fn rigcfg_body(cfg: &RigConfig) -> RIGCFG_WORST = "RIGCFG proto=1 capture=mono16" {
+        lane: Lane = cfg.lane,
+        blocks: Dec = cfg.blocks,
+        block_bytes: Dec = cfg.block_bytes,
+        bytes_per_s: Dec = cfg.bytes_per_s,
+        capsec_us: Dec = cfg.capsec_us,
+        window_s: Dec = cfg.window_s,
+        cpu_hz: Dec = cfg.cpu_hz,
+        icache: Flag = cfg.icache,
+        dcache: Flag = cfg.dcache,
+    }
 }
 
 /// Most generator-description bytes [`riggen_body`] will carry: 160.
@@ -578,24 +640,6 @@ pub struct CaptureStatus {
     pub dropped_full: u32,
 }
 
-/// Field table behind [`capstat_body`].
-const CAPSTAT_FIELDS: [(&str, usize); 8] = [
-    ("delivered", U32_MAX_DIGITS),
-    ("expected", U32_MAX_DIGITS),
-    ("overrun", U32_MAX_DIGITS),
-    ("max_block_us", U32_MAX_DIGITS),
-    ("worst_gap_us", U32_MAX_DIGITS),
-    ("audio_exit", U32_MAX_DIGITS),
-    ("dumped", U32_MAX_DIGITS),
-    ("dropped_full", U32_MAX_DIGITS),
-];
-
-/// Worst-case `CAPSTAT` body: 187 bytes, 13 inside the cap.
-///
-/// The tightest of the four numeric verbs relative to when it repeats, which is why its rate
-/// gate exists (parent plan §8) and divides by [`CAPSTAT_MAX_BODY`].
-const CAPSTAT_WORST: usize = saturated_len("CAPSTAT proto=1", &CAPSTAT_FIELDS);
-
 /// The byte budget a `CAPSTAT` record may never exceed: [`crate::frame::MAX_BODY`].
 ///
 /// An alias rather than a second `200`, so the rate gate in `rig.rs` and the encoder cannot
@@ -609,22 +653,18 @@ pub const CAPSTAT_MAX_BODY: usize = crate::frame::MAX_BODY;
 // runtime assertion on it can only ever pass; `clippy::assertions_on_constants` says so too.
 const _: () = assert!(CAPSTAT_MAX_BODY <= crate::frame::MAX_BODY);
 
-/// Render a `CAPSTAT` record body into `out`, returning the bytes written.
-pub fn capstat_body(st: &CaptureStatus, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = BodyWriter::new(out);
-    let _ = core::write!(
-        w,
-        "CAPSTAT proto=1 delivered={} expected={} overrun={} max_block_us={} worst_gap_us={} audio_exit={} dumped={} dropped_full={}",
-        st.delivered,
-        st.expected,
-        st.overrun,
-        st.max_block_us,
-        st.worst_gap_us,
-        st.audio_exit,
-        st.dumped,
-        st.dropped_full,
-    );
-    w.filled()
+wire_verb! {
+    /// Render a `CAPSTAT` record body into `out`, returning the bytes written.
+    pub fn capstat_body(st: &CaptureStatus) -> CAPSTAT_WORST = "CAPSTAT proto=1" {
+        delivered: Dec = st.delivered,
+        expected: Dec = st.expected,
+        overrun: Dec = st.overrun,
+        max_block_us: Dec = st.max_block_us,
+        worst_gap_us: Dec = st.worst_gap_us,
+        audio_exit: Dec = st.audio_exit,
+        dumped: Dec = st.dumped,
+        dropped_full: Dec = st.dropped_full,
+    }
 }
 
 /// What the capture ring could hold at all, as one `CAPMAX` record.
@@ -646,31 +686,15 @@ pub struct RingCapacity {
     pub unused_headroom_bytes: u32,
 }
 
-/// Field table behind [`capmax_body`].
-const CAPMAX_FIELDS: [(&str, usize); 5] = [
-    ("total_bytes", U32_MAX_DIGITS),
-    ("ring_bytes", U32_MAX_DIGITS),
-    ("seconds_max", U32_MAX_DIGITS),
-    ("us_max", U32_MAX_DIGITS),
-    ("unused_headroom_bytes", U32_MAX_DIGITS),
-];
-
-/// Worst-case `CAPMAX` body: 133 bytes, 67 inside the cap.
-const CAPMAX_WORST: usize = saturated_len("CAPMAX proto=1", &CAPMAX_FIELDS);
-
-/// Render a `CAPMAX` record body into `out`, returning the bytes written.
-pub fn capmax_body(cap: &RingCapacity, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = BodyWriter::new(out);
-    let _ = core::write!(
-        w,
-        "CAPMAX proto=1 total_bytes={} ring_bytes={} seconds_max={} us_max={} unused_headroom_bytes={}",
-        cap.total_bytes,
-        cap.ring_bytes,
-        cap.seconds_max,
-        cap.us_max,
-        cap.unused_headroom_bytes,
-    );
-    w.filled()
+wire_verb! {
+    /// Render a `CAPMAX` record body into `out`, returning the bytes written.
+    pub fn capmax_body(cap: &RingCapacity) -> CAPMAX_WORST = "CAPMAX proto=1" {
+        total_bytes: Dec = cap.total_bytes,
+        ring_bytes: Dec = cap.ring_bytes,
+        seconds_max: Dec = cap.seconds_max,
+        us_max: Dec = cap.us_max,
+        unused_headroom_bytes: Dec = cap.unused_headroom_bytes,
+    }
 }
 
 /// Where a one-shot stimulus started inside the capture, as one `STIMSTART` record.
@@ -689,23 +713,12 @@ pub struct StimulusStart {
     pub offset: u32,
 }
 
-/// Field table behind [`stimstart_body`].
-const STIMSTART_FIELDS: [(&str, usize); 2] =
-    [("first_block", U32_MAX_DIGITS), ("offset", U32_MAX_DIGITS)];
-
-/// Worst-case `STIMSTART` body: 59 bytes.
-const STIMSTART_WORST: usize = saturated_len("STIMSTART proto=1", &STIMSTART_FIELDS);
-
-/// Render a `STIMSTART` record body into `out`, returning the bytes written.
-pub fn stimstart_body(st: &StimulusStart, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = BodyWriter::new(out);
-    let _ = core::write!(
-        w,
-        "STIMSTART proto=1 first_block={} offset={}",
-        st.first_block,
-        st.offset,
-    );
-    w.filled()
+wire_verb! {
+    /// Render a `STIMSTART` record body into `out`, returning the bytes written.
+    pub fn stimstart_body(st: &StimulusStart) -> STIMSTART_WORST = "STIMSTART proto=1" {
+        first_block: Dec = st.first_block,
+        offset: Dec = st.offset,
+    }
 }
 
 /// How one completed dump went, as one `DUMPEND` record.
@@ -736,39 +749,19 @@ pub struct DumpSummary {
     pub bytes_dropped: u32,
 }
 
-/// Field table behind [`dumpend_body`].
-const DUMPEND_FIELDS: [(&str, usize); 9] = [
-    ("blocks", U32_MAX_DIGITS),
-    ("chunks", U32_MAX_DIGITS),
-    ("bytes", U32_MAX_DIGITS),
-    ("elapsed_ms", U32_MAX_DIGITS),
-    ("refused", U32_MAX_DIGITS),
-    ("stall_ms", U32_MAX_DIGITS),
-    ("sent", U32_MAX_DIGITS),
-    ("dropped_full", U32_MAX_DIGITS),
-    ("bytes_dropped", U32_MAX_DIGITS),
-];
-
-/// Worst-case `DUMPEND` body: 194 bytes, 6 inside the cap - the tightest verb on the wire.
-const DUMPEND_WORST: usize = saturated_len("DUMPEND proto=1", &DUMPEND_FIELDS);
-
-/// Render a `DUMPEND` record body into `out`, returning the bytes written.
-pub fn dumpend_body(d: &DumpSummary, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = BodyWriter::new(out);
-    let _ = core::write!(
-        w,
-        "DUMPEND proto=1 blocks={} chunks={} bytes={} elapsed_ms={} refused={} stall_ms={} sent={} dropped_full={} bytes_dropped={}",
-        d.blocks,
-        d.chunks,
-        d.bytes,
-        d.elapsed_ms,
-        d.refused,
-        d.stall_ms,
-        d.sent,
-        d.dropped_full,
-        d.bytes_dropped,
-    );
-    w.filled()
+wire_verb! {
+    /// Render a `DUMPEND` record body into `out`, returning the bytes written.
+    pub fn dumpend_body(d: &DumpSummary) -> DUMPEND_WORST = "DUMPEND proto=1" {
+        blocks: Dec = d.blocks,
+        chunks: Dec = d.chunks,
+        bytes: Dec = d.bytes,
+        elapsed_ms: Dec = d.elapsed_ms,
+        refused: Dec = d.refused,
+        stall_ms: Dec = d.stall_ms,
+        sent: Dec = d.sent,
+        dropped_full: Dec = d.dropped_full,
+        bytes_dropped: Dec = d.bytes_dropped,
+    }
 }
 
 /// One completed replay pass, as one `EXCPLAY` record.
@@ -799,33 +792,16 @@ pub struct ExcerptPlay {
     pub clean: bool,
 }
 
-/// Field table behind [`exc_play_body`].
-const EXCPLAY_FIELDS: [(&str, usize); 6] = [
-    ("slot", 3),
-    ("bytes", U32_MAX_DIGITS),
-    ("crc16", 4),
-    ("want", 4),
-    ("underruns", U32_MAX_DIGITS),
-    ("clean", 1),
-];
-
-/// Worst-case `EXCPLAY` body.
-const EXCPLAY_WORST: usize = saturated_len("EXCPLAY proto=1", &EXCPLAY_FIELDS);
-
-/// Render an `EXCPLAY` record body into `out`, returning the bytes written.
-pub fn exc_play_body(play: &ExcerptPlay, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = BodyWriter::new(out);
-    let _ = core::write!(
-        w,
-        "EXCPLAY proto=1 slot={} bytes={} crc16={:04x} want={:04x} underruns={} clean={}",
-        play.slot,
-        play.bytes,
-        play.crc16,
-        play.want,
-        play.underruns,
-        u8::from(play.clean),
-    );
-    w.filled()
+wire_verb! {
+    /// Render an `EXCPLAY` record body into `out`, returning the bytes written.
+    pub fn exc_play_body(play: &ExcerptPlay) -> EXCPLAY_WORST = "EXCPLAY proto=1" {
+        slot: Slot = play.slot,
+        bytes: Dec = play.bytes,
+        crc16: Hex4 = play.crc16,
+        want: Hex4 = play.want,
+        underruns: Dec = play.underruns,
+        clean: Flag = play.clean,
+    }
 }
 
 /// Why a boot refused to play the slot it was built for.
@@ -848,19 +824,14 @@ impl PlayRefusal {
     }
 }
 
-/// Field table behind [`exc_play_refused_body`]; `why` is the longest spelling, `invalid`.
-const EXCPLAYFAIL_FIELDS: [(&str, usize); 2] = [("slot", 3), ("why", 7)];
-
-/// Worst-case `EXCPLAYFAIL` body.
-const EXCPLAYFAIL_WORST: usize = saturated_len("EXCPLAYFAIL proto=1", &EXCPLAYFAIL_FIELDS);
-
-/// Render an `EXCPLAYFAIL` record body into `out`, returning the bytes written.
-///
-/// The record a boot sends instead of playing silence when its slot holds no playable excerpt.
-pub fn exc_play_refused_body(slot: u8, why: PlayRefusal, out: &mut [u8; BODY_WINDOW]) -> usize {
-    let mut w = BodyWriter::new(out);
-    let _ = core::write!(w, "EXCPLAYFAIL proto=1 slot={} why={}", slot, why.as_str());
-    w.filled()
+wire_verb! {
+    /// Render an `EXCPLAYFAIL` record body into `out`, returning the bytes written.
+    ///
+    /// The record a boot sends instead of playing silence when its slot holds no playable excerpt.
+    pub fn exc_play_refused_body(slot: u8, why: PlayRefusal) -> EXCPLAYFAIL_WORST = "EXCPLAYFAIL proto=1" {
+        slot: Slot = slot,
+        why: Why = why,
+    }
 }
 
 // One record each, at their own worst case. These lines are the half a drifted format
@@ -1560,11 +1531,11 @@ mod tests {
         );
     }
 
-    /// Each builder's actual worst case must equal what its field table claims. The `const`
-    /// asserts above prove the *table* fits one record; these prove the format string still
-    /// renders that table, so a field added to one and not the other fails here.
+    /// Each builder's actual worst case must equal the width its field list claims. The `const`
+    /// asserts above prove the list fits one record; these prove the rendered bytes still agree
+    /// with the width each field kind declares.
     #[test]
-    fn saturated_renders_match_their_field_tables() {
+    fn saturated_renders_match_their_declared_widths() {
         let mut out = [0u8; BODY_WINDOW];
         assert_eq!(rigcfg_body(&saturated_rigcfg(), &mut out), RIGCFG_WORST);
         assert_eq!(

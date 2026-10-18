@@ -14,9 +14,14 @@ use asperitas_wire::frame::{
     encode, write_whole, WriteOutcome, MAX_BODY, MAX_FRAME, PREFIX_LEN, TRAILER_LEN,
 };
 use asperitas_wire::Level;
+use proptest::prelude::Rng;
 
 /// The device's ring, referenced rather than restated: `LOG_PIPE_SIZE` is ungated precisely so
 /// this suite sweeps the capacity the firmware builds, and cannot quietly disagree with it.
+#[path = "../../asperitas-wire/tests/common/mod.rs"]
+mod common;
+use common::park_cursors_at;
+
 const RING: usize = LOG_PIPE_SIZE;
 
 /// A ring in the shape the device uses, held locally rather than in a `static`.
@@ -42,20 +47,6 @@ fn commit_frame(pipe: &Ring, frame: &[u8]) -> bool {
         }),
         WriteOutcome::Committed
     )
-}
-
-/// Advance both cursors `at` bytes into the backing array, leaving the ring empty by occupancy —
-/// the state in which a wrap short-write happens.
-fn park_cursors_at(pipe: &Ring, at: usize) {
-    let filler = vec![b'f'; at];
-    assert_eq!(pipe.try_write(&filler).ok(), Some(at));
-    let mut drained = vec![0u8; at];
-    assert_eq!(pipe.try_read(&mut drained).ok(), Some(at));
-    assert_eq!(
-        pipe.free_capacity(),
-        RING,
-        "ring must report itself empty before occupancy is set"
-    );
 }
 
 /// Occupy `n` bytes, crossing the array end if it has to.
@@ -101,22 +92,6 @@ fn frame_of_body(body_len: usize) -> ([u8; MAX_FRAME], usize) {
         "a body of {body_len} <= MAX_BODY cannot come back truncated"
     );
     (out, enc.len)
-}
-
-/// Deterministic RNG so the randomized rounds replay identically on every run.
-///
-/// Step constants copied from `src/frame.rs`'s `XorShift` (a Numerical Recipes LCG) so results are
-/// comparable between the two suites.
-struct Lcg(u32);
-
-impl Lcg {
-    fn new(seed: u32) -> Self {
-        Self(seed)
-    }
-    fn next(&mut self) -> usize {
-        self.0 = self.0.wrapping_mul(1_103_515_245).wrapping_add(12_345);
-        (self.0 >> 16) as usize
-    }
 }
 
 /// Every starting occupancy, crossed with the body lengths where a boundary could hide.
@@ -269,7 +244,7 @@ fn log_records_survive_a_saturated_dump() {
     let dump_body_len = dump::FULL_AUDIO_BODY_LEN;
 
     let pipe = ring();
-    let mut rng = Lcg::new(0x1234_5678);
+    let mut rng = common::seeded_rng(0x1234_5678);
     let mut expected: Vec<u8> = Vec::new();
     let mut got: Vec<u8> = Vec::new();
     let mut buf = [0u8; DRAIN_BUF_SIZE];
@@ -280,7 +255,7 @@ fn log_records_survive_a_saturated_dump() {
         // Alternate which producer gets the earlier slot, so neither one is structurally favoured
         // by the loop's own order.
         let order = [true, false];
-        let turns = if rng.next().is_multiple_of(2) {
+        let turns = if rng.random::<bool>() {
             order
         } else {
             [false, true]
@@ -318,7 +293,7 @@ fn log_records_survive_a_saturated_dump() {
         }
 
         // Consumer: drain a random amount up to one packet, like the USB task does.
-        let want = 1 + rng.next() % DRAIN_BUF_SIZE;
+        let want = rng.random_range(1..=DRAIN_BUF_SIZE);
         if let Ok(n) = pipe.try_read(&mut buf[..want]) {
             got.extend_from_slice(&buf[..n]);
         }

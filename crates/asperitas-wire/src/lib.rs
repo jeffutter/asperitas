@@ -18,6 +18,10 @@
 
 #![no_std]
 
+// Lets the shared test helpers under `tests/common`, which name this crate, compile inside it too.
+#[cfg(test)]
+extern crate self as asperitas_wire;
+
 pub use log::Level;
 
 pub mod body;

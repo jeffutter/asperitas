@@ -3,13 +3,15 @@ id: TASK-096
 title: >-
   Logging: one body writer/reader, one saturating counter, one field list per
   verb
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-18 23:07'
 labels:
   - review-2026-10
   - logging
+  - planned
 dependencies: []
 priority: low
 type: chore
@@ -28,7 +30,25 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One body writer/reader and one saturating counter
-- [ ] #2 Wire bytes unchanged (golden tests pass)
-- [ ] #3 Test helpers and RNGs deduplicated
+- [x] #1 One body writer/reader and one saturating counter
+- [x] #2 Wire bytes unchanged (golden tests pass)
+- [x] #3 Test helpers and RNGs deduplicated
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by 34894e2 (with 521ed12). This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Landed in two commits. 521ed12: SaturatingCounter (asperitas-wire counter module) replaces the three copies in console, control and inbound; the console add() used checked_add and stalled below u32::MAX on overflow, now lands exactly on the ceiling. body module: BodyWriter (non-panicking, supersedes TruncWriter, adds put/hex/decimal/rest_mut/advance) and BodyReader (moved from dump, adds labelled_hex) replace control Writer/Reader and dump put/put_hex/put_decimal. 34894e2: wire_verb! macro makes each console verb's field list the only place its fields are spelled; it renders the body and derives the const worst-case length from per-kind widths, replacing the *_FIELDS tables. Shared tests/common/mod.rs (park_cursors_at, seeded proptest TestRng, decode_in_chunks) is included by #[path] into wire unit tests, wire integration tests and logging tests; the three hand-rolled RNGs are gone. Golden and wire-byte tests pass unchanged; cargo test/clippy workspace clean and commit-tier gates green. Left alone on purpose: the DescWriter copy in asperitas-dsp (leaf crate), and console_frame's Outcome-based decode helper (richer law-checking variant, not a duplicate).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+One SaturatingCounter, one BodyWriter/BodyReader, console verb field lists as single source (wire_verb! macro), shared test helpers and proptest RNG. Wire bytes unchanged; goldens pass.
+<!-- SECTION:FINAL_SUMMARY:END -->
