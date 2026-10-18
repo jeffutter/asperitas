@@ -1448,7 +1448,7 @@ mod fx_ctl {
     /// for a knob the patch does not have.
     #[cfg(feature = "log-usb")]
     pub fn override_set(knob: u8, value: u16) -> bool {
-        let v = f32::from(value) / f32::from(u16::MAX);
+        let v = asperitas_wire::control::wire_to_level(value);
         cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().set(usize::from(knob), v))
     }
 

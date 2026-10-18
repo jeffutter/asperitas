@@ -117,7 +117,7 @@ mod console {
                 RESET_STATUS.load(Ordering::Relaxed),
             ))),
             Command::OverrideSet { knob, value } => {
-                let v = f32::from(value) / f32::from(u16::MAX);
+                let v = asperitas_wire::control::wire_to_level(value);
                 let accepted = cortex_m::interrupt::free(|cs| {
                     OVERRIDE.borrow(cs).borrow_mut().set(usize::from(knob), v)
                 });

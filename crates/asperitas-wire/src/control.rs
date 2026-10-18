@@ -533,8 +533,41 @@ pub fn reset_reason_from_rsr(rsr: u32) -> ReasonText {
     ReasonText::reason(token).unwrap_or_else(|_| ReasonText::reason(b"unknown").unwrap())
 }
 
+/// Convert a level in `0.0..=1.0` to the wire value `0x0000..=0xFFFF` carried by `CTL SET`.
+/// `None` when the level is outside the range or NaN: out of range is rejected, never clamped,
+/// because a clamped sweep would silently test something else.
+pub fn level_to_wire(x: f64) -> Option<u16> {
+    if !(0.0..=1.0).contains(&x) {
+        return None;
+    }
+    // `as` truncates; adding 0.5 rounds half up, and the crate is no_std so `f64::round` is unavailable.
+    Some((x * f64::from(u16::MAX) + 0.5) as u16)
+}
+
+/// Convert a `CTL SET` wire value back to the level `0.0..=1.0` the firmware applies. The
+/// firmware and every host-side model of it share this one expression so they stay bit-identical.
+pub fn wire_to_level(v: u16) -> f32 {
+    f32::from(v) / f32::from(u16::MAX)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn level_wire_mapping() {
+        assert_eq!(level_to_wire(0.0), Some(0));
+        assert_eq!(level_to_wire(1.0), Some(u16::MAX));
+        for bad in [-0.001, 1.001, f64::NAN, f64::INFINITY] {
+            assert_eq!(level_to_wire(bad), None);
+        }
+        for v in 0..=u16::MAX {
+            assert_eq!(
+                wire_to_level(v).to_bits(),
+                (f32::from(v) / 65535.0).to_bits()
+            );
+            assert_eq!(level_to_wire(f64::from(wire_to_level(v))), Some(v));
+        }
+    }
+
     use super::*;
     use crate::excerpt;
     use crate::frame::{encode, Decoder, MAX_FRAME};

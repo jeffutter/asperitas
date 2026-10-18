@@ -226,7 +226,8 @@ fn resolve(path: &str, flags: Flags) -> Result<Mode, String> {
             );
         }
         let mut fx = FxSetting::from_code(side.fx_f);
-        let wire = (side.from * f64::from(u16::MAX)).round() as u16;
+        let wire = asperitas_wire::control::level_to_wire(side.from)
+            .ok_or_else(|| format!("sidecar level {} is outside 0..=1", side.from))?;
         fx = fx
             .with_knob(usize::from(side.knob), wire)
             .ok_or_else(|| format!("sidecar knob {} is not a knob of the patch", side.knob))?;

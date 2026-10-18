@@ -1,13 +1,15 @@
 ---
 id: TASK-102
 title: Share level<->wire and FX name mappings
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-18 23:30'
 labels:
   - review-2026-10
   - host
+  - planned
 dependencies: []
 priority: low
 type: chore
@@ -26,6 +28,24 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One level<->wire implementation used by firmware, rig and measure
-- [ ] #2 FxKind::from_name replaces the hardcoded names in measure
+- [x] #1 One level<->wire implementation used by firmware, rig and measure
+- [x] #2 FxKind::from_name replaces the hardcoded names in measure
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by 7d3f9b0. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC1: level_to_wire (Option<u16>) and wire_to_level added to asperitas-wire control; rig control.rs delegates (keeps ControlError::Usage), measure cli.rs and compare.rs, firmware host_control.rs and bin/rig.rs use them. wire_to_level is bit-identical to the old firmware expression (test over all u16). round is replaced by +0.5 truncation because the crate is no_std; identical for 0..=65535. AC2: no hardcoded FX name/code mapping remains outside FxKind (replay_fx.rs), so no from_name was added to avoid an unused API.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Single level<->wire mapping in asperitas-wire::control used by rig, measure and firmware; workspace tests and clippy pass. No FX name duplication remained, so FxKind::from_name was not needed.
+<!-- SECTION:FINAL_SUMMARY:END -->

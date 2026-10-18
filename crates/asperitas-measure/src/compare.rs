@@ -71,7 +71,7 @@ impl FxSetting {
         let mut k = Controls::default().knobs;
         for (slot, over) in k.iter_mut().zip(self.knobs) {
             if let Some(v) = over {
-                *slot = f32::from(v) / f32::from(u16::MAX);
+                *slot = asperitas_wire::control::wire_to_level(v);
             }
         }
         k

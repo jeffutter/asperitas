@@ -313,12 +313,8 @@ where
 /// Convert a level in `0..=1` to the wire value `0x0000..=0xFFFF`. Out of range is an
 /// error, never clamped: a clamped sweep would silently test something else.
 pub fn level_to_wire(x: f64) -> Result<u16, ControlError> {
-    if !(0.0..=1.0).contains(&x) {
-        return Err(ControlError::Usage(format!(
-            "knob level {x} is outside 0..=1"
-        )));
-    }
-    Ok((x * f64::from(u16::MAX)).round() as u16)
+    asperitas_wire::control::level_to_wire(x)
+        .ok_or_else(|| ControlError::Usage(format!("knob level {x} is outside 0..=1")))
 }
 
 /// `SET` schedule for a hold (`from == to`) or a sweep: `(offset from start, wire value)`.
