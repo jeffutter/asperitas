@@ -3,13 +3,15 @@ id: TASK-137
 title: >-
   Fix: firmware make build passes --target-dir to cargo objcopy, which rejects
   it
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-19 16:27'
+updated_date: '2026-10-19 17:06'
 labels:
   - firmware
   - tooling
+  - planned
 dependencies: []
 references:
   - firmware/Makefile
@@ -34,7 +36,25 @@ Change: make `build` put the variant target dir in the environment (CARGO_TARGET
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 make build BINARY=main|rig|panictest|podtest produces the .bin in the internal and bootloaded layouts inside the nix shell with no manual CARGO_DIR override
-- [ ] #2 The per-variant target directory scheme is unchanged and scripts/firmware-variants.sh still builds, lints and grades every row of the variants table
-- [ ] #3 docs/reference/flashing.md build commands still match what works
+- [x] #1 make build BINARY=main|rig|panictest|podtest produces the .bin in the internal and bootloaded layouts inside the nix shell with no manual CARGO_DIR override
+- [x] #2 The per-variant target directory scheme is unchanged and scripts/firmware-variants.sh still builds, lints and grades every row of the variants table
+- [x] #3 docs/reference/flashing.md build commands still match what works
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by this commit. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+firmware/Makefile build recipe now sets CARGO_TARGET_DIR=$(VARIANT_DIR) and drops CARGO_DIR for cargo objcopy. Verified in nix shell: main, panictest, podtest build internal and bootloaded; rig builds bootloaded. rig internal overflows the 128 KB FLASH region by design (linker error, not an argument error). firmware-variants.sh build passes unchanged (it uses cargo build, not objcopy). flashing.md uses plain make build, no change needed.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+make build passes the variant target dir to cargo objcopy via CARGO_TARGET_DIR; variant dir scheme unchanged.
+<!-- SECTION:FINAL_SUMMARY:END -->

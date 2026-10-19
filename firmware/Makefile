@@ -168,8 +168,10 @@ all: build
 ##
 ## The output carries `$(BINARY)` in its name so the artifact cannot outlive the command that made
 ## it. See the note beside `BINARY` above.
+## cargo-objcopy rejects `--target-dir`, so this recipe hands the variant directory to the cargo it
+## spawns through CARGO_TARGET_DIR instead of CARGO_DIR.
 build:
-	cargo objcopy --release $(CARGO_DIR) $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
+	CARGO_TARGET_DIR=$(VARIANT_DIR) cargo objcopy --release $(CARGO_DEFAULTS) --features "$(FEATURES)" --bin $(BINARY) -- \
 		-O binary $(IMAGE)
 
 ## Flash $(BINARY).bin to the Seed3 via DFU and start it
