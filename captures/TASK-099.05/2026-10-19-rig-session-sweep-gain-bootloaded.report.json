@@ -1,0 +1,103 @@
+{
+  "attach_prefix_bytes": 121,
+  "capture": "captures/TASK-099.05/2026-10-19-rig-session-sweep-gain-bootloaded.console.zst",
+  "failures": [],
+  "pass": true,
+  "response": {
+    "curve": [
+      {
+        "response_db": -83.04039142882374,
+        "value": 0.025
+      },
+      {
+        "response_db": -80.10394721126954,
+        "value": 0.075
+      },
+      {
+        "response_db": -76.57046791334734,
+        "value": 0.125
+      },
+      {
+        "response_db": -73.02498286567307,
+        "value": 0.175
+      },
+      {
+        "response_db": -69.42526707363676,
+        "value": 0.225
+      },
+      {
+        "response_db": -65.82982186406059,
+        "value": 0.275
+      },
+      {
+        "response_db": -62.22625074579965,
+        "value": 0.325
+      },
+      {
+        "response_db": -58.62091770374639,
+        "value": 0.375
+      },
+      {
+        "response_db": -55.01319732176263,
+        "value": 0.425
+      },
+      {
+        "response_db": -51.40803230537833,
+        "value": 0.475
+      },
+      {
+        "response_db": -47.803855143719424,
+        "value": 0.525
+      },
+      {
+        "response_db": -44.19427796232298,
+        "value": 0.575
+      },
+      {
+        "response_db": -40.59038243619319,
+        "value": 0.625
+      },
+      {
+        "response_db": -36.98029366292977,
+        "value": 0.675
+      },
+      {
+        "response_db": -33.37509791402235,
+        "value": 0.725
+      },
+      {
+        "response_db": -29.771723183557818,
+        "value": 0.775
+      },
+      {
+        "response_db": -26.16267565612571,
+        "value": 0.825
+      },
+      {
+        "response_db": -22.55689759987324,
+        "value": 0.875
+      },
+      {
+        "response_db": -18.951071022546266,
+        "value": 0.925
+      },
+      {
+        "response_db": -15.343341405992547,
+        "value": 0.975
+      }
+    ],
+    "direction": "rising",
+    "expected_direction": "rising",
+    "flat_regions": [],
+    "kind": "gain",
+    "max_reversal_db": 0.0,
+    "monotonic": true,
+    "span_db": 67.69705002283119
+  },
+  "sweep": {
+    "duration_s": 30.0,
+    "from": 0.0,
+    "start_s": 5.0,
+    "to": 1.0
+  }
+}
