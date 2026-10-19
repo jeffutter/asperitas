@@ -188,7 +188,7 @@ impl SessionPlan {
 pub struct SessionOpts {
     /// Whole-session limit, from attach to the end of the dump.
     pub max: Duration,
-    /// How long to wait for a `BOOT` record before refusing to send anything.
+    /// How long to wait for a fresh-boot proof (`BOOT`, or an early idle stream) before refusing to send anything.
     pub boot_wait: Duration,
     /// How long to wait for the `FX` acknowledgement.
     pub reply_timeout: Duration,
@@ -213,6 +213,10 @@ impl SessionOpts {
 pub struct Observed {
     /// `BOOT` records read. More than one after the session sent a command means a device reset.
     pub boots: usize,
+    /// Sequence number and device `t_ms` of the first record read.
+    pub first: Option<(u32, u32)>,
+    /// A `CAPSTAT` with `delivered=0` was read: the capture had not started.
+    pub idle_capstat: bool,
     /// `CTLR OK FX` was read.
     pub fx_acked: bool,
     /// `CTLR OK SET` replies.
@@ -235,9 +239,13 @@ pub struct Observed {
 
 impl Observed {
     fn observe(&mut self, r: &Record<'_>) {
+        self.first.get_or_insert((r.seq, r.t_ms));
         if is_boot(r.body) {
             self.boots += 1;
         } else if let Some(delivered) = capstat_delivered(r.body) {
+            if delivered == 0 {
+                self.idle_capstat = true;
+            }
             if delivered > 0 && !self.armed {
                 self.armed = true;
                 self.arm_t_ms = Some(r.t_ms);
@@ -259,6 +267,26 @@ impl Observed {
                 _ => {}
             }
         }
+    }
+}
+
+/// A board whose first record is this early (device `t_ms`) and this low (`seq`) was attached
+/// within moments of starting. The USB console only connects a few hundred ms into a bootloaded
+/// start, so the `BOOT` record is lost before the host can attach; this bound is how much of the
+/// start may be missing and still count as fresh.
+const FRESH_MAX_T_MS: u32 = 3000;
+const FRESH_MAX_SEQ: u32 = 32;
+
+impl Observed {
+    /// The board is safe to send `FX` to: either its `BOOT` record was read, or the stream began
+    /// early in the device's life and shows the capture idle (`CAPSTAT delivered=0`) and never armed.
+    fn fresh_boot(&self) -> bool {
+        if self.boots > 0 {
+            return true;
+        }
+        matches!(self.first, Some((seq, t_ms)) if seq <= FRESH_MAX_SEQ && t_ms <= FRESH_MAX_T_MS)
+            && self.idle_capstat
+            && !self.armed
     }
 }
 
@@ -338,6 +366,8 @@ struct Runner<P> {
     sent_anything: bool,
     released: bool,
     sets_sent: usize,
+    /// `BOOT` records read when the session decided the board was fresh; one more means a reset.
+    boots_at_start: usize,
 }
 
 impl<P: Read + Write> Runner<P> {
@@ -388,7 +418,7 @@ impl<P: Read + Write> Runner<P> {
                 "decoder made no progress",
             )));
         }
-        if self.sent_anything && self.observed.boots > 1 {
+        if self.sent_anything && self.observed.boots > self.boots_at_start {
             return Err(ControlError::DeviceReset);
         }
         Ok(())
@@ -404,16 +434,17 @@ impl<P: Read + Write> Runner<P> {
         let limit = start + opts.max;
 
         let boot_deadline = start + opts.boot_wait.min(opts.max);
-        while self.observed.boots == 0 {
+        while !self.observed.fresh_boot() {
             if Instant::now() >= boot_deadline {
                 return Err(ControlError::NoDevice(
-                    "no BOOT record after attaching: this is not a fresh boot, refusing to send FX"
+                    "no BOOT record and no early idle stream after attaching: this is not a fresh boot, refusing to send FX"
                         .into(),
                 ));
             }
             self.pump()?;
         }
 
+        self.boots_at_start = self.observed.boots;
         self.send(Command::ReplayFx {
             fx: plan.fx_f,
             value: plan.fx_v,
@@ -501,6 +532,7 @@ pub fn run_session<P: Read + Write>(port: P, plan: &SessionPlan, opts: &SessionO
         sent_anything: false,
         released: false,
         sets_sent: 0,
+        boots_at_start: 0,
     };
     let sets_planned = timeline.pre.len() + timeline.timed.len();
     let mut error = r.drive(plan, &timeline, opts).err();
@@ -924,6 +956,62 @@ mod tests {
         let run = run_session(rig, &sweep_plan(), &opts(3000));
         assert!(matches!(run.error, Some(ControlError::NoDevice(_))));
         assert!(cmds(&written).is_empty());
+    }
+
+    /// A bootloaded start: `BOOT` and the first records were sent before USB connected, so the
+    /// stream starts at `first_seq` with device time `t_ms`, optionally already armed.
+    fn lost_prefix_rig(
+        first_seq: u32,
+        t_ms: u32,
+        delivered: u32,
+    ) -> (Rig, Arc<Mutex<Vec<Command>>>) {
+        let (mut rig, written) = Rig::new();
+        rig.queue.clear();
+        rig.seq = first_seq;
+        let body = format!(
+            "CAPSTAT proto=1 delivered={delivered} expected=1 overrun=0 max_block_us=1 worst_gap_us=1 audio_exit=0 dumped=0 dropped_full=0"
+        );
+        let f = frame_body(first_seq, t_ms, body.as_bytes());
+        rig.queue.push_back(f);
+        (rig, written)
+    }
+
+    #[test]
+    fn lost_prefix_early_idle_stream_is_a_fresh_boot() {
+        let (rig, written) = lost_prefix_rig(5, 203, 0);
+        let run = run_session(rig, &sweep_plan(), &opts(3000));
+        assert!(run.observed.fx_acked, "{:?}", run.error);
+        assert!(cmds(&written)
+            .iter()
+            .any(|c| matches!(c, Command::ReplayFx { .. })));
+    }
+
+    #[test]
+    fn lost_prefix_already_armed_board_is_refused() {
+        let (rig, written) = lost_prefix_rig(5, 203, 7);
+        let run = run_session(rig, &sweep_plan(), &opts(3000));
+        assert!(matches!(run.error, Some(ControlError::NoDevice(_))));
+        assert!(cmds(&written).is_empty());
+    }
+
+    #[test]
+    fn lost_prefix_late_attach_is_refused() {
+        let (rig, written) = lost_prefix_rig(900, 600_000, 0);
+        let run = run_session(rig, &sweep_plan(), &opts(3000));
+        assert!(matches!(run.error, Some(ControlError::NoDevice(_))));
+        assert!(cmds(&written).is_empty());
+    }
+
+    #[test]
+    fn boot_after_lost_prefix_start_is_a_device_reset() {
+        let (mut rig, _w) = lost_prefix_rig(5, 203, 0);
+        rig.reset_on_write = Some(1);
+        let run = run_session(rig, &sweep_plan(), &opts(3000));
+        assert!(
+            matches!(run.error, Some(ControlError::DeviceReset)),
+            "{:?}",
+            run.error
+        );
     }
 
     #[test]

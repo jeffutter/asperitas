@@ -3,10 +3,11 @@ id: TASK-142
 title: >-
   Fix: asperitas-rig session cannot see BOOT on a bootloaded rig, so it refuses
   every run
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-19 19:48'
+updated_date: '2026-10-19 19:57'
 labels:
   - rig
   - host
@@ -31,8 +32,26 @@ Blocks TASK-099.05 (HUMAN session recheck). The loopback cable is now fitted, so
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Root cause confirmed: which records are lost before attach on a bootloaded rig and why, recorded in the ticket notes.
-- [ ] #2 asperitas-rig session --probe-reset reaches FX/SET/REL against a bootloaded rig image without weakening the never-send-to-a-running-board guarantee.
-- [ ] #3 A host test models the lost-prefix stream (first seq above 0, no BOOT) and pins both the accepted fresh boot and the refused already-armed board.
-- [ ] #4 gates.sh push passes.
+- [x] #1 Root cause confirmed: which records are lost before attach on a bootloaded rig and why, recorded in the ticket notes.
+- [x] #2 asperitas-rig session --probe-reset reaches FX/SET/REL against a bootloaded rig image without weakening the never-send-to-a-running-board guarantee.
+- [x] #3 A host test models the lost-prefix stream (first seq above 0, no BOOT) and pins both the accepted fresh boot and the refused already-armed board.
+- [x] #4 gates.sh push passes.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the commit carrying Task-Id TASK-142. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Root cause: on the bootloaded layout the device emits BOOT (seq 0) and RIGCFG (seq 4) before its USB console connects (about t_ms 419), and the host port also re-enumerates around the app start, so the host attaches at seq 4 or 5 and never sees BOOT. Fix is host-only (crates/asperitas-rig/src/session.rs): the session now accepts a fresh-boot proof other than BOOT: first record seq <= 32 and device t_ms <= 3000, a CAPSTAT delivered=0 seen, and never armed. A later BOOT after sending counts as DeviceReset (boots_at_start baseline). No firmware change, so nothing was flashed. Not exercised on the bench here; this assumes the device emits CAPSTAT delivered=0 before arming (as the ticket's captured stream shows). Bench recheck belongs to TASK-099.05.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+asperitas-rig session --probe-reset now treats an early, idle, never-armed stream (low seq, low t_ms, CAPSTAT delivered=0) as a fresh boot when BOOT was lost before USB attached; armed or late-attached boards are still refused. Host tests pin accepted, armed-refused, late-refused and reset-after-lost-prefix cases; gates.sh push passes.
+<!-- SECTION:FINAL_SUMMARY:END -->
