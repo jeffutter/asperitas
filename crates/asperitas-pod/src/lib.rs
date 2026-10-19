@@ -35,14 +35,3 @@ pub mod ticker_guard;
 
 // Host override of knob values, upstream of DSP smoothing. Pure logic, host-testable.
 pub mod knob_override;
-
-// ---------------------------------------------------------------------------
-// Default init (no features)
-// ---------------------------------------------------------------------------
-
-/// Initialize the Pod subsystem with no-op defaults.
-///
-/// When no hardware feature is enabled, this does nothing. Call during boot
-/// to keep the call-site uniform across feature configurations.
-#[cfg(not(feature = "pod-hw"))]
-pub fn init() {}

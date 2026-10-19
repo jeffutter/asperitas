@@ -64,11 +64,13 @@ impl<const N: usize> KnobOverride<N> {
     }
 
     /// Return every knob to pot control.
+    #[cfg(test)]
     pub fn release_all(&mut self) {
         self.sources = [Source::Knob; N];
     }
 
     /// Whether knob `idx` is currently host-controlled.
+    #[cfg(test)]
     pub fn is_active(&self, idx: usize) -> bool {
         matches!(self.sources.get(idx), Some(Source::Host(_)))
     }

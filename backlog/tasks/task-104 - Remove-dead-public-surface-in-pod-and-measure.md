@@ -1,14 +1,16 @@
 ---
 id: TASK-104
 title: Remove dead public surface in pod and measure
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-19 02:05'
 labels:
   - review-2026-10
   - pod
   - measure
+  - planned
 dependencies: []
 priority: low
 type: chore
@@ -27,5 +29,23 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The listed items are deleted or cfg(test); workspace builds and tests pass
+- [x] #1 The listed items are deleted or cfg(test); workspace builds and tests pass
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the TASK-104 commit. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Deleted pod init() and led off(); made led set_channels private; cfg(test) on knob_override release_all/is_active, align assert_repeatable, Metrics/Comparison to_json. Build, tests, clippy all-targets and pod-hw check clean.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Removed dead public surface in asperitas-pod and asperitas-measure per the listed items.
+<!-- SECTION:FINAL_SUMMARY:END -->

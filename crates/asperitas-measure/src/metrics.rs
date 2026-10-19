@@ -89,6 +89,7 @@ pub struct Spur {
 }
 
 impl Metrics {
+    #[cfg(test)]
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).expect("Metrics serializes")
     }

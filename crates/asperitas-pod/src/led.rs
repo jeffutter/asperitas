@@ -105,15 +105,10 @@ impl Led2 {
         self.set_channels(r, g, b);
     }
 
-    /// Turn all channels off.
-    pub fn off(&mut self) {
-        self.set_color(Led2Color::Off);
-    }
-
     /// Set individual colour channels.
     ///
     /// `true` = light the channel (drives pin Low for active-low LEDs).
-    pub fn set_channels(&mut self, red: bool, green: bool, blue: bool) {
+    fn set_channels(&mut self, red: bool, green: bool, blue: bool) {
         let on = if LED_ACTIVE_LOW {
             Level::Low
         } else {

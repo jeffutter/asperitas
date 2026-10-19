@@ -197,6 +197,7 @@ pub fn assert_stable(a: &Alignment) -> Result<(), AlignError> {
 }
 
 /// Two captures of the same stimulus must have the same delay within the repeat tolerance.
+#[cfg(test)]
 pub fn assert_repeatable(a: &Alignment, b: &Alignment) -> Result<(), AlignError> {
     let (first, second) = (a.median(), b.median());
     if (first - second).abs() > thresholds::ALIGN_STABLE_TOL_SAMPLES {

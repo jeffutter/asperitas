@@ -177,6 +177,7 @@ pub struct Comparison {
 }
 
 impl Comparison {
+    #[cfg(test)]
     pub fn to_json(&self) -> String {
         serde_json::to_string_pretty(self).expect("Comparison serialises")
     }
