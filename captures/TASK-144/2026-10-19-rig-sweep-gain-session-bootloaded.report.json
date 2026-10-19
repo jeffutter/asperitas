@@ -1,0 +1,105 @@
+{
+  "attach_prefix_bytes": 121,
+  "capture": "/private/tmp/claude-501/-Users-jeffutter-src-asperitas/938c1078-68ee-43ef-b660-e170fc8a5243/scratchpad/sweep-gain2.console.zst",
+  "failures": [
+    "sweep response reverses by 55.2 dB (limit 1 dB)"
+  ],
+  "pass": false,
+  "response": {
+    "curve": [
+      {
+        "response_db": -24.92667338462015,
+        "value": 0.025
+      },
+      {
+        "response_db": -80.09503813177463,
+        "value": 0.075
+      },
+      {
+        "response_db": -76.57204941444778,
+        "value": 0.125
+      },
+      {
+        "response_db": -73.01963135694314,
+        "value": 0.175
+      },
+      {
+        "response_db": -69.42611853967063,
+        "value": 0.225
+      },
+      {
+        "response_db": -65.82719649929652,
+        "value": 0.275
+      },
+      {
+        "response_db": -62.220878523875136,
+        "value": 0.325
+      },
+      {
+        "response_db": -58.617870318688915,
+        "value": 0.375
+      },
+      {
+        "response_db": -55.01303517623953,
+        "value": 0.425
+      },
+      {
+        "response_db": -51.40620988907439,
+        "value": 0.475
+      },
+      {
+        "response_db": -47.800181046395885,
+        "value": 0.525
+      },
+      {
+        "response_db": -44.195159054619786,
+        "value": 0.575
+      },
+      {
+        "response_db": -40.591670897526164,
+        "value": 0.625
+      },
+      {
+        "response_db": -36.98134286058193,
+        "value": 0.675
+      },
+      {
+        "response_db": -33.37718123079667,
+        "value": 0.725
+      },
+      {
+        "response_db": -29.769603772376726,
+        "value": 0.775
+      },
+      {
+        "response_db": -26.160032082117958,
+        "value": 0.825
+      },
+      {
+        "response_db": -22.556508406822413,
+        "value": 0.875
+      },
+      {
+        "response_db": -18.948267899085625,
+        "value": 0.925
+      },
+      {
+        "response_db": -15.34450013032518,
+        "value": 0.975
+      }
+    ],
+    "direction": "rising",
+    "expected_direction": "rising",
+    "flat_regions": [],
+    "kind": "gain",
+    "max_reversal_db": 55.168364747154484,
+    "monotonic": false,
+    "span_db": 9.582173254294968
+  },
+  "sweep": {
+    "duration_s": 30.0,
+    "from": 0.0,
+    "start_s": 5.001,
+    "to": 1.0
+  }
+}

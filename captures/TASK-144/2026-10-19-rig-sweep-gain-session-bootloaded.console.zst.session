@@ -1,0 +1,13 @@
+asperitas-session v1
+fx_f=1
+fx_v=0
+knob=1
+mode=sweep
+from=0
+to=1
+duration_s=30
+start_after_arm_s=5
+snaps=
+snap_level=0
+arm_t_ms=3205
+first_set_t_ms=8206
