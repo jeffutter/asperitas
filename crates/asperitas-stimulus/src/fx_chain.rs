@@ -153,8 +153,10 @@ impl<G: Stimulus> Stimulus for FxChain<G> {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
     use crate::stimulus::Sine;
+    use std::vec::Vec;
 
     fn bare() -> Sine {
         let mut s = Sine::default();

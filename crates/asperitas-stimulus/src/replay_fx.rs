@@ -124,7 +124,9 @@ impl ReplayFx {
 
 #[cfg(test)]
 mod tests {
+    extern crate std;
     use super::*;
+    use std::vec::Vec;
 
     const DEFAULTS: [f32; KNOB_COUNT] = [0.0; KNOB_COUNT];
 
