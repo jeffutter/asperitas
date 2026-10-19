@@ -1,6 +1,7 @@
 //! `asperitas-live`: run the Asperitas effect in real time on the default audio devices.
 
 mod backend;
+mod terminal;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -30,7 +31,8 @@ struct Args {
     #[arg(long, default_value_t = 128)]
     buffer: u32,
 
-    /// Stop after this many seconds. Without it the stream runs until Enter is pressed.
+    /// Stop after this many seconds. Without it the stream runs until esc (knob view) or Enter
+    /// (when stdout is not a terminal) is pressed.
     #[arg(long, value_name = "SECONDS")]
     seconds: Option<f64>,
 }
@@ -41,7 +43,14 @@ fn run(args: &Args) -> Result<(), String> {
         Some(path) => Some(load_clip(&path.to_string_lossy())?),
         None => None,
     };
-    backend::run(clip, &controls, args.buffer, args.seconds)
+    let source = match &args.input {
+        Some(path) => format!("loop {}", path.display()),
+        None => "line-in".to_string(),
+    };
+    let seconds = args.seconds;
+    backend::run(clip, &controls, args.buffer, |slot| {
+        terminal::wait(slot, &controls, &source, seconds)
+    })
 }
 
 fn main() -> ExitCode {

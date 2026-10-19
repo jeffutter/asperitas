@@ -15,6 +15,7 @@ asperitas-dsp = { path = "../asperitas-dsp", features = ["std"] }
 asperitas-cli = { path = "../asperitas-cli" }
 clap = { version = "4", features = ["derive"] }
 cpal = "0.18.2"
+crossterm = "0.29"
 ringbuf = "0.5.3"
 
 [dev-dependencies]

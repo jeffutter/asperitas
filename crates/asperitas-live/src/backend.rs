@@ -2,7 +2,6 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use asperitas_dsp::asperitas::Controls;
 use asperitas_dsp::processor::Frame;
@@ -89,12 +88,13 @@ fn write_interleaved(frames: &[Frame], data: &mut [f32], channels: usize) {
     }
 }
 
-/// Run until `seconds` elapse or Enter is pressed, then print the counters.
+/// Start the streams, hand the shared knob slot to `wait` (which returns when the session ends),
+/// then stop the streams and print the counters.
 pub fn run(
     clip: Option<Vec<Frame>>,
     controls: &Controls,
     buffer: u32,
-    seconds: Option<f64>,
+    wait: impl FnOnce(&ControlSlot) -> Result<(), String>,
 ) -> Result<(), String> {
     let host = cpal::default_host();
     let out_dev: Device = host
@@ -118,7 +118,7 @@ pub fn run(
         Some(frames) => Source::Loop(LoopSource::new(frames)),
         None => Source::External,
     };
-    let mut engine = Engine::new(source, slot);
+    let mut engine = Engine::new(source, slot.clone());
 
     let mut scratch_in = vec![[0.0f32; 2]; MAX_SLICE];
     let mut scratch_out = vec![[0.0f32; 2]; MAX_SLICE];
@@ -226,14 +226,7 @@ pub fn run(
         if live { "line-in" } else { "looping clip" }
     );
 
-    match seconds {
-        Some(s) => std::thread::sleep(Duration::from_secs_f64(s.max(0.0))),
-        None => {
-            println!("press Enter to stop");
-            let mut line = String::new();
-            let _ = std::io::stdin().read_line(&mut line);
-        }
-    }
+    let waited = wait(&slot);
     drop(streams);
 
     println!(
@@ -242,6 +235,7 @@ pub fn run(
         counters.underruns.load(Ordering::Relaxed),
         counters.overruns.load(Ordering::Relaxed),
     );
+    waited?;
     if counters.stream_errors.load(Ordering::Relaxed) > 0 {
         return Err("stream errors were reported".to_string());
     }

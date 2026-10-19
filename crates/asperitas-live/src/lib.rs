@@ -6,6 +6,7 @@
 
 pub mod controls;
 pub mod engine;
+pub mod view;
 
 pub use controls::ControlSlot;
 pub use engine::{load_clip, Engine, LoopSource, Source, BLOCK_FRAMES, SAMPLE_RATE};
