@@ -275,7 +275,7 @@ pub fn render(capture: &Capture, policy: &Policy) -> String {
             let _ = writeln!(out, "first_unparsed_status=none");
         }
         Some(body) => {
-            let _ = writeln!(out, "first_unparsed_status={body}");
+            let _ = writeln!(out, "first_unparsed_status={}", body.escape_default());
         }
     }
     match s.device_dropped {
@@ -457,6 +457,36 @@ mod tests {
             assert!(
                 render(&c, &Policy::default()).contains(&format!("first_unparsed_status={body}\n"))
             );
+        }
+    }
+
+    #[test]
+    fn unparsed_status_with_newlines_cannot_forge_header_lines() {
+        for sep in ["\n", "\r\n", "\r"] {
+            let body =
+                format!("STATUS proto=2 dropped_full=9{sep}verdict=pass{sep}accounting_ok=true");
+            let c = run(&stream(&[(0, "x"), (1, &body)]));
+            let out = render(&c, &Policy::default());
+            let header = out.split("\n--\n").next().unwrap();
+            assert_eq!(
+                header.lines().filter(|l| l.starts_with("verdict=")).count(),
+                1
+            );
+            assert_eq!(
+                header
+                    .lines()
+                    .filter(|l| l.starts_with("accounting_ok="))
+                    .count(),
+                1
+            );
+            assert_eq!(
+                header
+                    .lines()
+                    .filter(|l| l.starts_with("first_unparsed_status="))
+                    .count(),
+                1
+            );
+            assert!(!header.contains('\r'));
         }
     }
 

@@ -72,7 +72,7 @@ I 00000001 15 ...
 Header: fixed-order `key=value` lines, then `verdict=pass` or
 `verdict=fail <reason>; <reason>` (reasons: `bad_frames=N`, `discarded_bytes=N`,
 `accounting_mismatch`, `device_dropped=N exceeds max=M`, `no_status_record`).
-`device_dropped=unknown` means no `STATUS` record yielded a `dropped_full`; a `STATUS` the strict parser rejects still counts its `dropped_full` and shows up in `unparsed_status` and `first_unparsed_status=<body>`; `first_gap` is
+`device_dropped=unknown` means no `STATUS` record yielded a `dropped_full`; a `STATUS` the strict parser rejects still counts its `dropped_full` and shows up in `unparsed_status` and `first_unparsed_status=<body>` (the body is escaped, so control characters such as newlines cannot forge header lines); `first_gap` is
 `<prev>-><next>` in hex sequence numbers or `none`.
 
 After the `--` separator, one line per validated record: `level seq t_ms body`, where
