@@ -443,7 +443,10 @@ impl<P: Read + Write> Runner<P> {
         let mut dump_seen_at: Option<Instant> = None;
         loop {
             let elapsed = armed_at.elapsed();
-            while next < timeline.timed.len() && timeline.timed[next].0 <= elapsed {
+            // A SET after the release would re-engage the device override with nothing left to
+            // release it, so a released session never sends again.
+            while !self.released && next < timeline.timed.len() && timeline.timed[next].0 <= elapsed
+            {
                 self.send_set(plan.knob, timeline.timed[next].1)?;
                 next += 1;
             }
@@ -822,6 +825,33 @@ mod tests {
                 Command::OverrideRelease { knob: 2 },
             ]
         );
+    }
+
+    #[test]
+    fn dump_ending_before_the_schedule_stops_the_sets() {
+        let (mut rig, written) = Rig::new();
+        rig.dump_on_arm = true;
+        // A grace longer than the schedule gives any late SET time to go out.
+        let o = SessionOpts {
+            dump_grace: Duration::from_millis(400),
+            ..opts(3000)
+        };
+        let run = run_session(rig, &sweep_plan(), &o);
+        let c = cmds(&written);
+        assert_eq!(c.last(), Some(&Command::OverrideRelease { knob: 2 }));
+        assert_eq!(
+            c.iter()
+                .filter(|c| matches!(c, Command::OverrideRelease { .. }))
+                .count(),
+            1
+        );
+        let sets = c
+            .iter()
+            .filter(|c| matches!(c, Command::OverrideSet { .. }))
+            .count();
+        assert_eq!(run.sets_sent, sets);
+        assert_eq!(run.observed.set_acks, sets);
+        assert_eq!(run.outcome(), Outcome::Pass, "{}", run.summary());
     }
 
     #[test]
