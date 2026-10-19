@@ -12,6 +12,7 @@
 //! * an override sweep always sends `REL` for its knob, on success, on a capture error and
 //!   on a write error alike ([`run_override`]).
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
@@ -92,6 +93,9 @@ pub struct Link<P> {
     seq: u32,
     timeout: Duration,
     saw_boot: bool,
+    /// Record bodies that followed an accepted reply in the same read chunk, offered to the
+    /// next `wait`.
+    held: VecDeque<Vec<u8>>,
 }
 
 impl<P: Read + Write> Link<P> {
@@ -103,6 +107,7 @@ impl<P: Read + Write> Link<P> {
             seq: 0,
             timeout,
             saw_boot: false,
+            held: VecDeque::new(),
         }
     }
 
@@ -155,11 +160,16 @@ impl<P: Read + Write> Link<P> {
     }
 
     /// Read until `pick` accepts a record body or `timeout` passes. Records in the same read
-    /// chunk after the accepted one are consumed without being offered to `pick`; callers wait
-    /// on one reply at a time.
+    /// chunk after the accepted one are kept and offered to the next call before the port is
+    /// read again; records `pick` rejects are dropped.
     fn wait<T>(&mut self, mut pick: impl FnMut(&str) -> Option<T>) -> Result<T, ControlError> {
         let deadline = Instant::now() + self.timeout;
         let mut chunk = [0u8; 4096];
+        while let Some(body) = self.held.pop_front() {
+            if let Some(v) = pick(&String::from_utf8_lossy(&body)) {
+                return Ok(v);
+            }
+        }
         loop {
             if Instant::now() >= deadline {
                 return Err(ControlError::Timeout);
@@ -181,12 +191,15 @@ impl<P: Read + Write> Link<P> {
             };
             let mut found = None;
             let saw_boot = &mut self.saw_boot;
+            let held = &mut self.held;
             let taken = self.decoder.feed(&chunk[..n], |r| {
                 if is_boot(r.body) {
                     *saw_boot = true;
                 }
                 if found.is_none() {
                     found = pick(&String::from_utf8_lossy(r.body));
+                } else {
+                    held.push_back(r.body.to_vec());
                 }
             });
             if let Some(v) = found {
@@ -584,6 +597,21 @@ mod tests {
         let mut d = Decoder::new();
         d.push(&f[..n]);
         assert_eq!(d.next_record().unwrap().body, b"CTL SET k=01 v=0fff");
+    }
+
+    #[test]
+    fn records_after_the_accepted_reply_serve_the_next_request() {
+        let mut a = reply_frame(0, Reply::Ok(Verb::Set));
+        a.extend(frame_body(1, b"noise"));
+        a.extend(frame_body(2, b"BOOT fw=x"));
+        a.extend(reply_frame(3, Reply::Ok(Verb::Release)));
+        let (fake, _) = Fake::new(vec![a]);
+        let mut link = Link::new(fake, T);
+        let set = Command::OverrideSet { knob: 1, value: 5 };
+        assert_eq!(link.request(set).unwrap(), Reply::Ok(Verb::Set));
+        let rel = Command::OverrideRelease { knob: 1 };
+        assert_eq!(link.request(rel).unwrap(), Reply::Ok(Verb::Release));
+        assert!(link.saw_boot());
     }
 
     #[test]
