@@ -3,13 +3,15 @@ id: TASK-118
 title: >-
   Docs: refresh rust-daisy-stack.md, mark idea.md superseded, fix daisy-pod.md,
   move logs out of reference/
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-19 03:20'
 labels:
   - review-2026-10
   - docs
+  - planned
 dependencies: []
 priority: low
 type: chore
@@ -28,6 +30,24 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Each listed document is accurate or clearly marked historical
-- [ ] #2 No em dashes in backlog filenames
+- [x] #1 Each listed document is accurate or clearly marked historical
+- [x] #2 No em dashes in backlog filenames
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the commit carrying Task-Id TASK-118. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+rust-daisy-stack.md rewritten as current state (locked 0.2.3, no vendored fork or ticket refs, dasp unused, real host crates). idea.md carries a superseded header. daisy-pod.md listening session moved to docs/investigations/pod-listening-session.md with durable bullets kept; both-jacks facts kept in reference. Schematic search log moved to docs/investigations/ with links fixed. Three em-dash backlog filenames renamed. The pins.rs and chip-string claims were already fixed at HEAD.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Refreshed stale docs, marked idea.md superseded, moved session and search logs to docs/investigations, renamed em-dash backlog files.
+<!-- SECTION:FINAL_SUMMARY:END -->

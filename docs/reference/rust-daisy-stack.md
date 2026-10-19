@@ -1,7 +1,7 @@
-# Rust Daisy Stack — Ecosystem Reference
+# Rust Daisy Stack - Ecosystem Reference
 
-Snapshot taken 2026-08-01. **This file describes a fast-moving situation** — especially
-the Seed3 support status below. Re-check before relying on it. Stable hardware facts
+Last reviewed 2026-10-18 against `firmware/Cargo.lock`. **This file describes a fast-moving
+situation**, especially the Seed3 support status below. Re-check before relying on it. Stable hardware facts
 live in [daisy-seed3.md](./daisy-seed3.md).
 
 ## Board support: use `daisy-embassy`
@@ -21,7 +21,8 @@ Board selection is by Cargo feature:
 | `patch_sm` | Patch SM | PCM3060 |
 | `seed3` | Seed3 | TAC5242 |
 
-Current release line is `0.3.0` (unreleased); `0.2.2` is the last published version.
+`firmware/Cargo.toml` tracks `branch = "master"`; `firmware/Cargo.lock` currently resolves
+`0.2.3`.
 
 The audio API is a callback over a block:
 
@@ -55,7 +56,7 @@ the same configuration as this project — confirmed:
 - stereo in and out at 48 kHz with correct left/right channels
 - line-out to line-in loopback passes stereo audio repeatably
 
-**Block size is fixed at 32 samples, not 48.** `src/audio.rs` hardcodes `pub const BLOCK_LENGTH: usize = 32;`; it is not a field on `AudioConfig` (which only exposes `fs: Fs`), so this project cannot request a different block size without patching the vendored fork. This diverges from libDaisy's 48-sample default for the Pod — worth mentioning in the TASK-005.03 upstream report if block size ever becomes musically significant (e.g. for tight feedback/delay paths).
+**Block size is fixed at 32 samples, not 48.** `src/audio.rs` hardcodes `pub const BLOCK_LENGTH: usize = 32;`; it is not a field on `AudioConfig` (which only exposes `fs: Fs`), so a different block size needs a patch to daisy-embassy. This diverges from libDaisy's 48-sample default for the Pod and matters for tight feedback or delay paths.
 
 ## Alternative / superseded BSPs
 
@@ -74,7 +75,8 @@ the same configuration as this project — confirmed:
 
 - [`dasp`](https://github.com/RustAudio/dasp) (RustAudio) — low-level PCM primitives:
   ring buffers, interpolation, signal combinators, frame/sample traits. A foundation
-  rather than a module library. `no_std` capable. **This project's chosen base.**
+  rather than a module library. `no_std` capable. Not used here: `asperitas-dsp` is hand-written
+  and depends only on `libm`.
 - `fundsp` — general-purpose, combinator-based graph API with batteries included.
   Active community. `no_std` behaviour on a 480 MHz M7 with hard-float is unverified.
 - `valib` — smaller, newer, musical-DSP-focused building blocks.
@@ -90,10 +92,13 @@ the same configuration as this project — confirmed:
 
 ## Host-side crates
 
-- `cpal` — real-time audio I/O for the live desktop TUI
-- `hound` — WAV read/write for the offline CLI and golden-file tests
-- `proptest` — property testing
-- `ratatui` — TUI
+Those the workspace `Cargo.toml` files actually depend on:
+
+- `hound` - WAV read/write for the offline CLI and golden-file tests
+- `proptest` - property testing
+- `rustfft` - spectral analysis in `asperitas-measure`
+- `ruzstd` - decoding zstd-compressed text captures
+- `serde_json`, `tempfile` - sidecar files and test scratch space
 
 ## Toolchain
 

@@ -22,7 +22,7 @@ Crates (root workspace, `crates/`):
 Other docs: `backlog/docs/doc-001 - Asperitas-Project-Plan.md` (the plan),
 [idea.md](idea.md) (original research handoff), [audio/README.md](audio/README.md) (corpus, goldens,
 captures layout), [docs/development.md](docs/development.md) (gates, nix, lefthook, CI),
-[docs/reference/seed3-schematic-search-log.md](docs/reference/seed3-schematic-search-log.md),
+[docs/investigations/seed3-schematic-search-log.md](docs/investigations/seed3-schematic-search-log.md),
 [docs/investigations/](docs/investigations/) (bench evidence behind the reference docs),
 [docs/upstream/](docs/upstream/) (upstream bug reports and write-ups).
 

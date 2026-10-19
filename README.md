@@ -97,5 +97,5 @@ Hardware status, measurements and open questions live in the tickets under `back
 - [`docs/reference/daisy-pod.md`](docs/reference/daisy-pod.md) - Pod pin map, controls, line-level audio warning
 - [`docs/reference/asperitas-rig.md`](docs/reference/asperitas-rig.md) - `rig` firmware workflow, capture runner, analysis, console debugging
 - [`docs/reference/rust-daisy-stack.md`](docs/reference/rust-daisy-stack.md) - Crate landscape, daisy-embassy status, DSP library options
-- [`docs/reference/seed3-schematic-search-log.md`](docs/reference/seed3-schematic-search-log.md) - Record of the Seed3 schematic search
+- [`docs/investigations/seed3-schematic-search-log.md`](docs/investigations/seed3-schematic-search-log.md) - Record of the Seed3 schematic search
 - [`docs/upstream/`](docs/upstream/) - Notes prepared for upstream projects

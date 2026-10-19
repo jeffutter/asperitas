@@ -216,35 +216,23 @@ Recorded 2026-10-15 with the owner at the bench (TASK-034).
   the probe; raw console bytes captured to a file, rebuilt with `dump_reassemble` (every block proved,
   0 discarded bytes), then analysed offline.
 
-## Listening session with `main` (TASK-019.02, owner at the bench)
+## Listening with `main`
 
-Recorded 2026-10-16. The owner listened to a mandolin loop through the Pod on headphones and
-agreed that knob 1 (one-pole low-pass, `20 * 1000^n` Hz) and knob 2 (gain, `-60 + 72 n` dB) change the
-sound in the intended direction with the intended character, with no zipper noise, crackle, wobble
-or hiss, while moving or held still, and that behaviour survives a power cycle.
+Durable facts from a bench listening session; the full record is in
+[pod-listening-session.md](../investigations/pod-listening-session.md).
 
-- **Use broadband material for knob 1.** On a pure sine the low-pass only acts as a gain control once
-  its cutoff passes the fundamental, so knob 1 sounds like knob 2. Judge the filter on an
-  instrument recording, not a tone.
-- **Mac as the source:** the Mac headphone path is far quieter than line level (Mac output at 25%
-  gave about -55 dB at the Pod input). Play at 50 to 80% for listening. To record the Pod's output
-  back with the Mac mic input, keep input volume at 5 to 15%; 50% clips on the Pod's line-level
-  output. A 60 Hz hum near -52 dBFS showed up on the Mac mic recordings.
-- **The audio callback must run on an interrupt executor.** `main` runs it on SAI1 at priority P6
-  (as `rig` does). A callback has about 1.3 ms after a half-transfer or `read` returns
-  `sai::Error::Overrun`, and on the thread executor the knob, console and LED tasks made it miss.
-  After an overrun `main`'s audio loop ends and stays ended (`AUDIO_EXIT` holds the reason); there
-  is no recovery policy yet.
-- **Do not attach a probe while listening.** Attaching halts the core briefly, which overruns the
-  SAI ring and ends the audio loop until reset. Reset without a probe attached
-  (`probe-rs reset`, then detach) before listening. Reading statics after listening is fine.
-- **Half-plugged input jack:** in one session the output was audible on the Pod headphone jack only
-  with the input cable half inserted. Two cables behaved the same; a fully seated cable worked
-  fine in the later session. The cause (jack or cable) was not found. Seat plugs fully.
+- **The audio callback must run on an interrupt executor** (SAI1, priority P6). A callback has about
+  1.3 ms per half-transfer before `read` returns `sai::Error::Overrun`; after an overrun the audio loop
+  ends and stays ended.
+- **Do not attach a probe while listening.** Attaching halts the core and overruns the SAI ring.
+- **Seat plugs fully**; a half-inserted input cable gave odd output-jack behaviour.
+- **Judge a low-pass on broadband material**, not a sine.
+- **Line level:** a Mac headphone output is far below line level; play at 50 to 80% and keep Mac mic
+  input volume at 5 to 15% when recording the Pod's output.
 
 ## Both output jacks in use: the channels mix (observed, cause unknown)
 
-Observed 2026-10-16 (TASK-059.03, owner at the bench), with `main` running and the Mac feeding the Pod input.
+Observed at the bench with `main` running and the Mac feeding the Pod input.
 
 - **Use one output jack at a time when judging left versus right.** With headphones in *either* the
   Pod's headphone out *or* its line out (never both), a right-only source came out the right side only
@@ -261,4 +249,4 @@ Observed 2026-10-16 (TASK-059.03, owner at the bench), with `main` running and t
 - **Does not contradict the loopback measurement** in *Self-loopback channel mapping*: that run used the
   output-to-input cable only, with nothing else on the output jacks.
 - **Buffer addresses:** in the bootloaded layout the SAI DMA buffers read at `0x30000000` (RX) and
-  `0x30000200` (TX), not the `0x240021b8` address TASK-059.01 planned for the non-bootloaded layout.
+  `0x30000200` (TX); the non-bootloaded layout differs.

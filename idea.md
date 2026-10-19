@@ -1,3 +1,7 @@
+> **Superseded by [doc-001 - Asperitas-Project-Plan](backlog/docs/doc-001%20-%20Asperitas-Project-Plan.md).**
+> Kept as the original pre-project research handoff; historical only. The open uncertainty below
+> was settled by doc-001, and the egui and probe-rs main-loop proposals were not adopted.
+
 # Daisy Seed 3 Project — Research Summary & Handoff Notes
 
 Context: Jeff owns a Daisy Seed 3 (Electro-Smith, STM32H750 MCU) and wants to program it without

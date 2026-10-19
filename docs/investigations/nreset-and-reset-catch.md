@@ -77,7 +77,7 @@ chips need it and others do not support it.
 There is no Seed3 schematic to read. Electrosmith publishes a databrief, pinout PDF and CSV, 3D models
 and a compliance zip, and nothing else; archived copies of the documentation page list the same five
 assets. The databrief has zero occurrences of `RESET`, `NRST` or `supervisor`. The search is logged in
-[seed3-schematic-search-log.md](../reference/seed3-schematic-search-log.md).
+[seed3-schematic-search-log.md](seed3-schematic-search-log.md).
 
 The net is traced on the public drawings, each by the revision and date in its title block. All four
 name the net `RESET`:
