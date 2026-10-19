@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@ralph'
 created_date: '2026-10-19 18:20'
-updated_date: '2026-10-19 18:39'
+updated_date: '2026-10-19 19:34'
 labels:
   - firmware
   - hardware
@@ -48,6 +48,8 @@ SHIPPED by b802f1c. This plan is superseded; the ticket's final summary describe
 
 <!-- SECTION:NOTES:BEGIN -->
 Root cause (AC1): the capture ring is SDRAM mapped as Device memory (see ring.rs), which faults on unaligned multi-byte loads. 33f0847 made dump::encode call base64's STANDARD.encode_slice directly on the ring slice; disassembly of the pre-fix rig ELF shows its internal_encode loading input with ldrd/ldr.w at whatever alignment the slice has, and 129-byte chunks start at odd ring offsets, so the first misaligned chunk faults in thread mode while the SAI interrupt keeps audio running. The old hand-written encoder read byte-wise. The OutputSliceTooSmall theory in the description was wrong. Host tests missed it because host memory permits unaligned access. Fix: dump::encode is now a byte-at-a-time encoder using volatile single-byte loads (cannot be widened or merged); base64 remains the decoder. Post-fix disassembly has no base64 encode symbols and no ldrd/ldm in dump::encode. AC2 note: a host test cannot fault on unaligned access, so the new test console_dump.rs::encoder_matches_the_standard_engine_at_every_length_and_offset pins wire-output equivalence with the base64 engine for all lengths 0..=129 at 8 start offsets; the fault itself is pinned only by the disassembly check above. Not verified on hardware: TASK-138 owns the bench step (flash rig, ASP_RIG_CAPTURE_SECONDS=10, expect DUMPEND).
+
+2026-10-19: bench confirmation of a723f4c. A bootloaded rig built with ASP_RIG_CAPTURE_SECONDS=10 completes its dump on the board (DUMPEND blocks=30 chunks=7650 elapsed_ms=2083 dropped_full=0; dump_reassemble writes 983,040 PCM bytes with every block checksum good). The previous build stalled at t=12.2 s with no DUMPEND. Owner-attended session, found while rechecking TASK-138.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
