@@ -1,7 +1,7 @@
 //! The `cpal` shell around the engine: device and stream setup, the line-in ring, counters.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use asperitas_dsp::asperitas::Controls;
 use asperitas_dsp::processor::Frame;
@@ -27,6 +27,15 @@ struct Counters {
     stream_errors: AtomicU64,
     underruns: AtomicU64,
     overruns: AtomicU64,
+    /// The most recent stream error. Written from a cpal error thread, never from an audio
+    /// callback, so a mutex is fine.
+    last_error: Mutex<Option<String>>,
+}
+
+impl Counters {
+    fn last_error(&self) -> Option<String> {
+        self.last_error.lock().ok().and_then(|e| e.clone())
+    }
 }
 
 /// Pick a 48 kHz f32 configuration, preferring the device default's channel count.
@@ -68,7 +77,11 @@ fn error_callback(counters: &Arc<Counters>, direction: &'static str) -> impl FnM
     let counters = counters.clone();
     move |e| {
         counters.stream_errors.fetch_add(1, Ordering::Relaxed);
-        eprintln!("asperitas-live: {direction} stream error: {e}");
+        // No printing here: the terminal may be in raw mode, where a stray line corrupts the
+        // knob view. The view shows the error and `run` prints it once the terminal is restored.
+        if let Ok(mut last) = counters.last_error.lock() {
+            *last = Some(format!("{direction} stream error: {e}"));
+        }
     }
 }
 
@@ -88,13 +101,14 @@ fn write_interleaved(frames: &[Frame], data: &mut [f32], channels: usize) {
     }
 }
 
-/// Start the streams, hand the shared knob slot to `wait` (which returns when the session ends),
-/// then stop the streams and print the counters.
+/// Start the streams, hand the shared knob slot and a reader of the latest stream error to `wait`
+/// (which returns when the session ends), then stop the streams and print the counters and the
+/// last stream error.
 pub fn run(
     clip: Option<Vec<Frame>>,
     controls: &Controls,
     buffer: u32,
-    wait: impl FnOnce(&ControlSlot) -> Result<(), String>,
+    wait: impl FnOnce(&ControlSlot, &dyn Fn() -> Option<String>) -> Result<(), String>,
 ) -> Result<(), String> {
     let host = cpal::default_host();
     let out_dev: Device = host
@@ -226,7 +240,7 @@ pub fn run(
         if live { "line-in" } else { "looping clip" }
     );
 
-    let waited = wait(&slot);
+    let waited = wait(&slot, &|| counters.last_error());
     drop(streams);
 
     println!(
@@ -235,6 +249,9 @@ pub fn run(
         counters.underruns.load(Ordering::Relaxed),
         counters.overruns.load(Ordering::Relaxed),
     );
+    if let Some(error) = counters.last_error() {
+        eprintln!("asperitas-live: {error}");
+    }
     waited?;
     if counters.stream_errors.load(Ordering::Relaxed) > 0 {
         return Err("stream errors were reported".to_string());

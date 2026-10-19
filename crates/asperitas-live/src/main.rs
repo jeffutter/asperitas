@@ -60,8 +60,8 @@ fn run(args: &Args) -> Result<(), String> {
         None => "line-in".to_string(),
     };
     let seconds = args.seconds;
-    backend::run(clip, &controls, args.buffer, |slot| {
-        terminal::wait(slot, &controls, &source, seconds)
+    backend::run(clip, &controls, args.buffer, |slot, error| {
+        terminal::wait(slot, error, &controls, &source, seconds)
     })
 }
 

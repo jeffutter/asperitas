@@ -66,9 +66,10 @@ fn draw(out: &mut impl Write, lines: &[String], redraw: bool) -> io::Result<()> 
 
 /// Block until the session ends. On a terminal that is esc, ctrl-c or `seconds`, while key
 /// presses write knob positions into `slot`; otherwise the knobs stay fixed and the session
-/// ends after `seconds` or on Enter; with stdin closed and no `seconds` it runs until killed.
+/// ends after `seconds` or on Enter; `error` reports the latest stream error for the view; with stdin closed and no `seconds` it runs until killed.
 pub fn wait(
     slot: &ControlSlot,
+    error: &dyn Fn() -> Option<String>,
     initial: &Controls,
     source: &str,
     seconds: Option<f64>,
@@ -104,25 +105,43 @@ pub fn wait(
     let _guard = RawGuard::enter().map_err(|e| format!("cannot enter raw mode: {e}"))?;
     let mut out = io::stdout();
     let mut controls = initial.clone();
-    draw(&mut out, &render_view(&controls, source), false).map_err(|e| e.to_string())?;
+    let mut shown = error();
+    draw(
+        &mut out,
+        &render_view(&controls, source, shown.as_deref()),
+        false,
+    )
+    .map_err(|e| e.to_string())?;
     loop {
         if deadline.is_some_and(|d| Instant::now() >= d) {
             return Ok(());
         }
-        if !event::poll(POLL).map_err(|e| e.to_string())? {
-            continue;
-        }
-        let Event::Key(key) = event::read().map_err(|e| e.to_string())? else {
-            continue;
-        };
-        match handle_key(&controls, key) {
-            Action::Quit => return Ok(()),
-            Action::None => {}
-            Action::Set(next) => {
-                slot.write(&next);
-                controls = next;
-                draw(&mut out, &render_view(&controls, source), true).map_err(|e| e.to_string())?;
+        let mut redraw = false;
+        if event::poll(POLL).map_err(|e| e.to_string())? {
+            if let Event::Key(key) = event::read().map_err(|e| e.to_string())? {
+                match handle_key(&controls, key) {
+                    Action::Quit => return Ok(()),
+                    Action::None => {}
+                    Action::Set(next) => {
+                        slot.write(&next);
+                        controls = next;
+                        redraw = true;
+                    }
+                }
             }
+        }
+        let latest = error();
+        if latest != shown {
+            shown = latest;
+            redraw = true;
+        }
+        if redraw {
+            draw(
+                &mut out,
+                &render_view(&controls, source, shown.as_deref()),
+                true,
+            )
+            .map_err(|e| e.to_string())?;
         }
     }
 }

@@ -85,12 +85,35 @@ pub fn readout_line(controls: &Controls, knob: usize) -> String {
     format!("{label:<6} [{up}/{down}]  {bar}  {position:.2}  ({real})")
 }
 
-/// The whole view as lines, with no line terminators.
-pub fn render_view(controls: &Controls, source: &str) -> Vec<String> {
+/// Widest status line, in characters, so it never wraps and breaks the redraw's line count.
+const STATUS_WIDTH: usize = 78;
+
+/// The status line: `error` flattened onto one line and cut to [`STATUS_WIDTH`], or empty.
+fn status_line(error: Option<&str>) -> String {
+    let Some(error) = error else {
+        return String::new();
+    };
+    let flat: String = error
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line = format!(" {}", flat.trim());
+    if line.chars().count() > STATUS_WIDTH {
+        let cut: String = line.chars().take(STATUS_WIDTH - 3).collect();
+        format!("{cut}...")
+    } else {
+        line
+    }
+}
+
+/// The whole view as lines, with no line terminators. The last line is the latest stream error,
+/// blank when there is none, so the line count is constant.
+pub fn render_view(controls: &Controls, source: &str, error: Option<&str>) -> Vec<String> {
     let mut lines = vec![format!(" asperitas-live  src: {source}"), String::new()];
     lines.extend((0..KNOB_COUNT).map(|k| format!(" {}", readout_line(controls, k))));
     lines.push(String::new());
     lines.push(" shift = fine step   esc = quit".to_string());
+    lines.push(status_line(error));
     lines
 }
 
@@ -206,10 +229,29 @@ mod tests {
 
     #[test]
     fn view_has_header_knobs_and_footer() {
-        let lines = render_view(&Controls::default(), "loop a.wav");
+        let lines = render_view(&Controls::default(), "loop a.wav", None);
         assert_eq!(lines[0], " asperitas-live  src: loop a.wav");
         assert!(lines[2].starts_with(" cutoff"));
         assert!(lines[3].starts_with(" gain"));
-        assert!(lines.last().unwrap().contains("esc = quit"));
+        assert!(lines[lines.len() - 2].contains("esc = quit"));
+    }
+
+    #[test]
+    fn error_line_keeps_the_line_count_and_shows_the_error() {
+        let c = Controls::default();
+        let quiet = render_view(&c, "line-in", None);
+        let failed = render_view(&c, "line-in", Some("input stream error: gone"));
+        assert_eq!(quiet.len(), failed.len());
+        assert!(quiet.last().unwrap().is_empty());
+        assert!(failed.last().unwrap().contains("input stream error: gone"));
+    }
+
+    #[test]
+    fn long_multiline_error_stays_on_one_short_line() {
+        let long = format!("first\nsecond\r\n{}", "x".repeat(500));
+        let line = status_line(Some(&long));
+        assert!(!line.contains(['\n', '\r']));
+        assert!(line.chars().count() <= STATUS_WIDTH, "{line}");
+        assert!(line.starts_with(" first second"));
     }
 }
