@@ -1,5 +1,5 @@
 {
-  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-soak-tri.console.zst",
+  "capture": "captures/TASK-019.03.04/2026-10-15-rig-soak-triangle-smoothed.console.zst",
   "expected_failure_observed": false,
   "failures": [],
   "pass": true,

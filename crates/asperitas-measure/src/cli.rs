@@ -179,7 +179,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Outcome
     } else {
         failures
     };
-    report["capture"] = json!(args.path);
+    report["capture"] = json!(report_path(&args.path));
     report["pass"] = json!(failures.is_empty());
     report["failures"] = json!(failures);
     let _ = writeln!(out, "{}", serde_json::to_string_pretty(&report).unwrap());
@@ -354,9 +354,33 @@ fn invert_for_expected_failure(
     }
 }
 
+/// The path a report records for its capture: relative to the repository root (the nearest
+/// ancestor holding `.git`) when the capture lives in the repository, so a committed report
+/// names the committed capture wherever the checkout is; otherwise the path as given.
+fn report_path(path: &str) -> String {
+    let Ok(abs) = Path::new(path).canonicalize() else {
+        return path.to_string();
+    };
+    abs.ancestors()
+        .skip(1)
+        .find(|dir| dir.join(".git").exists())
+        .and_then(|root| abs.strip_prefix(root).ok())
+        .map_or_else(
+            || path.to_string(),
+            |rel| rel.to_string_lossy().into_owned(),
+        )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_path_is_repo_relative_inside_the_repo_and_as_given_outside() {
+        let inside = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml");
+        assert_eq!(report_path(inside), "Cargo.toml");
+        assert_eq!(report_path("/no/such/capture.zst"), "/no/such/capture.zst");
+    }
 
     #[test]
     fn expect_fail_passes_only_when_the_step_detector_fired() {

@@ -1,5 +1,5 @@
 {
-  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-gain6.console.zst",
+  "capture": "captures/TASK-035.07.03/2026-10-15-rig-fx-gain-p6db.console.zst",
   "comparison": {
     "dc_lsb": 1.3511905520168506,
     "delay_samples": 81,

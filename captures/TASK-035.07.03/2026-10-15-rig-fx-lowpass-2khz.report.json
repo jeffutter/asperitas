@@ -1,5 +1,5 @@
 {
-  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-lp2k.console.zst",
+  "capture": "captures/TASK-035.07.03/2026-10-15-rig-fx-lowpass-2khz.console.zst",
   "comparison": {
     "dc_lsb": 0.42622472376915177,
     "delay_samples": 81,

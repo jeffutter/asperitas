@@ -13,7 +13,7 @@ pub const FIXED_GAIN_BLOCK_SAMPLES: usize = 4096;
 
 /// Loop gain of the Pod self-loopback at the rig's -20 dBFS sine, in dB (capture minus stimulus).
 ///
-/// Origin: the rig baseline, the 300 s run (`audio/captures/2026-10-07-rig-sine-300s.console.zst`).
+/// Origin: the rig baseline, the 300 s run (`captures/TASK-038.05/2026-10-07-rig-sine-300s.console.zst`).
 pub const LOOP_GAIN_DB: f64 = -0.41;
 
 /// Noise plus distortion of that capture, in LSB RMS of the 16-bit capture.

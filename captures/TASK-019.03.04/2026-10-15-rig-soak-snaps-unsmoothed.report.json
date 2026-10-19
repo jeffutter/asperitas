@@ -1,5 +1,5 @@
 {
-  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-soak-tri-snap-unsmoothed.console.zst",
+  "capture": "captures/TASK-019.03.04/2026-10-15-rig-soak-snaps-unsmoothed.console.zst",
   "detector_failures": [
     "209 discontinuity candidate(s): 64 inside parameter motion, 0 outside, 145 unattributed",
     "4 parameter step(s): 4 inside parameter motion, 0 outside, 0 unattributed"

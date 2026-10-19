@@ -1,5 +1,5 @@
 {
-  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-hold-lp2k.console.zst",
+  "capture": "captures/TASK-019.03.04/2026-10-15-rig-hold-lowpass-2khz-excerpt.console.zst",
   "comparison": {
     "dc_lsb": 0.4300871659683027,
     "delay_samples": 81,

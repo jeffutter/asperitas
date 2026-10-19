@@ -1,5 +1,5 @@
 {
-  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-hold-gain-p6.console.zst",
+  "capture": "captures/TASK-019.03.04/2026-10-15-rig-hold-gain-p6db-excerpt.console.zst",
   "comparison": {
     "dc_lsb": 1.3410205604204644,
     "delay_samples": 81,

@@ -33,8 +33,8 @@ captures layout), [docs/development.md](docs/development.md) (gates, nix, leftho
 - Host crates: `cargo test`, `cargo clippy`, `cargo fmt` at the repo root.
 - Firmware has no host test harness: `cd firmware && make check|clippy|build BINARY=... FEATURES=...`.
   Correctness rests on the cross-build, lints and the rig.
-- Captures: `captures/` holds rig session evidence committed with hardware verification tickets;
-  `audio/captures/` holds loopback captures. Format and flags are in
+- Captures: `captures/TASK-x/` holds the rig evidence of each hardware verification ticket (layout and
+  size policy in [audio/README.md](audio/README.md)). Format and flags are in
   [docs/reference/asperitas-rig.md](docs/reference/asperitas-rig.md).
 
 ## Hardware & ecosystem reference — READ BEFORE TOUCHING FIRMWARE

@@ -95,7 +95,7 @@ mod tests {
 
     const FIXTURE: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../audio/captures/2026-10-07-rig-sine-300s.console.zst"
+        "/../../captures/TASK-038.05/2026-10-07-rig-sine-300s.console.zst"
     );
 
     #[test]

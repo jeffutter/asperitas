@@ -4,7 +4,6 @@
 audio/
 ├── instruments/   recorded test corpus — the reference material for golden tests and ear checks
 ├── goldens/       frozen processor output, regenerated only on purpose
-├── captures/      on-device loopback captures from rig, kept as evidence
 └── tools/         one-off asset preparation
 ```
 
@@ -80,23 +79,37 @@ Two caveats worth knowing before reading a diff:
   true pass-through (alpha about 0.93). The `cutoff500` impulse golden is the one to read for
   the filter's slope and decaying tail.
 
-## `captures/` - on-device loopback evidence
+## `captures/` (repo root) - on-device evidence
 
-Raw framed-console captures from `rig` runs through the Pod self-loopback cable, zstd-compressed.
+Rig evidence lives in one tree at the repository root, one directory per hardware verification
+ticket:
+
+```
+captures/TASK-x/<date>-rig-<what>.console.zst   raw framed-console capture, zstd
+captures/TASK-x/<date>-rig-<what>.report.json    its `asperitas-measure analyze` verdict
+captures/TASK-x/<name>.txt.zst                   text output of other bench tools, zstd
+```
+
 The console capture is the artifact, not the PCM: it carries the device's own `CAPSTAT`,
 `DUMPEND` and gate lines beside the audio, and the PCM is re-derived from it, refusing any block
 it cannot prove:
 
 ```sh
-zstd -dc audio/captures/<name>.console.zst \
+zstd -dc captures/TASK-x/<name>.console.zst \
   | cargo run -p asperitas-host --release --bin dump_reassemble -- --out capture.pcm
 ```
 
-| File | Run | Result |
-|------|-----|--------|
-| `2026-10-07-rig-sine-300s.console.zst` | rig at `eed633b`, sine -20 dBFS 1 kHz, 300 s, RESET-button boot | 879/879 blocks, max_block_us 72, worst_gap_us 714, dropped_full 0, dump 69.4 s; returned level -20.41 dBFS on the Left lane |
+A report's `capture` field is the capture's path relative to the repository root, so a report
+names its raw capture in any checkout. It is the path as given when the capture lies outside the
+repository, and `null` in the two `exploratory-*` reports, whose raw captures were never
+committed. A capture that a test names as a fixture stays in its ticket directory; the test
+points there.
 
-Details and the analysis behind each row live in TASK-038.05's notes.
+Size policy: plain git, no LFS. Captures are already compressed, so every text capture is
+zstd-compressed (`zstd -19`) and JSON reports stay uncompressed because they are small and
+diffable. Growth is about 3 MB a day in hardware weeks and the tree is about 32 MB. Review it
+when `captures/` passes about 100 MB, and then consider archiving the older evidence outside the
+repository. Purging old blobs from history needs the owner.
 
 ## `tools/`
 

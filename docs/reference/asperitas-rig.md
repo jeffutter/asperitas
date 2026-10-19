@@ -115,7 +115,7 @@ Exit codes for the control subcommands: 0 success, 1 the device rejected a comma
 (`CTLR ERR`, for example `bad-knob`) or the override acks were incomplete, 2 usage, device,
 I/O or timeout.
 
-Verified on the host with a fake transport, and on hardware 2026-10-15 (TASK-033.01): `query` and `restart` against `podtest` on a Seed3 re-enumerated with no BOOT/RESET and reported `reset_reason=software` (`captures/task-033-01-restart.txt`). A 240 s `capture` had `bad_frames=0` but `device_dropped=4041` in one gap (see `captures/task-033-01-podtest-240s.txt`).
+Verified on the host with a fake transport, and on hardware 2026-10-15 (TASK-033.01): `query` and `restart` against `podtest` on a Seed3 re-enumerated with no BOOT/RESET and reported `reset_reason=software` (`captures/TASK-033.01/restart.txt.zst`). A 240 s `capture` had `bad_frames=0` but `device_dropped=4041` in one gap (see `captures/TASK-033.01/podtest-240s.txt.zst`).
 
 ### Bench session (`session`)
 
@@ -229,7 +229,7 @@ setting sent right after the console attached and answered `CTLR OK FX`:
 Each capture aligned at 81 samples. The wrong setting fails: the +6 dB capture against `bypass` is 5.99 dB off on
 loop gain, the -12 dB capture against the +6 dB setting fails, and the low-pass capture against `bypass` fails. The
 callback cost with the effect on is `max_block_us=19` against 15 without, 30 of 30 blocks delivered, no overruns. The
-captures are `audio/captures/2026-10-15-rig-fx-*.console.zst` and the reports `captures/task-035-07-03-*.json`.
+captures are `captures/TASK-035.07.03/2026-10-15-rig-fx-*.console.zst` and the reports `captures/TASK-035.07.03/*.report.json`.
 
 ## Convention: commit artifacts with hardware verification tickets
 
@@ -313,8 +313,8 @@ Taken on the earlier build in which `CTL FX` chose a lone gain or low-pass and k
 
 All on `rig` in the bootloaded layout, each run started by a since-retired session script (probe reset, a fresh `BOOT`
 record, `CTL FX` on attach, then a `SET` schedule at 20 per second ending in `REL`), console held by that one
-reader, 2026-10-15. Captures are `audio/captures/2026-10-15-rig-{sweep,soak,hold}-*.console.zst`, reports
-`captures/task-019-03-04-*.json`. The sweep start is `arm_ms` (the median of `t_ms - (delivered + 0.5) * 341.3` over
+reader, 2026-10-15. Captures are `captures/TASK-019.03.04/2026-10-15-rig-{sweep,soak,hold}-*.console.zst`, reports
+`captures/TASK-019.03.04/*.report.json`. The sweep start is `arm_ms` (the median of `t_ms - (delivered + 0.5) * 341.3` over
 the `CAPSTAT` rows) against the first `CTLR OK SET` reply's `t_ms`; it was 4.90 s into the capture.
 To reproduce a run like these, use `asperitas-rig session`.
 
@@ -339,7 +339,7 @@ What the runs taught, for whoever plans the next one:
 - **A snap is flagged by the discontinuity detector whatever the smoothing.** The gain fit follows over 10 ms, and a
   smoothed 8.6 dB snap still moves faster than that (72 candidates, all at the snaps). It is the step detector that separates
   smoothed from unsmoothed: 2.1 dB per ms against 8.65. An 18 dB snap (+0.25 knob) defeats the smoothing even for the step
-  detector (6.3 dB per ms, over the 5 dB limit); that capture's report is `captures/task-019-03-04-exploratory-soak-18db-snaps-smoothed.json`.
+  detector (6.3 dB per ms, over the 5 dB limit); that capture's report is `captures/TASK-019.03.04/exploratory-soak-18db-snaps-smoothed.report.json`.
 - **A low-pass sweep needs a broadband stimulus.** On the 1 kHz sine the first-difference level is flat once the cutoff passes
   1 kHz, so use the pulse train for it. The gain sweep and the soak use the sine.
 - **Sweep and soak need the motion start and duration.** The stream cannot supply them; the session sidecar does.
@@ -362,7 +362,7 @@ What the runs taught, for whoever plans the next one:
 ### Fixture workflow
 
 1. Capture with `asperitas-rig` (see above); the artifact is a `.console.zst`.
-2. Run `analyze` on it. Commit the capture under `audio/captures/` with the hardware verification
+2. Run `analyze` on it. Commit the capture under `captures/TASK-x/` with the hardware verification
    ticket, as for any rig artifact.
 3. A new committed capture becomes a regression fixture by adding a test in
    `crates/asperitas-measure/tests/cli.rs` (or the module tests) naming it.
@@ -412,7 +412,7 @@ only the samples handed to the DAC encoder, and `want` is the CRC stored at inst
 `clean=1` say the QSPI-to-encoder path delivered the excerpt intact, and say nothing about the codec or
 the cable. A slot that is blank or holds no valid header makes `rig` send
 `EXCPLAYFAIL proto=1 slot=<n> why=<empty|invalid>`, show red and start no audio. An excerpt install is refused
-until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootloaded`); The committed excerpt captures under `audio/captures/` are the evidence.
+until the pass completes. Needs the bootloaded layout (`make flash LAYOUT=bootloaded`); The committed excerpt captures under `captures/TASK-038.09/` are the evidence.
 
 ### Installing an excerpt
 
@@ -469,7 +469,7 @@ one loop latency later.
 ### Where artifacts go
 
 Compress the raw console bytes and commit them with the ticket whose evidence they are, under
-`audio/captures/<date>-rig-<what>.console.zst`; the reassembled PCM is derived and need not be kept. Keep
+`captures/TASK-x/<date>-rig-<what>.console.zst` (layout and size policy in `audio/README.md`); the reassembled PCM is derived and need not be kept. Keep
 `clean.txt` out of the repository unless a ticket quotes it. Record in the ticket which build produced the
 capture (features, `ASP_RIG_*` variables, layout), since `RIGCFG` and `RIGGEN` in the capture say it only
 for the stimulus and window.
@@ -500,10 +500,10 @@ readings; the full-speed USB ceiling and sustained FMC write throughput are not 
 | Noise + distortion after removing the tone | 0.35 LSB RMS (~76 dB SNR, at the 16-bit floor) | 30 s sine |
 | Channel mapping | straight (L to L, R to R), no crosstalk above the floor | three one-channel runs |
 
-The 300 s capture is archived as `audio/captures/2026-10-07-rig-sine-300s.console.zst`. The
+The 300 s capture is archived as `captures/TASK-038.05/2026-10-07-rig-sine-300s.console.zst`. The
 analysis behind every row is in the notes of the ticket that took the reading, and the loopback setup is in
-`daisy-pod.md`. The bootloaded 300 s run is archived as `audio/captures/2026-10-15-rig-sine-300s-bootloaded.console.zst`; its 36 `dropped_full` all fall before the host attached (t=1.2 s to 27 s), none during the dump. The ring-fill run is archived as
-`audio/captures/2026-10-13-rig-ring-fill-349s.console.zst`.
+`daisy-pod.md`. The bootloaded 300 s run is archived as `captures/TASK-038.04.07.04/2026-10-15-rig-sine-300s-bootloaded.console.zst`; its 36 `dropped_full` all fall before the host attached (t=1.2 s to 27 s), none during the dump. The ring-fill run is archived as
+`captures/TASK-038.07.02/2026-10-13-rig-ring-fill-349s.console.zst`.
 
 To judge a capture, see *Analysis: `asperitas-measure`* above.
 

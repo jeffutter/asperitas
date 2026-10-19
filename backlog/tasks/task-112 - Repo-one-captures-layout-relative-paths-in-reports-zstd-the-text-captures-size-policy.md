@@ -3,13 +3,15 @@ id: TASK-112
 title: >-
   Repo: one captures layout, relative paths in reports, zstd the text captures,
   size policy
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-19 03:16'
 labels:
   - review-2026-10
   - repo
+  - planned
 dependencies: []
 priority: low
 type: chore
@@ -29,12 +31,26 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One captures layout documented in the README; reports hold repo-relative capture paths
-- [ ] #2 Size policy decided and recorded
+- [x] #1 One captures layout documented in the README; reports hold repo-relative capture paths
+- [x] #2 Size policy decided and recorded
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the TASK-112 commit. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-16 owner decision: Plain git is fine (not many captures expected). No LFS. Do the layout, repo-relative paths in reports, and zstd the text captures.
+
+Moved all raw captures into captures/TASK-x/ (git mv), reports renamed to <run>.report.json beside their capture, text captures zstd -19 as .txt.zst. asperitas-measure cli.rs report_path records a repo-relative path (nearest .git ancestor), with unit and integration tests. Two exploratory reports have capture=null (raw never committed). Size policy (plain git, no LFS, review at ~100 MB) recorded in audio/README.md. Tests, clippy, fmt, gates commit pass.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+One captures tree (captures/TASK-x), repo-relative capture paths in reports, text captures zstd-compressed, size policy documented in audio/README.md; code, tests and docs repointed.
+<!-- SECTION:FINAL_SUMMARY:END -->

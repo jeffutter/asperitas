@@ -215,7 +215,7 @@ mod tests {
 
     fn load(name: &str) -> Capture {
         Capture::from_console_zst(format!(
-            "{}/../../audio/captures/{name}.console.zst",
+            "{}/../../captures/{name}.console.zst",
             env!("CARGO_MANIFEST_DIR")
         ))
         .unwrap()
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn fixture_300s_sine_is_stable() {
-        let c = load("2026-10-07-rig-sine-300s");
+        let c = load("TASK-038.05/2026-10-07-rig-sine-300s");
         let a = align(&c.samples, &sine(c.samples.len())).unwrap();
         assert_eq!(a.delays.len(), 300);
         assert_stable(&a).unwrap();
@@ -249,8 +249,8 @@ mod tests {
     #[test]
     fn fixture_reset_pair_repeats() {
         let (c1, c2) = (
-            load("2026-10-13-rig-10s-reset1"),
-            load("2026-10-13-rig-10s-reset2"),
+            load("TASK-059.04/2026-10-13-rig-10s-reset1"),
+            load("TASK-059.04/2026-10-13-rig-10s-reset2"),
         );
         let a1 = align(&c1.samples, &sine(c1.samples.len())).unwrap();
         let a2 = align(&c2.samples, &sine(c2.samples.len())).unwrap();

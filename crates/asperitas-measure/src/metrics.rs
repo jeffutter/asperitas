@@ -392,7 +392,7 @@ mod tests {
 
     fn load(name: &str) -> Capture {
         Capture::from_console_zst(format!(
-            "{}/../../audio/captures/{name}.console.zst",
+            "{}/../../captures/{name}.console.zst",
             env!("CARGO_MANIFEST_DIR")
         ))
         .unwrap()
@@ -423,12 +423,14 @@ mod tests {
 
     #[test]
     fn fixture_2026_10_07_300s() {
-        assert_healthy(&run(&load("2026-10-07-rig-sine-300s")));
+        assert_healthy(&run(&load("TASK-038.05/2026-10-07-rig-sine-300s")));
     }
 
     #[test]
     fn fixture_2026_10_15_bootloaded() {
-        assert_healthy(&run(&load("2026-10-15-rig-sine-300s-bootloaded")));
+        assert_healthy(&run(&load(
+            "TASK-038.04.07.04/2026-10-15-rig-sine-300s-bootloaded",
+        )));
     }
 
     /// 10 s synthetic capture: the stimulus, 37 samples late, at the baseline gain.

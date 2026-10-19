@@ -1,5 +1,5 @@
 {
-  "capture": "/var/folders/1r/hgl3f3q90yq88xfs02hjdyh00000gn/T//cap-soak.console.zst",
+  "capture": null,
   "expected_failure_observed": true,
   "failures": [
     "92 discontinuity candidate(s): 64 inside parameter motion, 0 outside, 28 unattributed",

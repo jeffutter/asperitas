@@ -19,14 +19,18 @@ fn json(o: &Output) -> serde_json::Value {
     serde_json::from_slice(&o.stdout).expect("stdout is one JSON document")
 }
 
-const REPLAY: &str = "audio/captures/2026-10-15-rig-excerpt-replay-mand-soft.console.zst";
+const REPLAY: &str = "captures/TASK-038.09/2026-10-15-rig-excerpt-replay-mand-soft.console.zst";
 const CLIP: &str = "audio/instruments/mandolin_single_note_soft.wav";
 
 #[test]
 fn healthy_sine_capture_passes() {
-    let cap = root("audio/captures/2026-10-13-rig-10s-reset1.console.zst");
+    let cap = root("captures/TASK-059.04/2026-10-13-rig-10s-reset1.console.zst");
     let o = run(&["analyze", &cap]);
     let j = json(&o);
+    assert_eq!(
+        j["capture"], "captures/TASK-059.04/2026-10-13-rig-10s-reset1.console.zst",
+        "the report names the capture by its repo-relative path"
+    );
     eprintln!("{j}\n{}", String::from_utf8_lossy(&o.stderr));
     assert_eq!(o.status.code(), Some(0));
     assert_eq!(j["pass"], true);
@@ -85,7 +89,7 @@ fn missing_file_and_bad_usage_are_errors() {
     );
 }
 
-const SINE: &str = "audio/captures/2026-10-13-rig-10s-reset1.console.zst";
+const SINE: &str = "captures/TASK-059.04/2026-10-13-rig-10s-reset1.console.zst";
 
 /// A copy of `capture` in a fresh directory of its own, with `sidecar` written beside it as
 /// `asperitas-rig session` would. Returns the copy's path.
