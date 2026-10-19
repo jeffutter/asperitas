@@ -93,4 +93,17 @@ mod tests {
         assert_eq!(generate_sweep(44_100, 0.1).len(), 4410);
         assert_eq!(sample_count(48_000, 1.0), 48_000);
     }
+
+    #[test]
+    fn sweep_is_the_20_hz_to_20_khz_chirp_over_the_rounded_length() {
+        let sweep = generate_sweep(48_000, 1.0);
+        assert_eq!(sweep.len(), 48_000);
+        assert_eq!(sweep[0], 0.0);
+        let peak = sweep.iter().fold(0.0f32, |p, v| p.max(v.abs()));
+        assert!((peak - 1.0).abs() < 1e-6, "peak {peak}");
+        let chirp = Chirp::new(20.0, 20_000.0, 48_000, 48_000);
+        for (n, v) in sweep.iter().enumerate() {
+            assert_eq!(*v, chirp.sample(n) as f32, "sample {n}");
+        }
+    }
 }

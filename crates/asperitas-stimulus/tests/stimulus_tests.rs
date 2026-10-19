@@ -1070,29 +1070,74 @@ fn reset_replays_bit_identically_for_every_source() {
         .all(|(a, b)| a.to_bits() == b.to_bits()));
 }
 
-#[test]
-fn sweep_interior_is_the_shared_chirp_scaled_to_level() {
-    // The golden sweep in `asperitas-cli` is `Chirp` bare. The device sweep must be that chirp
-    // times its fade and a level scale, so over the untapered interior the two differ by one
-    // constant factor and nothing else.
-    const N: u32 = 4_800;
+/// One second at 48 kHz played through [`ExponentialSweep`], with the bare chirp it is built on.
+fn played_sweep_and_chirp(level_dbfs: f32) -> (Vec<f32>, Chirp) {
+    const N: u32 = 48_000;
     let mut source = ExponentialSweep::default();
     source.set_sample_rate(FS as f32);
     source.set_params(&ExponentialSweepParams {
-        level_dbfs: 0.0,
+        level_dbfs,
         f0_hz: 20.0,
         f1_hz: 20_000.0,
         total_samples: N,
     });
     let chirp = Chirp::new(20.0, 20_000.0, N, FS);
-    let played: Vec<f32> = (0..N).map(|_| source.tick([0.0, 0.0])[0]).collect();
-    let fade = 480;
-    let worst = (fade..N as usize - fade)
-        .map(|n| (f64::from(played[n]) - chirp.sample(n)).abs())
-        .fold(0.0f64, f64::max);
+    let played = (0..N).map(|_| source.tick([0.0, 0.0])[0]).collect();
+    (played, chirp)
+}
+
+/// Largest disagreement over `range` between the played sweep and `gain` times the bare chirp.
+fn worst_difference(
+    played: &[f32],
+    chirp: &Chirp,
+    gain: f64,
+    range: core::ops::Range<usize>,
+) -> f64 {
+    range
+        .map(|n| (f64::from(played[n]) - gain * chirp.sample(n)).abs())
+        .fold(0.0f64, f64::max)
+}
+
+const SWEEP_FADE: usize = 480;
+
+#[test]
+fn sweep_interior_is_the_shared_chirp_scaled_to_level() {
+    // The golden sweep in `asperitas-cli` is `Chirp` bare. The device sweep must be that chirp
+    // times its fade and a level scale, so over the untapered interior the two differ by one
+    // constant factor and nothing else.
+    let (played, chirp) = played_sweep_and_chirp(0.0);
+    let worst = worst_difference(&played, &chirp, 1.0, SWEEP_FADE..played.len() - SWEEP_FADE);
     // Peak normalisation moves the scale by at most the scanned peak's distance from unity.
     assert!(
-        worst < 1e-4,
+        worst < 1e-6,
         "interior differs from the chirp by {worst:.3e}"
+    );
+}
+
+#[test]
+fn sweep_level_is_the_chirp_scaled_by_dbfs() {
+    // A level bug such as squared amplitude agrees at 0 dBFS and diverges everywhere else.
+    let (played, chirp) = played_sweep_and_chirp(-20.0);
+    let gain = 10f64.powf(-20.0 / 20.0);
+    let worst = worst_difference(&played, &chirp, gain, SWEEP_FADE..played.len() - SWEEP_FADE);
+    assert!(
+        worst < 1e-6,
+        "interior differs from the chirp scaled to -20 dBFS by {worst:.3e}"
+    );
+}
+
+#[test]
+fn sweep_fades_are_the_only_disagreement() {
+    let (played, chirp) = played_sweep_and_chirp(0.0);
+    let n = played.len();
+    let interior =
+        worst_difference(&played, &chirp, 1.0, SWEEP_FADE..n - SWEEP_FADE).max(f64::EPSILON);
+    let head = worst_difference(&played, &chirp, 1.0, 0..SWEEP_FADE);
+    let tail = worst_difference(&played, &chirp, 1.0, n - SWEEP_FADE..n);
+    assert!(head > 0.1, "head fade changes the chirp by only {head:.3e}");
+    assert!(tail > 0.5, "tail fade changes the chirp by only {tail:.3e}");
+    assert!(
+        head > 1e3 * interior && tail > 1e3 * interior,
+        "fade disagreement (head {head:.3e}, tail {tail:.3e}) is not well above the interior {interior:.3e}"
     );
 }
