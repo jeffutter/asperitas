@@ -66,14 +66,22 @@ fn draw(out: &mut impl Write, lines: &[String], redraw: bool) -> io::Result<()> 
 
 /// Block until the session ends. On a terminal that is esc, ctrl-c or `seconds`, while key
 /// presses write knob positions into `slot`; otherwise the knobs stay fixed and the session
-/// ends after `seconds` or on Enter.
+/// ends after `seconds` or on Enter; with stdin closed and no `seconds` it runs until killed.
 pub fn wait(
     slot: &ControlSlot,
     initial: &Controls,
     source: &str,
     seconds: Option<f64>,
 ) -> Result<(), String> {
-    let deadline = seconds.map(|s| Instant::now() + Duration::from_secs_f64(s.max(0.0)));
+    let deadline = match seconds {
+        Some(s) => Some(
+            Duration::try_from_secs_f64(s)
+                .ok()
+                .and_then(|d| Instant::now().checked_add(d))
+                .ok_or_else(|| format!("invalid duration: {s} seconds"))?,
+        ),
+        None => None,
+    };
     if !(io::stdout().is_terminal() && io::stdin().is_terminal()) {
         println!("stdout is not a terminal: knob view disabled, knobs fixed");
         match deadline {
@@ -81,7 +89,12 @@ pub fn wait(
             None => {
                 println!("press Enter to stop");
                 let mut line = String::new();
-                let _ = io::stdin().read_line(&mut line);
+                if matches!(io::stdin().read_line(&mut line), Ok(0)) {
+                    println!("stdin closed: running until killed");
+                    loop {
+                        std::thread::park();
+                    }
+                }
             }
         }
         return Ok(());

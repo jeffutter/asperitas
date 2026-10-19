@@ -32,9 +32,21 @@ struct Args {
     buffer: u32,
 
     /// Stop after this many seconds. Without it the stream runs until esc (knob view) or Enter
-    /// (when stdout is not a terminal) is pressed.
-    #[arg(long, value_name = "SECONDS")]
+    /// (when stdout is not a terminal) is pressed; if stdin is closed the stream runs until killed.
+    #[arg(long, value_name = "SECONDS", value_parser = parse_seconds)]
     seconds: Option<f64>,
+}
+
+/// Longest accepted `--seconds`: a day, far below anything `Duration` or `Instant` overflow on.
+const MAX_SECONDS: f64 = 86_400.0;
+
+fn parse_seconds(text: &str) -> Result<f64, String> {
+    let s: f64 = text.parse().map_err(|e| format!("not a number: {e}"))?;
+    if s.is_finite() && s > 0.0 && s <= MAX_SECONDS {
+        Ok(s)
+    } else {
+        Err(format!("must be greater than 0 and at most {MAX_SECONDS}"))
+    }
 }
 
 fn run(args: &Args) -> Result<(), String> {
@@ -61,5 +73,23 @@ fn main() -> ExitCode {
             eprintln!("asperitas-live: {message}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_seconds;
+
+    #[test]
+    fn rejects_unusable_seconds() {
+        for bad in ["inf", "NaN", "-1", "0", "1e300", "abc"] {
+            assert!(parse_seconds(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn accepts_sane_seconds() {
+        assert_eq!(parse_seconds("0.5"), Ok(0.5));
+        assert_eq!(parse_seconds("3600"), Ok(3600.0));
     }
 }
