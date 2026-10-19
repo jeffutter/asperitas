@@ -47,6 +47,8 @@ pub enum ControlError {
     Usage(String),
     /// The console never came back after a restart.
     NoDevice(String),
+    /// The device sent a second `BOOT` after the session began: it restarted mid-session.
+    DeviceReset,
 }
 
 impl fmt::Display for ControlError {
@@ -57,6 +59,12 @@ impl fmt::Display for ControlError {
             ControlError::Timeout => write!(f, "timed out waiting for a device reply"),
             ControlError::Rejected(c) => write!(f, "device rejected the command: {c:?}"),
             ControlError::Usage(s) | ControlError::NoDevice(s) => write!(f, "{s}"),
+            ControlError::DeviceReset => {
+                write!(
+                    f,
+                    "device reset mid-session (BOOT seen after commands were sent)"
+                )
+            }
         }
     }
 }

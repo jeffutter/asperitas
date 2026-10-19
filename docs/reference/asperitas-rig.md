@@ -146,6 +146,8 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
   `firmware/asperitas-h750.yaml`.
 - `FX` is only sent after a `BOOT` record has been read on this attachment (12 s limit). Without
   one the board has been running and may be armed, so the session exits 2 having sent nothing.
+- A second `BOOT` after the session sent a command means the device reset mid-session: the
+  session aborts with a device-reset error (exit 2) rather than reporting a pass.
 - Release guarantee: once anything has been sent, `REL` follows on every way out, including a
   failed write, a dead port and a timeout before the capture armed.
 - The schedule runs between reads of a 10 ms port timeout, so step timing jitters by up to 10 ms.

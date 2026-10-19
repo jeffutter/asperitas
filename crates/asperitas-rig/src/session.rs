@@ -211,8 +211,8 @@ impl SessionOpts {
 /// What the stream showed while the session ran.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Observed {
-    /// A `BOOT` record was read.
-    pub boot: bool,
+    /// `BOOT` records read. More than one after the session sent a command means a device reset.
+    pub boots: usize,
     /// `CTLR OK FX` was read.
     pub fx_acked: bool,
     /// `CTLR OK SET` replies.
@@ -236,7 +236,7 @@ pub struct Observed {
 impl Observed {
     fn observe(&mut self, r: &Record<'_>) {
         if is_boot(r.body) {
-            self.boot = true;
+            self.boots += 1;
         } else if let Some(delivered) = capstat_delivered(r.body) {
             if delivered > 0 && !self.armed {
                 self.armed = true;
@@ -384,6 +384,9 @@ impl<P: Read + Write> Runner<P> {
                 "decoder made no progress",
             )));
         }
+        if self.sent_anything && self.observed.boots > 1 {
+            return Err(ControlError::DeviceReset);
+        }
         Ok(())
     }
 
@@ -397,7 +400,7 @@ impl<P: Read + Write> Runner<P> {
         let limit = start + opts.max;
 
         let boot_deadline = start + opts.boot_wait.min(opts.max);
-        while !self.observed.boot {
+        while self.observed.boots == 0 {
             if Instant::now() >= boot_deadline {
                 return Err(ControlError::NoDevice(
                     "no BOOT record after attaching: this is not a fresh boot, refusing to send FX"
@@ -583,6 +586,8 @@ mod tests {
         arm: bool,
         die_after_arm: bool,
         dump_on_arm: bool,
+        /// After the nth write (0-based) is acknowledged, the device restarts and sends `BOOT`.
+        reset_on_write: Option<usize>,
         /// The nth write (0-based) fails once.
         fail_write: Option<usize>,
         writes: usize,
@@ -601,6 +606,7 @@ mod tests {
                 die_after_arm: false,
                 dump_on_arm: false,
                 fail_write: None,
+                reset_on_write: None,
                 writes: 0,
                 queue: VecDeque::new(),
                 seq: 0,
@@ -646,6 +652,10 @@ mod tests {
             self.writes += 1;
             if self.fail_write == Some(n) {
                 return Err(io::Error::other("write failed"));
+            }
+            if self.reset_on_write == Some(n) {
+                let f = self.next_frame(b"BOOT proto=1 fw=x");
+                self.queue.push_back(f);
             }
             let mut d = Decoder::new();
             d.push(b);
@@ -848,6 +858,24 @@ mod tests {
         let c = cmds(&written);
         assert_eq!(c.last(), Some(&Command::OverrideRelease { knob: 2 }));
         assert!(!c.iter().any(|c| matches!(c, Command::OverrideSet { .. })));
+    }
+
+    #[test]
+    fn mid_session_boot_aborts_with_device_reset() {
+        let (mut rig, written) = Rig::new();
+        rig.reset_on_write = Some(2);
+        let run = run_session(rig, &sweep_plan(), &opts(3000));
+        assert!(
+            matches!(run.error, Some(ControlError::DeviceReset)),
+            "{:?}",
+            run.error
+        );
+        assert_eq!(run.outcome(), Outcome::Error);
+        let sets = cmds(&written)
+            .iter()
+            .filter(|c| matches!(c, Command::OverrideSet { .. }))
+            .count();
+        assert!(sets <= 2, "kept sending SETs after the reset: {sets}");
     }
 
     #[test]
