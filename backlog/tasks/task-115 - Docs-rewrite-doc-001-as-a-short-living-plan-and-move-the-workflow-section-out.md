@@ -1,11 +1,11 @@
 ---
 id: TASK-115
 title: 'Docs: rewrite doc-001 as a short living plan and move the workflow section out'
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-10-16 18:13'
-updated_date: '2026-10-18 20:46'
+updated_date: '2026-10-19 18:25'
 labels:
   - review-2026-10
   - docs
@@ -31,7 +31,7 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 <!-- AC:BEGIN -->
 - [x] #1 doc-001 is under ~250 lines, factually matches the repo, and marks M0-M3 done
 - [x] #2 Workflow/gates content lives outside the plan; no cites of firmware/memory.x
-- [ ] #3 M4 scope is stated concretely (reviewed with the owner)
+- [x] #3 M4 scope is stated concretely (reviewed with the owner)
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -53,10 +53,12 @@ Final: tick AC1, AC2; leave AC3 for owner sign-off.
 
 <!-- SECTION:NOTES:BEGIN -->
 Section 5 moved to docs/development.md (condensed, no timings, no gate-cost tables, memory.x cites replaced by memory-internal.x/memory-bootloaded.x, 469,763,480). doc-001 rewritten to 181 lines: real crate map, M0-M3 marked done, measurement rig effort added, PR #80/dasp/probe/48-sample claims fixed. M4/M5 scope is drafted as a proposal marked needing owner review; AC3 deliberately left unchecked (HUMAN review, cannot be satisfied unattended). Also repointed the gates.sh --list usage text and an led.rs comment that cited doc-001.
+
+2026-10-19, live session with the owner: walked the M4 scope in doc-001 (asperitas-live crate, Controls and ParamSpec as the one shared parameter model, live host versus device exit criterion, M4 before M5). The owner confirmed each point as written and signed off AC #3. The exit criterion stays as drafted, live host against device.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-doc-001 rewritten as a short living plan; development workflow moved to docs/development.md. AC3 (owner review of M4 scope) remains open.
+doc-001 is a short living plan with the workflow section moved to docs/development.md. The owner reviewed and confirmed the M4 scope as written in a live session, closing the last criterion.
 <!-- SECTION:FINAL_SUMMARY:END -->

@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@human'
 created_date: '2026-10-16 18:13'
-updated_date: '2026-10-19 16:25'
+updated_date: '2026-10-19 18:20'
 labels:
   - review-2026-10
   - hardware
@@ -57,4 +57,6 @@ AC2 NOT met for rig: `asperitas-rig query` against rig answers `device rejected 
 AC2 reworded with the owner (2026-10-19): query/restart on rig was never implemented (rig's handle_control serves FX/SET/REL only; VER/RSN/RST were wired into main and podtest), so the criterion now asks for query/restart on main only. The rig capture counters and main query/restart were verified at the bench as noted above; owner agreed and signed off. query/restart on rig remains with TASK-088.
 
 AC3 checked in the same live bench session with the owner (2026-10-19), bootloaded layout, fw 86fe0ae-dirty. panictest: countdown 8..1 and `E ... PANIC: panictest: deliberate panic, exercising the LED + serial panic path at src/bin/panictest.rs:123:9` reached the host intact over USB (capture attached late: BOOT and countdown 10/9 missed, discarded_bytes=34). Owner saw LED 1 steady green for the 10 s countdown then steady red after the panic; the brief boot red was not clearly seen (before USB, behind the bootloader's 2 s grace), so TASK-106.01 boot state stays open. podtest 75 s capture: ENC +1 x10, ENC -1 x10, BTN1 press/release 10/10, BTN2 10/10, encoder CLICK 10/10, each detent with the full AB=00,01,10,11 walk. device_dropped=4489 is podtest's ~100 Hz knob stream (TASK-033.01 recorded 4041 in 240 s), unrelated to the input counts. Owner signed off on this criterion.
+
+2026-10-19, live session with the owner: the query and restart check on a rig image now passes after TASK-088 (fw=0.1.0+8095c78 reset_reason=software, restart re-enumerates). The recheck found one regression, the rig dump hanging on hardware since 33f0847, filed as TASK-141 with the bisect. AC #4 is left unticked until the owner decides whether TASK-141 satisfies it.
 <!-- SECTION:NOTES:END -->

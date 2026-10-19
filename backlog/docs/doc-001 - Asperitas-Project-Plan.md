@@ -110,19 +110,19 @@ runner (`asperitas-rig`) and the analysis crate (`asperitas-measure`). This is h
 verified without ears; committed captures live in `audio/captures`. Open work is tracked as
 tickets, notably the HUMAN bench runs.
 
-### M4 - Live desktop iteration: proposal, needs owner review
-A `cpal`-backed live host so sound design stops requiring a flash cycle. Proposed scope:
+### M4 - Live desktop iteration
+A `cpal`-backed live host so sound design stops requiring a flash cycle. Scope:
 
 - **Crate:** `asperitas-live` (a `cpal` backend running `Asperitas`; add `ratatui` only if a
   terminal UI earns its keep over plain CLI flags). Not `asperitas-tui` unless the TUI is the point.
 - **Shared parameter model:** today three separate surfaces map to the same effect: the Pod knob
-  mapping, `asperitas-cli --params`, and `CTL FX`. "Same as the device" is proposed to mean exactly
+  mapping, `asperitas-cli --params`, and `CTL FX`. "Same as the device" means exactly
   one definition: `asperitas-dsp`'s `Controls` (normalised knobs in `[0, 1]`) and `ParamSpec`
   tables, with every host translating its own input into `Controls` and nothing else.
 - **Exit criterion:** the live host and the device, given the same `Controls` and input, produce
   the same output within float tolerance.
 
-### M5 - The resonator: proposal, needs owner review
+### M5 - The resonator
 A resonator `Processor` (comb/bandpass bank, excitation shaping, damping and structure controls,
 stereo spread) with its own `Params`, added beside `Asperitas` rather than replacing it. Golden
 regression tests against the committed corpus; impulse and frequency response output from the CLI
