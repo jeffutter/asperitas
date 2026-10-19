@@ -45,8 +45,9 @@
 //! - **Panic path.** The panic handler takes no lock and touches no inbound state, so inbound
 //!   traffic cannot block it. After a panic the executor is dead, so `RST` is not serviced; recover
 //!   with the RESET button.
-//! - **Not wired:** `rig`, a one-shot timeline with no inbound channel by design and little flash
-//!   headroom left.
+//! - **Rig.** The rig owns its inbound channel (one consumer shared with the excerpt installer), so
+//!   it calls [`handle_control`] from its install loop instead of [`spawn`], passing a hook for
+//!   `FX`. Overrides, `VER`, `RSN` and `RST` are the same code as in `main`.
 
 use core::cell::RefCell;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -57,7 +58,7 @@ use asperitas_wire::control::{VersionText, VERSION_MAX};
 use cortex_m::interrupt::Mutex;
 
 /// Knobs the Pod exposes to the DSP: knob 1 and knob 2, ids 0 and 1.
-pub const KNOBS: usize = 2;
+pub const KNOBS: usize = asperitas_dsp::KNOB_COUNT;
 
 static OVERRIDE: Mutex<RefCell<KnobOverride<KNOBS>>> =
     Mutex::new(RefCell::new(KnobOverride::new()));
@@ -92,9 +93,10 @@ fn version() -> VersionText {
 #[cfg(feature = "log-usb")]
 mod console {
     use super::*;
+    use asperitas_logging::inbound::InboundRecord;
     use asperitas_logging::usb::{enable_inbound, InboundReceiver};
     use asperitas_wire::control::{
-        reset_reason_from_rsr, route, Command, ErrorCode, Reply, CONTROL,
+        reset_reason_from_rsr, route, wire_to_level, Command, ErrorCode, Reply, Verb, CONTROL,
     };
 
     /// Time the console drain gets to ship the `OK RST` ack before the core resets. The drain is a
@@ -109,37 +111,65 @@ mod console {
         let _ = asperitas_logging::emit_record(asperitas_logging::Level::Info, now_ms, &body[..n]);
     }
 
-    fn apply(cmd: Command) -> Option<Reply> {
-        let ok = |cmd: Command| Some(Reply::Ok(cmd.verb()));
+    /// Answer one `CTL` record: the verbs every binary serves (`VER`, `RSN`, `RST`, `SET`, `REL`)
+    /// plus whatever `replay_fx` makes of `FX`, then send the reply.
+    ///
+    /// `replay_fx(fx, value)` is the binary-specific hook: `main` and `podtest` have no effect
+    /// stage and answer `unknown-verb`; the rig selects its replay effect. `RST` acks, waits for the
+    /// console drain, and resets the core, so this future does not return for it.
+    pub async fn handle_control(rec: &InboundRecord, replay_fx: impl FnOnce(u8, u16) -> Reply) {
+        let mut restart = false;
+        let mut reply = None;
+        let rejected = route(
+            rec,
+            &CONTROL,
+            // Excerpt records belong to the binary's own consumer, not to this dispatcher.
+            |_| {},
+            |cmd| match cmd {
+                Command::Restart => restart = true,
+                other => reply = Some(apply(other, replay_fx)),
+            },
+        );
+        if restart {
+            send(Reply::Ok(Verb::Restart));
+            embassy_time::Timer::after_millis(RESTART_FLUSH_MS).await;
+            cortex_m::peripheral::SCB::sys_reset();
+        }
+        if let Some(r) = reply.or(rejected) {
+            send(r);
+        }
+    }
+
+    fn apply(cmd: Command, replay_fx: impl FnOnce(u8, u16) -> Reply) -> Reply {
+        let ok = |cmd: Command| Reply::Ok(cmd.verb());
         match cmd {
-            Command::GetVersion => Some(Reply::Version(version())),
-            Command::GetResetReason => Some(Reply::ResetReason(reset_reason_from_rsr(
-                RESET_STATUS.load(Ordering::Relaxed),
-            ))),
+            Command::GetVersion => Reply::Version(version()),
+            Command::GetResetReason => {
+                Reply::ResetReason(reset_reason_from_rsr(RESET_STATUS.load(Ordering::Relaxed)))
+            }
             Command::OverrideSet { knob, value } => {
-                let v = asperitas_wire::control::wire_to_level(value);
+                let v = wire_to_level(value);
                 let accepted = cortex_m::interrupt::free(|cs| {
                     OVERRIDE.borrow(cs).borrow_mut().set(usize::from(knob), v)
                 });
                 if accepted {
                     ok(cmd)
                 } else {
-                    Some(Reply::Error(ErrorCode::BadKnob))
+                    Reply::Error(ErrorCode::BadKnob)
                 }
             }
             Command::OverrideRelease { knob } => {
                 if usize::from(knob) >= KNOBS {
-                    return Some(Reply::Error(ErrorCode::BadKnob));
+                    return Reply::Error(ErrorCode::BadKnob);
                 }
                 cortex_m::interrupt::free(|cs| {
                     OVERRIDE.borrow(cs).borrow_mut().release(usize::from(knob))
                 });
                 ok(cmd)
             }
-            // Served only by the rig's excerpt replay, not by these binaries.
-            Command::ReplayFx { .. } => Some(Reply::Error(ErrorCode::UnknownVerb)),
-            // Handled by the caller: it never returns.
-            Command::Restart => None,
+            Command::ReplayFx { fx, value } => replay_fx(fx, value),
+            // Handled by `handle_control`: it never returns.
+            Command::Restart => Reply::Error(ErrorCode::UnknownVerb),
         }
     }
 
@@ -147,26 +177,8 @@ mod console {
     async fn control_task(rx: InboundReceiver) {
         loop {
             let rec = rx.receive().await;
-            let mut restart = false;
-            let mut reply = None;
-            let rejected = route(
-                &rec,
-                &CONTROL,
-                // No excerpt consumer in these binaries; the record is simply not for us.
-                |_| {},
-                |cmd| match cmd {
-                    Command::Restart => restart = true,
-                    other => reply = apply(other),
-                },
-            );
-            if restart {
-                send(Reply::Ok(asperitas_wire::control::Verb::Restart));
-                embassy_time::Timer::after_millis(RESTART_FLUSH_MS).await;
-                cortex_m::peripheral::SCB::sys_reset();
-            }
-            if let Some(r) = reply.or(rejected) {
-                send(r);
-            }
+            // No effect stage in these binaries.
+            handle_control(&rec, |_, _| Reply::Error(ErrorCode::UnknownVerb)).await;
         }
     }
 
@@ -179,7 +191,7 @@ mod console {
 }
 
 #[cfg(feature = "log-usb")]
-pub use console::spawn;
+pub use console::{handle_control, spawn};
 
 /// No console, no control channel.
 #[cfg(not(feature = "log-usb"))]

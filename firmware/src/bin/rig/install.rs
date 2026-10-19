@@ -159,55 +159,24 @@ fn emit_exc_fail(failure: &asperitas_wire::excerpt::Failure) {
     emit_console(&body[..n]);
 }
 
-/// Answer one `CTL` record. The rig serves the replay-effect verbs `FX`, `SET` and `REL` on every
-/// build (see the `fx_ctl` module); every other verb gets `unknown-verb`, as before this channel existed
-/// it was ignored, and a host that waits for an answer is better told. Parse failures are counted
-/// and answered by `route`.
+/// Answer one `CTL` record through the shared dispatcher (`VER`, `RSN`, `RST`, `SET`, `REL`; see
+/// `host_control`). The rig adds `FX`, refused with `busy` while a capture is armed because changing
+/// the effect mid-capture would make the recording unrepeatable. `SET` and `REL` are allowed
+/// mid-capture: the effect kind and base value stay fixed while the override moves the parameter,
+/// which is what a sweep is.
 #[cfg(feature = "log-usb")]
-fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
-    use asperitas_wire::control::{route, ErrorCode, Reply, CONTROL};
-    let mut reply = None;
-    let rejected = route(
-        record,
-        &CONTROL,
-        |_| {},
-        |cmd| {
-            reply = Some(match cmd {
-                asperitas_wire::control::Command::ReplayFx { fx, value } => {
-                    // Changing the effect mid-capture would make the recording unrepeatable.
-                    if CAPTURE_ACTIVE.load(Ordering::Acquire) {
-                        Reply::Error(ErrorCode::Busy)
-                    } else if fx_ctl::select_fx(fx, value) {
-                        Reply::Ok(cmd.verb())
-                    } else {
-                        Reply::Error(ErrorCode::BadValue)
-                    }
-                }
-                // Allowed mid-capture, unlike `FX`: the effect kind and base value stay fixed
-                // while the override moves the parameter, which is what a sweep is.
-                asperitas_wire::control::Command::OverrideSet { knob, value } => {
-                    if fx_ctl::override_set(knob, value) {
-                        Reply::Ok(cmd.verb())
-                    } else {
-                        Reply::Error(ErrorCode::BadKnob)
-                    }
-                }
-                asperitas_wire::control::Command::OverrideRelease { knob } => {
-                    if fx_ctl::override_release(knob) {
-                        Reply::Ok(cmd.verb())
-                    } else {
-                        Reply::Error(ErrorCode::BadKnob)
-                    }
-                }
-                _ => Reply::Error(ErrorCode::UnknownVerb),
-            });
-        },
-    );
-    if let Some(r) = reply.or(rejected) {
-        let mut body = [0u8; asperitas_wire::frame::MAX_BODY];
-        let n = r.encode(&mut body);
-        emit_console(&body[..n]);
-    }
+async fn handle_control(record: &asperitas_logging::inbound::InboundRecord) {
+    use asperitas_wire::control::{ErrorCode, Reply, Verb};
+    asperitas_firmware::host_control::handle_control(record, |fx, value| {
+        if CAPTURE_ACTIVE.load(Ordering::Acquire) {
+            Reply::Error(ErrorCode::Busy)
+        } else if fx_ctl::select_fx(fx, value) {
+            Reply::Ok(Verb::Fx)
+        } else {
+            Reply::Error(ErrorCode::BadValue)
+        }
+    })
+    .await;
 }
 
 /// Consume install records forever: the one consumer of `usb::inbound()`.
@@ -234,7 +203,7 @@ pub(crate) async fn run_install(inbound: asperitas_logging::usb::InboundReceiver
         let record = inbound.receive().await;
         let body = record.body();
         if body.starts_with(asperitas_wire::control::CMD_PREFIX) {
-            handle_control(&record);
+            handle_control(&record).await;
             continue;
         }
         let parsed = parse_record(body);

@@ -11,8 +11,7 @@
 //! `select_fx` publishes under a critical section and the callback picks it up at the next block.
 //!
 //! `CTL SET k=<00|01> v=<4 hex>` / `CTL REL k=<00|01>` override knob 0 (filter cutoff) or knob 1
-//! (output gain) through the same `asperitas_pod::knob_override::KnobOverride` the shipped firmware
-//! uses. Unlike `FX` it is accepted while a capture is armed, so `asperitas-rig`'s override sweep
+//! (output gain) through `host_control`'s override table, the one the shipped firmware uses. Unlike `FX` it is accepted while a capture is armed, so `asperitas-rig`'s override sweep
 //! moves the effect mid-capture. Each callback merges the overrides over the patch's default knob
 //! positions (the "pot reading") and calls `ReplayFx::set_knobs`, which acts only when the merged
 //! pair changed; the override therefore enters UPSTREAM of the effect's smoothing, exactly where
@@ -29,9 +28,7 @@
 
 use asperitas_dsp::fx_chain::FxChain;
 use asperitas_dsp::processor::{Frame, Processor};
-use asperitas_dsp::KNOB_COUNT;
-use asperitas_pod::knob_override::KnobOverride;
-use core::cell::{Cell, RefCell};
+use core::cell::Cell;
 use core::sync::atomic::{AtomicU32, Ordering};
 use cortex_m::interrupt::Mutex;
 
@@ -51,28 +48,6 @@ pub fn select_fx(code: u8, value: u16) -> bool {
     true
 }
 
-/// The host's overrides of the patch's knobs: 0 filter cutoff, 1 output gain.
-static KNOB: Mutex<RefCell<KnobOverride<KNOB_COUNT>>> =
-    Mutex::new(RefCell::new(KnobOverride::new()));
-
-/// Override knob `knob` with the wire value `value` (`0..=65535` spans `0.0..=1.0`). `false`
-/// for a knob the patch does not have.
-#[cfg(feature = "log-usb")]
-pub fn override_set(knob: u8, value: u16) -> bool {
-    let v = asperitas_wire::control::wire_to_level(value);
-    cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().set(usize::from(knob), v))
-}
-
-/// Return knob `knob` to its default. `false` for a knob the patch does not have.
-#[cfg(feature = "log-usb")]
-pub fn override_release(knob: u8) -> bool {
-    if usize::from(knob) >= KNOB_COUNT {
-        return false;
-    }
-    cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow_mut().release(usize::from(knob)));
-    true
-}
-
 /// Render one block: the generator, then the effect, applying a pending `FX` first.
 ///
 /// `fx_seen` is the generation this stage last applied. The callback's cost beyond the bare
@@ -89,6 +64,6 @@ pub fn render<G: Processor>(chain: &mut FxChain<G>, fx_seen: &mut u32, block: &m
     }
     chain.process_block_with(block, |base| {
         // Upstream of smoothing, as `main` does.
-        cortex_m::interrupt::free(|cs| KNOB.borrow(cs).borrow().merge(base))
+        asperitas_firmware::host_control::merge(base)
     });
 }

@@ -264,6 +264,8 @@ fn boot_halt() -> ! {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
+    // First, before anything clears `RCC_RSR`, so `CTL RSN` has an answer.
+    asperitas_firmware::host_control::capture_reset_reason();
     // Claim the core peripherals BEFORE `hal::init`, so that whatever else in the stack wants
     // them finds them gone rather than half-configured by us. The `Option` is matched below
     // rather than unwrapped or `steal()`ed: `None` means somebody else owns the core peripherals,
