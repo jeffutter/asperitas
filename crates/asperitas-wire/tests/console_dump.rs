@@ -3,8 +3,8 @@
 //!
 //! Run with: `cargo test -p asperitas-wire`
 //!
-//! The codec itself is the `base64` crate's `STANDARD` engine, so this file does not re-prove that
-//! engine. It pins what this crate promises on top of it, with expectations written down rather
+//! Decoding is the `base64` crate's `STANDARD` engine, so this file does not re-prove that engine;
+//! encoding is hand-written (see `dump::encode` for why) and is pinned against that engine below. It pins what this crate promises on top of it, with expectations written down rather
 //! than computed from the code under test:
 //!
 //! * **Vectors.** RFC 4648 §10 verbatim, the two saturation patterns at full payload size, and one
@@ -58,6 +58,27 @@ fn our_encode(raw: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; encoded_len(raw.len())];
     let written = dump::encode(raw, &mut out).expect("buffer sized by encoded_len");
     out[..written].to_vec()
+}
+
+/// The hand-written encoder is byte-for-byte the `base64` crate's `STANDARD` output for every
+/// length a chunk can have, read from every start offset a chunk can have in the ring (chunks of
+/// 129 bytes begin at odd and even addresses alike), including an output slice of exactly
+/// `encoded_len` bytes, which is what `audio_body` hands it on the device.
+#[test]
+fn encoder_matches_the_standard_engine_at_every_length_and_offset() {
+    use base64::Engine;
+    let backing: Vec<u8> = (0..=255u8).cycle().take(129 + 8).collect();
+    for offset in 0..8 {
+        for len in 0..=129 {
+            let raw = &backing[offset..offset + len];
+            let mut expected = vec![0u8; encoded_len(len)];
+            let n = base64::engine::general_purpose::STANDARD
+                .encode_slice(raw, &mut expected)
+                .unwrap();
+            expected.truncate(n);
+            assert_eq!(our_encode(raw), expected, "offset {offset} len {len}");
+        }
+    }
 }
 
 /// Full-size payloads take no padding — 129 is a multiple of 3 — so the tail rules above are

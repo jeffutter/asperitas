@@ -1,14 +1,16 @@
 ---
 id: TASK-141
 title: 'Fix: rig capture dump never starts since the base64 crate swap (33f0847)'
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-19 18:20'
+updated_date: '2026-10-19 18:39'
 labels:
   - firmware
   - hardware
   - regression
+  - planned
 dependencies: []
 priority: high
 type: bug
@@ -31,7 +33,25 @@ Suspect: crates/asperitas-wire/src/dump.rs encode path now calls STANDARD.encode
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Root cause identified and recorded in the ticket notes (what fails on the device at dump start, and why host tests missed it).
-- [ ] #2 A regression test fails on the old behaviour and passes on the fix, using the device's real buffer sizes.
-- [ ] #3 gates.sh push passes.
+- [x] #1 Root cause identified and recorded in the ticket notes (what fails on the device at dump start, and why host tests missed it).
+- [x] #2 A regression test fails on the old behaviour and passes on the fix, using the device's real buffer sizes.
+- [x] #3 gates.sh push passes.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by b802f1c. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Root cause (AC1): the capture ring is SDRAM mapped as Device memory (see ring.rs), which faults on unaligned multi-byte loads. 33f0847 made dump::encode call base64's STANDARD.encode_slice directly on the ring slice; disassembly of the pre-fix rig ELF shows its internal_encode loading input with ldrd/ldr.w at whatever alignment the slice has, and 129-byte chunks start at odd ring offsets, so the first misaligned chunk faults in thread mode while the SAI interrupt keeps audio running. The old hand-written encoder read byte-wise. The OutputSliceTooSmall theory in the description was wrong. Host tests missed it because host memory permits unaligned access. Fix: dump::encode is now a byte-at-a-time encoder using volatile single-byte loads (cannot be widened or merged); base64 remains the decoder. Post-fix disassembly has no base64 encode symbols and no ldrd/ldm in dump::encode. AC2 note: a host test cannot fault on unaligned access, so the new test console_dump.rs::encoder_matches_the_standard_engine_at_every_length_and_offset pins wire-output equivalence with the base64 engine for all lengths 0..=129 at 8 start offsets; the fault itself is pinned only by the disassembly check above. Not verified on hardware: TASK-138 owns the bench step (flash rig, ASP_RIG_CAPTURE_SECONDS=10, expect DUMPEND).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Rig dump stall root-caused to base64's encoder issuing unaligned wide loads against Device-memory SDRAM; replaced dump::encode with a volatile byte-wise encoder (output identical to STANDARD, pinned by a new test), gates.sh push passes, rig cross-build clean. Hardware confirmation left to TASK-138.
+<!-- SECTION:FINAL_SUMMARY:END -->

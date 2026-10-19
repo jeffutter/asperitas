@@ -3,8 +3,9 @@
 //! Captured audio has to travel through the console transport in [`crate::frame`], which is
 //! printable-ASCII text: [`crate::frame::sanitize_byte`] replaces every control byte, so raw sample
 //! bytes cannot go near it. This module supplies the codec that makes them fit — RFC 4648 standard
-//! base64 from the `base64` crate's `STANDARD` engine (`no_std`, allocation-free through its slice
-//! API), which is strict enough that silent corruption cannot survive a round trip.
+//! base64, encoded by a small byte-at-a-time encoder here and decoded by the `base64` crate's
+//! `STANDARD` engine (`no_std`, allocation-free through its slice API), which is strict enough that
+//! silent corruption cannot survive a round trip.
 //!
 //! On top of the codec sits the record grammar that carries these payloads — `AUDIO` and `AUDEND`
 //! bodies, the chunk geometry derived from them, and one composite entry point per record kind — so
@@ -179,21 +180,46 @@ pub const fn max_raw_for(b64_chars: usize) -> usize {
 // Encoding and decoding
 // ---------------------------------------------------------------------------
 
+/// The standard base64 alphabet, indexed by a 6-bit group.
+const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
 /// Encode `raw` into `out`, returning the number of characters written.
 ///
-/// Output is canonical and padded (`base64`'s `STANDARD` engine). A short output buffer is
-/// reported before anything is written, leaving `out` untouched.
+/// Output is canonical and padded, identical to the `base64` crate's `STANDARD` engine (a test
+/// pins that for every length a chunk can have). A short output buffer is reported before anything
+/// is written, leaving `out` untouched.
+///
+/// This is hand-written rather than delegated to the crate because of where `raw` lives on the
+/// device: the rig's capture ring is SDRAM mapped as Device memory, which faults on unaligned
+/// multi-byte accesses, and chunks start at arbitrary byte offsets in it. The crate's encoder
+/// loads `raw` in `u64`/`u32` pieces (`ldrd`, `ldr.w` at whatever alignment the slice has), which
+/// compile to exactly those faulting accesses. Each input byte here is read once with a volatile
+/// load, which the compiler may neither widen nor merge, so any source memory is safe.
 pub fn encode(raw: &[u8], out: &mut [u8]) -> Result<usize, EncodeError> {
     let need = encoded_len(raw.len());
     if out.len() < need {
         return Err(EncodeError::OutputTooSmall { need });
     }
-    match STANDARD.encode_slice(raw, out) {
-        Ok(written) => Ok(written),
-        Err(base64::EncodeSliceError::OutputSliceTooSmall) => {
-            unreachable!("output length checked against encoded_len above")
+    let src = raw.as_ptr();
+    let mut written = 0;
+    let mut i = 0;
+    while i < raw.len() {
+        let take = (raw.len() - i).min(3);
+        let mut group = [0u8; 3];
+        for (k, slot) in group.iter_mut().enumerate().take(take) {
+            // Safety: `i + k < raw.len()`, so the pointer is inside the slice.
+            *slot = unsafe { core::ptr::read_volatile(src.add(i + k)) };
         }
+        let n = (u32::from(group[0]) << 16) | (u32::from(group[1]) << 8) | u32::from(group[2]);
+        let sextet = |shift: u32| ALPHABET[((n >> shift) & 0x3f) as usize];
+        out[written] = sextet(18);
+        out[written + 1] = sextet(12);
+        out[written + 2] = if take > 1 { sextet(6) } else { b'=' };
+        out[written + 3] = if take > 2 { sextet(0) } else { b'=' };
+        written += 4;
+        i += 3;
     }
+    Ok(written)
 }
 
 /// Decode a base64 string into `out`, returning the number of raw bytes written.
