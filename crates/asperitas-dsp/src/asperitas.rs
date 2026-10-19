@@ -8,6 +8,9 @@ use crate::processor::{Frame, Processor};
 /// Number of knobs: filter cutoff, then output gain.
 pub const KNOB_COUNT: usize = 2;
 
+/// Real-unit parameter table for the knobs, in knob order `[cutoff, gain]`.
+pub const ASPERITAS_PARAMS: [ParamSpec; KNOB_COUNT] = [FILTER_PARAMS[0], GAIN_PARAMS[0]];
+
 /// Control surface of the effect. Each knob is a normalised position in `[0, 1]`; out-of-range
 /// values clamp and NaN falls back to the parameter's default.
 #[derive(Clone, Debug, PartialEq)]

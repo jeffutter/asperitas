@@ -1,6 +1,6 @@
 //! Process a WAV file through a named DSP processor.
 
-use asperitas_dsp::asperitas::{Asperitas, Controls, KNOB_COUNT};
+use asperitas_dsp::asperitas::{Asperitas, Controls, ASPERITAS_PARAMS};
 use asperitas_dsp::filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 use asperitas_dsp::gain::{Gain, GainParams, GAIN_PARAMS};
 use asperitas_dsp::param::ParamSpec;
@@ -35,13 +35,21 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
                 .process_block(&mut frames);
         }
         "asperitas" => {
-            // The effect's knobs are `[cutoff, gain]`, so its table is the two stage tables in
-            // that order; each real-unit value goes back through its spec to a knob position.
-            let table: Vec<ParamSpec> = FILTER_PARAMS.iter().chain(&GAIN_PARAMS).copied().collect();
-            debug_assert_eq!(table.len(), KNOB_COUNT);
-            let values = parse_with_table("asperitas", &table, &pairs)?;
+            // Unlike gain and filter, the effect takes knob positions, which clamp; so range
+            // check the real-unit values here instead of silently moving them.
+            let values = parse_with_table("asperitas", &ASPERITAS_PARAMS, &pairs)?;
+            for (spec, value) in ASPERITAS_PARAMS.iter().zip(&values) {
+                if !value.is_finite() || *value < spec.min || *value > spec.max {
+                    return Err(format!(
+                        "{} out of range for asperitas processor: {value} (allowed {}..={} {})",
+                        spec.name, spec.min, spec.max, spec.unit
+                    ));
+                }
+            }
             let mut controls = Controls::default();
-            for ((knob, spec), value) in controls.knobs.iter_mut().zip(&table).zip(values) {
+            for ((knob, spec), value) in
+                controls.knobs.iter_mut().zip(&ASPERITAS_PARAMS).zip(values)
+            {
                 *knob = spec.to_normalised(value);
             }
             Asperitas::new(sample_rate, &controls).process_block(&mut frames);
@@ -207,10 +215,59 @@ mod tests {
 
     #[test]
     fn asperitas_rejects_unknown_key() {
-        let table: Vec<ParamSpec> = FILTER_PARAMS.iter().chain(&GAIN_PARAMS).copied().collect();
-        let err =
-            parse_with_table("asperitas", &table, &[("bogus".into(), "1".into())]).unwrap_err();
+        let err = parse_with_table(
+            "asperitas",
+            &ASPERITAS_PARAMS,
+            &[("bogus".into(), "1".into())],
+        )
+        .unwrap_err();
         assert!(err.contains("unknown parameter"), "got: {err}");
+    }
+
+    fn process_err(params: &[&str]) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(&input, spec).unwrap();
+        w.write_sample(0i16).unwrap();
+        w.finalize().unwrap();
+        run_process(&ProcessArgs {
+            input_path: input.to_str().unwrap().to_string(),
+            output_path: dir.path().join("o.wav").to_str().unwrap().to_string(),
+            processor_name: "asperitas".to_string(),
+            params: params.iter().map(|p| p.to_string()).collect(),
+        })
+        .unwrap_err()
+    }
+
+    #[test]
+    fn asperitas_rejects_out_of_range() {
+        for (arg, key) in [
+            ("gain_db=20", "gain_db"),
+            ("cutoff_hz=0", "cutoff_hz"),
+            ("cutoff_hz=1e9", "cutoff_hz"),
+            ("gain_db=nan", "gain_db"),
+        ] {
+            let err = process_err(&[arg]);
+            assert!(
+                err.contains(key) && err.contains("out of range") && err.contains("allowed"),
+                "{arg}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn asperitas_accepts_boundary_values() {
+        for spec in &ASPERITAS_PARAMS {
+            for v in [spec.min, spec.max] {
+                run_on_ramp("asperitas", &[&format!("{}={v}", spec.name)]);
+            }
+        }
     }
 
     #[test]
