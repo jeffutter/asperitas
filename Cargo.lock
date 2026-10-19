@@ -147,6 +147,7 @@ version = "0.1.0"
 dependencies = [
  "asperitas-cli",
  "asperitas-dsp",
+ "asperitas-stimulus",
  "clap",
  "cpal",
  "crossterm",

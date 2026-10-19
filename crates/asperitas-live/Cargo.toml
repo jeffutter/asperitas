@@ -19,6 +19,7 @@ crossterm = "0.29"
 ringbuf = "0.5.3"
 
 [dev-dependencies]
+asperitas-stimulus = { path = "../asperitas-stimulus", features = ["std"] }
 tempfile = "3"
 
 # Inherit the workspace rustdoc denies (see root Cargo.toml).
