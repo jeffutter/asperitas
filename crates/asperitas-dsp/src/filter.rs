@@ -77,7 +77,8 @@ impl Processor for OnePoleLowPass {
     }
 
     fn set_params(&mut self, params: &Self::Params) {
-        // f32::max returns the non-NaN operand, so a NaN cutoff lands on 0 Hz.
+        // f32::max returns the non-NaN operand, so a NaN cutoff lands on 0 Hz (filter closed).
+        // Gain maps NaN to unity instead; a closed low-pass is the safe failure here.
         self.cutoff_hz = params.cutoff_hz.max(0.0);
         self.recompute();
     }

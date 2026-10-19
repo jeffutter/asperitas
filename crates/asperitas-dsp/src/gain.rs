@@ -63,14 +63,16 @@ impl Processor for Gain {
     fn set_params(&mut self, params: &Self::Params) {
         // Convert dB to linear gain, clamped to prevent overflow.
         // 10^(dB/20): -60 dB = 1e-3, +6.02 dB ~ x2, +78.3 dB hits the ceiling below.
-        // A non-finite gain_db falls back to unity (0 dB).
-        let gain_db = if params.gain_db.is_finite() {
-            params.gain_db
-        } else {
+        // -inf dB is exactly zero gain (silence) and +inf saturates at the ceiling. NaN has no
+        // meaning, so it falls back to unity; a filter instead closes on NaN, which is the safe
+        // failure for a low-pass, whereas for a gain unity leaves the signal audible.
+        let gain_clamped = if params.gain_db.is_nan() {
+            1.0
+        } else if params.gain_db == f32::NEG_INFINITY {
             0.0
+        } else {
+            powf(10.0, params.gain_db / 20.0).clamp(0.0, 8192.0) // ~78 dB ceiling
         };
-        let gain_linear = powf(10.0, gain_db / 20.0);
-        let gain_clamped = gain_linear.clamp(0.0, 8192.0); // ~78 dB ceiling
         self.smoother.set_target(gain_clamped);
     }
 
@@ -160,5 +162,36 @@ mod normalised_tests {
             assert!(gain >= prev, "not monotonic at knob={}", knob);
             prev = gain;
         }
+    }
+}
+
+#[cfg(test)]
+mod non_finite_tests {
+    use super::*;
+
+    fn settled(gain_db: f32) -> f32 {
+        let g = Gain::new(48_000.0, &GainParams { gain_db });
+        let mut g = g;
+        g.tick([1.0, 1.0])[0]
+    }
+
+    #[test]
+    fn neg_infinity_is_silence() {
+        assert_eq!(settled(f32::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn pos_infinity_saturates_at_ceiling() {
+        assert_eq!(settled(f32::INFINITY), 8192.0);
+    }
+
+    #[test]
+    fn nan_is_unity() {
+        assert_eq!(settled(f32::NAN), 1.0);
+    }
+
+    #[test]
+    fn finite_minus_60_db_is_unchanged() {
+        assert!((settled(-60.0) - 1e-3).abs() < 1e-6);
     }
 }
