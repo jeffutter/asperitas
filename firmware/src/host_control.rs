@@ -26,7 +26,7 @@
 //!   returns `false` when the console has no room. A dropped reply is the host's timeout to handle.
 //! - **Override.** `SET`/`REL` write a `cortex_m::interrupt::Mutex<RefCell<KnobOverride<2>>>`.
 //!   `main` calls [`merge`] on the knob readings inside the audio callback, after the pot read and
-//!   before `params_from_normalised`, so injected values pass through the DSP smoothing as a turned
+//!   before the knobs reach the effect, so injected values pass through the DSP smoothing as a turned
 //!   pot does. Knob ids 0 and 1; anything else is `bad-knob`. `podtest` logs raw ADC counts to
 //!   measure the pot itself, so it accepts and holds overrides but does not merge them into its log.
 //! - **Version.** `build.rs` exports `ASPERITAS_VERSION` = `CARGO_PKG_VERSION` + `+` +

@@ -1,6 +1,6 @@
 //! Process a WAV file through a named DSP processor.
 
-use asperitas_dsp::asperitas::{Asperitas, Controls, ASPERITAS_PARAMS};
+use asperitas_dsp::asperitas::{Asperitas, Controls};
 use asperitas_dsp::filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 use asperitas_dsp::gain::{Gain, GainParams, GAIN_PARAMS};
 use asperitas_dsp::param::ParamSpec;
@@ -35,23 +35,14 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
                 .process_block(&mut frames);
         }
         "asperitas" => {
-            // Unlike gain and filter, the effect takes knob positions, which clamp; so range
-            // check the real-unit values here instead of silently moving them.
-            let values = parse_with_table("asperitas", &ASPERITAS_PARAMS, &pairs)?;
-            for (spec, value) in ASPERITAS_PARAMS.iter().zip(&values) {
-                if !value.is_finite() || *value < spec.min || *value > spec.max {
-                    return Err(format!(
-                        "{} out of range for asperitas processor: {value} (allowed {}..={} {})",
-                        spec.name, spec.min, spec.max, spec.unit
-                    ));
-                }
+            let mut values = Vec::with_capacity(pairs.len());
+            for (key, value) in &pairs {
+                let value = value
+                    .parse::<f32>()
+                    .map_err(|_| format!("invalid value for {key}: {value}"))?;
+                values.push((key.as_str(), value));
             }
-            let mut controls = Controls::default();
-            for ((knob, spec), value) in
-                controls.knobs.iter_mut().zip(&ASPERITAS_PARAMS).zip(values)
-            {
-                *knob = spec.to_normalised(value);
-            }
+            let controls = Controls::from_values(&values).map_err(|e| e.to_string())?;
             Asperitas::new(sample_rate, &controls).process_block(&mut frames);
         }
         other => {
@@ -103,6 +94,7 @@ fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use asperitas_dsp::asperitas::ASPERITAS_PARAMS;
 
     #[test]
     fn gain_parse_rejects_unknown_key() {
@@ -215,12 +207,7 @@ mod tests {
 
     #[test]
     fn asperitas_rejects_unknown_key() {
-        let err = parse_with_table(
-            "asperitas",
-            &ASPERITAS_PARAMS,
-            &[("bogus".into(), "1".into())],
-        )
-        .unwrap_err();
+        let err = process_err(&["bogus=1"]);
         assert!(err.contains("unknown parameter"), "got: {err}");
     }
 

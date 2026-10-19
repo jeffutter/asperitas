@@ -95,7 +95,13 @@ mod tests {
 
     use super::*;
     use crate::knob::normalize;
-    use asperitas_dsp::{Gain, Processor};
+    use asperitas_dsp::{Gain, GainParams, Processor, GAIN_PARAMS};
+
+    fn gain_at(knob: f32) -> GainParams {
+        GainParams {
+            gain_db: GAIN_PARAMS[0].from_normalised(knob),
+        }
+    }
 
     #[test]
     fn merge_without_override_is_bit_identical() {
@@ -147,7 +153,7 @@ mod tests {
     fn settled_gain() -> Gain {
         let mut g = Gain::default();
         g.set_sample_rate(48_000.0);
-        g.set_params(&Gain::params_from_normalised(0.0));
+        g.set_params(&gain_at(0.0));
         g.reset();
         g
     }
@@ -163,12 +169,12 @@ mod tests {
         ov.set(0, 1.0);
         let mut a = settled_gain();
         let [k] = ov.merge([0.0]);
-        a.set_params(&Gain::params_from_normalised(k));
+        a.set_params(&gain_at(k));
         let a_out = run(&mut a, 6000);
 
         // Path B: same target, but the smoother is snapped to it.
         let mut b = settled_gain();
-        b.set_params(&Gain::params_from_normalised(1.0));
+        b.set_params(&gain_at(1.0));
         b.reset();
         let b_out = run(&mut b, 6000);
 

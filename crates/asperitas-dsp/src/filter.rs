@@ -152,43 +152,34 @@ impl OnePoleLowPass {
     pub fn snap_params(&mut self) {
         self.smoother.snap();
     }
-
-    /// Convert a normalised knob position [0.0, 1.0] to [`FilterParams`].
-    ///
-    /// Uses logarithmic taper: maps linearly across the frequency ratio,
-    /// so equal physical knob travel gives equal perceptual steps.
-    ///
-    /// Range: 20 Hz (knob = 0) → 20 kHz (knob = 1).
-    /// At midpoint (0.5) this yields ≈ 632 Hz (geometric mean of 20 and 20 kHz).
-    ///
-    /// Input is clamped to [0.0, 1.0] so degenerate readings produce valid params.
-    pub fn params_from_normalised(knob: f32) -> FilterParams {
-        FilterParams {
-            cutoff_hz: FILTER_PARAMS[0].from_normalised(knob),
-        }
-    }
 }
 
 #[cfg(test)]
 mod normalised_tests {
     use super::*;
 
+    fn cutoff_at(knob: f32) -> FilterParams {
+        FilterParams {
+            cutoff_hz: FILTER_PARAMS[0].from_normalised(knob),
+        }
+    }
+
     #[test]
-    fn params_from_normalised_min_is_20hz() {
-        let params = OnePoleLowPass::params_from_normalised(0.0);
+    fn knob_min_is_20hz() {
+        let params = cutoff_at(0.0);
         assert!((params.cutoff_hz - 20.0).abs() < 0.01);
     }
 
     #[test]
-    fn params_from_normalised_max_is_20khz() {
-        let params = OnePoleLowPass::params_from_normalised(1.0);
+    fn knob_max_is_20khz() {
+        let params = cutoff_at(1.0);
         assert!((params.cutoff_hz - 20_000.0).abs() < 0.01);
     }
 
     #[test]
-    fn params_from_normalised_midpoint_is_geometric_mean() {
+    fn knob_midpoint_is_geometric_mean() {
         // Geometric mean of 20 and 20000 = sqrt(20*20000) ≈ 632.5 Hz
-        let params = OnePoleLowPass::params_from_normalised(0.5);
+        let params = cutoff_at(0.5);
         assert!(
             (params.cutoff_hz - 632.5).abs() < 1.0,
             "got {}",
@@ -197,23 +188,23 @@ mod normalised_tests {
     }
 
     #[test]
-    fn params_from_normalised_clamps_below_zero() {
-        let params = OnePoleLowPass::params_from_normalised(-0.5);
+    fn knob_clamps_below_zero() {
+        let params = cutoff_at(-0.5);
         assert!((params.cutoff_hz - 20.0).abs() < 0.01);
     }
 
     #[test]
-    fn params_from_normalised_clamps_above_one() {
-        let params = OnePoleLowPass::params_from_normalised(2.0);
+    fn knob_clamps_above_one() {
+        let params = cutoff_at(2.0);
         assert!((params.cutoff_hz - 20_000.0).abs() < 0.01);
     }
 
     #[test]
-    fn params_from_normalised_monotonic() {
+    fn knob_monotonic() {
         let mut prev = 0.0_f32;
         for i in 0..=100u16 {
             let knob = i as f32 / 100.0;
-            let cutoff = OnePoleLowPass::params_from_normalised(knob).cutoff_hz;
+            let cutoff = cutoff_at(knob).cutoff_hz;
             assert!(cutoff >= prev, "not monotonic at knob={}", knob);
             prev = cutoff;
         }

@@ -15,7 +15,7 @@ pub enum Taper {
 ///
 /// The `min`/`max` range is the span a knob sweeps. It is not enforced on values supplied
 /// elsewhere (CLI, tests); processors sanitise their own inputs.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParamSpec {
     pub name: &'static str,
     pub unit: &'static str,

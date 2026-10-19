@@ -31,6 +31,57 @@ impl Default for Controls {
     }
 }
 
+/// Why [`Controls::from_values`] rejected an input.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ControlsError<'a> {
+    /// No entry of [`ASPERITAS_PARAMS`] has this name.
+    UnknownKey(&'a str),
+    /// The value is non-finite or outside the parameter's `min..=max`.
+    OutOfRange { spec: ParamSpec, value: f32 },
+}
+
+impl core::fmt::Display for ControlsError<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::UnknownKey(key) => {
+                write!(f, "unknown parameter key for asperitas processor: {key}")
+            }
+            Self::OutOfRange { spec, value } => write!(
+                f,
+                "{} out of range for asperitas processor: {value} (allowed {}..={} {})",
+                spec.name, spec.min, spec.max, spec.unit
+            ),
+        }
+    }
+}
+
+impl Controls {
+    /// Build controls from real-unit `(name, value)` pairs, the one translation from real units
+    /// to knob positions. Parameters not named keep their table default; a repeated name takes
+    /// its last value. Unlike a knob reading, which clamps, a value outside its parameter's range
+    /// is an error rather than silently moved.
+    pub fn from_values<'a>(values: &[(&'a str, f32)]) -> Result<Self, ControlsError<'a>> {
+        let mut controls = Self::default();
+        for &(key, value) in values {
+            let idx = ASPERITAS_PARAMS
+                .iter()
+                .position(|spec| spec.name == key)
+                .ok_or(ControlsError::UnknownKey(key))?;
+            let spec = ASPERITAS_PARAMS[idx];
+            if !value.is_finite() || value < spec.min || value > spec.max {
+                return Err(ControlsError::OutOfRange { spec, value });
+            }
+            controls.knobs[idx] = spec.to_normalised(value);
+        }
+        Ok(controls)
+    }
+
+    /// The real-unit value of every knob, in knob order, for display.
+    pub fn values(&self) -> [f32; KNOB_COUNT] {
+        core::array::from_fn(|i| map_knob(&ASPERITAS_PARAMS[i], self.knobs[i]))
+    }
+}
+
 fn map_knob(spec: &ParamSpec, knob: f32) -> f32 {
     if knob.is_nan() {
         spec.default
@@ -225,5 +276,49 @@ mod tests {
             (last[0] - 0.5).abs() < 0.01 && (last[1] + 0.5).abs() < 0.01,
             "{last:?}"
         );
+    }
+
+    #[test]
+    fn from_values_without_pairs_is_default() {
+        assert_eq!(Controls::from_values(&[]).unwrap(), Controls::default());
+    }
+
+    #[test]
+    fn from_values_round_trips_each_knob() {
+        for (i, spec) in ASPERITAS_PARAMS.iter().enumerate() {
+            for frac in [0.0f32, 0.25, 0.5, 0.9, 1.0] {
+                let value = spec.from_normalised(frac);
+                let c = Controls::from_values(&[(spec.name, value)]).unwrap();
+                let back = c.values()[i];
+                assert!(
+                    (back - value).abs() <= 1e-4 * value.abs().max(1.0),
+                    "{} {value} -> {back}",
+                    spec.name
+                );
+                // The other knob stays at its default.
+                let other = 1 - i;
+                assert_eq!(c.knobs[other], Controls::default().knobs[other]);
+            }
+        }
+    }
+
+    #[test]
+    fn from_values_rejects_bad_input() {
+        assert_eq!(
+            Controls::from_values(&[("bogus", 1.0)]),
+            Err(ControlsError::UnknownKey("bogus"))
+        );
+        for spec in &ASPERITAS_PARAMS {
+            for bad in [spec.min - 1.0, spec.max + 1.0, f32::NAN, f32::INFINITY] {
+                assert!(
+                    matches!(
+                        Controls::from_values(&[(spec.name, bad)]),
+                        Err(ControlsError::OutOfRange { .. })
+                    ),
+                    "{} {bad}",
+                    spec.name
+                );
+            }
+        }
     }
 }
