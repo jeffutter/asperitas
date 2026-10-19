@@ -1,8 +1,7 @@
 //! Daisy Pod control surface drivers for Asperitas firmware.
 //!
-//! Provides pin map type aliases and structs for the Pod's controls (buttons,
-//! encoder, knobs, LEDs), following daisy-embassy's `pins_seed.rs` conventions
-//! so the pin map can be contributed upstream unchanged.
+//! Provides control drivers for the Pod's encoder, knobs and LEDs. Firmware
+//! passes board pins to them directly; there is no Pod pin map module.
 //!
 //! # Features
 //!
@@ -15,9 +14,6 @@
 // ---------------------------------------------------------------------------
 // Feature-gated modules
 // ---------------------------------------------------------------------------
-
-#[cfg(feature = "pod-hw")]
-pub mod pins;
 
 #[cfg(feature = "pod-hw")]
 pub mod led;

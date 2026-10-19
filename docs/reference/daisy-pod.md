@@ -156,9 +156,8 @@ any small discrepancy when comparing against C++ reference behaviour.
 ## No Pod support exists in daisy-embassy
 
 `daisy-embassy` has `src/pins/pins_seed.rs` and `src/pins/pins_patch_sm.rs` — there is
-no Pod module. The pin map above has to be written on our side. It is a small, purely
-declarative piece of work (GPIO + ADC channel assignment), and a good candidate to
-contribute upstream once it is proven.
+no Pod module. Neither daisy-embassy nor this repo has a Pod pin map module: firmware
+takes the board pins directly, and no upstream contribution is planned.
 
 ## Audio I/O is line level, not instrument level
 
