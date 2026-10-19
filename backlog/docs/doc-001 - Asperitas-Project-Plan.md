@@ -3,8 +3,8 @@ id: doc-001
 title: Asperitas Project Plan
 type: specification
 created_date: '2026-08-01 05:43'
+updated_date: '2026-10-19 22:07'
 ---
-
 # Asperitas - Project Plan
 
 A musically-interactive audio effect for acoustic and clean electric instruments
@@ -26,7 +26,7 @@ architecture and milestones, kept short and updated as work lands.
 | Board bring-up | **Rust-only.** C++ is not a fallback: libDaisy has no Seed3 support | Done. `daisy-embassy` Seed3 support (PR #80) merged; the build tracks `master` with the `seed3` feature, no SHA pin |
 | Control surface | **Daisy Pod** - 2 knobs, encoder + click, 2 buttons, 2 RGB LEDs | Done (`asperitas-pod`, firmware `main`) |
 | Debug | Flash by DFU over the onboard USB-C, or by ST-Link on the SWD pads. Log over the framed USB console or `defmt`/RTT | Both routes work; see `docs/reference/daisy-seed3.md` |
-| Desktop tooling | WAV CLI first, then live `cpal` TUI, then analysis, then CPU-cost harness | CLI done; analysis lives in `asperitas-measure`; TUI and bench not started |
+| Desktop tooling | WAV CLI first, then a live `cpal` host with a thin `crossterm` knob view, then analysis, then CPU-cost harness | CLI done; analysis lives in `asperitas-measure`; live host is M4; bench not started |
 | Test corpus | Real instrument recordings committed to git, alongside synthetic signals | Done (`audio/`) |
 | CI | `lefthook` locally and GitHub Actions, all executing `scripts/gates.sh` at ascending tiers | Done; see `docs/development.md` |
 
@@ -113,14 +113,28 @@ tickets, notably the HUMAN bench runs.
 ### M4 - Live desktop iteration
 A `cpal`-backed live host so sound design stops requiring a flash cycle. Scope:
 
-- **Crate:** `asperitas-live` (a `cpal` backend running `Asperitas`; add `ratatui` only if a
-  terminal UI earns its keep over plain CLI flags). Not `asperitas-tui` unless the TUI is the point.
-- **Shared parameter model:** today three separate surfaces map to the same effect: the Pod knob
-  mapping, `asperitas-cli --params`, and `CTL FX`. "Same as the device" means exactly
-  one definition: `asperitas-dsp`'s `Controls` (normalised knobs in `[0, 1]`) and `ParamSpec`
-  tables, with every host translating its own input into `Controls` and nothing else.
+- **Crate:** `asperitas-live`, in the root workspace: a `cpal` backend running `Asperitas`, with a
+  looping WAV (the corpus clips) or live line-in as the source. Host-only; nothing reaches
+  `firmware/`.
+- **Live knob control:** a thin terminal view on `crossterm` alone (no `ratatui`): the two knobs on
+  the keyboard, a value readout in normalised and real units, a quit key. No layout work. Startup
+  flags set the initial `Controls` with the same `key=value` syntax as `asperitas-cli --params`.
+  Revisit `ratatui` only if M5's extra controls make layout real work.
+- **Shared parameter model:** three surfaces map to the same effect: the Pod knob mapping,
+  `asperitas-cli --params`, and `CTL SET` (with `CTL FX` selecting the stage). "Same as the device"
+  means exactly one definition: `asperitas-dsp`'s `Controls` (normalised knobs in `[0, 1]`) and the
+  `ParamSpec` tables, with every host translating its own input into `Controls` and nothing else.
+  The live host is the fourth surface and follows the same rule.
+- **Block alignment:** the device applies `Controls` once per 32-frame block. The live host latches
+  control changes on the same 32-frame grid counted from stream start, whatever buffer size the
+  OS hands it, so a knob move lands on the sample it would on the device.
 - **Exit criterion:** the live host and the device, given the same `Controls` and input, produce
-  the same output within float tolerance.
+  the same output within float tolerance. Shown in two halves: a host test that the live engine
+  matches `asperitas-cli process` (and the no_std `ReplayFx` the rig firmware runs) bit for bit at
+  any host buffer size, and a bench rerun of the rig excerpt comparison (`asperitas-measure analyze
+  --excerpt`) at the same settings. The bench half is limited by the analog loopback, so its
+  tolerance is the comparison's documented residual limit, not float precision; the float claim
+  rests on the device and the host running the same `asperitas-dsp` code.
 
 ### M5 - The resonator
 A resonator `Processor` (comb/bandpass bank, excitation shaping, damping and structure controls,
