@@ -1,48 +1,19 @@
 #!/usr/bin/env bash
 #
-# Gate the firmware image names that reader-facing documentation is allowed to contain, and the one
-# shape the recipe that produces them is allowed to have.
+# Keep reader-facing docs to image names the build really produces.
 #
-# Three rules, and all three derive what is legal from the build itself rather than from a list kept
-# by hand, because a list kept by hand is the thing that went stale:
+#   R1  Every `*.bin` token in README.md or docs/**/*.md must be an image firmware/Makefile builds
+#       (derived from `make -n`, not a hand-kept list) or an entry in ALLOWED_TOKENS.
+#   R2  No `cargo objcopy` invocation appears in those files. The recipe lives in firmware/Makefile's
+#       `build:` target only: a prose copy drifts, and a wrong objcopy keep-list exits 0 and writes a
+#       truncated image.
 #
-#   R1  Every `*.bin` token in README.md or docs/**/*.md must be an image firmware/Makefile really
-#       builds, or one of the explicitly allowlisted non-images below. An audit found `firmware.bin`
-#       still quoted in six places (README.md, firmware/Cargo.toml) long after each target started
-#       writing `$(BINARY).bin`, and nothing could see it: at that point every gate in the repo was a
-#       cargo invocation, so make was nobody's input and no check compared a doc string against what
-#       the build produces. Prose fixes decay; this makes the class self-policing.
+# The -n on every make invocation is load-bearing: firmware/Makefile's default goal is `all: build`,
+# so without it this lint would cross-compile firmware in every tier, including pre-commit.
 #
-#   R2  No `cargo objcopy` invocation appears in those files at all. The recipe belongs in
-#       firmware/Makefile's `build:` target (:118-120) and nowhere else, because a second
-#       copy in prose fails silently. Measured:
+# Scope is README.md and docs/ on purpose: backlog/** quotes stale names as evidence.
 #
-#         llvm-objcopy -O binary --only-section=.no_such_section elf out.bin
-#
-#       exits 0 and writes a 0-byte file, no warning. A doc that transcribes the keep-list is a doc
-#       that can turn into instructions for producing a truncated image, and the only symptom is a
-#       board that does not boot. A prose copy had already lost the flags.
-#
-#   R3  firmware/Makefile's `build:` recipe passes no `--only-section` flag. Before the `(NOLOAD)` rule landed,
-#       six of them were load-bearing: `.sram1_bss` loaded where it runs, so a plain `-O binary`
-#       spanned flash to AXI SRAM and padded the gap with zeros (469,763,480 bytes for `main`). That
-#       section is `(NOLOAD)` placement now, so the plain image is what flash must hold and a
-#       keep-list can only subtract something real -- silently, per R2's measurement. Deleting the
-#       flags without forbidding their return would leave the next plausible-looking "optimisation"
-#       free to re-add one. `check-image-load-addresses.sh` replaces this proxy with the direct check: no file-backed
-#       section may load outside flash.
-#
-# THE -n FLAG ON EVERY make INVOCATION HERE IS LOAD-BEARING. firmware/Makefile's default goal is
-# `all: build` (firmware/Makefile:89). Drop -n and this lint stops reading the build rules and starts
-# cross-compiling firmware inside every tier of the gate set, including the pre-commit hook that fires
-# on every commit. They are the only make invocations any tier has (`scripts/gates.sh` runs this script
-# as the second gate, cheapest-first); everything else in the gate set is raw cargo.
-#
-# Scope is README.md and docs/ on purpose. It does NOT extend to backlog/**: historical ticket
-# files quote `firmware.bin` as evidence of what was broken, and must keep doing so.
-#
-# Exit codes: 0 clean, 1 violations found (all of them, in one run), 2 the check itself could not
-# run - missing files, or make refusing to dry-run. A check that cannot run never reports success.
+# Exit codes: 0 clean, 1 violations (all of them, in one run), 2 the check itself could not run.
 
 set -uo pipefail
 
@@ -51,8 +22,7 @@ cd "$ROOT" || exit 2
 
 # `*.bin` tokens that R1 permits despite being no firmware image.
 #   capture.bin: a console log capture read OFF the board, not an image flashed TO it. Quoted as
-#   the dump destination in README.md's console-capture section and in
-#   README.md's console capture section and docs/reference/flashing.md.
+#   the dump destination in README.md and docs/reference/flashing.md.
 #
 #   dsy_bootloader_v6_4-intdfu-2000ms.bin: the stock DaisyBootloader release image, downloaded from
 #   electro-smith/DaisyBootloader and flashed to internal flash once. Third-party, so no
@@ -147,27 +117,7 @@ is_permitted_token() {
   return 1
 }
 
-# --------------------------------------------------------------------------- pass 2: recipe shape
-
-# R3. Read what the recipe expands to rather than the text of the file, because what matters is the
-# command the build runs.
-check_no_keep_list() {
-  local rules
-  if ! rules=$(make -n -C firmware build 2>&1); then
-    printf '%s\n' "check-doc-artifact-names: make -n -C firmware build failed:" >&2
-    printf '%s\n' "$rules" >&2
-    exit 2
-  fi
-
-  if printf '%s' "$rules" | grep -qE -- '--only-section'; then
-    VIOLATIONS+=("firmware/Makefile: the build: recipe passes --only-section. Since the (NOLOAD) rule the \
-plain -O binary image is exactly what flash holds, so a keep-list can only remove something real \
-- and it removes it silently, per R2's measurement. Delete the flags; if you think one is needed \
-again, an ALLOC section is loading outside flash, which is the thing to fix.")
-  fi
-}
-
-# --------------------------------------------------------------------------- pass 3: doc tokens
+# --------------------------------------------------------------------------- pass 2: doc tokens
 
 check_bin_tokens() {
   local f line tok
@@ -183,7 +133,7 @@ check_bin_tokens() {
   done
 }
 
-# --------------------------------------------------------------------------- pass 4: hand-copied recipes
+# --------------------------------------------------------------------------- pass 3: hand-copied recipes
 
 check_objcopy_recipes() {
   local f line text
@@ -222,7 +172,6 @@ report() {
 main() {
   collect_doc_files
   derive_legal_image_names
-  check_no_keep_list
   check_bin_tokens
   check_objcopy_recipes
   report

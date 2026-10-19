@@ -81,8 +81,7 @@ other redundant. Their cases and cost rules are stated in the scripts' own heade
   469,763,480 bytes of mostly zeros with every other gate green. It uses bare
   `rust-objdump` / `rust-objcopy` only.
 - `scripts/check-doc-artifact-names.sh` keeps reader-facing documentation to image names the
-  firmware Makefile really builds, and the Makefile `build:` recipe to a plain `-O binary` with no
-  `--only-section` keep-list.
+  firmware Makefile really builds and keeps the objcopy recipe out of prose.
 
 What the one-command shape costs: lefthook buffers a command's stdout and replays it when the
 command finishes, so a hook prints nothing until its tier has finished. In exchange the log carries

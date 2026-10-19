@@ -2,53 +2,22 @@
 #
 # The gate set, defined once.
 #
-# Every fmt / lint / doc / test / cross-build check this repo enforces is named here exactly once,
-# tagged with the cheapest tier that runs it. Three callers each ask for one tier and add nothing:
-# .github/workflows/ci.yml asks for `ci`, and lefthook's pre-commit and pre-push ask for `commit`
-# and `push`. Before this file the same list existed twice, by hand -- 25 `run:` lines in
-# lefthook.yml plus a second copy in CI's step -- and every check added drifted
-# between them. The gates script exists because firmware was invisible to both copies, and four
-# closed tickets declined to notice.
+# Every check this repo enforces is named here exactly once, tagged with the cheapest tier that runs
+# it. CI asks for `ci`; lefthook's pre-commit and pre-push ask for `commit` and `push`. Tiers are
+# cumulative, and no argument means `ci`, so forgetting it never means "ran less than everything".
 #
-# Why a script and not "CI just runs the hooks": lefthook sorts the commands in a stage by
-# priority, then leading digits in the name, then name ascending -- NOT by declaration order -- so
-# two decisions this repo has measured money behind are simply unexpressible in hook config:
-# cheapest-gate-first fail-fast, and cross-build-before-cross-clippy so the lints reuse the
-# artifacts the builds just produced. A sequential script can say both; YAML cannot. It also buys
-# deterministic ordering, per-gate timings, and fail-fast that alphabetical names cannot give.
-# What it gives up: lefthook captures a command's stdout and replays it when the command finishes,
-# so a hook now prints nothing until its tier ends. The silence lasts as long as the tier takes; the
-# per-gate and per-tier times each run prints are the measure of that trade.
+# A script rather than lefthook config because lefthook orders a stage by priority and name, not
+# declaration order, and two orderings matter here: cheapest-first fail-fast, and cross-builds before
+# cross-clippy so the lints reuse the build artifacts. Lefthook also buffers stdout, so a hook prints
+# nothing until its tier ends; per-gate headers and times are what come back for that.
 #
-# Tiers are cumulative: `commit` is a subset of `push`, `push` a subset of `ci`. No argument means
-# `ci` -- forgetting the argument must never mean "ran less than everything".
+# Adding a check: add one `gate` line where it should run. A gate's key is its identity (rewording a
+# banner does not rename it); keys match ^[a-z0-9][a-z0-9-]{0,39}$ and are unique, enforced at call time.
 #
-# One ordering rule outranks cheapest-first: the cross-clippy gates come after the cross-builds so clippy
-# reuses their artifacts. They stay `commit`-tier gates, so in the commit tier they simply run with no
-# build above them, which is what pre-commit does today.
+# With GATES_TIMINGS_FILE set, a run appends one tab-separated line per gate (`gate<TAB>key<TAB>seconds`)
+# and one for the tier, so nothing has to parse the human `--- N.NNs` lines.
 #
-# Firmware build order otherwise does not matter. Every firmware cargo invocation passes a
-# `--target-dir` from scripts/variant-dir.sh, so each layout / log-mode / feature set owns its ELF and
-# no build can overwrite another's.
-#
-# Adding a check: add one `gate` line in the position you want it to run, with the tier that should
-# start running it and a stable key. Nothing else in the repo names checks.
-#
-# Every gate has a key as well as a banner, and the key -- not the banner -- is its identity, so
-# rewording a banner for readability does not rename the gate; that is the same argument that put the
-# gate list in a script rather than in YAML names.
-# Keys match ^[a-z0-9][a-z0-9-]{0,39}$ and must be unique; both are enforced where they cost nothing,
-# at call time, which the first gate's `bash -n` makes the fastest failure available.
-#
-# Timings are addressable too. With GATES_TIMINGS_FILE set, a run appends one tab-separated line per
-# completed gate (`gate<TAB>key<TAB>seconds`) and one after the tier (`tier<TAB>tier<TAB>seconds`).
-# That sink exists because the human `--- N.NNs` line can only be joined to a gate by position: a
-# child that prints a lookalike line, or echoes a banner, silently corrupts the join, and `cargo
-# test` / `cargo doc` are exactly that hazard class. Nothing parses stdout to get a number. The file
-# is appended, never truncated, by whoever sets it -- so a run that died mid-tier leaves a partial
-# file rather than a plausible one.
-#
-# Exit codes: 0 every gate passed, 1 a gate failed or the tier matched no gate at all, 2 bad usage,
+# Exit codes: 0 every gate passed, 1 a gate failed or the tier matched no gate, 2 bad usage,
 # 3 this toolchain cannot build for thumbv7em at all.
 
 set -euo pipefail
@@ -84,11 +53,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# Anchoring is load-bearing, not hygiene. Run from firmware/ an unanchored list produces
-# wrong-workspace passes that exit 0: `cargo fmt --all --check` checks the firmware workspace
-# instead of the host one, `cargo clippy --workspace` means the firmware crates, and
-# `-p asperitas-logging` errors out. Same shape as the ROOT anchor at the top of
-# scripts/check-doc-artifact-names.sh.
+# Anchoring at the repo root is load-bearing: run from firmware/, host-workspace commands such as
+# `cargo fmt --all --check` silently check the wrong workspace and exit 0.
 ROOT=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT" || exit 1
 
@@ -105,18 +71,9 @@ esac
 N_COMMIT=0 N_PUSH=0 N_CI=0 RAN=0
 
 # gate <min-tier> <key> <banner> [-C dir] <command...>
-#
-# One check, one line. <key> is the gate's identity; <min-tier> is the cheapest tier that runs it and
-# every higher tier inherits it, which is what makes the three call sites one list. Declaration order
-# IS execution order, so the cheap stuff goes first and the ordering rules in the header are visible
-# as file positions.
-#
-# -C dir runs the command in a subshell whose cwd is dir. Firmware gates need it: .cargo/config.toml
-# supplies the thumbv7em target and link args and cargo discovers that file from the CWD, not from
-# --manifest-path (cargo #9670). A bare `cd` in the parent would leave every later host gate
-# pointed at the firmware workspace -- where `cargo fmt --all --check` and `cargo clippy
-# --workspace` both pass happily on the wrong code with exit 0 -- so the directory dies with the
-# gate that needed it.
+# <min-tier> is the cheapest tier that runs the gate; declaration order is execution order.
+# -C runs the command in a subshell in dir: cargo finds .cargo/config.toml from the CWD, and a bare
+# `cd` would leave later host gates pointed at the firmware workspace.
 KEY_RE='^[a-z0-9][a-z0-9-]{0,39}$'
 declare -A SEEN_KEYS=()
 
@@ -124,9 +81,7 @@ gate() {
   local min=$1 key=$2 banner=$3 rank dir="" out a us t
   local called=${BASH_LINENO[0]}
 
-  # Enforced on every mode, including --list and --dry-run: a key is a gate's identity, so
-  # a malformed or duplicated one must fail the cheapest command that touches this file, not merely
-  # the ones that execute something.
+  # Checked in every mode so a bad key fails even --list.
   if [[ ! $key =~ $KEY_RE ]]; then
     printf 'gates.sh: bad gate key "%s" at line %s\nkeys match ^[a-z0-9][a-z0-9-]{0,39}$.\n' "$key" "$called" >&2
     exit 2
@@ -155,9 +110,7 @@ gate() {
 
   if [[ $MODE != run ]]; then
     if (( RANK >= rank )); then
-      # Both of these are machine-read interfaces, so their columns are fixed-width / tab-separated
-      # by contract, not by taste. Column order is part of the format: key first, then tier, then the
-      # rest.
+      # Machine-read output: column order is part of the format (key, tier, rest).
       if [[ $MODE == list ]]; then
         printf '%-27s | %-6s | %-3s | %-3s | %-2s | %s\n' "$key" "$min" \
           "$([[ 1 -ge $rank ]] && echo yes || echo -)" \
@@ -181,24 +134,19 @@ gate() {
   fi
   us=$(( ${EPOCHREALTIME/./} - t ))
   awk -v us="$us" 'BEGIN { printf "--- %.2fs\n", us / 1000000 }'
-  # Same microseconds as the human line above -- one clock read per gate, not two.
   if [[ -n ${GATES_TIMINGS_FILE:-} ]]; then
     awk -v us="$us" -v key="$key" 'BEGIN { printf "gate\t%s\t%.3f\n", key, us / 1000000 }' \
       >> "$GATES_TIMINGS_FILE"
   fi
 }
 
-# Before anything cross-target runs: without the embedded std every firmware gate dies as E0463
-# ("can't find crate for `core`"), which reads like a code bug rather than a missing toolchain.
-# Outside `nix develop .#default` a user's own cargo has no thumbv7em std installed, and the shim
-# lefthook installs honours LEFTHOOK=0 as a total bypass -- a confusing red hook is exactly what
-# teaches someone to set it. Checked in run mode only: --dry-run and --list answer questions about
-# the list and must work anywhere.
 if [[ $MODE == list ]]; then
   printf '%-27s | %-6s | %-3s | %-3s | %-2s | %s\n' key min com psh ci gate
   printf '%s\n' '----------------------------+--------+-----+-----+----+------------------------------------------------'
 fi
 
+# Without the embedded std every firmware gate dies as E0463, which reads like a code bug. Run mode
+# only: --dry-run and --list must work anywhere.
 if [[ $MODE == run ]]; then
   if [[ ! -d "$(rustc --print sysroot)/lib/rustlib/thumbv7em-none-eabihf" ]]; then
     printf 'gates.sh: this rustc has no thumbv7em-none-eabihf standard library, so every firmware\n' >&2
@@ -207,171 +155,90 @@ if [[ $MODE == run ]]; then
     exit 3
   fi
   printf 'tier: %s\n' "$TIER"
-  # Everything from here to the summary line is what the tier total measures. Reading it before the
-  # first gate rather than at the top of the file keeps shell startup and the sysroot probe out of it;
-  # what separates the whole from the sum of its gate lines is the banner print and the awk call that
-  # formats each gate's timing -- and while the timing sink below is open, a second awk per gate. Either
-  # way it is at least one process spawn per gate, so the residue grows with the gate count and not with
-  # what the gates do. Anything much past a few milliseconds per gate means something other than
-  # printing entered the loop.
+  # Read after the sysroot probe so shell startup stays out of the tier total.
   TIER_START_US=${EPOCHREALTIME/./}
 fi
 
-# The list is a shell script, so the class of bug that ate CI for three days (an inline
-# single-quoted `bash -c '\''...'\''` string cannot carry an apostrophe: the quote closes, and
-# because bash executes a script line by line as it parses it, every check appears to run before
-# the step dies on "unexpected EOF while looking for matching `''" -- 6d7d38a to 70c6fc6, unseen
-# because nothing had been pushed since the last green run) is worth ten milliseconds to rule out
-# locally. Cheapest gate, so a broken definition is the fastest possible failure.
-#
-# The path is written relative to the repo root rather than as `${BASH_SOURCE[0]}`, because this file
-# `cd`s there before running anything, and `--list` and `--dry-run` print the command line: an absolute
-# path here would fold the machine's checkout directory into that output.
+# A syntax error in this file should be the cheapest possible failure. The path is repo-relative so
+# --list and --dry-run output carries no machine-specific directory.
 gate commit gate-definition-parses "=== gate definition parses ===" bash -n scripts/gates.sh
 
-# Docs name firmware image files; legal names come from the build rules themselves via `make -n`,
-# so this is the only place in the gate set that invokes make, and it stays a dry run -- see the
-# "THE -n FLAG ... IS LOAD-BEARING" paragraph near the top of scripts/check-doc-artifact-names.sh.
-# Covers names only: it does not read a line of Rust.
+# Docs may only name images the build produces. Legal names come from `make -n` (a dry run, the only
+# make invocation in the gate set); the script's header explains why -n is load-bearing.
 gate commit docs-artifact-names "=== docs artifact names ===" scripts/check-doc-artifact-names.sh
 
-# The provenance reader's own checks: the next edit to build.rs's blob encoding or to the feature
-# normalizer needs something between it and an ELF that reads as the wrong image at the bench.
-# Hand-emitted ELF fixtures, no build, nothing touched outside a `mktemp -d`: the cases and the
-# cost rules they obey (at most a few child invocations, never a `cargo build` /
-# `clippy` / `objcopy` / `objdump` / `make`, never a path under firmware/target/) are spelled out in
-# scripts/elf-provenance.sh's own header.
-#
-# Ahead of every cargo invocation, because it compiles nothing and needs no artifact: the one figure
-# below is what cheapest-first says to do with a check that has no inputs to wait for.
-# It builds no firmware. The cost is a handful of rust-objcopy invocations, every one of them
-# load-bearing.
-# Outside `nix develop .#default` there is no rust-objcopy, but gates.sh already exits 3 before any
-# gate for the missing thumbv7em std, so the script's own exit-2 message is a direct-run affordance
-# rather than a hook failure.
+# Reader of the provenance note in an ELF. Hand-emitted fixtures, no build; cheap, so it runs ahead of
+# every cargo gate. Cases and cost rules are in scripts/elf-provenance.sh's header.
 gate commit elf-provenance-selftest "=== elf-provenance --selftest ===" scripts/elf-provenance.sh --selftest
 
-# The staleness mechanism's own checks: elf-check decides "was this ELF built from these
-# sources?" by hashing the input set against the digest build.rs embedded in the ELF, and a check of that kind is only
-# as good as the case that would notice it quietly passing. The cases drive the SHIPPED recipe through
-# make's command-line overrides (ELF / ELF_INPUTS / MAIN_SRC / CARGO / PROV), so the thing graded is
-# the file that ships rather than a copy of its logic; one of them is the false positive itself, red
-# against any Makefile that compares mtimes again. Fixtures under `mktemp -d`, no cargo, nothing
-# outside that directory touched -- rules and reasoning in scripts/check-elf-staleness.sh's header.
-# Fourth in the list on the same cheapest-first rule as the gate above: it builds nothing and reads no
-# artifact. Most of its cost is make parsing the Makefile once per case.
+# The staleness check hashes sources against the digest embedded in the ELF; its cases drive the
+# shipped Makefile recipe through command-line overrides. No cargo, fixtures in a temp dir.
 gate commit elf-staleness-selftest "=== elf-staleness --selftest ===" scripts/check-elf-staleness.sh --selftest
 
-# The load-address checker's own checks. The push-tier `=== image load addresses ===` gate far
-# below reads one column of `rust-objdump -h --show-lma` by POSITION, and a parser that stops matching
-# does not turn that gate red: an empty section table satisfies all three rules by having nothing to fail,
-# so it turns it green for the wrong reason. Four traps of that kind were measured while planning this
-# ticket, and none of them had a case until now. Bash matches leftmost-longest, so dropping the trim
-# leaves objdump's column padding on every captured name and R2 answers `.sram1_bss=absent` for all six
-# binaries -- `main` and `rig` included, exit still 0. defmt names sections after JSON records full of
-# spaces, braces and commas, which no left-to-right field split survives. The Type column is composed
-# flags joined by `, `, and prints nothing at all for an unallocated row, where "not loaded" and "a word
-# nobody recognizes" must not be read the same way. And `.gnu.sgstubs` is zero-size ALLOC sitting ABOVE
-# the real flash high-water mark, so counting it breaks R3's length equality by 8 bytes on a build that
-# is correct.
-#
-# Hand-emitted ELF fixtures plus literal objdump row text, everything in a `mktemp -d`: seventeen cases,
-# five of them real child processes, because the exit code that reaches this file is part of what is being
-# asserted. Rules and reasoning in scripts/check-image-load-addresses.sh's selftest header. What they
-# cannot prove is the limit every fixture has -- that the linker emits anything like these files -- and
-# the push-tier gate over six linked ELFs stays the backstop for that, which is why both exist rather
-# than one. Fifth here on the same cheapest-first rule as the two above: compiles nothing, reads no
-# artifact, writes nothing under firmware/target/. Nearly all of its cost is the five child
-# processes and their objdumps. Eight deliberate mutations each turned at least one case red and left the
-# rest green: trim dropped, zero-size counted, empty Type read as loaded, unknown Type word downgraded to
-# a warning, VMA column read instead of LMA, refusal removed before measuring, `.sram1_bss` matched as a
-# substring, and no-rows-parsed downgraded to a warning. Two of them needed a case of their own that no
-# real binary could have provoked -- the substring match and the VMA swap, the latter visible only through
-# a fixture whose `.data` runs from RAM and loads from flash.
+# The load-address checker reads objdump columns by position, and a parser that stops matching turns
+# the push-tier gate green for the wrong reason. This runs the parser against fixtures and literal
+# objdump rows; the push-tier gate over real ELFs stays the backstop. Rules in the script's selftest header.
 gate commit load-addresses-selftest "=== load-addresses --selftest ===" scripts/check-image-load-addresses.sh --selftest
 
 gate commit cargo-fmt "=== cargo fmt ===" cargo fmt --all --check
 
-# Root Cargo.toml:3 declares exclude = ["firmware"], so the check above never meant all: firmware/
-# is its own workspace and has drifted under this gate twice. `--check` is not
-# optional, and not because of any expiry date: a bare `cargo fmt` would rewrite firmware/src/**/*.rs,
-# which are ELF inputs (ELF_INPUTS in firmware/Makefile), so a commit would move the very bytes the
-# next `make elf-check` hashes and send the bench red for a change it never made. A commit has no
-# business rewriting the tree it is committing either way.
+# firmware/ is its own workspace, so the gate above does not cover it. `--check` is required: a bare
+# `cargo fmt` would rewrite ELF inputs and send `make elf-check` red for a change nobody made.
 gate commit cargo-fmt-firmware "=== cargo fmt (firmware workspace) ===" \
   cargo fmt --manifest-path firmware/Cargo.toml --all --check
 
 gate commit cargo-clippy "=== cargo clippy ===" cargo clippy --workspace --all-targets -- -D warnings
 
-# Default features build asperitas-logging without `log-usb`, so every record-path function in it
-# goes unlinted above. This is the only gate that sees them.
+# Default features build asperitas-logging without `log-usb`; only this gate lints those paths.
 gate commit cargo-clippy-log-usb "=== cargo clippy (asperitas-logging log-usb) ===" \
   cargo clippy -p asperitas-logging --features log-usb --lib -- -D warnings
 
-# The other transport has the same blind spot: the default feature set excludes `log-defmt`, so
-# defmt_log.rs -- the bridge behind the probe's lossless log channel -- is compiled by no other gate
-# here.
+# Same blind spot for `log-defmt`, the bridge behind the probe's lossless log channel.
 gate commit cargo-clippy-log-defmt "=== cargo clippy (asperitas-logging log-defmt) ===" \
   cargo clippy -p asperitas-logging --features log-defmt --lib -- -D warnings
 
-# pod-hw gates the hardware-backed Pod paths no default-feature build compiles. Its compile-time
-# half runs in the push tier; its runtime half is the one deliberate CI-only item, below.
+# Compiles the hardware-backed Pod paths no default-feature build sees. The runtime half is the
+# ci-only `cargo-test-pod-hw` gate.
 gate push clippy-pod-hw "=== cargo clippy (asperitas-pod pod-hw feature) ===" \
   cargo clippy --workspace --all-targets --features asperitas-pod/pod-hw -- -D warnings
 
-# The capture decoder's own verdict: exit 0 means every block the synthetic captures promised, they
-# proved. Exercises the shipped read/decode/assemble path, so it needs no board.
+# The capture decoder's verdict on synthetic captures, through the shipped decode path. No board.
 gate push dump-reassemble-selftest "=== dump_reassemble --selftest ===" \
   cargo run -p asperitas-host --bin dump_reassemble -- --selftest
 
-# Rustdoc cross-references. Each member's `[lints] workspace = true` already denies the two
-# intra-doc-link lints via the root table; RUSTDOCFLAGS raises that to every rustdoc warning.
-# Two runs because neither feature set is a superset of the other: default features document
-# logging's fn.init() but not usb.rs / led.rs / panic_handler.rs, while --all-features gains those
-# (and pod's led / pins) and drops fn.init(). Do not merge them.
+# Rustdoc warnings are errors. Two runs because neither feature set is a superset of the other
+# (default documents logging's `init()`, --all-features documents usb/led/panic_handler); do not merge them.
 gate push cargo-doc "=== cargo doc (workspace) ===" \
   env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
-# asperitas-measure is excluded here and only here. It depends on serde and serde_json, which turn on
-# serde's `std` feature, and --all-features unifies that with asperitas-logging's `log-usb` -> embassy-usb
-# -> ssmarshal, a no_std crate whose Error does not implement std::error::Error, so it stops compiling
-# (E0277 on serde::de::Error). The crate has no features of its own, so its all-features build is its
-# default build, which the `cargo-doc` gate above already covers: nothing is lost by the exclusion.
+# asperitas-measure is excluded: --all-features unifies serde's `std` with logging's `log-usb` ->
+# embassy-usb -> ssmarshal, which stops compiling. The crate has no features, so its default build
+# (`cargo-doc` above) already covers it.
 gate push cargo-doc-all-features "=== cargo doc (workspace, all features) ===" \
   env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude asperitas-measure --no-deps --all-features
 
-# Every firmware image variant -- layout, cfg set, ASP_RIG_* build inputs, binaries -- is a row of
-# scripts/firmware-variants.table, and these four gates just run the driver over it. A new binary or
-# variant is a table edit and no gate here changes. The coverage check is source-level and builds nothing,
-# so it runs at the commit tier: it fails when a src/bin file has no row that builds, lints and grades it.
+# Every firmware variant is a row of scripts/firmware-variants.table; these gates run the driver over
+# it. This check is source-level and builds nothing: it fails when a src/bin file has no row.
 gate commit firmware-variants-coverage "=== firmware variants cover every src/bin ===" \
   scripts/firmware-variants.sh check
 
-# Cross-builds, each into its own target directory (see vd above), so the bench's `make probe-*`
-# decodes the ELF of the variant it names whatever ran after.
+# Each variant builds into its own target directory, so bench `make probe-*` decodes the ELF of the
+# variant it names.
 gate push firmware-builds "=== firmware builds (every variant) ===" scripts/firmware-variants.sh build
 
-# Where the images load. Asserts no file-backed section loads outside the layout's region parsed from
-# firmware/memory-internal.x or memory-bootloaded.x, that `.sram1_bss` stays NOBITS when present, and that
-# each plain `-O binary` image is exactly as long as the highest flash LMA end implies -- the invariant
-# whose absence made `main.bin` 469,763,536 bytes of mostly zeros with every gate green. Reads the artifacts
-# the gate above wrote and asks cargo for nothing: bare `rust-objdump` / `rust-objcopy` only, because the
-# cargo forms rebuild. A missing ELF is a hard failure, never a skip. `push` tier because pre-commit builds
-# no firmware. Its parser's own assertions are the commit-tier `load-addresses --selftest` gate.
+# No file-backed section may load outside the layout's region, `.sram1_bss` stays NOBITS, and each
+# plain `-O binary` image has exactly the length its flash LMA range implies. Reads the artifacts the
+# build gate wrote with bare rust-objdump/rust-objcopy (the cargo forms rebuild); a missing ELF is a
+# failure, never a skip. Push tier because pre-commit builds no firmware.
 gate push image-load-addresses "=== image load addresses (every variant) ===" scripts/firmware-variants.sh grade
 
-# Lint after the builds so clippy reuses their dependency artifacts: cheap when nothing changed since the
-# last lint, several times dearer directly after a build, and tens of seconds in a fresh target dir.
-# --bins is the whole package (no lib target), and --all-targets is unusable on a no_std target with no
-# test harness to link. firmware/ is a second workspace, so every host clippy above says nothing about the
-# bins that actually run on the board.
+# After the builds so clippy reuses their dependency artifacts. --bins because the package has no lib
+# target and --all-targets cannot link on a no_std target.
 gate commit firmware-clippy "=== firmware clippy (every variant) ===" scripts/firmware-variants.sh clippy
 
 gate push cargo-test "=== cargo test ===" cargo test --workspace
 
-# The pod-hw feature adds no tests of its own and no other crate depends on asperitas-pod, so this
-# gate runs only that crate's suite under the feature. Compile coverage of the pod-hw code paths is
-# the pod-hw clippy gate in the push tier; this one adds runtime coverage on CI.
+# Runtime coverage of the pod-hw feature; compile coverage is `clippy-pod-hw` in the push tier.
 gate ci cargo-test-pod-hw "=== cargo test (asperitas-pod pod-hw feature) ===" cargo test -p asperitas-pod --features pod-hw
 
 if [[ $MODE == list ]]; then
@@ -393,8 +260,6 @@ if [[ -n ${GATES_TIMINGS_FILE:-} ]]; then
     >> "$GATES_TIMINGS_FILE"
 fi
 
-# The total is formatted from EPOCHREALTIME microseconds. bash's integer `SECONDS` counter would print
-# X.0 while the truth sat anywhere in [X, X+1).
-# A total that cannot agree with its own parts is not a total worth publishing.
+# Formatted from EPOCHREALTIME microseconds; bash's integer SECONDS would truncate.
 printf '\ntier %s: %d gates, %.1fs\n' "$TIER" "$RAN" \
   "$(awk -v us="$TIER_US" 'BEGIN { printf "%.1f", us / 1000000 }')"

@@ -367,8 +367,8 @@ probe-run: build-elf
 # Reading the embedded source digest out of the ELF belongs to scripts/elf-provenance.sh, which is the
 # only thing in the repo that parses the `.asp.prov` note firmware/build.rs embeds. The Makefile
 # reaching up into scripts/ is mutual coupling: scripts/check-doc-artifact-names.sh already reaches
-# down into this file to enumerate legal image names, and both headers say so. `bash` is spelled rather than relying on the executable bit plus shebang, because a checkout
-# on another filesystem can lose the bit and turn every probe target into "command not found".
+# down into this file to enumerate legal image names. `bash` is spelled rather than relying on the
+# executable bit, because a checkout on another filesystem can lose the bit.
 PROV = bash $(dir $(firstword $(MAKEFILE_LIST)))../scripts/elf-provenance.sh
 
 # What the operator asked for, spelled the way they asked for it, so the remedy elf-check prints is

@@ -3,13 +3,15 @@ id: TASK-111
 title: >-
   Tooling: trim check-doc-artifact-names.sh, delete one-off scripts, cut gate/CI
   comments
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-19 03:10'
 labels:
   - review-2026-10
   - tooling
+  - planned
 dependencies: []
 priority: low
 type: chore
@@ -28,6 +30,24 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The listed scripts and checks are removed or reduced
-- [ ] #2 No stale line-number citations remain in lefthook.yml, ci.yml, gates.sh
+- [x] #1 The listed scripts and checks are removed or reduced
+- [x] #2 No stale line-number citations remain in lefthook.yml, ci.yml, gates.sh
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by 507c972. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+check-doc-artifact-names.sh: R3 and its pass deleted, R1/R2 kept with a short header. bench-030-04.py, knob-interval.py and the tracked __pycache__ removed. lefthook.yml cut to 6 comment lines, ci.yml and gates.sh comments trimmed to short whys with no line citations and no ticket IDs (project rule for code comments). doc-001 staleness (.#default, memory.x) was already fixed before this run. Stale refs in docs/development.md, firmware/Makefile and check-image-load-addresses.sh updated. gates.sh --list output unchanged; gates.sh commit passes.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Removed the R3 check, two one-off scripts and stale cache files; trimmed comments in lefthook.yml, ci.yml, gates.sh and removed all line-number citations. Gate list and behaviour unchanged.
+<!-- SECTION:FINAL_SUMMARY:END -->

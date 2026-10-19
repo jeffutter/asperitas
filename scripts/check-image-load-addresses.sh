@@ -56,9 +56,7 @@
 # --target-dir (scripts/gates.sh passes the RTT-only one, the only variant that links all six
 # binaries). Whether an ELF is stale belongs to
 # `make -C firmware elf-check`. What an ELF's stamp says belongs to scripts/elf-provenance.sh. Where its
-# sections load belongs here. And the ban on re-adding a keep-list belongs to
-# scripts/check-doc-artifact-names.sh pass 2, which greps the expansion of `make -n -C firmware build`
-# for `--only-section`.
+# sections load belongs here (R3 below is what keeps an `--only-section` keep-list unnecessary).
 #
 # Reads artifacts and builds nothing. That is why it calls the bare cargo-binutils shims
 # (`rust-objdump`, `rust-objcopy`) and never `cargo objdump` / `cargo objcopy`: the cargo forms rebuild,

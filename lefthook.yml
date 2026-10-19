@@ -1,60 +1,10 @@
-# lefthook config - local git hooks for Asperitas
-# Installed automatically by the nix shell (`lefthook install`, flake.nix:67).
-#
-# Each stage runs exactly one command: the shared gate script, at the tier that fits this stage's
-# budget. The gate set is defined once, in scripts/gates.sh; adding a check means adding a `gate`
-# line there and never anything here. Before that script existed, this file hand-maintained 25
-# `run:` lines across two stages and CI kept a second copy of the same list, and every check added
-# since early on drifted between them - firmware was added late because it was firmware was invisible to both.
-#
-# What that shape trades away, recorded so nobody "fixes" the silence later: lefthook captures a
-# command's stdout and replays it when the command finishes, so a hook now prints nothing until its
-# tier ends. How long that silence lasts is whatever the tier takes, and this file does not restate it -
-# `scripts/gates.sh` prints a time per gate and per tier. What
-# comes back for the muteness is per-gate headers
-# and wall times in the log, fail-fast naming the gate that died, and an order the script declares rather
-# than one lefthook infers - it sorts a stage's commands by priority, then leading digits, then name ascending, NOT by
-# declaration order, so cheapest-gate-first and cross-build-before-cross-clippy are unexpressible in
-# this file. If the muteness ever becomes unbearable, two keys stream output, and both were measured
-# rather than assumed: `parallel` with `priority` 100000 streams but stops guaranteeing that the
-# first job to fail is the first one reported, and `interactive` streams with its exit code intact
-# yet asks for /dev/tty and takes stdin -- neither of which a hook run from a GUI client or CI can
-# be relied on to have. Neither is used: what a hook owes this repo is a quiet run and a true exit
-# code.
-#
-# Nothing here filters paths, and nothing may: no `root`, `glob`, `files` or `local` key, and no
-# staged-files or push-files template token survives anywhere in this file. A filtered job whose set
-# is empty exits 0 without running, so a lint behind one reads as green having checked nothing -
-# `firmware-cross-compile` sat behind the last such filter until it was deleted. Every key
-# listed above greps to zero in this file, which makes grep the durable check rather than this prose.
-#
-# One skip remains and it is benign by construction: lefthook skips a stage whose staged-file set is
-# empty, so `git commit --allow-empty` runs nothing and a manual `lefthook run <stage>` on an empty
-# index needs `-f`. Measured, not assumed, and it is not a choice this file gets to
-# make: 2.1.10 has no key for it. Upstream's builder returns a SkipError("no matching staged files")
-# for every command whenever the staged set is empty and `--force` was not passed, before looking at
-# anything configurable, and its published schema.json carries no option to turn that off. So the
-# alternatives to `-f` are all worse than the skip they avoid. The skip itself is affordable because
-# an empty commit changes no tree: what it would gate is HEAD's tree, which the commit that produced
-# it already paid for. A path-filtered job has no such excuse - its set goes empty on commits that DO
-# change files.
-#
-# Three more keys stay out on purpose. `only` was measured on a deliberately failing command and it
-# came back greener than expected: lefthook skipped the job outright ("skip by condition") and exited
-# 0 without running the check at all. Turning off `stdout` reports success while hiding everything.
-# And `parallel` starts every cargo job at once and loses fail-fast.
-#
-# Any check that runs in one tier and not another is an exception written down with its price at the
-# gate itself in scripts/gates.sh - currently one: the `pod-hw` crate test, ci-only.
-#
-# No `forward_stderr:` key here, though every command carried one until someone asked whether it
-# does anything. It does not: the key exists in no lefthook release - absent from the 2.1.10 this
-# repo pins and from 2.1.12's source, in the Go structs, the JSON schema, and the docs alike - and
-# an unrecognised key is accepted and ignored without a warning, which is how it survived a dozen
-# tickets that each copied it "like its neighbours". A command's stderr reaches the terminal either
-# way (measured on 2.1.10: `echo ERR >&2` printed, and its exit status 3 became lefthook's 1). This
-# file's whole contract is that a line here means something, so a key that silently means nothing is
-# the bug this ticket was filed for, wearing a different hat.
+# Each stage runs scripts/gates.sh at its tier; the gate set is defined there and only there.
+# No path filters (root, glob, files, only): a filtered job with an empty set exits 0 without
+# running, which reads as green having checked nothing.
+# stdout, parallel and interactive are left at their defaults: they trade away fail-fast or
+# need a tty.
+# lefthook skips a stage on an empty staged set (--allow-empty commits); nothing configurable
+# changes that.
 
 min_version: 2.1.10
 
