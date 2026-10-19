@@ -3,12 +3,13 @@ id: TASK-145.04
 title: >-
   asperitas-live knobs turn from the keyboard while audio plays, in a thin
   crossterm terminal view
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-19 22:09'
-updated_date: '2026-10-19 22:09'
+updated_date: '2026-10-19 23:34'
 labels:
+  - planned
   - m4
   - live
   - host
@@ -49,24 +50,32 @@ Code comments describe current state only: no ticket numbers, dates, measurement
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Key handling is a pure function from (current Controls, key event) to an action (new Controls, quit, or nothing), unit-tested: q/a and w/s move the right knob by the coarse step, shift-modified keys by the fine step, values clamp at 0 and 1, esc and ctrl-c quit, other keys do nothing
-- [ ] #2 The readout line for a knob is a pure function unit-tested against at least one cutoff and one gain value, with the real unit computed through asperitas-dsp (no taper or range constants in asperitas-live)
-- [ ] #3 The step sizes are named constants (coarse 0.05 so end to end is 20 presses, fine 0.005, unless the notes record a reason for other values) with a comment saying why
-- [ ] #4 Raw mode is left and the cursor restored on normal quit, on error and on panic (a drop guard plus a panic hook); the ticket notes say how this was checked
-- [ ] #5 With stdout not a TTY, asperitas-live --input <clip> --seconds 5 runs with fixed knobs, prints that the view is disabled, and exits 0 (run it with stdout piped and record the output in the notes)
-- [ ] #6 crossterm is added only to crates/asperitas-live; CI on main is green after push (checked with gh)
-- [ ] #7 bash scripts/gates.sh push passes
+- [x] #1 Key handling is a pure function from (current Controls, key event) to an action (new Controls, quit, or nothing), unit-tested: q/a and w/s move the right knob by the coarse step, shift-modified keys by the fine step, values clamp at 0 and 1, esc and ctrl-c quit, other keys do nothing
+- [x] #2 The readout line for a knob is a pure function unit-tested against at least one cutoff and one gain value, with the real unit computed through asperitas-dsp (no taper or range constants in asperitas-live)
+- [x] #3 The step sizes are named constants (coarse 0.05 so end to end is 20 presses, fine 0.005, unless the notes record a reason for other values) with a comment saying why
+- [x] #4 Raw mode is left and the cursor restored on normal quit, on error and on panic (a drop guard plus a panic hook); the ticket notes say how this was checked
+- [x] #5 With stdout not a TTY, asperitas-live --input <clip> --seconds 5 runs with fixed knobs, prints that the view is disabled, and exits 0 (run it with stdout piped and record the output in the notes)
+- [x] #6 crossterm is added only to crates/asperitas-live; CI on main is green after push (checked with gh)
+- [x] #7 bash scripts/gates.sh push passes
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Provisional; the planner re-checks it against the engine and control path TASK-145.03 actually shipped.
-
-1. `crates/asperitas-live/src/view.rs`: `enum Action { Set(Controls), Quit, None }`; `fn on_key(c: &Controls, ev: KeyEvent) -> Action` (crossterm `KeyEvent`; shift arrives as an uppercase char and/or `KeyModifiers::SHIFT`, handle both). `const COARSE: f32 = 0.05; const FINE: f32 = 0.005;`. `fn readout(knob: usize, value: f32) -> String` producing the bar, the normalised value and the real unit from `ASPERITAS_PARAMS[knob]` (`from_normalised`, `unit`) or the TASK-145.02 helper; format Hz as kHz above 1000.
-2. `fn run_view(shared: &SharedControls, src_label: &str, until: Option<Instant>)`: enable raw mode behind a guard struct whose Drop disables it and shows the cursor; install a panic hook that does the same before chaining the old hook; poll `crossterm::event::poll` with a ~30 ms timeout, apply `on_key`, write to `SharedControls`, redraw the four lines in place (MoveTo + Clear(CurrentLine)); return on Quit or deadline.
-3. `main.rs`: if `std::io::stdout().is_terminal()` run the view on the main thread after starting the stream; otherwise print `view disabled: stdout is not a terminal` and sleep until `--seconds` or Ctrl-C.
-4. Tests for `on_key` and `readout` (AC #1, #2). Manual check of terminal restore: run in a TTY, quit with esc, then with ctrl-c, then trigger a debug-only panic key if added (or a `--panic-after` test-only flag behind `cfg(debug_assertions)`), and confirm `stty -a` shows `icanon echo` afterwards; record in notes.
-5. Piped run (AC #5): `cargo run -p asperitas-live --release -- --input audio/instruments/mandolin_chord.wav --seconds 5 | cat`.
-6. `bash scripts/gates.sh push`, commit, push main, `gh run watch`.
+SHIPPED by 4d4b78b. This plan is superseded; the ticket's final summary describes what actually landed.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Pure logic in crates/asperitas-live/src/view.rs (handle_key, readout_line, render_view; 8 unit tests); terminal shell in src/terminal.rs; backend::run now takes a wait closure that receives the ControlSlot. crossterm 0.29 added to asperitas-live only. Steps: COARSE_STEP 0.05, FINE_STEP 0.005. Real units via Controls::values and ASPERITAS_PARAMS units, no constants in the crate.
+AC4 evidence: ran the binary under a python pty. While running, ICANON was off (raw). After esc and after ctrl-c the output ended with the show-cursor escape and the process exited 0. A temporary panic after raw-mode entry (not committed) printed show-cursor before the panic message, exit 101: the RawGuard drop plus panic hook restore the terminal on normal, error and panic exits.
+AC5 evidence: 'asperitas-live --input audio/instruments/mandolin_chord.wav --seconds 5 | cat' printed 'running at 48000 Hz, looping clip', 'stdout is not a terminal: knob view disabled, knobs fixed', 'stream errors: 0, underruns: 0, overruns: 0', exit 0.
+AC6: CI run 39341613624 on main succeeded. AC7: scripts/gates.sh push passed (19 gates).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+asperitas-live now shows a crossterm knob view: q/a cutoff, w/s gain, shift for fine steps, esc/ctrl-c quit, writing into the shared ControlSlot. Falls back to fixed knobs when stdout is not a TTY. Shipped in 4d4b78b.
+<!-- SECTION:FINAL_SUMMARY:END -->
