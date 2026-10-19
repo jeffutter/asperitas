@@ -46,9 +46,19 @@ impl<'a> BodyWriter<'a> {
         }
     }
 
-    /// Append `value` as exactly `digits` lowercase hex digits, dropping high digits the width
-    /// cannot hold.
+    /// Append `value` as exactly `digits` lowercase hex digits.
+    ///
+    /// The width contract is the caller's: `digits` is at most 10 and `value` fits in it. It is
+    /// proven where each width is declared (`check_hex_width` in `frame.rs`, or the field kind's
+    /// `WIDTH` in `console.rs`) and asserted here in debug builds. Release builds never panic and
+    /// fall back to dropping the high digits, so a violated contract is a malformed body that the
+    /// receiver rejects, not a crash on a path that may not fail.
     pub fn hex(&mut self, value: u32, digits: usize) {
+        debug_assert!(digits <= MAX_FIELD_DIGITS, "hex width {digits} too wide");
+        debug_assert!(
+            digits >= 8 || value >> (4 * digits) == 0,
+            "{value:#x} does not fit {digits} hex digits"
+        );
         let mut scratch = [0u8; MAX_FIELD_DIGITS];
         let digits = digits.min(MAX_FIELD_DIGITS);
         if let Some(field) = scratch.get_mut(..digits) {
@@ -57,9 +67,19 @@ impl<'a> BodyWriter<'a> {
         }
     }
 
-    /// Append `value` as exactly `digits` zero-padded decimal digits, dropping high digits the
-    /// width cannot hold.
+    /// Append `value` as exactly `digits` zero-padded decimal digits.
+    ///
+    /// Same contract as [`Self::hex`]: `digits` is at most 10 and `value` fits, asserted in debug
+    /// builds, with the high digits dropped as the release-build fallback.
     pub fn decimal(&mut self, value: u32, digits: usize) {
+        debug_assert!(
+            digits <= MAX_FIELD_DIGITS,
+            "decimal width {digits} too wide"
+        );
+        debug_assert!(
+            digits >= MAX_FIELD_DIGITS || value < 10u32.pow(digits as u32),
+            "{value} does not fit {digits} decimal digits"
+        );
         let mut scratch = [0u8; MAX_FIELD_DIGITS];
         let digits = digits.min(MAX_FIELD_DIGITS);
         if let Some(field) = scratch.get_mut(..digits) {
@@ -170,6 +190,34 @@ mod tests {
         w.hex(1, 2);
         assert_eq!(w.filled(), 6);
         assert_eq!(&buf, b"abbeef");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "does not fit")]
+    fn hex_asserts_a_value_wider_than_its_field() {
+        BodyWriter::new(&mut [0u8; 8]).hex(0x1_0000, 4);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "does not fit")]
+    fn decimal_asserts_a_value_wider_than_its_field() {
+        BodyWriter::new(&mut [0u8; 8]).decimal(1_000_000, 6);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "too wide")]
+    fn hex_asserts_a_width_past_the_widest_field() {
+        BodyWriter::new(&mut [0u8; 16]).hex(0, 11);
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "too wide")]
+    fn decimal_asserts_a_width_past_the_widest_field() {
+        BodyWriter::new(&mut [0u8; 16]).decimal(0, 11);
     }
 
     #[test]

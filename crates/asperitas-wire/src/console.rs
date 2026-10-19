@@ -411,12 +411,32 @@ impl StatusRecord {
 // Measurement-rig verbs
 // ---------------------------------------------------------------------------
 
-/// How many decimal digits a saturated `u32` renders as: `4294967295`.
+/// How many decimal digits `value` renders as, with no leading zeros.
 ///
-/// Every `u32` field in a verb's field list costs exactly this many bytes at its worst. Naming
-/// the number keeps the widths auditable: `11` would pass the same asserts while quietly
-/// overstating the verb, and `9` would understate it and let a real device overflow one record.
-const U32_MAX_DIGITS: usize = 10;
+/// A `const fn` so a field kind can derive its width from the value type's maximum
+/// (`decimal_digits(u32::MAX as u64)`) instead of restating the number: a wider type changes the
+/// width and every verb's worst case follows it into the `MAX_BODY` asserts.
+const fn decimal_digits(mut value: u64) -> usize {
+    let mut digits = 1;
+    while value >= 10 {
+        value /= 10;
+        digits += 1;
+    }
+    digits
+}
+
+/// The longest string in `all`, in bytes.
+const fn longest(all: &[&str]) -> usize {
+    let mut i = 0;
+    let mut max = 0;
+    while i < all.len() {
+        if all[i].len() > max {
+            max = all[i].len();
+        }
+        i += 1;
+    }
+    max
+}
 
 /// One field kind a numeric verb body can carry: how it renders and the most bytes that takes.
 ///
@@ -433,17 +453,17 @@ trait WireField {
 struct Dec;
 impl WireField for Dec {
     type Value = u32;
-    const WIDTH: usize = U32_MAX_DIGITS;
+    const WIDTH: usize = decimal_digits(u32::MAX as u64);
     fn write(w: &mut BodyWriter<'_>, value: u32) {
         let _ = core::write!(w, "{value}");
     }
 }
 
-/// A slot index, up to three decimal digits.
+/// A slot index in plain decimal; three digits at `u8::MAX`.
 struct Slot;
 impl WireField for Slot {
     type Value = u8;
-    const WIDTH: usize = 3;
+    const WIDTH: usize = decimal_digits(u8::MAX as u64);
     fn write(w: &mut BodyWriter<'_>, value: u8) {
         let _ = core::write!(w, "{value}");
     }
@@ -453,7 +473,7 @@ impl WireField for Slot {
 struct Hex4;
 impl WireField for Hex4 {
     type Value = u16;
-    const WIDTH: usize = 4;
+    const WIDTH: usize = (u16::BITS / 4) as usize;
     fn write(w: &mut BodyWriter<'_>, value: u16) {
         w.hex(u32::from(value), 4);
     }
@@ -473,17 +493,17 @@ impl WireField for Flag {
 struct Lane;
 impl WireField for Lane {
     type Value = MonoLane;
-    const WIDTH: usize = 1;
+    const WIDTH: usize = longest(&MonoLane::SPELLINGS);
     fn write(w: &mut BodyWriter<'_>, value: MonoLane) {
         w.put(value.letter().as_bytes());
     }
 }
 
-/// A refusal reason; `invalid` is the longest spelling.
+/// A refusal reason, as wide as the longest spelling in [`PlayRefusal::SPELLINGS`].
 struct Why;
 impl WireField for Why {
     type Value = PlayRefusal;
-    const WIDTH: usize = 7;
+    const WIDTH: usize = longest(&PlayRefusal::SPELLINGS);
     fn write(w: &mut BodyWriter<'_>, value: PlayRefusal) {
         w.put(value.as_str().as_bytes());
     }
@@ -535,6 +555,9 @@ pub enum MonoLane {
 }
 
 impl MonoLane {
+    /// Every wire spelling, kept beside [`Self::letter`]; a test fails if a variant is missing.
+    const SPELLINGS: [&'static str; 2] = [MonoLane::Left.letter(), MonoLane::Right.letter()];
+
     /// The one-character wire spelling of this lane.
     const fn letter(self) -> &'static str {
         match self {
@@ -832,6 +855,10 @@ pub enum PlayRefusal {
 }
 
 impl PlayRefusal {
+    /// Every wire spelling, kept beside [`Self::as_str`]; a test fails if a variant is missing.
+    const SPELLINGS: [&'static str; 2] =
+        [PlayRefusal::Empty.as_str(), PlayRefusal::Invalid.as_str()];
+
     /// The wire spelling.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -1529,6 +1556,54 @@ mod tests {
         assert_eq!(n, EXCPLAYFAIL_WORST);
     }
 
+    /// The spelling tables behind `Lane` and `Why` must name every variant: the exhaustive
+    /// matches fail to compile when a variant is added, and the length checks then fail until it
+    /// reaches the table the width is derived from.
+    #[test]
+    fn spelling_tables_cover_every_variant() {
+        for lane in [MonoLane::Left, MonoLane::Right] {
+            match lane {
+                MonoLane::Left | MonoLane::Right => {}
+            }
+            assert!(MonoLane::SPELLINGS.contains(&lane.letter()));
+        }
+        for why in [PlayRefusal::Empty, PlayRefusal::Invalid] {
+            match why {
+                PlayRefusal::Empty | PlayRefusal::Invalid => {}
+            }
+            assert!(PlayRefusal::SPELLINGS.contains(&why.as_str()));
+        }
+    }
+
+    /// Render `value` through field kind `K`, returning the bytes written.
+    fn rendered_len<K: WireField>(value: K::Value) -> usize {
+        let mut buf = [0u8; 32];
+        let mut w = BodyWriter::new(&mut buf);
+        K::write(&mut w, value);
+        w.filled()
+    }
+
+    #[test]
+    fn each_field_kind_renders_exactly_its_declared_width_at_saturation() {
+        assert_eq!(rendered_len::<Dec>(u32::MAX), Dec::WIDTH);
+        assert_eq!(Dec::WIDTH, 10);
+        assert_eq!(rendered_len::<Slot>(u8::MAX), Slot::WIDTH);
+        assert_eq!(Slot::WIDTH, 3);
+        assert_eq!(rendered_len::<Hex4>(u16::MAX), Hex4::WIDTH);
+        assert_eq!(rendered_len::<Hex4>(0), Hex4::WIDTH, "hex is zero padded");
+        assert_eq!(rendered_len::<Flag>(true), Flag::WIDTH);
+        assert_eq!(rendered_len::<Flag>(false), Flag::WIDTH);
+        for lane in [MonoLane::Left, MonoLane::Right] {
+            assert!(rendered_len::<Lane>(lane) <= Lane::WIDTH);
+        }
+        let widest = [PlayRefusal::Empty, PlayRefusal::Invalid]
+            .map(rendered_len::<Why>)
+            .into_iter()
+            .max();
+        assert_eq!(widest, Some(Why::WIDTH));
+        assert_eq!(Why::WIDTH, 7);
+    }
+
     #[test]
     fn dumpend_body_pins_field_names_and_order() {
         let mut out = [0u8; BODY_WINDOW];
@@ -1596,6 +1671,10 @@ mod tests {
         assert_eq!(
             stimstart_body(&saturated_stimulus_start(), &mut out),
             STIMSTART_WORST
+        );
+        assert_eq!(
+            exc_play_refused_body(u8::MAX, PlayRefusal::Invalid, &mut out),
+            EXCPLAYFAIL_WORST
         );
     }
 }

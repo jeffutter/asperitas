@@ -422,8 +422,12 @@ const SEP_WHY: &[u8] = b" why=";
 const LONGEST_WHY: usize = 9; // "malformed"
 
 /// Longest `EXCOK` body: 51.
-pub const MAX_OK_BODY_LEN: usize =
-    OK_PREFIX.len() + super::TAG_MAX + SEP_BYTES.len() + 6 + SEP_CRC16.len() + 4;
+pub const MAX_OK_BODY_LEN: usize = OK_PREFIX.len()
+    + super::TAG_MAX
+    + SEP_BYTES.len()
+    + super::BYTES_DEC_DIGITS
+    + SEP_CRC16.len()
+    + 4;
 
 /// Longest `EXCFAIL` body: 40.
 pub const MAX_FAIL_BODY_LEN: usize =
@@ -440,7 +444,7 @@ pub fn exc_ok_body(header: &SlotHeader, out: &mut [u8; MAX_BODY]) -> usize {
     w.put(OK_PREFIX);
     w.put(header.name().as_bytes());
     w.put(SEP_BYTES);
-    w.decimal(header.pcm_bytes(), 6);
+    w.decimal(header.pcm_bytes(), super::BYTES_DEC_DIGITS);
     w.put(SEP_CRC16);
     w.hex(u32::from(header.pcm_crc16()), 4);
     w.filled()
