@@ -3,11 +3,11 @@ id: TASK-085
 title: >-
   Firmware: add a package lib with one audio module, shared panic/logger
   preamble and host-control glue
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
-updated_date: '2026-10-16 20:00'
+updated_date: '2026-10-19 16:28'
 labels:
   - review-2026-10
   - firmware
@@ -34,11 +34,11 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 main and rig both start audio through the same audio::start; one AUDIO_EXIT encoding
-- [ ] #2 encode_block and the SAI1 executor setup exist once
-- [ ] #3 The per-binary panic/logger preamble is replaced by the lib, with panictest still reaching LED and USB (checked in the hardware recheck ticket)
-- [ ] #4 #[path] imports and the blanket allow(dead_code) are gone
-- [ ] #5 scripts/check-main-audio-executor.sh is deleted or reduced because the guarantee holds by construction
+- [x] #1 main and rig both start audio through the same audio::start; one AUDIO_EXIT encoding
+- [x] #2 encode_block and the SAI1 executor setup exist once
+- [x] #3 The per-binary panic/logger preamble is replaced by the lib, with panictest still reaching LED and USB (checked in the hardware recheck ticket)
+- [x] #4 #[path] imports and the blanket allow(dead_code) are gone
+- [x] #5 scripts/check-main-audio-executor.sh is deleted or reduced because the guarantee holds by construction
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -47,3 +47,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 Planned against ec0d387
 Umbrella ticket. Work splits into three sub-tickets: .01 lib target + shared panic/logger preamble (with link experiment), .02 host_control into lib (needs .01), .03 audio module (needs .01). Order: .01, then .02 and .03. Parent has no direct work; closes when children are Done. ACs 3 (panictest on hardware) is confirmed in TASK-120. Final check: CI firmware builds (default and no-default-features seed3 log-defmt) link, gates pass.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All subtasks are Done (.01 lib target and shared preamble, .02 host_control in the lib, .03 shared audio module). Verified 2026-10-19: main and rig both start audio through asperitas_firmware::audio::start with one AUDIO_EXIT encoding; encode_block and the SAI1 executor setup exist once; no #[path] imports or blanket allow(dead_code) remain in firmware/src; check-main-audio-executor.sh is gone with no references. panictest reached the panic LED (steady red) and USB (PANIC record intact at src/bin/panictest.rs:123:9) in the TASK-120 bench session with the owner.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -3,11 +3,11 @@ id: TASK-082
 title: >-
   DSP: one top-level effect that owns knob mapping, chaining and the parameter
   table; in-place block API
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:12'
-updated_date: '2026-10-16 22:35'
+updated_date: '2026-10-19 16:28'
 labels:
   - review-2026-10
   - dsp
@@ -37,10 +37,10 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 main.rs and rig run the same asperitas-dsp chain; the knob mapping lives in asperitas-dsp only
-- [ ] #2 CLI process, the future TUI and the firmware build the chain from the same parameter table
-- [ ] #3 Block processing is in place with no triple buffering in main.rs; max_block_us is not worse by more than a few us
-- [ ] #4 Hardware recheck is covered by the review hardware-recheck ticket
+- [x] #1 main.rs and rig run the same asperitas-dsp chain; the knob mapping lives in asperitas-dsp only
+- [x] #2 CLI process, the future TUI and the firmware build the chain from the same parameter table
+- [x] #3 Block processing is in place with no triple buffering in main.rs; max_block_us is not worse by more than a few us
+- [x] #4 Hardware recheck is covered by the review hardware-recheck ticket
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -58,3 +58,9 @@ No remaining work outside the subtasks.
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-16 owner decision: Modulation (M6) is block-rate: the envelope follower and random walk set parameters once per audio block through each processor's existing smoother; no per-sample modulation inputs. The top-level effect has no soft-clip stage; the hard clamp at the codec boundary stays. Revisit by ear in M5.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All four subtasks are Done. Verified 2026-10-19: knob mapping lives in asperitas-dsp (firmware main's KnobChain only wraps Asperitas); asperitas-cli process and the firmware host control use the shared parameter table (ASPERITAS_PARAMS); block processing is in place with one frames buffer in main.rs. Block time: rig max_block_us was 39-44 in the TASK-120 bench capture against 43-46 in the TASK-059.03 baseline, so not worse (main emits no STATUS, so its block time was not measured directly). Hardware recheck covered by TASK-120 (AC1-3 checked with the owner on 2026-10-19).
+<!-- SECTION:FINAL_SUMMARY:END -->

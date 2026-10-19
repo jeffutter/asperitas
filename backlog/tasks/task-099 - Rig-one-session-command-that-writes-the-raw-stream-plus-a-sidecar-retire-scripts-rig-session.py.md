@@ -3,16 +3,23 @@ id: TASK-099
 title: >-
   Rig: one session command that writes the raw stream plus a sidecar; retire
   scripts/rig-session.py
-status: To Do
+status: Blocked
 assignee:
-  - '@agent'
+  - '@human'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-17 02:53'
 labels:
   - review-2026-10
   - rig
   - host
+  - planned
 dependencies:
   - TASK-095
+  - TASK-099.01
+  - TASK-099.02
+  - TASK-099.03
+  - TASK-099.04
+  - TASK-099.05
 priority: medium
 type: chore
 ordinal: 201800
@@ -35,6 +42,15 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [ ] #2 scripts/rig-session.py is deleted
 - [ ] #3 A bench run reproduces a TASK-019.03.04 style result (hardware recheck ticket)
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Planned against b1f171b
+Approach: one 'asperitas-rig session' path replaces scripts/rig-session.py; timing comes from the stream (device t_ms of first CTLR OK SET) with a sidecar fallback; measure analyze reads the sidecar.
+Order: TASK-099.01 (stream timing), TASK-099.02 (session subcommand), TASK-099.03 (measure reads sidecar), TASK-099.04 (delete script, docs), TASK-019.03.04 (HUMAN bench recheck).
+Parent is @human because TASK-019.03.04 is. AC1 satisfied by TASK-099.03, AC2 by TASK-099.04, AC3 by TASK-019.03.04. Final test: cargo test -p asperitas-rig -p asperitas-measure -p asperitas-host, then bench run.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

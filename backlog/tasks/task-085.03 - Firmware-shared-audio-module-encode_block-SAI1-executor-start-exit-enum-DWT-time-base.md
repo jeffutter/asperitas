@@ -3,11 +3,11 @@ id: TASK-085.03
 title: >-
   Firmware: shared audio module (encode_block, SAI1 executor, start(), exit
   enum, DWT time base)
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-10-16 20:00'
-updated_date: '2026-10-16 20:20'
+updated_date: '2026-10-19 16:28'
 labels:
   - task
   - firmware
@@ -32,3 +32,9 @@ Add firmware audio module to the lib: codec encode/decode (encode_block exists o
 Planned against e5e8afd
 Tracking ticket. Work is split: .01 builds the lib audio module and migrates main (and removes the check-main-audio-executor script and gate), .02 migrates rig onto it. Done when both are Done, gates pass, and hardware recheck proceeds in TASK-120.
 <!-- SECTION:PLAN:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Both subtasks are Done: .01 added the lib audio module and migrated main, .02 migrated rig. main and rig both call audio::start, encode_block and the executor setup exist once in asperitas_firmware::audio, and check-main-audio-executor.sh is gone with no remaining references. Hardware behavior checked in the TASK-120 bench session on 2026-10-19.
+<!-- SECTION:FINAL_SUMMARY:END -->
