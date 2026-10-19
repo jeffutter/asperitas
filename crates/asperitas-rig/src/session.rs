@@ -506,18 +506,29 @@ pub fn run_session<P: Read + Write>(port: P, plan: &SessionPlan, opts: &SessionO
     }
 }
 
-/// Write the raw stream zstd-compressed to `out` and the sidecar beside it. Does nothing when the
-/// session read nothing.
-pub fn write_session(out: &Path, plan: &SessionPlan, run: &SessionRun) -> io::Result<()> {
+/// Write the raw stream zstd-compressed to `out` and the sidecar beside it. Returns `Ok(false)`
+/// without writing anything when the session read nothing.
+pub fn write_session(out: &Path, plan: &SessionPlan, run: &SessionRun) -> io::Result<bool> {
     if run.raw.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     std::fs::write(
         out,
         compress_to_vec(run.raw.as_slice(), CompressionLevel::Fastest),
     )?;
     let sidecar = plan.sidecar(run.observed.arm_t_ms, run.observed.first_set_t_ms);
-    std::fs::write(sidecar_path(out), sidecar.render())
+    std::fs::write(sidecar_path(out), sidecar.render())?;
+    Ok(true)
+}
+
+/// Pick the error a finished session reports. The session's own failure (timeout, closed port,
+/// rejected command) is the root cause, so it wins over an artifact write failure; the write
+/// failure is returned only when the session itself succeeded.
+pub fn session_error(
+    run_error: Option<ControlError>,
+    write: io::Result<bool>,
+) -> Option<ControlError> {
+    run_error.or(write.err().map(ControlError::Io))
 }
 
 /// Reset the board over the probe. The console vanishes and re-enumerates afterwards; the caller
@@ -737,7 +748,7 @@ mod tests {
         let run = run_session(rig, &plan, &opts(3000));
         let d = tempfile::tempdir().unwrap();
         let out = d.path().join("s.console.zst");
-        write_session(&out, &plan, &run).unwrap();
+        assert!(write_session(&out, &plan, &run).unwrap());
         let mut back = Vec::new();
         ruzstd::decoding::StreamingDecoder::new(std::fs::File::open(&out).unwrap())
             .unwrap()
@@ -749,6 +760,35 @@ mod tests {
             side,
             plan.sidecar(run.observed.arm_t_ms, run.observed.first_set_t_ms)
         );
+    }
+
+    #[test]
+    fn empty_raw_stream_writes_no_artifact() {
+        let plan = sweep_plan();
+        let run = SessionRun {
+            raw: Vec::new(),
+            observed: Observed::default(),
+            sets_sent: 0,
+            error: Some(ControlError::Timeout),
+        };
+        let d = tempfile::tempdir().unwrap();
+        let out = d.path().join("s.console.zst");
+        assert!(!write_session(&out, &plan, &run).unwrap());
+        assert!(!out.exists() && !sidecar_path(&out).exists());
+    }
+
+    #[test]
+    fn session_failure_wins_over_write_failure() {
+        let werr = || Err(io::Error::other("disk"));
+        assert!(matches!(
+            session_error(Some(ControlError::Timeout), werr()),
+            Some(ControlError::Timeout)
+        ));
+        assert!(matches!(
+            session_error(None, werr()),
+            Some(ControlError::Io(_))
+        ));
+        assert!(session_error(None, Ok(false)).is_none());
     }
 
     #[test]

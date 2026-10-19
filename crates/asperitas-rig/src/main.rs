@@ -15,8 +15,8 @@ use asperitas_rig::control::{
     query, restart, run_override, schedule, ControlError, Link, OverridePlan, RestartOpts,
 };
 use asperitas_rig::session::{
-    probe_reset, run_session, write_session, Motion, SessionOpts, SessionPlan, DEFAULT_SNAPS,
-    DEFAULT_SNAP_LEVEL,
+    probe_reset, run_session, session_error, write_session, Motion, SessionOpts, SessionPlan,
+    DEFAULT_SNAPS, DEFAULT_SNAP_LEVEL,
 };
 use asperitas_rig::Policy;
 use clap::{Args, Parser, Subcommand};
@@ -373,10 +373,15 @@ fn go(command: Command) -> Result<Outcome, ControlError> {
             } else {
                 attach(&device, Duration::ZERO, poll)?
             };
-            let run = run_session(port, &plan, &opts);
-            write_session(&out, &plan, &run)?;
+            let mut run = run_session(port, &plan, &opts);
+            let written = write_session(&out, &plan, &run);
             println!("{}", run.summary());
-            if let Some(e) = run.error {
+            match &written {
+                Ok(true) => {}
+                Ok(false) => println!("no artifact written (empty raw stream)"),
+                Err(e) => eprintln!("cannot write session artifact: {e}"),
+            }
+            if let Some(e) = session_error(run.error.take(), written) {
                 return Err(e);
             }
             let outcome = run.outcome();
