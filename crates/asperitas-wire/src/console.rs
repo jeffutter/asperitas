@@ -387,6 +387,24 @@ impl StatusRecord {
         };
         tokens.next().is_none().then_some(parsed)
     }
+
+    /// Read one counter from a `STATUS`-shaped body without requiring the rest of the format.
+    ///
+    /// [`parse`](Self::parse) is the strict contract; this is the host's tolerance for drift.
+    /// It needs only the leading `STATUS` token and a `name=<u32>` token somewhere after it, so a
+    /// reordered, extended, truncated or newer-protocol body still yields the counters a verdict
+    /// depends on. `None` when the body is not `STATUS` or the counter is absent or non-numeric.
+    pub fn counter(body: &[u8], name: &str) -> Option<u32> {
+        let text = core::str::from_utf8(body).ok()?;
+        let mut tokens = text.split_ascii_whitespace();
+        if tokens.next()? != "STATUS" {
+            return None;
+        }
+        tokens.find_map(|token| {
+            let (key, value) = token.split_once('=')?;
+            (key == name).then(|| value.parse().ok()).flatten()
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +956,27 @@ mod tests {
             endpoint_errors,
             seq_next,
         }
+    }
+
+    #[test]
+    fn counter_reads_through_format_drift() {
+        let reordered = b"STATUS ep_err=4 dropped_full=7 proto=1";
+        let newer = b"STATUS proto=2 sent=1 dropped_full=9 new=1";
+        let truncated = b"STATUS proto=1 sent=5 dropped_full=3 byt";
+        assert_eq!(StatusRecord::counter(reordered, "dropped_full"), Some(7));
+        assert_eq!(StatusRecord::counter(reordered, "ep_err"), Some(4));
+        assert_eq!(StatusRecord::counter(newer, "dropped_full"), Some(9));
+        assert_eq!(StatusRecord::counter(truncated, "dropped_full"), Some(3));
+        assert_eq!(StatusRecord::counter(truncated, "ep_err"), None);
+        assert_eq!(
+            StatusRecord::counter(b"BOOT dropped_full=1", "dropped_full"),
+            None
+        );
+        assert_eq!(
+            StatusRecord::counter(b"STATUS dropped_full=x", "dropped_full"),
+            None
+        );
+        assert_eq!(StatusRecord::counter(b"\xff", "dropped_full"), None);
     }
 
     #[test]

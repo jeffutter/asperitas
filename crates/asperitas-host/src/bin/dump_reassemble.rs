@@ -351,10 +351,14 @@ fn handle(
 /// Echo a non-dump record's body when it carries a fact a rig watches: `STATUS` is the counter
 /// stream, everything else is ordinary logging noise that would bury the manifest.
 fn note(body: &[u8]) {
+    if !body.starts_with(b"STATUS ") {
+        return;
+    }
+    let text = String::from_utf8_lossy(body);
     if StatusRecord::parse(body).is_some() {
-        if let Ok(text) = core::str::from_utf8(body) {
-            eprintln!("dump_reassemble: {text}");
-        }
+        eprintln!("dump_reassemble: {text}");
+    } else {
+        eprintln!("dump_reassemble: unparsed STATUS: {text}");
     }
 }
 

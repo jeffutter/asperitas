@@ -70,6 +70,8 @@ pub struct Summary {
     pub status_records: u64,
     /// `STATUS` records with an unknown protocol or unparseable fields.
     pub unparsed_status: u64,
+    /// Body of the first `STATUS` record the strict parser rejected, so format drift is visible.
+    pub first_unparsed_status: Option<String>,
     /// Device-reported `dropped_full`, summed over boots using the last `STATUS` of each.
     /// `None` when no `STATUS` record parsed.
     pub device_dropped: Option<u64>,
@@ -191,7 +193,17 @@ impl Accumulator {
                     self.any_status = true;
                     self.dropped_this_boot = u64::from(status.dropped_full);
                 }
-                None => self.summary.unparsed_status += 1,
+                None => {
+                    self.summary.unparsed_status += 1;
+                    self.summary
+                        .first_unparsed_status
+                        .get_or_insert_with(|| body.clone());
+                    // Drift must not erase the drop count the verdict depends on.
+                    if let Some(dropped) = StatusRecord::counter(r.body, "dropped_full") {
+                        self.any_status = true;
+                        self.dropped_this_boot = u64::from(dropped);
+                    }
+                }
             }
         }
 
@@ -258,6 +270,14 @@ pub fn render(capture: &Capture, policy: &Policy) -> String {
     let _ = writeln!(out, "restarts={}", s.restarts);
     let _ = writeln!(out, "status_records={}", s.status_records);
     let _ = writeln!(out, "unparsed_status={}", s.unparsed_status);
+    match &s.first_unparsed_status {
+        None => {
+            let _ = writeln!(out, "first_unparsed_status=none");
+        }
+        Some(body) => {
+            let _ = writeln!(out, "first_unparsed_status={body}");
+        }
+    }
     match s.device_dropped {
         None => {
             let _ = writeln!(out, "device_dropped=unknown");
@@ -412,14 +432,32 @@ mod tests {
     }
 
     #[test]
-    fn missing_status_and_unknown_proto() {
-        let c = run(&stream(&[(0, "x"), (1, "STATUS proto=2 dropped_full=9")]));
+    fn missing_status_is_no_status() {
+        let c = run(&stream(&[(0, "x"), (1, "STATUS proto=2")]));
         assert_eq!(c.summary.device_dropped, None);
         assert_eq!(c.summary.unparsed_status, 1);
         assert_eq!(
             verdict(&c.summary, &Policy::default()),
             Verdict::Fail(vec![Reason::NoStatus])
         );
+    }
+
+    #[test]
+    fn status_drift_keeps_the_drop_count_and_is_surfaced() {
+        for body in [
+            "STATUS proto=2 dropped_full=9",
+            "STATUS proto=1 sent=5 dropped_full=9 extra=1",
+            "STATUS proto=1 ep_err=0 dropped_full=9",
+            "STATUS proto=1 sent=5 dropped_full=9 byt",
+        ] {
+            let c = run(&stream(&[(0, "x"), (1, body)]));
+            assert_eq!(c.summary.device_dropped, Some(9), "{body}");
+            assert_eq!(c.summary.unparsed_status, 1, "{body}");
+            assert_eq!(c.summary.first_unparsed_status.as_deref(), Some(body));
+            assert!(
+                render(&c, &Policy::default()).contains(&format!("first_unparsed_status={body}\n"))
+            );
+        }
     }
 
     struct OneByte<'a>(&'a [u8]);
@@ -456,7 +494,7 @@ mod tests {
         let expected = format!(
             "asperitas-rig capture v1\nrecords=2\nbytes_pushed={}\nbad_frames=0\nresyncs=0\n\
              discarded_bytes=0\naccounting_ok=true\nseq_gaps=0\nfirst_gap=none\nrestarts=0\n\
-             status_records=0\nunparsed_status=0\ndevice_dropped=unknown\nverdict=fail no_status_record\n--\n\
+             status_records=0\nunparsed_status=0\nfirst_unparsed_status=none\ndevice_dropped=unknown\nverdict=fail no_status_record\n--\n\
              I 00000000 0 BOOT proto=1\nI 00000001 10 hi\n",
             first + second
         );
