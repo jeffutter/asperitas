@@ -77,6 +77,11 @@ pub fn sidecar_path(out: &Path) -> PathBuf {
 /// Device `t_ms` is transmitted modulo this many milliseconds.
 const T_MS_MODULUS: i64 = 100_000_000;
 
+/// Slack allowed beyond the planned delay when trusting the device-clock delta. Real scheduling
+/// latency is small, so a larger delta means the first `SET` reply preceded the arming record
+/// and the subtraction wrapped the wrong way.
+const MAX_SET_LATENCY_S: f64 = 30.0;
+
 /// Why a sidecar did not parse.
 #[derive(Debug, PartialEq, Eq)]
 pub struct SidecarError(pub String);
@@ -93,11 +98,18 @@ impl Sidecar {
     /// Seconds from the capture arming to the first scheduled `SET`. Prefers the device clock
     /// (first `SET` reply minus the arming status record, wrapped as the stream wraps), which
     /// includes real scheduling latency; falls back to the host's planned delay when the recorder
-    /// could not read one of the two times.
+    /// could not read one of the two times, or when the device delta exceeds the planned delay by
+    /// more than `MAX_SET_LATENCY_S` (the `SET` reply preceded the arming record).
     pub fn motion_start_s(&self) -> f64 {
         match (self.arm_t_ms, self.first_set_t_ms) {
             (Some(arm), Some(set)) => {
-                (i64::from(set) - i64::from(arm)).rem_euclid(T_MS_MODULUS) as f64 / 1000.0
+                let delta_s =
+                    (i64::from(set) - i64::from(arm)).rem_euclid(T_MS_MODULUS) as f64 / 1000.0;
+                if delta_s <= self.start_after_arm_s + MAX_SET_LATENCY_S {
+                    delta_s
+                } else {
+                    self.start_after_arm_s
+                }
             }
             _ => self.start_after_arm_s,
         }
@@ -252,6 +264,18 @@ mod tests {
             ..sample()
         };
         assert_eq!(planned.motion_start_s(), 10.0);
+        let reply_before_arm = Sidecar {
+            arm_t_ms: Some(14_710),
+            first_set_t_ms: Some(4_210),
+            ..sample()
+        };
+        assert_eq!(reply_before_arm.motion_start_s(), 10.0);
+        let at_bound = Sidecar {
+            arm_t_ms: Some(0),
+            first_set_t_ms: Some(40_000),
+            ..sample()
+        };
+        assert_eq!(at_bound.motion_start_s(), 40.0);
     }
 
     #[test]
