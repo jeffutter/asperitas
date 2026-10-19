@@ -135,8 +135,9 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
 - `--fx-f` is `0` bypass or `1` patch; `--knob` is required and decimal (0 filter cutoff, 1 output gain).
   Device selection is the same as the other subcommands (`--device` or the single
   `/dev/cu.usbmodem*` / `/dev/ttyACM*`).
-- `sweep` steps linearly at 20 `SET`s per second from `--start-after-arm` seconds after the
-  capture arms, then releases 0.1 s after the last step. `soak` is a 250 s triangle ramp
+- `sweep` sends the `--from` level once before the capture arms (so the gain is settled when the
+  sweep starts, not still at the device default), then steps linearly at 20 `SET`s per second from
+  `--start-after-arm` seconds after the capture arms, then releases 0.1 s after the last step. `soak` is a 250 s triangle ramp
   0.50 to 0.95 to 0.50 starting 10 s after arming (it starts and ends at the base value so the
   ramp itself causes no snap), with two snaps (+`--snap-level` for 0.5 s) at 80 s and 160 s of the
   ramp unless `--no-snaps`. `hold` sends one `SET` before the capture arms and releases when the

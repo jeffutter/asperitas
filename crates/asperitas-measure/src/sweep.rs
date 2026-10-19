@@ -309,6 +309,35 @@ mod tests {
     }
 
     #[test]
+    fn unsettled_start_fails_and_settled_start_passes() {
+        // The first 300 ms still play at the device default (about -13 dB), as when the first SET
+        // is the first thing to move the gain and its effect reaches the stream late. That is far
+        // above the -30 dB the sweep begins at and reaches into the first bucket's trimmed window,
+        // so the first bucket reverses against the rest.
+        let rate = f64::from(RATE);
+        let unsettled_len = (0.3 * rate) as usize;
+        let mut unsettled = gain_signal(ramp, false);
+        let tone = |i: usize| {
+            let a = 0.5 * 10f64.powf(-13.0 / 20.0);
+            (a * f64::from((TAU * 1000.0 * i as f32 / RATE as f32).sin())) as f32
+        };
+        for (i, s) in unsettled.iter_mut().enumerate().take(unsettled_len) {
+            *s = tone(i);
+        }
+        let bad = judged(SweepKind::Gain, &unsettled);
+        assert!(!bad.monotonic, "{bad:?}");
+        assert!(
+            bad.failures().iter().any(|f| f.contains("reverses")),
+            "{bad:?}"
+        );
+
+        // With the 'from' level applied before the capture the same window is at the sweep start.
+        let good = judged(SweepKind::Gain, &gain_signal(ramp, false));
+        assert!(good.monotonic, "{good:?}");
+        assert!(good.failures().is_empty(), "{good:?}");
+    }
+
+    #[test]
     fn reversal_fails_as_non_monotonic() {
         // Dips 6 dB over the middle of the travel, then recovers.
         let r = judged(

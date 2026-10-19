@@ -51,6 +51,8 @@ const RELEASE_LAG: Duration = Duration::from_millis(100);
 #[derive(Clone, Debug, PartialEq)]
 pub enum Motion {
     /// Linear sweep at 20 `SET`s per second, starting `start_after_arm` after the capture arms.
+    /// The `from` level is sent once before the capture arms, so the knob override is engaged and
+    /// settled at the start of the sweep instead of the device still sitting at its default.
     Sweep {
         from: f64,
         to: f64,
@@ -102,7 +104,7 @@ impl SessionPlan {
                     .map(|(t, v)| (t + *start_after_arm, v))
                     .collect();
                 Ok(Timeline {
-                    pre: Vec::new(),
+                    pre: vec![level_to_wire(*from)?],
                     timed,
                     release_at: Some(*start_after_arm + *duration + RELEASE_LAG),
                 })
@@ -776,8 +778,9 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert!(sets.len() >= 2);
-        assert_eq!(sets[0], 0);
+        assert!(sets.len() >= 3);
+        // The pre-arm 'from' SET, then the first timed step at the same level.
+        assert_eq!(sets[..2], [0, 0]);
         assert_eq!(*sets.last().unwrap(), 0xffff);
         assert_eq!(c.last(), Some(&Command::OverrideRelease { knob: 2 }));
         assert_eq!(
@@ -928,7 +931,12 @@ mod tests {
         assert!(matches!(run.error, Some(ControlError::Timeout)));
         let c = cmds(&written);
         assert_eq!(c.last(), Some(&Command::OverrideRelease { knob: 2 }));
-        assert!(!c.iter().any(|c| matches!(c, Command::OverrideSet { .. })));
+        // Only the pre-arm 'from' SET went out; none of the timed steps.
+        let sets = c
+            .iter()
+            .filter(|c| matches!(c, Command::OverrideSet { .. }))
+            .count();
+        assert_eq!(sets, 1);
     }
 
     #[test]
@@ -1067,7 +1075,8 @@ mod tests {
         assert_eq!(t.timed[0], (Duration::from_millis(20), 0));
         assert_eq!(t.timed.last().unwrap().1, 0xffff);
         assert_eq!(t.release_at, Some(Duration::from_millis(320)));
-        assert!(t.pre.is_empty());
+        // The 'from' level is applied before the capture arms so the first bucket is settled.
+        assert_eq!(t.pre, vec![0]);
     }
 
     #[test]

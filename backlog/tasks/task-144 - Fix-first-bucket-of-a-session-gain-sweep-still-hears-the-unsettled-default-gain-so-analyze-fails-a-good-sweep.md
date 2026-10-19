@@ -3,15 +3,16 @@ id: TASK-144
 title: >-
   Fix: first bucket of a session gain sweep still hears the unsettled default
   gain, so analyze fails a good sweep
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-19 20:17'
-updated_date: '2026-10-19 20:17'
+updated_date: '2026-10-19 21:24'
 labels:
   - rig
   - host
   - measure
+  - planned
 dependencies: []
 references:
   - captures/TASK-144/2026-10-19-rig-sweep-gain-session-bootloaded.console.zst
@@ -38,7 +39,25 @@ Blocks TASK-099.05 (HUMAN): its sweep cannot pass analyze until bucket 0 is clea
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Cause of the bucket-0 level identified from the stream (gain settling versus start estimate) and recorded in the ticket notes.
-- [ ] #2 A gain sweep session of 0 to 1 over 30 s analyses as monotonic with no reversal, after the fix, in a host test that models the unsettled start.
-- [ ] #3 gates.sh push passes.
+- [x] #1 Cause of the bucket-0 level identified from the stream (gain settling versus start estimate) and recorded in the ticket notes.
+- [x] #2 A gain sweep session of 0 to 1 over 30 s analyses as monotonic with no reversal, after the fix, in a host test that models the unsettled start.
+- [x] #3 gates.sh push passes.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by the commit carrying Task-Id TASK-144. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Cause (AC1), from the committed capture: re-running analyze with the sidecar first_set_t_ms shifted shows bucket 0.025 stays near -24 dB until the sweep start is moved about 0.7 s later (-37 dB at +0.5 s, clean -82 dB at +0.7 s; trimmed window starts 0.375 s into the bucket). So audio at the unsettled default gain (-13 dB at gain 1) reaches roughly 0.9 s past the device t_ms of the first SET (8206 ms, arm 3205 ms), far longer than smoother settling; the same lag explains the constant -2.1 dB offset of every other bucket (3.6 dB per 1.5 s bucket = 2.4 dB/s x 0.9 s). Either way the first SET is the first thing to move the gain, so the fix is to leave nothing unsettled: Motion::Sweep now sends the from level once before the capture arms (Timeline.pre, as Hold does). analyze is unchanged. Tests: session.rs timeline/order/never-arms tests updated; sweep.rs unsettled_start_fails_and_settled_start_passes models the 300 ms unsettled start. docs/reference/asperitas-rig.md updated. Bench confirmation remains TASK-099.05.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Session gain sweeps now send the 'from' level before the capture arms so bucket 0 is settled; host tests pin it; gates.sh push passes (19 gates). Bench confirmation is TASK-099.05.
+<!-- SECTION:FINAL_SUMMARY:END -->
