@@ -3,11 +3,11 @@ id: TASK-091
 title: >-
   Logging: split asperitas-logging into a logging runtime and a wire-protocol
   crate
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
-updated_date: '2026-10-16 20:38'
+updated_date: '2026-10-19 21:45'
 labels:
   - review-2026-10
   - logging
@@ -34,9 +34,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Crate boundaries as decided; no crate depends on code it only needs for another role
-- [ ] #2 All 240 logging tests still pass; firmware builds for every layout
-- [ ] #3 Hardware recheck ticket passes (rig capture, panictest, enumeration)
+- [x] #1 Crate boundaries as decided; no crate depends on code it only needs for another role
+- [x] #2 All 240 logging tests still pass; firmware builds for every layout
+- [x] #3 Hardware recheck ticket passes (rig capture, panictest, enumeration)
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -50,4 +50,12 @@ Umbrella ticket; all work is delegated. Order: TASK-091.01 (replay out) -> TASK-
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-16 owner decision: Names: `asperitas-wire` (pure no_std protocol: frame, dump grammar, control, excerpt layout/grammar, console bodies, capture geometry) and `asperitas-host` (std crate: BlockAssembler, dump::decode, parse_wav, install_frames, the dump_reassemble binary, shared capture loading). `asperitas-logging` keeps the runtime. replay.rs moves to firmware or a rig crate.
+
+2026-10-19: closed after verifying the umbrella. AC1: boundaries match the owner decision. asperitas-wire has no workspace dependencies; asperitas-host depends on wire only; asperitas-logging keeps the runtime and depends on wire; asperitas-rig and asperitas-measure sit on host and wire. AC2: cargo test --workspace passes (583 passed, 0 failed) and the commit-tier gates build and lint every firmware variant. AC3: the hardware recheck is TASK-120, signed off with the owner the same day on this code (rig capture, panictest, podtest, enumeration, query and restart), plus the TASK-138 and TASK-099.05 bench runs.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+asperitas-logging is the logging runtime, asperitas-wire the no_std protocol crate and asperitas-host the std decoding crate, with replay moved to the firmware rig. Workspace tests and every firmware variant pass, and the hardware recheck (TASK-120) passed with the owner.
+<!-- SECTION:FINAL_SUMMARY:END -->

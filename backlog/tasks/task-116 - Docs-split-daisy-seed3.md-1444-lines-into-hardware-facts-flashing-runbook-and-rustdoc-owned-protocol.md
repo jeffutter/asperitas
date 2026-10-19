@@ -3,11 +3,11 @@ id: TASK-116
 title: >-
   Docs: split daisy-seed3.md (1,444 lines) into hardware facts, flashing
   runbook, and rustdoc-owned protocol
-status: Blocked
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-10-16 18:13'
-updated_date: '2026-10-18 22:45'
+updated_date: '2026-10-19 21:45'
 labels:
   - review-2026-10
   - docs
@@ -32,8 +32,8 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 daisy-seed3.md is hardware facts only; CLAUDE.md links the new files
-- [ ] #2 Protocol grammar has one owner (rustdoc) and the page no longer transcribes it
+- [x] #1 daisy-seed3.md is hardware facts only; CLAUDE.md links the new files
+- [x] #2 Protocol grammar has one owner (rustdoc) and the page no longer transcribes it
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -57,4 +57,12 @@ Remaining: none beyond the children.
 
 <!-- SECTION:NOTES:BEGIN -->
 planning marked this Dev Ready, but its dependencies are not all Done, so it was forced to Blocked. It should be re-checked once its dependencies are Done.
+
+2026-10-19: finished the page. daisy-seed3.md is 205 lines of hardware facts with 0 TASK- references; the 'pending TASK-038.09' cells now read 'not measured' (the ticket closed with one clip measured), and the unaligned-SDRAM bullet records that the fault was hit on this board. CLAUDE.md links flashing.md, protocol.md and the investigations; the grammar is owned by rustdoc via protocol.md. Commit tier gates pass.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+daisy-seed3.md is hardware facts only (205 lines, no ticket references), with the flashing runbook in flashing.md, the protocol grammar in rustdoc behind protocol.md, and investigations under docs/investigations.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -117,7 +117,7 @@ daisy-embassy `ca9bcc9`'s `SdRamBuilder::build` + `init`:
 Probe pattern writes read back intact at 0xC000_0000, 0xC1FF_FFF0 and 0xC3FF_FFF0. Distinct values at
 0xC000_0000 and 0xC200_0000 stayed distinct, so there is no aliasing below 64 MiB. A read at
 0xD000_0000 fails with an AP bus error, so nothing answers there. On the device side, the 300 s
-capture of 2026-10-07 (TASK-038.05) wrote 28.8 MB through this window and read it back with every
+capture of 2026-10-07 wrote 28.8 MB through this window and read it back with every
 block CRC matching.
 
 What that settles:
@@ -131,10 +131,12 @@ What that settles:
   does that owns the coherence argument for the FMC window and must revisit `rig`'s capture hand-off
   ordering in the same change.
 - **Device memory does not take unaligned accesses.** ARMv7-M supports unaligned loads and stores
-  only to Normal memory, so a misaligned access here is architecturally unsupported. Expect a fault,
-  not merely a slow access; this has not been tried on this board. Today's ring code copies whole
-  aligned 64-byte callbacks and passed 879 blocks. New code that reaches SDRAM through a misaligned
-  pointer or `#[repr(packed)]` data is the risk.
+  only to Normal memory, so a misaligned access here is architecturally unsupported, and on this board
+  it faults rather than running slowly: a base64 encoder that issued wide loads at odd ring offsets
+  hung the dump task while the audio interrupt kept running. Today's ring code copies whole aligned
+  64-byte callbacks and passed 879 blocks, and the dump encoder reads the ring one byte at a time.
+  New code that reaches SDRAM through a misaligned pointer, a wide load over an arbitrary slice or
+  `#[repr(packed)]` data is the risk.
 - daisy-embassy's region base looks like a mistaken `0xD000_0000`, perhaps from AN4891's wording for
   the bank-2 window. It lives in a third-party crate, so it is recorded here rather than patched.
 
@@ -160,7 +162,7 @@ not be cited as one.
 The slot layout, storage per second, flash rules, replay CRC posture and the install and replay
 record grammar are owned by the module docs of `asperitas_wire::excerpt`; see
 [protocol.md](./protocol.md). This section holds only the cost predictions and what the bench has
-observed of them. Cells reading `pending TASK-038.09` have not run on a board. The application itself
+observed of them. Cells reading `not measured` have not run on a board. The application itself
 is not placed in QSPI by the default layout (see [flashing.md](./flashing.md)); the bootloaded layout puts its
 image at `0x90040000`, above the bootloader region, which is why the excerpt area starts well clear of
 it.
@@ -172,20 +174,20 @@ in the ticket, not re-read from a sheet in this repo; estimated = a guess with n
 
 | Quantity | Predicted | Derivation | Observed |
 |---|---|---|---|
-| Playback rate | 96,000 B/s | derived: 48,000 Hz x 1 channel x 2 B (`replay::BYTES_PER_SECOND`) | pending TASK-038.09 |
+| Playback rate | 96,000 B/s | derived: 48,000 Hz x 1 channel x 2 B (`replay::BYTES_PER_SECOND`) | not measured |
 | Corpus clip PCM sizes | 190,312 to 288,000 B | derived: WAV file size minus 44-byte header, `audio/instruments/` (octave_mandolin_fast_run 190,312; mandolin_fast_run 207,756; six clips at 288,000) | n/a (file sizes) |
-| Sectors for a 288,000 B clip | 71 PCM + 1 header = 72 | derived: ceil(288,000 / 4096) = 71 | pending TASK-038.09 |
-| Sectors for a 190,312 B clip | 47 PCM + 1 header = 48 | derived: ceil(190,312 / 4096) = 47 | pending TASK-038.09 |
-| Erase time, 190 kB clip | at most 14.4 s (47 PCM sectors alone: 14.1 s) | datasheet max 300 ms x 48 sectors; typical is far lower (tens of ms), so this is an upper bound | pending TASK-038.09 |
-| Erase time, 288 kB clip | at most 21.6 s | datasheet max 300 ms x 72 sectors | pending TASK-038.09 |
-| Program time per sector | at most 12.8 ms | datasheet max 0.8 ms x 16 pages of 256 B | pending TASK-038.09 |
-| Install wall clock, 190 kB clip | at most 15.0 s | 14.4 s erase + 48 x 12.8 ms program (0.61 s); excludes USB and readback | pending TASK-038.09 |
+| Sectors for a 288,000 B clip | 71 PCM + 1 header = 72 | derived: ceil(288,000 / 4096) = 71 | not measured |
+| Sectors for a 190,312 B clip | 47 PCM + 1 header = 48 | derived: ceil(190,312 / 4096) = 47 | not measured |
+| Erase time, 190 kB clip | at most 14.4 s (47 PCM sectors alone: 14.1 s) | datasheet max 300 ms x 48 sectors; typical is far lower (tens of ms), so this is an upper bound | not measured |
+| Erase time, 288 kB clip | at most 21.6 s | datasheet max 300 ms x 72 sectors | not measured |
+| Program time per sector | at most 12.8 ms | datasheet max 0.8 ms x 16 pages of 256 B | not measured |
+| Install wall clock, 190 kB clip | at most 15.0 s | 14.4 s erase + 48 x 12.8 ms program (0.61 s); excludes USB and readback | not measured |
 | Install wall clock, 288 kB clip | at most 22.5 s | 21.6 s erase + 72 x 12.8 ms program (0.92 s); excludes USB and readback | measured 2026-10-15: 5.82 s from the first stream byte to `EXCOK` (includes USB transfer, erase, program and readback), slot 0, `mandolin_single_note_soft` |
 | Wire bytes, 288 kB install | about 493 kB | derived: 2250 chunks x (191 B body + 28 B frame overhead) = 492,750, plus `EXCSTART` and `EXCEND` frames | measured 2026-10-15: 492,867 bytes written by `excerpt_stream` |
-| Wire bytes, 190 kB install | about 326 kB | derived: 1486 full chunks x 219 + one 104 B chunk (159 + 28) = 325,621, plus start and end frames | pending TASK-038.09 |
+| Wire bytes, 190 kB install | about 326 kB | derived: 1486 full chunks x 219 + one 104 B chunk (159 + 28) = 325,621, plus start and end frames | not measured |
 | USB transfer time | well under 1 s | estimated: full-speed bulk, ceiling unmeasured | not separated from the install wall clock above, which was 5.82 s in total; the ceiling stays unmeasured |
-| Replay staging half | 8,192 B, plays for 85,333 us | derived: `replay::HALF_BYTES`, two halves, 16 KiB of AXI SRAM | pending TASK-038.09 |
-| Worst-case half refill | 18,192 us | estimated: 10,000 us scheduling (`ASSUMED_SCHEDULING_LATENCY_MICROS`) + 8,192 us transfer at an assumed 1 MB/s QSPI floor | pending TASK-038.09 |
+| Replay staging half | 8,192 B, plays for 85,333 us | derived: `replay::HALF_BYTES`, two halves, 16 KiB of AXI SRAM | not measured |
+| Worst-case half refill | 18,192 us | estimated: 10,000 us scheduling (`ASSUMED_SCHEDULING_LATENCY_MICROS`) + 8,192 us transfer at an assumed 1 MB/s QSPI floor | not measured |
 | Replay margin | 4.69x (85,333 / 18,192); build fails below 4x | estimated: the inputs above are assumptions; the QUADSPI kernel clock is unset in the HAL config, so the real read rate is unknown | measured 2026-10-15 only as an outcome: one 3.00 s pass, `underruns=0 clean=1`; the margin itself was not measured |
 
 Erase dominates the install: the USB stream and the programming are small beside it. If the observed
