@@ -180,6 +180,9 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Outcome
         failures
     };
     report["capture"] = json!(report_path(&args.path));
+    if capture.attach_prefix_bytes > 0 {
+        report["attach_prefix_bytes"] = json!(capture.attach_prefix_bytes);
+    }
     report["pass"] = json!(failures.is_empty());
     report["failures"] = json!(failures);
     let _ = writeln!(out, "{}", serde_json::to_string_pretty(&report).unwrap());

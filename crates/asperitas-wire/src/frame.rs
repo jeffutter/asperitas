@@ -685,6 +685,10 @@ pub struct Stats {
     /// forfeited `~` of each rejected start, and windows abandoned because no start
     /// marker ever appeared in them.
     pub discarded_bytes: u64,
+    /// The part of `discarded_bytes` charged before the first record validated: the lead-in
+    /// of a stream joined mid-flight, such as the tail of a record cut by attaching late.
+    /// Always at most `discarded_bytes`; equal to it when no record ever validated.
+    pub lead_discarded: u64,
     /// Bytes that made up validated records, start marker through CRLF. Together with
     /// `discarded_bytes` and [`Decoder::buffered`] this accounts for every byte pushed.
     pub framed_bytes: u64,
@@ -820,6 +824,7 @@ impl Decoder {
                 bad_frames: 0,
                 resyncs: 0,
                 discarded_bytes: 0,
+                lead_discarded: 0,
                 framed_bytes: 0,
             },
         }
@@ -969,6 +974,9 @@ impl Decoder {
     /// `discarded_bytes`.
     fn discard_front(&mut self, n: usize) {
         self.stats.discarded_bytes += n as u64;
+        if self.stats.records == 0 {
+            self.stats.lead_discarded += n as u64;
+        }
         self.consume_front(n);
     }
 
@@ -1456,6 +1464,7 @@ mod tests {
                 bad_frames: 0,
                 resyncs: 0,
                 discarded_bytes: 0,
+                lead_discarded: 0,
                 framed_bytes: enc.len as u64,
             },
             "a clean capture must report a clean capture"
@@ -1476,6 +1485,33 @@ mod tests {
                 decoder.buffered()
             );
         }
+    }
+
+    #[test]
+    fn lead_discarded_counts_only_bytes_before_the_first_record() {
+        let (out, enc) = encoded(Level::Info, 1, 2, b"hello");
+        let frame = &out[..enc.len];
+        let mut decoder = Decoder::new();
+        decoder.push(b"tail of a cut record\r\n");
+        decoder.push(frame);
+        decoder.push(b"junk");
+        decoder.push(frame);
+        decoder.finish();
+        let s = decoder.stats();
+        assert_eq!(s.records, 2);
+        assert_eq!(s.lead_discarded, 22);
+        assert_eq!(s.discarded_bytes, 26);
+    }
+
+    #[test]
+    fn lead_discarded_equals_discarded_when_nothing_validates() {
+        let mut decoder = Decoder::new();
+        decoder.push(b"no frames here at all");
+        decoder.finish();
+        let s = decoder.stats();
+        assert_eq!(s.records, 0);
+        assert_eq!(s.lead_discarded, s.discarded_bytes);
+        assert!(s.discarded_bytes > 0);
     }
 
     #[test]

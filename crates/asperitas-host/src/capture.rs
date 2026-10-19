@@ -1,8 +1,13 @@
 //! Load a recorded console capture and prove every dump block in it complete.
 //!
-//! Strictness matches `dump_reassemble`: a bad frame, a discarded byte, a refused or abandoned
-//! block, or a malformed dump record is an error. A short sample vector that looks fine is the
-//! failure this exists to prevent.
+//! A bad frame, a discarded byte after the first valid frame, a refused or abandoned block, or a
+//! malformed dump record is an error. A short sample vector that looks fine is the failure this
+//! exists to prevent.
+//!
+//! Bytes discarded before the first valid frame are the exception. A bootloaded rig is already
+//! streaming when the host attaches, so the capture always opens on the tail of a record cut by
+//! the attach. Those bytes precede every dump block and cannot hide dump data; they are reported
+//! as [`ProvedPcm::attach_prefix_bytes`].
 
 use std::fmt;
 use std::fs::File;
@@ -24,6 +29,8 @@ pub struct ProvedPcm {
     pub pcm: Vec<u8>,
     /// Number of blocks proved complete.
     pub blocks: usize,
+    /// Bytes discarded before the first valid frame (the attach prefix).
+    pub attach_prefix_bytes: u64,
 }
 
 /// Why a capture could not be loaded as a whole.
@@ -104,10 +111,11 @@ pub fn load_console<R: Read>(input: R) -> Result<ProvedPcm, LoadError> {
         problems.push(format!("block {} abandoned at end of stream", a.block));
     }
     let stats = decoder.stats();
-    if stats.bad_frames > 0 || stats.discarded_bytes > 0 {
+    let in_stream_discarded = stats.discarded_bytes - stats.lead_discarded;
+    if stats.bad_frames > 0 || in_stream_discarded > 0 {
         problems.push(format!(
-            "{} bad frames, {} discarded bytes",
-            stats.bad_frames, stats.discarded_bytes
+            "{} bad frames, {in_stream_discarded} discarded bytes after the first frame",
+            stats.bad_frames
         ));
     }
     if !problems.is_empty() {
@@ -126,5 +134,9 @@ pub fn load_console<R: Read>(input: R) -> Result<ProvedPcm, LoadError> {
     if blocks == 0 {
         return Err(LoadError::Empty);
     }
-    Ok(ProvedPcm { pcm, blocks })
+    Ok(ProvedPcm {
+        pcm,
+        blocks,
+        attach_prefix_bytes: stats.lead_discarded,
+    })
 }

@@ -152,6 +152,7 @@ impl<'s> InboundFeed<'s> {
                 bad_frames: 0,
                 resyncs: 0,
                 discarded_bytes: 0,
+                lead_discarded: 0,
                 framed_bytes: 0,
             },
             stats,

@@ -114,3 +114,50 @@ fn flipped_byte_is_an_error() {
         "{err}"
     );
 }
+
+#[test]
+fn attach_prefix_is_reported_not_fatal() {
+    let mut seq = 0;
+    let (a, pa) = block(&mut seq, 0, 0, None);
+    let (b, pb) = block(&mut seq, 1, 1000, None);
+    let prefix = &a[40..200];
+    let proved = load_console([prefix, &a, &b].concat().as_slice()).unwrap();
+    assert_eq!(proved.attach_prefix_bytes, prefix.len() as u64);
+    assert_eq!(proved.pcm, [pa, pb].concat());
+}
+
+#[test]
+fn clean_stream_has_no_attach_prefix() {
+    let mut seq = 0;
+    let (a, _) = block(&mut seq, 0, 0, None);
+    assert_eq!(load_console(a.as_slice()).unwrap().attach_prefix_bytes, 0);
+}
+
+#[test]
+fn junk_between_frames_is_an_error() {
+    let mut seq = 0;
+    let (a, _) = block(&mut seq, 0, 0, None);
+    let (b, _) = block(&mut seq, 1, 1000, None);
+    let err = load_console([&a[..], b"junk", &b[..]].concat().as_slice()).unwrap_err();
+    assert!(matches!(err, LoadError::Unproved(_)), "{err}");
+}
+
+#[test]
+fn prefix_with_an_incomplete_block_is_an_error() {
+    let mut seq = 0;
+    let (a, _) = block(&mut seq, 0, 0, None);
+    let (b, _) = block(&mut seq, 1, 1000, Some(2));
+    let err = load_console([&a[40..200], &a[..], &b[..]].concat().as_slice()).unwrap_err();
+    assert!(matches!(err, LoadError::Unproved(_)), "{err}");
+}
+
+#[test]
+fn prefix_only_is_empty() {
+    let mut seq = 0;
+    let (a, _) = block(&mut seq, 0, 0, None);
+    let err = load_console(&a[40..200]).unwrap_err();
+    assert!(
+        matches!(err, LoadError::Unproved(_) | LoadError::Empty),
+        "{err}"
+    );
+}

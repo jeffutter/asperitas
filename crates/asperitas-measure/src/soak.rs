@@ -237,6 +237,7 @@ mod tests {
             samples,
             sample_rate_hz: RATE as u32,
             blocks: 0,
+            attach_prefix_bytes: 0,
         }
     }
 
@@ -327,6 +328,7 @@ mod tests {
             samples,
             sample_rate_hz: RATE as u32,
             blocks: 0,
+            attach_prefix_bytes: 0,
         }
     }
 

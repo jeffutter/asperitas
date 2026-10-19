@@ -23,6 +23,9 @@ pub struct Capture {
     pub sample_rate_hz: u32,
     /// Number of blocks proved complete.
     pub blocks: usize,
+    /// Bytes of the stream discarded before its first valid frame: the tail of records lost
+    /// before the host attached. Reported, not fatal.
+    pub attach_prefix_bytes: u64,
 }
 
 /// Why a capture could not be loaded as a whole.
@@ -73,7 +76,11 @@ impl Capture {
     }
 
     fn from_proved(proved: ProvedPcm) -> Result<Capture, LoadError> {
-        let ProvedPcm { pcm, blocks } = proved;
+        let ProvedPcm {
+            pcm,
+            blocks,
+            attach_prefix_bytes,
+        } = proved;
         if !pcm.len().is_multiple_of(2) {
             return Err(LoadError::OddPcm(pcm.len()));
         }
@@ -85,6 +92,7 @@ impl Capture {
             samples,
             sample_rate_hz: SAMPLE_RATE_HZ,
             blocks,
+            attach_prefix_bytes,
         })
     }
 }

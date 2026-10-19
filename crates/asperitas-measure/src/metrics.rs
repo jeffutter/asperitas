@@ -448,6 +448,7 @@ mod tests {
             samples,
             sample_rate_hz: 48_000,
             blocks: 1,
+            attach_prefix_bytes: 0,
         }
     }
 

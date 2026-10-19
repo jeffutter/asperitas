@@ -249,7 +249,9 @@ does and does not describe (RTT captures carry no loss ledger).
 ## Analysis: `asperitas-measure`
 
 `crates/asperitas-measure` judges a committed `.console.zst` capture. It loads the capture
-strictly (any refused block is an error), regenerates the stimulus from `asperitas-stimulus`, aligns
+strictly (any refused block, bad frame, or byte discarded after the first valid frame is an error;
+bytes before the first valid frame are the tail of a record cut by attaching to a rig that was already
+streaming, and are reported as `attach_prefix_bytes`), regenerates the stimulus from `asperitas-stimulus`, aligns
 the two, and reports metrics as one JSON document on stdout. Every numeric limit lives in
 `src/thresholds.rs`, each with its origin; nothing else writes a limit as a literal.
 
