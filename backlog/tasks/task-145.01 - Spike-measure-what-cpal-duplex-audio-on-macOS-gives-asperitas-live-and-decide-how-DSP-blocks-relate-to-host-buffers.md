@@ -3,11 +3,11 @@ id: TASK-145.01
 title: >-
   Spike: measure what cpal duplex audio on macOS gives asperitas-live, and
   decide how DSP blocks relate to host buffers
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-19 22:07'
-updated_date: '2026-10-19 22:07'
+updated_date: '2026-10-19 22:30'
 labels:
   - m4
   - live
@@ -37,24 +37,29 @@ Owner decisions already made (do not reopen): crossterm-only terminal view for k
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 docs/investigations/cpal-macos-duplex.md exists and records, from a program actually run on this Mac (compiling is not evidence): the cpal version used, the default input and output device names, their supported sample-rate ranges, channel counts, sample formats and the buffer-size range each reports
-- [ ] #2 The doc records whether a 48 kHz f32 input stream and output stream both open with a fixed buffer size (try 32, 64, 128, 256, 512 frames) and the buffer size each callback actually received
-- [ ] #3 The doc records whether input and output callbacks share a clock (compare callback counts and frame totals over at least 30 s) and therefore whether asperitas-live needs a ring buffer between two streams, with the recommended ring capacity
-- [ ] #4 The doc records round-trip latency: at minimum the cpal-reported latency (input capture timestamp to output playback timestamp) per buffer size; plus a measured acoustic or cable loopback figure if a loopback is available, otherwise it says plainly that no physical loopback was measured
-- [ ] #5 The doc states the decision on DSP block versus host buffer (decoupled or not, and the exact mechanism) with the reason, and the same decision is recorded in this ticket's implementation notes
-- [ ] #6 If macOS microphone permission blocks input from the terminal, the doc says so, records what output-only facts were gathered, and the ticket notes name the exact permission step the owner must take; the ticket is not closed claiming input facts it did not observe
-- [ ] #7 No spike code is committed under crates/ or firmware/; bash scripts/gates.sh commit passes
+- [x] #1 docs/investigations/cpal-macos-duplex.md exists and records, from a program actually run on this Mac (compiling is not evidence): the cpal version used, the default input and output device names, their supported sample-rate ranges, channel counts, sample formats and the buffer-size range each reports
+- [x] #2 The doc records whether a 48 kHz f32 input stream and output stream both open with a fixed buffer size (try 32, 64, 128, 256, 512 frames) and the buffer size each callback actually received
+- [x] #3 The doc records whether input and output callbacks share a clock (compare callback counts and frame totals over at least 30 s) and therefore whether asperitas-live needs a ring buffer between two streams, with the recommended ring capacity
+- [x] #4 The doc records round-trip latency: at minimum the cpal-reported latency (input capture timestamp to output playback timestamp) per buffer size; plus a measured acoustic or cable loopback figure if a loopback is available, otherwise it says plainly that no physical loopback was measured
+- [x] #5 The doc states the decision on DSP block versus host buffer (decoupled or not, and the exact mechanism) with the reason, and the same decision is recorded in this ticket's implementation notes
+- [x] #6 If macOS microphone permission blocks input from the terminal, the doc says so, records what output-only facts were gathered, and the ticket notes name the exact permission step the owner must take; the ticket is not closed claiming input facts it did not observe
+- [x] #7 No spike code is committed under crates/ or firmware/; bash scripts/gates.sh commit passes
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Scratch project outside the repo (a temp dir, not crates/): `cargo new cpal-spike`, add `cpal` at its current 0.x release on crates.io (record the exact version from Cargo.lock in the doc). Build inside the repo's nix dev shell (`nix develop /Users/jeffutter/src/asperitas --command cargo run --release`) so the toolchain matches; on macOS cpal uses CoreAudio and needs nothing from the flake.
-2. Enumerate: default host, default input and output devices, `supported_input_configs` / `supported_output_configs` (rate range, channels, sample format, `SupportedBufferSize`). Print, paste into the doc.
-3. Open 48 kHz f32 input and output streams with `BufferSize::Fixed(n)` for n in 32, 64, 128, 256, 512 and `Default`. For each, log the frame count each callback receives (min/max/histogram over ~10 s) and whether the build or play call errors.
-4. Clock check: run input and output together for >= 30 s at one buffer size, counting total frames per side and the drift between them. Pass input to output through a lock-free SPSC ring (e.g. `ringbuf` or a hand-rolled one in the spike) and log underruns/overruns. Recommend a ring capacity.
-5. Latency: from `InputCallbackInfo::timestamp().capture` and `OutputCallbackInfo::timestamp().playback`, compute the reported path latency per buffer size plus the ring fill. If an audio interface with a cable loopback is plugged in, emit a click and time its return; if not, say no physical loopback was measured.
-6. Block decision: write a 20-line check in the spike (it may depend on `asperitas-dsp` by path) that runs a 5 s noise signal through `Asperitas` two ways with one control change scheduled mid-signal: (a) 32-frame blocks with `set_controls` before each block, as firmware main does; (b) random-length host buffers with the change latched at the next frame index divisible by 32. Compare bit for bit. Record the result and the decision.
-7. Write docs/investigations/cpal-macos-duplex.md (facts, tables, the decision; no ticket numbers needed in prose beyond a header line linking the ticket). Record the decision in the ticket notes. If mic permission blocks input (macOS TCC prompt for the terminal app, or silent all-zero input), record it as in AC #6.
-8. `bash scripts/gates.sh commit`, commit the doc only.
+SHIPPED by 4316c31. This plan is superseded; the ticket's final summary describes what actually landed.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DECISION: decouple DSP block from host buffer, no re-chunking, no added latency. asperitas-live processes whatever length the cpal callback gives in one call and latches a pending set_controls only at frame indices that are multiples of 32 counted from stream start (splitting the callback there). Verified: 200 trials, 5 s noise, random host buffers 1..1024, bit-identical to the device's 32-frame-block path. Measured on this Mac (cpal 0.18.2, built-in jack pair): 48 kHz f32 opens for fixed 32/64/128/256/512 and callbacks receive exactly the requested length; Default is 512; buffer range 15..4096; input mono, output stereo. Two separate streams, rate-locked over 35 s with constant ring fill and no underruns; ring still required. Reported path latency = 2*buffer + 274 frames. Mic permission did not block input (non-zero samples). No physical loopback was measured. Details in docs/investigations/cpal-macos-duplex.md. Spike code lived outside the repo.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Ran a scratch cpal 0.18.2 program on this Mac and recorded device configs, fixed-buffer behaviour, clock/ring behaviour, cpal-reported latency and a bit-exact block-latching check in docs/investigations/cpal-macos-duplex.md. Decision: process arbitrary host buffers directly and latch set_controls at 32-frame multiples from stream start. No physical loopback measured. gates.sh commit passes; no spike code committed.
+<!-- SECTION:FINAL_SUMMARY:END -->
