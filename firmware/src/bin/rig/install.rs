@@ -19,8 +19,8 @@
 //! wait is bounded by `with_timeout(..).expect(..)` - 600 ms per sector erase, 1.6 ms per 256-byte page
 //! program, twice the datasheet maxima - so a chip that misses one panics, and the panic handler turns
 //! that into a `PANIC` record and a red LED. That is the chosen failure: loud and attributable, rather
-//! than a silent hang. `firmware/build.rs` fails the build if this file ever calls a blocking flash
-//! method or `FlashBuilder::build`. The one blocking wait left in the image is the driver's own
+//! than a silent hang. The `flash` module's `AsyncFlash` offers no blocking method, so
+//! none can be called. The one blocking wait left in the image is the driver's own
 //! `reset()` inside `build_async`, run once at boot before audio starts.
 //!
 //! Wall clock is dominated by erases: a full 516,096-byte slot is 127 PCM sectors plus the header
@@ -61,12 +61,11 @@ use crate::ring::CAPTURE_ACTIVE;
 use asperitas_logging::{error, info};
 #[cfg(feature = "log-usb")]
 use core::sync::atomic::Ordering;
-use daisy_embassy::hal;
 use embassy_sync::blocking_mutex::raw::ThreadModeRawMutex;
 use embassy_sync::mutex::Mutex;
 
 /// The board's QSPI flash, async-only (see above).
-pub(crate) type RigFlash = daisy_embassy::flash::Flash<'static, hal::mode::Async>;
+pub(crate) use crate::flash::AsyncFlash as RigFlash;
 
 /// The one flash handle, built once in `main` before audio starts.
 ///

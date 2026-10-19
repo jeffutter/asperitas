@@ -53,7 +53,6 @@ fn main() {
 
     provenance(layout);
     version();
-    rig_flash_ban();
 
     println!("cargo:rerun-if-changed=memory-internal.x");
     println!("cargo:rerun-if-changed=memory-bootloaded.x");
@@ -189,53 +188,6 @@ fn version() {
     for p in ["../.git/HEAD", "../.git/logs/HEAD"] {
         if std::path::Path::new(p).exists() {
             println!("cargo:rerun-if-changed={p}");
-        }
-    }
-}
-
-/// Fail the build if any source under `src/bin/rig/` calls daisy-embassy's blocking flash API.
-///
-/// The blocking `read` / `write` / `erase` (and `read_uuid`) spin on the chip's status register with
-/// no bound, and `FlashBuilder::build` is the only way to get a handle that offers nothing else. rig
-/// runs a measurement whose console must keep talking, so it uses the async calls only; the reasons
-/// are in `src/bin/rig/install.rs`. A type cannot enforce that - `Flash<Async>` still carries
-/// the blocking methods - so this does it by text, on every firmware build and clippy run, which is
-/// every tier of `scripts/gates.sh` and CI.
-///
-/// Line comments are stripped first, so prose may name the banned calls. The patterns are broad on
-/// purpose: rig has no other `.read(` / `.write(` / `.erase(` receiver today, and a future one that
-/// trips this is cheaper to rename than a hang is to find at the bench.
-fn rig_flash_ban() {
-    const RIG_DIR: &str = "src/bin/rig";
-    const BANNED: [&str; 6] = [
-        ".read(",
-        ".write(",
-        ".erase(",
-        ".read_uuid(",
-        ".build()",
-        "FlashBuilder::build(",
-    ];
-    println!("cargo:rerun-if-changed={RIG_DIR}");
-    let mut sources: Vec<_> = std::fs::read_dir(RIG_DIR)
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
-        .collect();
-    sources.sort();
-    for path in sources {
-        println!("cargo:rerun-if-changed={}", path.display());
-        let source = std::fs::read_to_string(&path).unwrap();
-        for (n, line) in source.lines().enumerate() {
-            let code = line.split("//").next().unwrap_or("");
-            if let Some(pattern) = BANNED.iter().find(|pattern| code.contains(**pattern)) {
-                panic!(
-                    "{}:{}: `{pattern}` - rig may only use daisy-embassy's async flash API \
-                     (read_async / write_async / erase_async on a build_async handle); see \
-                     rig_flash_ban in firmware/build.rs",
-                    path.display(),
-                    n + 1
-                );
-            }
         }
     }
 }

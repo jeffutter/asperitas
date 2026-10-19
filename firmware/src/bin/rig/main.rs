@@ -34,6 +34,7 @@ include!(concat!(env!("OUT_DIR"), "/asp_pro.inc")); // cfg provenance note, see 
 mod dump;
 #[cfg(feature = "stim-excerpt")]
 mod excerpt_play;
+mod flash;
 mod fx_ctl;
 mod generator;
 mod geometry;
@@ -327,7 +328,7 @@ async fn main(_spawner: Spawner) {
     // for both choices. Before audio starts, because `build_async` resets the chip with the driver's
     // blocking status wait; that is the only blocking flash wait in the image, and it runs once,
     // here, with nothing yet to starve.
-    let flash = board.flash.build_async(flash_dma, RigFlashIrqs);
+    let flash = flash::AsyncFlash::build(board.flash, flash_dma, RigFlashIrqs);
     interrupt::QUADSPI.set_priority(Priority::P7);
     interrupt::MDMA.set_priority(Priority::P7);
     *FLASH.lock().await = Some(flash);
