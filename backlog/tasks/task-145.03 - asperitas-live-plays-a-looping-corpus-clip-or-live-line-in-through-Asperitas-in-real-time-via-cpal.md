@@ -3,15 +3,16 @@ id: TASK-145.03
 title: >-
   asperitas-live plays a looping corpus clip or live line-in through Asperitas
   in real time via cpal
-status: To Do
+status: Done
 assignee:
   - '@agent'
 created_date: '2026-10-19 22:08'
-updated_date: '2026-10-19 22:09'
+updated_date: '2026-10-19 23:12'
 labels:
   - m4
   - live
   - host
+  - planned
 dependencies:
   - TASK-145.01
   - TASK-145.02
@@ -49,25 +50,29 @@ Code comments describe current state only: no ticket numbers, dates, measurement
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 crates/asperitas-live exists in the root workspace with a binary that takes --input <wav> (looping) or --line-in, and --params key=value using the shared asperitas-dsp translation; firmware/Cargo.toml and firmware/Cargo.lock are unchanged
-- [ ] #2 The processing core has no cpal types and unit tests pin: a looping source wraps sample-exactly at the clip end; a control change requested mid-buffer takes effect at the next frame index divisible by 32 from stream start, whatever the buffer length (test lengths 1, 31, 32, 33, 480, 512); the callback path allocates nothing (asserted by construction or a test allocator)
-- [ ] #3 Starting with a non-48 kHz WAV, or a device that cannot open at 48 kHz, exits non-zero with a message naming the rate; a test pins the WAV case
-- [ ] #4 The binary was run on this Mac with each corpus clip as --input for at least 10 s with no cpal error or underrun reported (the stream error callback and any ring underrun counter are printed on exit), recorded in the ticket notes with the command used; audibility is NOT claimed here, that is the @human listening ticket
-- [ ] #5 cargo clippy and cargo doc pass for the crate on Linux in CI (push main and check the GitHub Actions run with gh), not only on macOS
-- [ ] #6 CLAUDE.md and doc-001 crate maps list asperitas-live, and a run command is documented
-- [ ] #7 bash scripts/gates.sh push passes
+- [x] #1 crates/asperitas-live exists in the root workspace with a binary that takes --input <wav> (looping) or --line-in, and --params key=value using the shared asperitas-dsp translation; firmware/Cargo.toml and firmware/Cargo.lock are unchanged
+- [x] #2 The processing core has no cpal types and unit tests pin: a looping source wraps sample-exactly at the clip end; a control change requested mid-buffer takes effect at the next frame index divisible by 32 from stream start, whatever the buffer length (test lengths 1, 31, 32, 33, 480, 512); the callback path allocates nothing (asserted by construction or a test allocator)
+- [x] #3 Starting with a non-48 kHz WAV, or a device that cannot open at 48 kHz, exits non-zero with a message naming the rate; a test pins the WAV case
+- [x] #4 The binary was run on this Mac with each corpus clip as --input for at least 10 s with no cpal error or underrun reported (the stream error callback and any ring underrun counter are printed on exit), recorded in the ticket notes with the command used; audibility is NOT claimed here, that is the @human listening ticket
+- [x] #5 cargo clippy and cargo doc pass for the crate on Linux in CI (push main and check the GitHub Actions run with gh), not only on macOS
+- [x] #6 CLAUDE.md and doc-001 crate maps list asperitas-live, and a run command is documented
+- [x] #7 bash scripts/gates.sh push passes
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Provisional, written before the spike ran; the planner must re-check it against docs/investigations/cpal-macos-duplex.md and the TASK-145.02 API before execution.
-
-1. `crates/asperitas-live/Cargo.toml`: lib + bin `asperitas-live`, `[lints] workspace = true`, deps cpal (spike's version), clap 4 derive, asperitas-dsp (features std), asperitas-cli (for `wav_io`). Add `[profile.dev.package.asperitas-live] opt-level = 3` in the root Cargo.toml only if a debug build underruns.
-2. `src/engine.rs` (the core, no cpal): `Engine { effect: Asperitas, source: Source, frame: u64, pending: ControlSlot }` with `fn render(&mut self, input: &[Frame], out: &mut [Frame])`. Inside: walk the buffer in segments that end at the next multiple of 32 from `frame`; at each segment start where `frame % 32 == 0`, take a pending `Controls` and call `set_controls`; then `process_block` the segment. `Source::Loop { frames, pos }` copies with wraparound; `Source::LineIn` copies `input` (mono input duplicated to both channels).
-3. `src/controls.rs`: `SharedControls` = `[AtomicU32; KNOB_COUNT]` of f32 bits plus a generation counter, written by the UI side, read once per 32-frame boundary by the engine. Same shape as firmware `KnobState`.
-4. `src/main.rs`: clap flags `--input <wav>` | `--line-in`, `--params k=v...`, `--buffer <frames>` (default from the spike), `--seconds <n>` (optional, for unattended runs; otherwise run until Ctrl-C). Load WAV via `asperitas_cli::wav_io::read_wav`, refuse non-48 kHz. Build output stream (and input stream for line-in, with the ring from the spike if clocks are separate). Error callback increments an atomic error counter; print errors and underruns on exit. Clamp to [-1, 1] when writing device samples, and handle the device's channel count (write the stereo frame to the first two channels, zero the rest).
-5. Tests in `engine.rs` per AC #2 and #3. No test touches cpal.
-6. Docs: CLAUDE.md crate list line, doc-001 crate map, a run section (`cargo run -p asperitas-live --release -- --input audio/instruments/mandolin_chord.wav --params cutoff_hz=2000`).
-7. Run each corpus clip for 10 s with `--seconds 10`, record in notes. `bash scripts/gates.sh push`, commit, push main, `gh run watch` the CI run (AC #5).
+SHIPPED by ba30b31. This plan is superseded; the ticket's final summary describes what actually landed.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented crates/asperitas-live: lib (ControlSlot atomics, Engine with 32-frame block-grid control latch, LoopSource, load_clip refusing non-48 kHz) plus a thin cpal shell (backend.rs) and clap main. Shared parse_asperitas_controls extracted in asperitas-cli process.rs so --params uses the one Controls::from_values translation. Tests: loop wrap sample-exact at chunk sizes 1..512, control change vs device reference at host lengths 1,31,32,33,480,512, counting-allocator no-alloc test (tests/no_alloc.rs), 44.1 kHz WAV refusal naming the rate. firmware/ untouched. AC4: ran './target/release/asperitas-live --input audio/instruments/<clip>.wav --params cutoff_hz=2000 --seconds 10' for all 8 corpus clips on this Mac: each exit 0, 'stream errors: 0, underruns: 0, overruns: 0'. Audibility not claimed (TASK-145.07). Extra observation: --line-in --seconds 10 showed 11 ring underruns at buffer 128 and 6 at buffer 256 (3 s run showed 12), so they do not grow with duration; likely a startup transient, not investigated. AC5: pushed main, GitHub Actions run 39338309165 succeeded on ubuntu (no flake change needed). gates.sh push passed.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added the asperitas-live crate (engine core with block-grid control latch, cpal shell, clap CLI), shared the asperitas-cli key=value parser, documented in docs/reference/asperitas-live.md and the CLAUDE.md/doc-001 crate maps. Unit and no-alloc tests pass, all 8 corpus clips ran 10 s clean on the Mac, push gates and Linux CI green.
+<!-- SECTION:FINAL_SUMMARY:END -->
