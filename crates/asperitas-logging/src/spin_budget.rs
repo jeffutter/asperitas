@@ -78,7 +78,7 @@ const EMIT_TIMEOUT_MAX_POLLS: u32 = 20_000_000;
 /// host too and a cargo feature cannot express "not this machine".
 #[cfg(target_arch = "arm")]
 pub(crate) fn cycle_counter_running() -> bool {
-    // Safety: `DCB` and `DWT` are Cortex-M system peripherals. `rig.rs` claims
+    // Safety: `DCB` and `DWT` are Cortex-M system peripherals. `rig/main.rs` claims
     // `cortex_m::Peripherals::take()` in the firmware package, so this cannot count on the
     // singleton being free - which is exactly why it uses `steal()`: a panic path must not behave
     // differently depending on whether some other binary got there first. Aliasing the singleton is

@@ -42,7 +42,7 @@ SECTIONS {
   } > RAM_D2
 } INSERT BEFORE .bss;
 
-/* Rig's excerpt replay staging (`REPLAY`, firmware/src/bin/rig.rs). Not DTCM: whether MDMA, the
+/* Rig's excerpt replay staging (`REPLAY`, firmware/src/bin/rig/excerpt_play.rs). Not DTCM: whether MDMA, the
  * master `Flash::read_async` refills it with, can write DTCM at 0x20000000 was not confirmed from RM0433
  * (the TCMs hang off MDMA's separate AHBS port, and a transfer must be steered to it; nothing in this tree
  * does that), and a refill that lands nowhere would play zeros. AXI SRAM is reached by MDMA's ordinary

@@ -23,7 +23,7 @@
 #
 # rig is left out of the internal console build: with the excerpt install path it no longer fits the
 # 128 KB internal flash, and the bootloaded rows build it for the layout it does fit. Exactly one
-# stimulus generator links per rig image (rig.rs rejects two at compile time), so each generator's
+# stimulus generator links per rig image (rig/generator.rs rejects two at compile time), so each generator's
 # row is the only build that compiles that code. The RTT-only internal row is the one build that
 # links build.rs's `-Tdefmt.x` fragment and the logger stubs behind `not(feature = "log-defmt")`
 # in every binary.

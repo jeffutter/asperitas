@@ -112,7 +112,7 @@
 //!   `erase` wait on the chip's WIP bit in an unbounded busy loop, which would hang thread mode
 //!   and the console with it. The async calls bound each wait with a timeout (600 ms per sector
 //!   erase, 1.6 ms per 256-byte page program) and panic on a miss, which surfaces as a `PANIC`
-//!   record and a red LED. `firmware/build.rs` fails the build if `rig.rs` calls a blocking flash
+//!   record and a red LED. `firmware/build.rs` fails the build if sources under `firmware/src/bin/rig` calls a blocking flash
 //!   method.
 //! - **Writes are whole, sector-aligned, 4096-byte sectors.** The driver erases the sector
 //!   containing every address it writes, so a partial or unaligned write would erase its

@@ -6,7 +6,7 @@
 //! The rig plays an excerpt stored in QSPI flash ([`asperitas_wire::excerpt`]). The audio callback has about
 //! 590 us of its 666 us block budget to spare and must never wait on flash, so the samples reach it
 //! through two halves of a staging buffer: a thread-mode task reads the next stretch of the
-//! excerpt into whichever half is idle (`Flash::read_async` over MDMA, wired in `rig.rs`)
+//! excerpt into whichever half is idle (`Flash::read_async` over MDMA, wired in `rig/excerpt_play.rs`)
 //! while the callback pops 32-sample blocks out of the other one. Everything about that hand-off
 //! that can be wrong without a board - which half each side may touch, what happens when the
 //! refill is late, how the final partial block is padded, what the reported CRC covers - lives

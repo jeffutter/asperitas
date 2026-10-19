@@ -123,7 +123,7 @@ usage() {
 usage: scripts/check-image-load-addresses.sh [--target-dir DIR] [ELF...]
        scripts/check-image-load-addresses.sh --selftest
 
-  no arguments  check the image of every firmware/src/bin/*.rs, read from
+  no arguments  check the image of every firmware/src/bin binary, read from
                 <DIR>/thumbv7em-none-eabihf/release/ (DIR defaults to firmware/target; relative
                 paths resolve against the repo root)
   ELF...        check just these: a path to an ELF, or a bare binary name resolved in that directory
@@ -223,15 +223,17 @@ ELF_PATHS=()
 ELF_NAMES=()
 TARGET_DIR=""
 
-# One entry per firmware/src/bin/*.rs -- the same derivation scripts/check-doc-artifact-names.sh uses
+# One entry per firmware/src/bin binary (<name>.rs or <name>/main.rs) -- the same derivation scripts/check-doc-artifact-names.sh uses
 # for legal image names, so a seventh bin joins this gate without anyone editing a list and "six"
 # never appears here as a magic number.
 derive_elfs() {
   local src name
-  for src in "$ROOT"/firmware/src/bin/*.rs; do
+  for src in "$ROOT"/firmware/src/bin/*.rs "$ROOT"/firmware/src/bin/*/main.rs; do
     [ -e "$src" ] || continue
-    name=${src##*/}
-    name=${name%.rs}
+    case $src in
+      */src/bin/*/main.rs) name=${src%/main.rs}; name=${name##*/} ;;
+      *) name=${src##*/}; name=${name%.rs} ;;
+    esac
     ELF_NAMES+=("$name")
     ELF_PATHS+=("$RELEASE_DIR/$name")
   done

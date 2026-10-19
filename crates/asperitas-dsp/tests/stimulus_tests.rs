@@ -34,7 +34,7 @@ const MAX_BODY: usize = 200;
 /// What a `RIGGEN` record will actually carry of this description
 /// (`asperitas-wire`'s `console::RIGGEN_MAX_GEN_BYTES`), which is the tighter of the two
 /// budgets and therefore the only one worth asserting against. Hardcoded for the same reason as
-/// `MAX_BODY`, and `rig.rs` checks it again at runtime against the same constant.
+/// `MAX_BODY`, and `rig/main.rs` checks it again at runtime against the same constant.
 const MAX_RIGGEN_PAYLOAD: usize = 160;
 
 fn gcd(mut a: u32, mut b: u32) -> u32 {

@@ -84,7 +84,7 @@ use crate::frame::{PREFIX_LEN, TRAILER_LEN};
 ///
 /// A deliberate copy of the rate the firmware configures — `daisy_embassy`'s `AudioConfig::default`
 /// — because this module cannot name that type without dragging the HAL into a crate whose tests run
-/// on the host. A const assert in `rig.rs` restores the link, where both sides
+/// on the host. A const assert in `rig/generator.rs` restores the link, where both sides
 /// are visible.
 pub const SAMPLE_RATE_HZ: u32 = 48_000;
 
@@ -98,7 +98,7 @@ pub const CAPTURE_BYTES_PER_SAMPLE: usize = 2;
 /// Samples per audio callback per channel: 32.
 ///
 /// A deliberate copy of `daisy_embassy::audio::BLOCK_LENGTH`, with the same reasoning as
-/// [`SAMPLE_RATE_HZ`]. `rig.rs` asserts equality against the real constant **in samples**.
+/// [`SAMPLE_RATE_HZ`]. `rig/generator.rs` asserts equality against the real constant **in samples**.
 /// Comparing [`CALLBACK_BYTES`] against `HALF_DMA_BUFFER_LENGTH` instead is a category error — that
 /// constant counts 64 `u32` *words* per callback (32 stereo frames) while [`CALLBACK_BYTES`] counts
 /// 64 *bytes* of one mono channel — and their numeric coincidence (64 == 64) is exactly why the
@@ -266,7 +266,7 @@ pub const fn ring_duration_micros() -> u64 {
 /// Rounded **up**, because a run that spills into a block consumes that block: 300 s × 96 000 B/s
 /// needs 879 blocks, and a helper that reported 878 would understate what the ring has to hold,
 /// which is the one thing a capacity estimate may not do. The argument is `usize` to match the
-/// index arithmetic at the call site (`rig.rs`); the product is still taken in
+/// index arithmetic at the call site (`rig/geometry.rs`); the product is still taken in
 /// `u64`, since `seconds × BYTES_PER_SECOND` passes `u32::MAX` near 44 700 s and the const evaluator
 /// rejects the 32-bit form outright rather than leaving it behind a `debug_assert`.
 #[must_use]

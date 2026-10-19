@@ -29,7 +29,7 @@ log-usb = ["asperitas-logging/log-usb"]
 # no pipe, no drain task. See docs/reference/flashing.md ("ST-Link probe") and
 # docs/investigations/rtt-and-dcache.md.
 log-defmt = ["asperitas-logging/log-defmt", "dep:defmt-rtt"]
-# Stimulus generators for `rig`, mutually exclusive by a `const` assert in `src/bin/rig.rs`.
+# Stimulus generators for `rig`, mutually exclusive by a `const` assert in `src/bin/rig/generator.rs`.
 #
 # None of them belongs in `default`: `--features seed3,stim-ess` adds to the defaults rather than
 # replacing them, so a default `stim-sine` would put two generators in the image CI builds and
@@ -41,12 +41,12 @@ stim-pulse = []
 # Replay an excerpt installed in QSPI: the generator reads its slot through an internal-RAM
 # ping-pong instead of computing a waveform. Counts as one stimulus for rig's exclusion assert. The slot
 # is `ASP_RIG_EXCERPT_SLOT` at build time (default 0). Needs the async flash, so it builds only with the
-# bootloaded layout like the rest of the install path. See "Excerpt replay" in `src/bin/rig.rs`.
+# bootloaded layout like the rest of the install path. See "Excerpt replay" in `src/bin/rig/excerpt_play.rs`.
 stim-excerpt = []
 # Remove parameter smoothing from the excerpt replay's effect, so a knob override
 # steps the parameter instantly. An intentionally click-prone build, used only to prove the
 # discontinuity detector can see what smoothing hides. Additive and never in `default`; it changes
-# nothing without `stim-excerpt`. See "Replay effect" in `src/bin/rig.rs`.
+# nothing without `stim-excerpt`. See the module docs of `src/bin/rig/fx_ctl.rs`.
 unsmoothed-params = []
 
 [profile.release]

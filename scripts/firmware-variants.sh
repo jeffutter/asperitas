@@ -4,7 +4,7 @@
 #
 #   scripts/firmware-variants.sh build | clippy | grade   run that action over every row that lists it
 #   scripts/firmware-variants.sh list                     print each row with its resolved binaries
-#   scripts/firmware-variants.sh check                    fail unless every firmware/src/bin/*.rs is
+#   scripts/firmware-variants.sh check                    fail unless every firmware/src/bin binary is
 #                                                         built, linted and graded by some row
 #
 # Each row builds into its own target directory (scripts/variant-dir.sh), so no variant replaces the
@@ -38,10 +38,14 @@ esac
 [ -f "$TABLE" ] || die "no $TABLE"
 
 ALL_BINS=()
-for src in firmware/src/bin/*.rs; do
+# A binary is src/bin/<name>.rs, or src/bin/<name>/main.rs when it is split into modules.
+for src in firmware/src/bin/*.rs firmware/src/bin/*/main.rs; do
   [ -e "$src" ] || continue
-  name=${src##*/}
-  ALL_BINS+=("${name%.rs}")
+  case $src in
+    firmware/src/bin/*/main.rs) name=${src%/main.rs}; name=${name##*/} ;;
+    *) name=${src##*/}; name=${name%.rs} ;;
+  esac
+  ALL_BINS+=("$name")
 done
 [ "${#ALL_BINS[@]}" -gt 0 ] || die "no firmware/src/bin/*.rs"
 
@@ -173,7 +177,7 @@ case $ACTION in
           has_word "${R_ACTIONS[$i]}" "$act" || continue
           case " ${R_RESOLVED[$i]}" in *" $b "*) covered=1 ;; esac
         done
-        [ "$covered" = 1 ] || fail "firmware/src/bin/$b.rs has no $act row in $TABLE"
+        [ "$covered" = 1 ] || fail "firmware/src/bin binary $b has no $act row in $TABLE"
       done
     done
     ;;

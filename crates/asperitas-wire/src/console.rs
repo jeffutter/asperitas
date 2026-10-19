@@ -573,7 +573,7 @@ impl MonoLane {
 /// captured bytes that follow. Numeric fields stay `u32` for uniformity with `STATUS` even
 /// where the source value is wider: `capture`'s byte totals come back as `usize` and
 /// [`crate::capture::ring_duration_micros`] as a `u64`. Narrowing is safe at the call site today
-/// (both values fit, and `rig.rs` narrows explicitly) and is *not* a claim that a ring can never
+/// (both values fit, and the rig binary narrows explicitly) and is *not* a claim that a ring can never
 /// grow past what these fields hold - a ring twice today's size would need them widened, which is
 /// a protocol change and will read as one.
 #[derive(Clone, Copy, Debug)]
@@ -623,7 +623,7 @@ wire_verb! {
 ///
 /// Named so the caller can check its own payload against the budget instead of trusting a
 /// comment. `asperitas-dsp` guarantees only that `describe()` stays under `frame::MAX_BODY`,
-/// which is 16 bytes more than this verb can carry; `rig.rs` debug-asserts the length
+/// which is 16 bytes more than this verb can carry; `rig/main.rs` debug-asserts the length
 /// `describe()` actually returned against this constant.
 pub const RIGGEN_MAX_GEN_BYTES: usize = 160;
 
@@ -683,7 +683,7 @@ pub struct CaptureStatus {
 
 /// The byte budget a `CAPSTAT` record may never exceed: [`crate::frame::MAX_BODY`].
 ///
-/// An alias rather than a second `200`, so the rate gate in `rig.rs` and the encoder cannot
+/// An alias rather than a second `200`, so the rate gate in `rig/geometry.rs` and the encoder cannot
 /// drift apart while both claim to know the cap. It lives next to the builder that produces
 /// the record and is checked by `capstat_body_saturated_counters_fit_one_frame`, because a
 /// gate that divided by a hand-typed number would be arithmetic nobody tested.

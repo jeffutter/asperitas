@@ -63,8 +63,11 @@ derive_legal_image_names() {
   local src name rules built flashed
   local -a targets=()
 
-  for src in firmware/src/bin/*.rs; do
+  for src in firmware/src/bin/*.rs firmware/src/bin/*/main.rs; do
     [ -e "$src" ] || continue
+    case $src in
+      firmware/src/bin/*/main.rs) src=${src%/main.rs}.rs ;;
+    esac
     targets+=("$src")
   done
   [ "${#targets[@]}" -gt 0 ] || die "no targets in firmware/src/bin/*.rs: the legal set would be \

@@ -67,7 +67,7 @@ SECTIONS {
 /*
  * Rig's excerpt replay staging (`REPLAY`). The bootloaded layout moves it to the AXI tail
  * (memory-bootloaded.x has the reasoning); here AXI SRAM is the whole RAM region, so the same section name
- * lands in it. NOLOAD and zeroed by rig at boot, as there. Keeping one name keeps rig.rs layout-blind.
+ * lands in it. NOLOAD and zeroed by rig at boot, as there. Keeping one name keeps rig layout-blind.
  */
 SECTIONS {
   .replay_bss (NOLOAD) : ALIGN(32) {
