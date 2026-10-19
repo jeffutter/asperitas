@@ -3,10 +3,19 @@
 //! All generators are deterministic and produce mono f32 samples at a given sample rate.
 
 use asperitas_dsp::processor::Frame;
+use asperitas_stimulus::Chirp;
+
+/// Samples in `duration_secs` at `sample_rate_hz`, rounded to the nearest whole sample.
+///
+/// Rounded in `f64` rather than truncated in `f32`, which comes out a sample short whenever the
+/// product is not exactly representable.
+fn sample_count(sample_rate_hz: u32, duration_secs: f32) -> u32 {
+    (f64::from(sample_rate_hz) * f64::from(duration_secs)).round() as u32
+}
 
 /// Generate a unit impulse (single sample = 1.0, rest zeros).
 pub fn generate_impulse(sample_rate_hz: u32, duration_secs: f32) -> Vec<f32> {
-    let total_samples = (sample_rate_hz as f32 * duration_secs) as usize;
+    let total_samples = sample_count(sample_rate_hz, duration_secs) as usize;
     let mut buf = vec![0.0f32; total_samples];
     if !buf.is_empty() {
         buf[0] = 1.0;
@@ -14,53 +23,30 @@ pub fn generate_impulse(sample_rate_hz: u32, duration_secs: f32) -> Vec<f32> {
     buf
 }
 
-/// Generate a logarithmic sine sweep from 20 Hz to 20 kHz.
+/// Generate a logarithmic sine sweep from 20 Hz to 20 kHz at unit amplitude.
 ///
-/// The phase is accumulated in `f64` via `libm`, not `f32` via `std`, because this
-/// signal backs golden-file regression tests and so must be bit-reproducible.
-///
-/// Two separate things would otherwise prevent that:
-///
-/// 1. **Magnitude.** The chirp's phase integral reaches ~18,000 radians by the end of a
-///    one-second sweep. An `f32` ULP at that magnitude is ~1.1e-3 — over ten times the
-///    goldens' 1e-4 comparison tolerance — so the sample values there are decided
-///    entirely by rounding. In `f64` the ULP is ~3.6e-12 and the phase is effectively
-///    exact.
-/// 2. **Implementation.** `f32::powf`, `f32::ln`, and `f32::sin` dispatch to the
-///    platform's libm, which differs between macOS and glibc and can shift across
-///    toolchain versions. `libm` is a pure-Rust port of MUSL's implementations and is
-///    identical everywhere. `asperitas-dsp` already uses it for this reason.
-///
-/// Together those made the goldens a record of one machine's rounding behaviour. The
-/// fenix -> rust-overlay toolchain switch alone moved samples by 4 LSB at 16 bits and
-/// broke the tests without any DSP change.
+/// The chirp is `asperitas_stimulus::Chirp`, the same expression the device sweep plays, so the
+/// golden files and the rig cannot disagree about the waveform. It evaluates the phase in `f64`
+/// through `libm` rather than in `f32` through `std`: the phase integral reaches ~18,000 radians
+/// by the end of a one-second sweep, where an `f32` ULP (~1.1e-3) is over ten times the goldens'
+/// comparison tolerance, and the platform libm differs between macOS and glibc. The golden files
+/// would otherwise record one machine's rounding.
 pub fn generate_sweep(sample_rate_hz: u32, duration_secs: f32) -> Vec<f32> {
-    let total_samples = (sample_rate_hz as f32 * duration_secs) as usize;
-    let mut buf = vec![0.0f32; total_samples];
-
-    let f_start = 20.0f64;
-    let f_end = 20_000.0f64;
-    let t = duration_secs as f64;
-    let omega_start = 2.0 * core::f64::consts::PI * f_start;
-    let omega_end = 2.0 * core::f64::consts::PI * f_end;
-    let ratio = omega_end / omega_start;
-    let log_ratio = libm::log(ratio);
-
-    for (i, sample) in buf.iter_mut().enumerate() {
-        let ti = i as f64 / sample_rate_hz as f64;
-        // Phase integral of log chirp: phi(t) = omega_start * T * ((r^(t/T) - 1) / ln(r))
-        let phase = omega_start * t * ((libm::pow(ratio, ti / t) - 1.0) / log_ratio);
-        *sample = libm::sin(phase) as f32;
+    let total_samples = sample_count(sample_rate_hz, duration_secs);
+    if total_samples == 0 {
+        return Vec::new();
     }
-
-    buf
+    let chirp = Chirp::new(20.0, 20_000.0, total_samples, sample_rate_hz);
+    (0..total_samples as usize)
+        .map(|n| chirp.sample(n) as f32)
+        .collect()
 }
 
 /// Generate a Karplus-Strong plucked-string sound at the given frequency.
 ///
 /// Uses a deterministic LCG-seeded noise buffer for reproducibility.
 pub fn generate_pluck(sample_rate_hz: u32, duration_secs: f32, frequency_hz: f32) -> Vec<f32> {
-    let total_samples = (sample_rate_hz as f32 * duration_secs) as usize;
+    let total_samples = sample_count(sample_rate_hz, duration_secs) as usize;
     let delay_samples = (sample_rate_hz as f32 / frequency_hz.max(20.0)).round() as usize;
     let delay_samples = delay_samples.max(1).min(total_samples);
 
@@ -94,4 +80,17 @@ pub fn generate_pluck(sample_rate_hz: u32, duration_secs: f32, frequency_hz: f32
 /// Convert a mono sample buffer to stereo frames by duplicating the channel.
 pub fn to_stereo(mono: &[f32]) -> Vec<Frame> {
     mono.iter().map(|&s| [s, s]).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_count_rounds_instead_of_truncating() {
+        // 44_100 * 0.1f32 is 4409.9999..., which truncation reads as 4409.
+        assert_eq!(sample_count(44_100, 0.1), 4410);
+        assert_eq!(generate_sweep(44_100, 0.1).len(), 4410);
+        assert_eq!(sample_count(48_000, 1.0), 48_000);
+    }
 }

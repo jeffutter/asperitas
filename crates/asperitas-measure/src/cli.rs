@@ -35,9 +35,9 @@
 use std::io::Write;
 use std::path::Path;
 
-use asperitas_dsp::stimulus::SineParams;
 use asperitas_host::outcome::Outcome;
 use asperitas_host::session::{sidecar_path, Mode as Motion, Sidecar};
+use asperitas_stimulus::stimulus::SineParams;
 use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand};
 use serde_json::{json, Value};

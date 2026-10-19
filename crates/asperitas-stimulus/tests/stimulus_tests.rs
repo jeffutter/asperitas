@@ -1,6 +1,6 @@
 //! Waveform-shape tests for the stimulus generators.
 //!
-//! These sit beside [`property_tests`](../property_tests) rather than inside it because they
+//! These sit beside `stimulus_properties` rather than inside it because they
 //! answer the opposite question. proptest asks "does *some* input break this"; these ask "for the
 //! parameters a capture will actually use, is this the waveform the analysis intends to subtract".
 //! That claim is about particular numbers — a peak of 0.1, a pulse spread over three samples,
@@ -15,12 +15,13 @@
 //! - **No silence-in-silence-out.** These sources ignore their input frames, so the property would
 //!   be vacuous — it would pass for a generator that ignored its input by accident.
 //!
-//! Run with: `cargo test -p asperitas-dsp --test stimulus_tests`
+//! Run with: `cargo test -p asperitas-stimulus --test stimulus_tests`
 
 use std::time::Instant;
 
-use asperitas_dsp::{
-    ExponentialSweep, ExponentialSweepParams, Frame, Processor, PulseTrain, PulseTrainParams, Sine,
+use asperitas_dsp::{Frame, Processor};
+use asperitas_stimulus::{
+    Chirp, ExponentialSweep, ExponentialSweepParams, PulseTrain, PulseTrainParams, Sine,
     SineParams, Stimulus,
 };
 
@@ -28,7 +29,7 @@ const FS: u32 = 48_000;
 const TAU: f64 = core::f64::consts::TAU;
 
 /// The frame budget of a logging body (`asperitas-wire`'s `frame::MAX_BODY`). Hardcoded
-/// because `asperitas-dsp` must not depend on logging to learn how big its own description may be.
+/// because `asperitas-stimulus` must not depend on logging to learn how big its own description may be.
 const MAX_BODY: usize = 200;
 
 /// What a `RIGGEN` record will actually carry of this description
@@ -1067,4 +1068,31 @@ fn reset_replays_bit_identically_for_every_source() {
         .iter()
         .zip(&fresh)
         .all(|(a, b)| a.to_bits() == b.to_bits()));
+}
+
+#[test]
+fn sweep_interior_is_the_shared_chirp_scaled_to_level() {
+    // The golden sweep in `asperitas-cli` is `Chirp` bare. The device sweep must be that chirp
+    // times its fade and a level scale, so over the untapered interior the two differ by one
+    // constant factor and nothing else.
+    const N: u32 = 4_800;
+    let mut source = ExponentialSweep::default();
+    source.set_sample_rate(FS as f32);
+    source.set_params(&ExponentialSweepParams {
+        level_dbfs: 0.0,
+        f0_hz: 20.0,
+        f1_hz: 20_000.0,
+        total_samples: N,
+    });
+    let chirp = Chirp::new(20.0, 20_000.0, N, FS);
+    let played: Vec<f32> = (0..N).map(|_| source.tick([0.0, 0.0])[0]).collect();
+    let fade = 480;
+    let worst = (fade..N as usize - fade)
+        .map(|n| (f64::from(played[n]) - chirp.sample(n)).abs())
+        .fold(0.0f64, f64::max);
+    // Peak normalisation moves the scale by at most the scanned peak's distance from unity.
+    assert!(
+        worst < 1e-4,
+        "interior differs from the chirp by {worst:.3e}"
+    );
 }

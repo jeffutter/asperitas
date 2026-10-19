@@ -5,8 +5,8 @@
 //! ([`Controls`]), so the rig measures what `main` ships and no knob mapping lives outside
 //! `asperitas-dsp`.
 
-use crate::asperitas::{Asperitas, Controls, KNOB_COUNT};
-use crate::processor::{Frame, Processor};
+use asperitas_dsp::asperitas::{Asperitas, Controls, KNOB_COUNT};
+use asperitas_dsp::processor::{Frame, Processor};
 
 /// Which stage the replay runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

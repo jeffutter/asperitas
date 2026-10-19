@@ -1,7 +1,7 @@
 //! A stimulus generator followed by the selectable [`ReplayFx`] stage.
 //!
 //! The rig plays one generator per build and runs the same stage after whichever it is: sine,
-//! sweep, pulse or the excerpt replay. The stage is bypass or the [`Asperitas`](crate::Asperitas)
+//! sweep, pulse or the excerpt replay. The stage is bypass or the [`Asperitas`](asperitas_dsp::Asperitas)
 //! patch `main` runs. This is that pairing as a plain host-testable unit, so the bypass-identity
 //! guarantee and the knob behaviour are pinned without a board. Order is fixed: generator first,
 //! stage second, and the capture (the codec input) never enters here.
@@ -15,10 +15,10 @@
 //! `set_knobs` compare plus the filter and gain over 32 frames per block. No allocation, no
 //! await, no lock held across anything.
 
-use crate::asperitas::{Controls, KNOB_COUNT};
-use crate::processor::{Frame, Processor};
 use crate::replay_fx::{FxKind, ReplayFx};
 use crate::stimulus::Stimulus;
+use asperitas_dsp::asperitas::{Controls, KNOB_COUNT};
+use asperitas_dsp::processor::{Frame, Processor};
 
 /// Generator `G` followed by the replay stage.
 pub struct FxChain<G> {

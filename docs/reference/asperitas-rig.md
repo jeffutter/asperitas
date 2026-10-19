@@ -169,7 +169,7 @@ a bench run against hardware is a separate ticket.
 
 Every `rig` build runs an effect stage after its stimulus generator: the sine (the default),
 `stim-ess`, `stim-pulse` and the `stim-excerpt` replay all carry the same stage,
-`asperitas_dsp::fx_chain::FxChain`. Generator first, effect second, then the encoder; the capture is of the
+`asperitas_stimulus::fx_chain::FxChain`. Generator first, effect second, then the encoder; the capture is of the
 codec input, as before. The stage is bypass or the `asperitas_dsp::Asperitas` patch, the same
 low-pass-then-gain chain `main` runs, so the rig measures what ships and no knob mapping lives outside
 `asperitas-dsp`. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
@@ -249,7 +249,7 @@ does and does not describe (RTT captures carry no loss ledger).
 ## Analysis: `asperitas-measure`
 
 `crates/asperitas-measure` judges a committed `.console.zst` capture. It loads the capture
-strictly (any refused block is an error), regenerates the stimulus from `asperitas-dsp`, aligns
+strictly (any refused block is an error), regenerates the stimulus from `asperitas-stimulus`, aligns
 the two, and reports metrics as one JSON document on stdout. Every numeric limit lives in
 `src/thresholds.rs`, each with its origin; nothing else writes a limit as a literal.
 

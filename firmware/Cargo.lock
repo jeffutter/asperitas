@@ -56,6 +56,7 @@ dependencies = [
  "asperitas-logging",
  "asperitas-pod",
  "asperitas-replay",
+ "asperitas-stimulus",
  "asperitas-wire",
  "cortex-m",
  "cortex-m-rt",
@@ -100,6 +101,15 @@ name = "asperitas-replay"
 version = "0.1.0"
 dependencies = [
  "asperitas-wire",
+]
+
+[[package]]
+name = "asperitas-stimulus"
+version = "0.1.0"
+dependencies = [
+ "asperitas-dsp",
+ "asperitas-wire",
+ "libm",
 ]
 
 [[package]]

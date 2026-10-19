@@ -45,7 +45,7 @@
 //!
 //! ## Parameters are frozen mid-capture
 //!
-//! Unlike [`crate::Gain`] and [`crate::OnePoleLowPass`], these sources do not smooth parameter
+//! Unlike [`asperitas_dsp::Gain`] and [`asperitas_dsp::OnePoleLowPass`], these sources do not smooth parameter
 //! changes, and they deliberately ignore their input frames. A smoothed level ramp applied to a
 //! stimulus corrupts the very calibration the capture exists to measure, so parameters take
 //! effect immediately and the expectation is that nobody changes them while a capture runs.
@@ -58,7 +58,8 @@ use core::fmt::Write as _;
 
 use libm::{cos, floor, log, pow, round, sin};
 
-use crate::processor::{Frame, Processor};
+use asperitas_dsp::processor::{Frame, Processor};
+use asperitas_wire::body::BodyWriter;
 
 /// Raised-cosine fade applied to both ends of the sweep, in samples (10 ms at 48 kHz).
 ///
@@ -168,7 +169,7 @@ const _: () = assert!(DESCRIBE_SCALE == 1_000_000);
 /// render as `nan`/`inf`/`-inf`, and a magnitude too large for the scale saturates in the
 /// float-to-`u64` conversion instead of wrapping. Neither is reachable from a sanitized parameter;
 /// both are defined so that a description can never be the thing that stops the audio path.
-fn write_decimal(out: &mut DescWriter, value: f64) {
+fn write_decimal(out: &mut BodyWriter, value: f64) {
     if !value.is_finite() {
         let token = if value.is_nan() {
             "nan"
@@ -196,47 +197,11 @@ fn write_decimal(out: &mut DescWriter, value: f64) {
 ///
 /// This is the only place the leading grammar is written; each [`Stimulus`] implementation
 /// appends its own fields after it.
-fn describe_prefix(out: &mut DescWriter, name: &str, sample_rate_hz: u32, level_dbfs: f32) {
+fn describe_prefix(out: &mut BodyWriter, name: &str, sample_rate_hz: u32, level_dbfs: f32) {
     let _ = out.write_fmt(format_args!(
         "name={name} sample_rate_hz={sample_rate_hz} level_dbfs="
     ));
     write_decimal(out, f64::from(level_dbfs));
-}
-
-/// A `fmt::Write` that stops at the end of its buffer instead of overflowing it.
-///
-/// Duplicated from `asperitas-wire`'s `BodyWriter` on purpose: `asperitas-dsp` is a leaf
-/// crate that cli, firmware and rig all sit on, so depending on logging to borrow twenty lines
-/// would invert the hierarchy for less than the cost of the copy.
-struct DescWriter<'a> {
-    buf: &'a mut [u8],
-    pos: usize,
-}
-
-impl<'a> DescWriter<'a> {
-    fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, pos: 0 }
-    }
-
-    fn filled(&self) -> usize {
-        self.pos
-    }
-}
-
-impl core::fmt::Write for DescWriter<'_> {
-    fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        if s.is_empty() {
-            return Ok(());
-        }
-        let available = self.buf.len() - self.pos;
-        let len = s.len().min(available);
-        if len == 0 {
-            return Err(core::fmt::Error);
-        }
-        self.buf[self.pos..self.pos + len].copy_from_slice(&s.as_bytes()[..len]);
-        self.pos += len;
-        Ok(())
-    }
 }
 
 /// Peak amplitude for a peak-referenced dBFS level: `10^(dbfs/20)`.
@@ -428,7 +393,7 @@ impl Sine {
 
 impl Stimulus for Sine {
     fn describe(&self, out: &mut [u8]) -> usize {
-        let mut w = DescWriter::new(out);
+        let mut w = BodyWriter::new(out);
         describe_prefix(&mut w, "sine", self.sample_rate_hz, self.level_dbfs);
         let _ = w.write_fmt(format_args!(
             " frequency_hz={} period_samples={}",
@@ -469,6 +434,45 @@ impl Default for ExponentialSweepParams {
     }
 }
 
+/// The untapered, unit-amplitude exponential chirp: the one place the sweep's phase expression is
+/// written.
+///
+/// [`ExponentialSweep`] applies its fades and level on top of this, and the CLI's golden sweep
+/// uses it bare, so the device and the golden files cannot drift apart on grouping or endpoints.
+/// Phase is the closed-form integral `φ(n) = ω0 · T · (r^(n/N) − 1) / ln r` with `r = f1/f0` and
+/// `T = N/fs`, evaluated in `f64` through `libm` so the samples are identical on every platform
+/// and toolchain. Instantaneous frequency at sample `n` is `f0 · r^(n/N)`.
+#[derive(Clone, Copy, Debug)]
+pub struct Chirp {
+    /// `ω0 · T / ln r`, the constant folded out of the phase integral.
+    phase_gain: f64,
+    /// `f1 / f0`.
+    ratio: f64,
+    total_samples: u32,
+}
+
+impl Chirp {
+    /// A chirp from `f0_hz` to `f1_hz` over exactly `total_samples` at `sample_rate_hz`.
+    ///
+    /// The caller guarantees `0 < f0_hz < f1_hz` and `total_samples >= 1`; a degenerate ratio of
+    /// one gives a non-finite phase.
+    pub fn new(f0_hz: f64, f1_hz: f64, total_samples: u32, sample_rate_hz: u32) -> Self {
+        let ratio = f1_hz / f0_hz;
+        let duration_secs = f64::from(total_samples) / f64::from(sample_rate_hz);
+        Self {
+            phase_gain: core::f64::consts::TAU * f0_hz * duration_secs / log(ratio),
+            ratio,
+            total_samples,
+        }
+    }
+
+    /// The chirp at sample `n`, in `[-1, 1]`.
+    pub fn sample(&self, n: usize) -> f64 {
+        let exponent = n as f64 / f64::from(self.total_samples);
+        sin(self.phase_gain * (pow(self.ratio, exponent) - 1.0))
+    }
+}
+
 /// Exponential sine sweep (ESS) spanning `f0..f1` over an exact sample count.
 ///
 /// Exponential rather than linear: equal energy per octave keeps the recovered impulse response
@@ -487,8 +491,8 @@ impl Default for ExponentialSweepParams {
 /// `φ(n) = ω0 · T · (r^(n/N) − 1) / ln r` with `r = f1/f0` and `T = N/fs`, evaluated in `f64`.
 /// Naively summing instantaneous frequency sample by sample is *not* an equivalent
 /// implementation: it differs from this expression by up to 1.31 rad over the default sweep,
-/// which is enough to move the deconvolved response. Same reasoning and same expression as
-/// `asperitas-cli`'s `synth::generate_sweep`, which backs the golden files.
+/// which is enough to move the deconvolved response. The expression is [`Chirp`], shared with
+/// `asperitas-cli`'s golden sweep.
 ///
 /// Instantaneous frequency at sample `n` is `f0 · r^(n/N)`, so `t = T` is the endpoint *time* and
 /// is never emitted: the last sample sits at `f0 · r^((N−1)/N)`, i.e. 19999.64 Hz for the
@@ -507,10 +511,7 @@ pub struct ExponentialSweep {
     f1_hz: f64,
     total_samples: u32,
     fade_samples: usize,
-    /// `ω0 · T / ln r`, the constant folded out of the phase integral.
-    phase_gain: f64,
-    /// `f1 / f0`, the chirp ratio.
-    ratio: f64,
+    chirp: Chirp,
     /// `amplitude / scanned peak`, so the emitted record peaks at `level_dbfs`.
     scale: f64,
     index: u32,
@@ -529,8 +530,11 @@ impl Default for ExponentialSweep {
             f1_hz: 0.0,
             total_samples: 0,
             fade_samples: 0,
-            phase_gain: 0.0,
-            ratio: 1.0,
+            chirp: Chirp {
+                phase_gain: 0.0,
+                ratio: 1.0,
+                total_samples: 1,
+            },
             scale: 0.0,
             index: 0,
         };
@@ -573,7 +577,7 @@ impl Processor for ExponentialSweep {
         let n = self.index as usize;
         self.index += 1;
 
-        let v = (self.scale * self.taper(n) * sin(self.phase(n))) as f32;
+        let v = (self.scale * self.taper(n) * self.chirp.sample(n)) as f32;
         [v, v]
     }
 
@@ -601,15 +605,12 @@ impl ExponentialSweep {
         self.total_samples = params.total_samples.clamp(1, MAX_SWEEP_SAMPLES);
         self.fade_samples = core::cmp::min(FADE_SAMPLES, (self.total_samples as usize) / 2);
 
-        let ratio = f1 / f0;
-        let duration_secs = f64::from(self.total_samples) / f64::from(self.sample_rate_hz);
-        self.ratio = ratio;
-        self.phase_gain = core::f64::consts::TAU * f0 * duration_secs / log(ratio);
+        self.chirp = Chirp::new(f0, f1, self.total_samples, self.sample_rate_hz);
 
         // Peak-normalise by scan: no allocation, and honest for endpoints nobody measured.
         let mut peak = 0.0f64;
         for n in 0..self.total_samples as usize {
-            let v = self.taper(n) * sin(self.phase(n));
+            let v = self.taper(n) * self.chirp.sample(n);
             peak = peak.max(v.abs());
         }
         self.scale = if peak > 0.0 && peak.is_finite() {
@@ -630,15 +631,9 @@ impl ExponentialSweep {
         self.apply(&params);
     }
 
-    /// Closed-form phase integral of the exponential chirp at sample `n`.
-    fn phase(&self, n: usize) -> f64 {
-        let exponent = n as f64 / f64::from(self.total_samples);
-        self.phase_gain * (pow(self.ratio, exponent) - 1.0)
-    }
-
     /// Raised-cosine fade, [`FADE_SAMPLES`] long at both ends, 1.0 in between.
     ///
-    /// Counter-driven rather than a [`crate::smooth::Smoother`]: a one-pole has no
+    /// Counter-driven rather than a a `Smoother`: a one-pole has no
     /// reached-target query, so its ramp endpoints are not reproducible sample for sample, and
     /// reproducibility is the entire point of this module.
     ///
@@ -664,7 +659,7 @@ impl ExponentialSweep {
     /// documented endpoints stay on the wire instead (see the type's docs).
     pub fn instantaneous_frequency_hz(&self, n: u32) -> f32 {
         let exponent = f64::from(n) / f64::from(self.total_samples.max(1));
-        (self.f0_hz * pow(self.ratio, exponent)) as f32
+        (self.f0_hz * pow(self.chirp.ratio, exponent)) as f32
     }
 
     /// Number of samples the sweep emits before silence.
@@ -675,7 +670,7 @@ impl ExponentialSweep {
 
 impl Stimulus for ExponentialSweep {
     fn describe(&self, out: &mut [u8]) -> usize {
-        let mut w = DescWriter::new(out);
+        let mut w = BodyWriter::new(out);
         describe_prefix(&mut w, "ess", self.sample_rate_hz, self.level_dbfs);
         let _ = w.write_fmt(format_args!(" f0_hz="));
         write_decimal(&mut w, self.f0_hz);
@@ -885,7 +880,7 @@ impl PulseTrain {
 
 impl Stimulus for PulseTrain {
     fn describe(&self, out: &mut [u8]) -> usize {
-        let mut w = DescWriter::new(out);
+        let mut w = BodyWriter::new(out);
         describe_prefix(&mut w, "pulse_train", self.sample_rate_hz, self.level_dbfs);
         let _ = w.write_fmt(format_args!(
             " period_samples={} max_frequency_hz=",

@@ -211,7 +211,7 @@ mod tests {
     use super::*;
     use crate::capture::Capture;
     use crate::stimulus::Stimulus;
-    use asperitas_dsp::stimulus::SineParams;
+    use asperitas_stimulus::stimulus::SineParams;
 
     fn load(name: &str) -> Capture {
         Capture::from_console_zst(format!(

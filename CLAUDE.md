@@ -8,6 +8,7 @@ in Rust for the Electro-Smith Daisy Seed3 in a Daisy Pod.
 Crates (root workspace, `crates/`):
 
 - `asperitas-dsp` - hardware-independent DSP.
+- `asperitas-stimulus` - rig measurement stimuli, replay effect stage and its wire codes; depends on dsp.
 - `asperitas-cli` - offline WAV `process`/`generate` and goldens.
 - `asperitas-wire` - `no_std` wire protocol shared by firmware and host.
 - `asperitas-replay` - replay staging core shared by firmware and host.

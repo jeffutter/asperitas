@@ -22,5 +22,7 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.asperitas-dsp]
 opt-level = 3
+[profile.dev.package.asperitas-stimulus]
+opt-level = 3
 [profile.dev.package.asperitas-logging]
 opt-level = 3

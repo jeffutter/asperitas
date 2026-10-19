@@ -188,7 +188,7 @@ mod tests {
     use crate::capture::FULL_SCALE;
     use asperitas_dsp::gain::{Gain, GainParams};
     use asperitas_dsp::processor::Processor;
-    use asperitas_dsp::stimulus::SineParams;
+    use asperitas_stimulus::stimulus::SineParams;
 
     const RATE: usize = 48_000;
     const SECONDS: usize = 310;
@@ -286,8 +286,8 @@ mod tests {
     /// The rig's sine path: `FxChain<Sine>` with the patch selected, the gain knob following `coarse` at 20
     /// `SET`/s through the live override, exactly as the firmware callback drives it.
     fn chain_capture(smoothed: bool) -> Capture {
-        use asperitas_dsp::fx_chain::FxChain;
-        use asperitas_dsp::stimulus::Sine;
+        use asperitas_stimulus::fx_chain::FxChain;
+        use asperitas_stimulus::stimulus::Sine;
         let n = RATE * SECONDS;
         let mut sine = Sine::default();
         sine.set_sample_rate(RATE as f32);

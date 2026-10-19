@@ -1,0 +1,25 @@
+[package]
+name = "asperitas-stimulus"
+version = "0.1.0"
+edition = "2021"
+
+# The rig's measurement stimuli (sine, exponential sweep, pulse train), the stimulus-plus-effect
+# chain and the replay stage selector. They sit on top of `asperitas-dsp` rather than inside it so
+# the DSP crate stays the effect core, and the firmware, the CLI and the host analysis all link
+# the same generators, which is what keeps the played and the regenerated signal bit-identical.
+# `asperitas-wire` supplies the bounded description writer; it is `no_std` and allocation-free.
+[features]
+default = []
+std = ["asperitas-dsp/std"]
+
+[dependencies]
+asperitas-dsp = { path = "../asperitas-dsp" }
+asperitas-wire = { path = "../asperitas-wire" }
+libm = "0.2"
+
+[dev-dependencies]
+proptest = "1"
+
+# Inherit the workspace rustdoc denies (see root Cargo.toml).
+[lints]
+workspace = true

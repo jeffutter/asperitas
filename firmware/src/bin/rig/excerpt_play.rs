@@ -63,12 +63,12 @@
 use crate::emit_console;
 use crate::install::{flash_of, FLASH};
 use asperitas_dsp::processor::{Frame, Processor};
-use asperitas_dsp::stimulus::Stimulus;
 use asperitas_logging::{error, info};
 use asperitas_replay::{
     FillClaim, PassReport, ReplayCore, ASSUMED_SCHEDULING_LATENCY_MICROS, BLOCK_SAMPLES,
     BYTES_PER_SAMPLE,
 };
+use asperitas_stimulus::stimulus::Stimulus;
 use asperitas_wire::console;
 use asperitas_wire::excerpt::{self, SlotHeader, HEADER_LEN};
 use core::fmt::Write as _;

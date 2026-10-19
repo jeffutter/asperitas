@@ -622,7 +622,7 @@ wire_verb! {
 /// Most generator-description bytes [`riggen_body`] will carry: 160.
 ///
 /// Named so the caller can check its own payload against the budget instead of trusting a
-/// comment. `asperitas-dsp` guarantees only that `describe()` stays under `frame::MAX_BODY`,
+/// comment. `asperitas-stimulus` guarantees only that `describe()` stays under `frame::MAX_BODY`,
 /// which is 16 bytes more than this verb can carry; `rig/main.rs` debug-asserts the length
 /// `describe()` actually returned against this constant.
 pub const RIGGEN_MAX_GEN_BYTES: usize = 160;
@@ -1255,7 +1255,7 @@ mod tests {
 
     // -- measurement-rig verbs ---------------------------------------------------------
 
-    /// `asperitas-dsp`'s pinned description of a 1 kHz sine (`stimulus_tests.rs`), used here as
+    /// `asperitas-stimulus`'s pinned description of a 1 kHz sine (`stimulus_tests.rs`), used here as
     /// a realistic `describe()` payload rather than a synthetic filler. If dsp renames a field,
     /// this literal is the one in two places that has to change together, which is the point.
     const SINE_DESCRIBE: &[u8] =

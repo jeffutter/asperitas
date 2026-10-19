@@ -112,6 +112,7 @@ debug = 2
 
 [dependencies]
 asperitas-dsp = { path = "../crates/asperitas-dsp" }
+asperitas-stimulus = { path = "../crates/asperitas-stimulus" }
 asperitas-pod = { path = "../crates/asperitas-pod", features = ["pod-hw"] }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7"

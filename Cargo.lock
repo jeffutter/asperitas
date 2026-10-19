@@ -96,9 +96,9 @@ name = "asperitas-cli"
 version = "0.1.0"
 dependencies = [
  "asperitas-dsp",
+ "asperitas-stimulus",
  "clap",
  "hound",
- "libm",
  "tempfile",
 ]
 
@@ -143,6 +143,7 @@ version = "0.1.0"
 dependencies = [
  "asperitas-dsp",
  "asperitas-host",
+ "asperitas-stimulus",
  "asperitas-wire",
  "clap",
  "rustfft",
@@ -177,6 +178,16 @@ dependencies = [
  "ruzstd",
  "serialport",
  "tempfile",
+]
+
+[[package]]
+name = "asperitas-stimulus"
+version = "0.1.0"
+dependencies = [
+ "asperitas-dsp",
+ "asperitas-wire",
+ "libm",
+ "proptest",
 ]
 
 [[package]]

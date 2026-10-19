@@ -14,6 +14,7 @@ asperitas/
 │   └── memory-*.x       # Linker layouts: internal flash (default), bootloaded (QSPI image run from AXI SRAM)
 ├── crates/              # Host workspace members
 │   ├── asperitas-dsp/       # Core DSP (hardware-independent, no Daisy or Embassy)
+│   ├── asperitas-stimulus/  # Rig stimuli (sine, sweep, pulse), the effect-stage chain and replay selector
 │   ├── asperitas-cli/       # Offline WAV-in/WAV-out CLI (process, generate) and golden-file tests
 │   ├── asperitas-wire/      # no_std console and control wire protocol, device and host sides
 │   ├── asperitas-replay/    # Replay core shared by firmware and host

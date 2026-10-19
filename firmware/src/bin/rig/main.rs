@@ -43,9 +43,9 @@ mod ring;
 mod timeline;
 
 use asperitas_dsp::processor::{Frame, Processor};
-use asperitas_dsp::stimulus::Stimulus;
 use asperitas_firmware::audio::{self, measure_time_base, AudioProcessor, TimeBase, BLOCK_LENGTH};
 use asperitas_logging::{error, info};
+use asperitas_stimulus::stimulus::Stimulus;
 use asperitas_wire::console;
 use core::sync::atomic::Ordering;
 use cortex_m::peripheral::{DWT, NVIC};
@@ -224,7 +224,7 @@ fn emit_descriptors(generator: &ActiveGenerator, time_base: TimeBase) {
     // Today's three generators at their `Default` parameters, described at 48 kHz, come to 88 bytes
     // for sine, 107 for the sweep, and 107 for the pulse train - the widest of the three - leaving
     // 53 bytes of slack. That margin is not kept by this comment: the worst-case check in
-    // `crates/asperitas-dsp/tests/stimulus_tests.rs` pushes every field to its sanitized extreme and
+    // `crates/asperitas-stimulus/tests/stimulus_tests.rs` pushes every field to its sanitized extreme and
     // asserts the result against the same 160, so a parameter change that eats the slack fails a
     // host test instead of arriving here as a clipped record.
     //

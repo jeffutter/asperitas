@@ -26,8 +26,8 @@
 //! compare, a few tens of cycles. While a value moves, one `set_controls` per block re-derives the
 //! parameters (a `powf` for gain, a `powf` and `expf` for the filter).
 
-use asperitas_dsp::fx_chain::FxChain;
 use asperitas_dsp::processor::{Frame, Processor};
+use asperitas_stimulus::fx_chain::FxChain;
 use core::cell::Cell;
 use core::sync::atomic::{AtomicU32, Ordering};
 use cortex_m::interrupt::Mutex;
@@ -40,7 +40,7 @@ static FX_GENERATION: AtomicU32 = AtomicU32::new(0);
 /// Request effect `code` at `value`. `false` for an unknown code, changing nothing.
 #[cfg(feature = "log-usb")]
 pub fn select_fx(code: u8, value: u16) -> bool {
-    if asperitas_dsp::replay_fx::FxKind::from_code(code).is_none() {
+    if asperitas_stimulus::replay_fx::FxKind::from_code(code).is_none() {
         return false;
     }
     cortex_m::interrupt::free(|cs| FX_REQUEST.borrow(cs).set((code, value)));

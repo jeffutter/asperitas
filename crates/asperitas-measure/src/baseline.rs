@@ -4,7 +4,7 @@
 //! discontinuities, spurs, parameter steps). The sweep and pulse are reported and checked for
 //! alignment stability only, because the baseline limits are defined for the sine.
 
-use asperitas_dsp::stimulus::{ExponentialSweepParams, PulseTrainParams, SineParams};
+use asperitas_stimulus::stimulus::{ExponentialSweepParams, PulseTrainParams, SineParams};
 use clap::ValueEnum;
 use serde::Serialize;
 

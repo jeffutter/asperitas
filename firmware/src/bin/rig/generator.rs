@@ -2,14 +2,14 @@
 
 #[cfg(feature = "stim-excerpt")]
 use crate::excerpt_play::ExcerptPlayer;
-use asperitas_dsp::fx_chain::FxChain;
-#[cfg(feature = "stim-ess")]
-use asperitas_dsp::stimulus::ExponentialSweep;
-#[cfg(feature = "stim-pulse")]
-use asperitas_dsp::stimulus::PulseTrain;
-#[cfg(not(any(feature = "stim-ess", feature = "stim-pulse", feature = "stim-excerpt")))]
-use asperitas_dsp::stimulus::Sine;
 use asperitas_firmware::audio::BLOCK_LENGTH;
+use asperitas_stimulus::fx_chain::FxChain;
+#[cfg(feature = "stim-ess")]
+use asperitas_stimulus::stimulus::ExponentialSweep;
+#[cfg(feature = "stim-pulse")]
+use asperitas_stimulus::stimulus::PulseTrain;
+#[cfg(not(any(feature = "stim-ess", feature = "stim-pulse", feature = "stim-excerpt")))]
+use asperitas_stimulus::stimulus::Sine;
 use asperitas_wire::capture;
 use daisy_embassy::audio::Fs;
 use static_cell::StaticCell;
@@ -64,7 +64,7 @@ pub(crate) type BareGenerator = Sine;
 
 /// What the audio task holds: the generator, then the replay effect (`CTL FX`), on every build.
 /// With no `FX` sent the effect is bypass and the output is bit-identical to the bare generator
-/// (`asperitas_dsp::fx_chain`).
+/// (`asperitas_stimulus::fx_chain`).
 pub(crate) type ActiveGenerator = FxChain<BareGenerator>;
 
 /// The chain around `gen`: shipped smoothing, or none under `unsmoothed-params`.

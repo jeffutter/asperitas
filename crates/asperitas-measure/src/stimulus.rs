@@ -1,7 +1,7 @@
 //! Regenerate the stimulus the rig played, from the same processors the firmware runs.
 
 use asperitas_dsp::processor::Processor;
-use asperitas_dsp::stimulus::{
+use asperitas_stimulus::stimulus::{
     ExponentialSweep, ExponentialSweepParams, PulseTrain, PulseTrainParams, Sine, SineParams,
 };
 

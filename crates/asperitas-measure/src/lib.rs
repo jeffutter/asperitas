@@ -2,7 +2,7 @@
 //! played, and the limits a run is judged against.
 //!
 //! - [`capture`] reassembles a committed `.console.zst` into samples, strictly.
-//! - [`stimulus`] regenerates the played signal from the same `asperitas-dsp` processors the rig
+//! - [`stimulus`] regenerates the played signal from the same `asperitas-stimulus` processors the rig
 //!   firmware runs.
 //! - [`align`] finds the loopback delay per window and flags slips.
 //! - [`baseline`] judges a steady-stimulus loopback capture against the rig baseline.
