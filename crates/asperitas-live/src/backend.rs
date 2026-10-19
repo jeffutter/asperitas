@@ -13,6 +13,7 @@ use cpal::{
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
 
+use asperitas_live::ring::{RingAction, RingSync};
 use asperitas_live::{ControlSlot, Engine, LoopSource, Source, SAMPLE_RATE};
 
 /// Largest slice rendered at once; a longer host buffer is rendered in several slices so the
@@ -22,11 +23,19 @@ const MAX_SLICE: usize = 8192;
 /// Smallest ring that rides out callback jitter, in frames.
 const MIN_RING_FRAMES: usize = 4096;
 
+/// Ring floor when the host buffer size is the device default and so unknown until a callback
+/// runs; macOS default buffers can reach a few thousand frames.
+const DEFAULT_BUFFER_RING_FRAMES: usize = 16384;
+
 #[derive(Default)]
 struct Counters {
     stream_errors: AtomicU64,
+    /// Output callbacks that found the ring short.
     underruns: AtomicU64,
+    /// Input callbacks that found the ring full and dropped samples.
     overruns: AtomicU64,
+    /// Output callbacks that dropped queued frames to bring latency back down.
+    trims: AtomicU64,
     /// The most recent stream error. Written from a cpal error thread, never from an audio
     /// callback, so a mutex is fine.
     last_error: Mutex<Option<String>>,
@@ -152,23 +161,29 @@ pub fn run(
         )?;
         let in_channels = in_cfg.channels() as usize;
         let in_conf = stream_config(&in_cfg, buffer);
-        let host_frames = match in_conf.buffer_size {
-            BufferSize::Fixed(n) => n as usize,
-            BufferSize::Default => 512,
+        let capacity = match in_conf.buffer_size {
+            BufferSize::Fixed(n) => (8 * n as usize).max(MIN_RING_FRAMES),
+            BufferSize::Default => DEFAULT_BUFFER_RING_FRAMES,
         };
-        let capacity = (8 * host_frames).max(MIN_RING_FRAMES);
         let (mut producer, mut consumer) = HeapRb::<f32>::new(capacity).split();
 
         let overruns = counters.clone();
+        let mut in_mono = vec![0.0f32; MAX_SLICE];
         let in_stream = in_dev
             .build_input_stream(
                 in_conf,
                 move |data: &[f32], _| {
                     // The first channel is the mono source.
-                    for sample in data.chunks_exact(in_channels).map(|c| c[0]) {
-                        if producer.try_push(sample).is_err() {
-                            overruns.overruns.fetch_add(1, Ordering::Relaxed);
+                    let mut dropped = false;
+                    for chunk in data.chunks(MAX_SLICE * in_channels) {
+                        let n = chunk.len() / in_channels;
+                        for (m, c) in in_mono[..n].iter_mut().zip(chunk.chunks_exact(in_channels)) {
+                            *m = c[0];
                         }
+                        dropped |= producer.push_slice(&in_mono[..n]) < n;
+                    }
+                    if dropped {
+                        overruns.overruns.fetch_add(1, Ordering::Relaxed);
                     }
                 },
                 error_callback(&counters, "input"),
@@ -178,28 +193,33 @@ pub fn run(
         streams.push(in_stream);
 
         let underruns = counters.clone();
-        let mut started = false;
+        let trims = counters.clone();
+        let mut sync = RingSync::new(capacity);
         let mut mono = vec![0.0f32; MAX_SLICE];
         out_dev.build_output_stream(
             out_conf,
             move |data: &mut [f32], _| {
                 let total = data.len() / out_channels;
-                // Hold back until one host buffer is queued, then drop any surplus so the
-                // input stream's head start does not stay as latency.
-                if !started {
-                    if consumer.occupied_len() < total {
+                // Hold back until one host buffer is queued, and again after an underrun; drop
+                // surplus at the start and whenever the ring fills past its high-water mark, so
+                // clock drift does not turn into latency.
+                match sync.decide(consumer.occupied_len(), total) {
+                    RingAction::Wait => {
                         data.fill(0.0);
                         return;
                     }
-                    let surplus = consumer.occupied_len() - total;
-                    consumer.skip(surplus);
-                    started = true;
+                    RingAction::Run => {}
+                    RingAction::Trim(surplus) => {
+                        consumer.skip(surplus);
+                        trims.trims.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
+                let mut short = false;
                 for out in data.chunks_mut(MAX_SLICE * out_channels) {
                     let n = out.len() / out_channels;
                     let got = consumer.pop_slice(&mut mono[..n]);
                     if got < n {
-                        underruns.underruns.fetch_add(1, Ordering::Relaxed);
+                        short = true;
                         mono[got..n].fill(0.0);
                     }
                     for (f, &s) in scratch_in[..n].iter_mut().zip(&mono[..n]) {
@@ -207,6 +227,10 @@ pub fn run(
                     }
                     engine.render(&scratch_in[..n], &mut scratch_out[..n]);
                     write_interleaved(&scratch_out[..n], out, out_channels);
+                }
+                if short {
+                    sync.underrun();
+                    underruns.underruns.fetch_add(1, Ordering::Relaxed);
                 }
             },
             error_callback(&counters, "output"),
@@ -244,10 +268,11 @@ pub fn run(
     drop(streams);
 
     println!(
-        "stream errors: {}, underruns: {}, overruns: {}",
+        "stream errors: {}, underruns: {}, overruns: {}, trims: {}",
         counters.stream_errors.load(Ordering::Relaxed),
         counters.underruns.load(Ordering::Relaxed),
         counters.overruns.load(Ordering::Relaxed),
+        counters.trims.load(Ordering::Relaxed),
     );
     if let Some(error) = counters.last_error() {
         eprintln!("asperitas-live: {error}");

@@ -6,6 +6,7 @@
 
 pub mod controls;
 pub mod engine;
+pub mod ring;
 pub mod view;
 
 pub use controls::ControlSlot;

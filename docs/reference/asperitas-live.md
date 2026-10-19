@@ -19,7 +19,7 @@ cargo run -p asperitas-live --release -- --line-in --params cutoff_hz=800 gain_d
 | `--buffer <frames>` | Host buffer size, default 128; `0` takes the device default. Clamped to the device's range. |
 | `--seconds <n>` | Stop after `n` seconds. Without it the stream runs until Enter is pressed. |
 
-On exit it prints the stream error count and, for line-in, the ring underrun and overrun counts.
+On exit it prints the stream error count and, for line-in, the ring underrun, overrun and trim counts. Each counts callbacks (events), not samples: an underrun is an output callback that found the ring short, an overrun an input callback that had to drop samples, a trim an output callback that dropped queued frames.
 It exits non-zero when a stream reported an error.
 
 ## Behaviour
@@ -34,4 +34,7 @@ It exits non-zero when a stream reported an error.
   `set_controls` once per 32-frame block, whatever the host buffer length. Decision and evidence:
   [cpal-macos-duplex.md](../investigations/cpal-macos-duplex.md).
 - Line-in uses two independent `cpal` streams joined by a lock-free ring; the output side waits
-  until one host buffer is queued and trims any surplus above that.
+  until one host buffer is queued and trims any surplus above that. It waits again after an
+  underrun, and trims back to one host buffer whenever the ring fills past half its capacity (at
+  least two host buffers), so clock drift between the streams does not stick as silence or as
+  latency. `--buffer 0` sizes the ring at 16384 frames since the host buffer is unknown up front.
