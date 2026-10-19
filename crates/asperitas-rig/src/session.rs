@@ -279,18 +279,22 @@ pub struct SessionRun {
     pub observed: Observed,
     /// `SET` commands sent, including the pre-arm ones.
     pub sets_sent: usize,
+    /// `SET` commands the plan schedules, pre-arm and timed. A dump that ends before the timed
+    /// schedule completes leaves `sets_sent` short of this.
+    pub sets_planned: usize,
     /// Why the session stopped early, if it did.
     pub error: Option<ControlError>,
 }
 
 impl SessionRun {
     /// Pass only when the session ran to `DUMPEND` and the device acknowledged the `FX`, every
-    /// `SET` and the `REL`, and rejected nothing.
+    /// `SET` and the `REL`, and rejected nothing. A schedule cut short by an early `DUMPEND` fails.
     pub fn outcome(&self) -> Outcome {
         let o = &self.observed;
         let clean = self.error.is_none()
             && o.fx_acked
             && o.dump_end
+            && self.sets_sent == self.sets_planned
             && o.set_acks == self.sets_sent
             && o.rel_acks >= 1
             && o.errors == 0;
@@ -483,6 +487,7 @@ pub fn run_session<P: Read + Write>(port: P, plan: &SessionPlan, opts: &SessionO
                 raw: Vec::new(),
                 observed: Observed::default(),
                 sets_sent: 0,
+                sets_planned: 0,
                 error: Some(e),
             }
         }
@@ -497,6 +502,7 @@ pub fn run_session<P: Read + Write>(port: P, plan: &SessionPlan, opts: &SessionO
         released: false,
         sets_sent: 0,
     };
+    let sets_planned = timeline.pre.len() + timeline.timed.len();
     let mut error = r.drive(plan, &timeline, opts).err();
     if r.sent_anything && !r.released {
         // Best effort: the failure that got us here is the one worth reporting.
@@ -508,6 +514,7 @@ pub fn run_session<P: Read + Write>(port: P, plan: &SessionPlan, opts: &SessionO
         raw: r.raw,
         observed: r.observed,
         sets_sent: r.sets_sent,
+        sets_planned,
         error,
     }
 }
@@ -782,6 +789,7 @@ mod tests {
             raw: Vec::new(),
             observed: Observed::default(),
             sets_sent: 0,
+            sets_planned: 0,
             error: Some(ControlError::Timeout),
         };
         let d = tempfile::tempdir().unwrap();
@@ -851,7 +859,8 @@ mod tests {
             .count();
         assert_eq!(run.sets_sent, sets);
         assert_eq!(run.observed.set_acks, sets);
-        assert_eq!(run.outcome(), Outcome::Pass, "{}", run.summary());
+        assert!(run.sets_sent < run.sets_planned, "{}", run.summary());
+        assert_eq!(run.outcome(), Outcome::Fail, "{}", run.summary());
     }
 
     #[test]
