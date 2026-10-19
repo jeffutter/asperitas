@@ -1,11 +1,11 @@
 ---
 id: TASK-120
 title: 'HUMAN: hardware recheck after the review refactors'
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-10-16 18:13'
-updated_date: '2026-10-19 18:20'
+updated_date: '2026-10-19 19:45'
 labels:
   - review-2026-10
   - hardware
@@ -38,7 +38,7 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 - [x] #1 HUMAN: main is heard with both knobs working and survives a power cycle
 - [x] #2 HUMAN: a rig capture shows STATUS sent advancing, dropped_full=0, overrun=0, and query/restart answer on main
 - [x] #3 HUMAN: panictest reaches the panic LED and USB; podtest encoder and buttons count correctly
-- [ ] #4 HUMAN: any regression is filed as a bug ticket with the capture
+- [x] #4 HUMAN: any regression is filed as a bug ticket with the capture
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -59,4 +59,12 @@ AC2 reworded with the owner (2026-10-19): query/restart on rig was never impleme
 AC3 checked in the same live bench session with the owner (2026-10-19), bootloaded layout, fw 86fe0ae-dirty. panictest: countdown 8..1 and `E ... PANIC: panictest: deliberate panic, exercising the LED + serial panic path at src/bin/panictest.rs:123:9` reached the host intact over USB (capture attached late: BOOT and countdown 10/9 missed, discarded_bytes=34). Owner saw LED 1 steady green for the 10 s countdown then steady red after the panic; the brief boot red was not clearly seen (before USB, behind the bootloader's 2 s grace), so TASK-106.01 boot state stays open. podtest 75 s capture: ENC +1 x10, ENC -1 x10, BTN1 press/release 10/10, BTN2 10/10, encoder CLICK 10/10, each detent with the full AB=00,01,10,11 walk. device_dropped=4489 is podtest's ~100 Hz knob stream (TASK-033.01 recorded 4041 in 240 s), unrelated to the input counts. Owner signed off on this criterion.
 
 2026-10-19, live session with the owner: the query and restart check on a rig image now passes after TASK-088 (fw=0.1.0+8095c78 reset_reason=software, restart re-enumerates). The recheck found one regression, the rig dump hanging on hardware since 33f0847, filed as TASK-141 with the bisect. AC #4 is left unticked until the owner decides whether TASK-141 satisfies it.
+
+2026-10-19, live session with the owner: AC #4 ticked and the ticket closed with the owner's agreement. The recheck's one regression, the rig dump hanging on hardware since 33f0847, was filed as TASK-141 with a board bisect, fixed in a723f4c and confirmed at the bench (DUMPEND reached, dump_reassemble clean); TASK-138 then closed on top of it. No stalled-dump capture is committed; the bisect and the root cause are in TASK-141's notes.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardware recheck after the review refactors, walked with the owner at the bench. main was heard (both knobs, no zipper noise, survives a power cycle); rig captures show STATUS advancing, dropped_full=0 and overrun=0, with query and restart answering on main and, after TASK-088, on rig; panictest reaches the panic LED and USB; podtest counts every input 10 of 10. The one regression found, the rig dump hang since 33f0847, was filed as TASK-141, fixed and verified on the board.
+<!-- SECTION:FINAL_SUMMARY:END -->
