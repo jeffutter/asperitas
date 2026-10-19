@@ -131,7 +131,7 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
   hold  --level 0.5
 ```
 
-- `--fx-f` is `0` bypass or `1` patch; `--knob` is decimal (0 filter cutoff, 1 output gain).
+- `--fx-f` is `0` bypass or `1` patch; `--knob` is required and decimal (0 filter cutoff, 1 output gain).
   Device selection is the same as the other subcommands (`--device` or the single
   `/dev/cu.usbmodem*` / `/dev/ttyACM*`).
 - `sweep` steps linearly at 20 `SET`s per second from `--start-after-arm` seconds after the

@@ -95,8 +95,9 @@ enum Command {
         /// Value sent with the effect selection (the rig ignores it).
         #[arg(long, default_value_t = 0)]
         fx_v: u16,
-        /// Knob id (decimal): 0 filter cutoff, 1 output gain.
-        #[arg(long, default_value_t = 0)]
+        /// Knob id (decimal): 0 filter cutoff, 1 output gain. Required: sweep and hold levels mean
+        /// different things on each knob, so there is no safe default.
+        #[arg(long)]
         knob: u8,
         /// Give up this many seconds after attaching.
         #[arg(long)]
@@ -384,5 +385,31 @@ fn go(command: Command) -> Result<Outcome, ControlError> {
             }
             Ok(outcome)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    const BASE: [&str; 9] = [
+        "asperitas-rig",
+        "session",
+        "--out",
+        "run.zst",
+        "--fx-f",
+        "1",
+        "--max-seconds",
+        "30",
+        "soak",
+    ];
+
+    #[test]
+    fn session_requires_an_explicit_knob() {
+        assert!(Cli::try_parse_from(BASE).is_err());
+        let mut with_knob = BASE.to_vec();
+        with_knob.splice(2..2, ["--knob", "1"]);
+        assert!(Cli::try_parse_from(with_knob).is_ok());
     }
 }
