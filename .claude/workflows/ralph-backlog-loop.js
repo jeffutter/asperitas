@@ -34,21 +34,29 @@ export const meta = {
   ],
 };
 
-const MAX_ITERATIONS = (() => {
-  if (typeof args === "number") return args;
-  if (
-    args &&
-    typeof args === "object" &&
-    typeof args.maxIterations === "number"
-  )
-    return args.maxIterations;
-  return 25;
+// Args may arrive as a number (40), a numeric string ("40"), a JSON string
+// ('{"maxIterations":40}') or an object ({ maxIterations, reviewEvery }).
+const ARGS = (() => {
+  let a = args;
+  if (typeof a === "string") {
+    const s = a.trim();
+    try {
+      a = JSON.parse(s);
+    } catch {
+      a = s;
+    }
+  }
+  if (a && typeof a === "object") return a;
+  return { maxIterations: a };
 })();
 
-const REVIEW_EVERY =
-  args && typeof args === "object" && typeof args.reviewEvery === "number"
-    ? args.reviewEvery
-    : 4;
+const positiveInt = (v, fallback) => {
+  const n = typeof v === "string" ? Number(v.trim()) : v;
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
+
+const MAX_ITERATIONS = positiveInt(ARGS.maxIterations, 25);
+const REVIEW_EVERY = positiveInt(ARGS.reviewEvery, 4);
 
 const SETUP_SCHEMA = {
   type: "object",
@@ -324,11 +332,38 @@ let lastExecuteOutcome = null;
 
 for (let i = 0; i < MAX_ITERATIONS; i++) {
   phase("State");
-  const state = await agent(STATE_PROMPT, {
-    schema: STATE_SCHEMA,
-    model: "haiku",
-    phase: "State",
-  });
+  // The haiku State agent has been seen skipping every command and returning
+  // seven empty arrays within seconds, which reads as "drained" and ends the
+  // loop with nothing done. An all-empty sweep is retried, on a stronger model
+  // after the first miss, and treated as an error rather than a drained backlog.
+  let state = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const s = await agent(
+      attempt === 0
+        ? STATE_PROMPT
+        : `${STATE_PROMPT}\n\nYour previous answer had every list empty without running the commands. You MUST actually run all seven commands with the Bash tool and copy the IDs from their real output.`,
+      {
+        schema: STATE_SCHEMA,
+        model: attempt === 0 ? "haiku" : "sonnet",
+        phase: "State",
+      },
+    );
+    if (!s) continue;
+    const allEmpty = [
+      s.inProgress,
+      s.devReady,
+      s.needsPlan,
+      s.unblockedTodo,
+      s.todoByPriority,
+      s.noRalph,
+      s.humanOnly,
+    ].every((a) => a.length === 0);
+    if (!allEmpty) {
+      state = s;
+      break;
+    }
+    log(`State sweep returned all-empty lists (attempt ${attempt + 1}); retrying.`);
+  }
   if (!state) {
     stopReason = "state-error";
     log("State detection failed; stopping.");
