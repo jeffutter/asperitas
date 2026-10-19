@@ -35,14 +35,7 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
                 .process_block(&mut frames);
         }
         "asperitas" => {
-            let mut values = Vec::with_capacity(pairs.len());
-            for (key, value) in &pairs {
-                let value = value
-                    .parse::<f32>()
-                    .map_err(|_| format!("invalid value for {key}: {value}"))?;
-                values.push((key.as_str(), value));
-            }
-            let controls = Controls::from_values(&values).map_err(|e| e.to_string())?;
+            let controls = controls_from_pairs(&pairs)?;
             Asperitas::new(sample_rate, &controls).process_block(&mut frames);
         }
         other => {
@@ -77,6 +70,23 @@ fn parse_with_table(
             .map_err(|_| format!("invalid value for {key}: {value}"))?;
     }
     Ok(values)
+}
+
+/// Translate `key=value` arguments (real units, as `--params cutoff_hz=2000 gain_db=-6`) into the
+/// effect's [`Controls`]. Every surface that drives the effect from text goes through this.
+pub fn parse_asperitas_controls(raw: &[String]) -> Result<Controls, String> {
+    controls_from_pairs(&parse_param_pairs(raw)?)
+}
+
+fn controls_from_pairs(pairs: &[(String, String)]) -> Result<Controls, String> {
+    let mut values = Vec::with_capacity(pairs.len());
+    for (key, value) in pairs {
+        let value = value
+            .parse::<f32>()
+            .map_err(|_| format!("invalid value for {key}: {value}"))?;
+        values.push((key.as_str(), value));
+    }
+    Controls::from_values(&values).map_err(|e| e.to_string())
 }
 
 fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {

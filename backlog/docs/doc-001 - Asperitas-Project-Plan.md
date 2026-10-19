@@ -57,6 +57,7 @@ asperitas/
 │   ├── asperitas-pod/           # Pod control surface drivers and the pure ControlDecoder
 │   ├── asperitas-replay/        # QSPI-to-callback ping-pong staging for replaying captured audio
 │   ├── asperitas-host/          # host tooling for the wire protocol (std)
+│   ├── asperitas-live/          # real-time desktop runner of the effect over cpal (`asperitas-live`)
 │   ├── asperitas-rig/           # host capture runner: `asperitas-rig` binary, session sidecars
 │   ├── asperitas-measure/       # host analysis of rig captures against limits
 │   └── asperitas-cli/           # offline WAV processing through the dsp crate

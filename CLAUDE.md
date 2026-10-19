@@ -17,6 +17,8 @@ Crates (root workspace, `crates/`):
 - `asperitas-measure` - host loopback analysis.
 - `asperitas-rig` - host capture engine (see the rig doc below).
 - `asperitas-host` - host tooling for the wire protocol.
+- `asperitas-live` - real-time desktop runner of the effect over cpal (see
+  [docs/reference/asperitas-live.md](docs/reference/asperitas-live.md)).
 
 `firmware/` is a separate workspace (`src/bin`: main, blinky, ledtest, panictest, podtest, rig).
 
