@@ -3,11 +3,11 @@ id: TASK-099
 title: >-
   Rig: one session command that writes the raw stream plus a sidecar; retire
   scripts/rig-session.py
-status: Blocked
+status: Done
 assignee:
   - '@human'
 created_date: '2026-10-16 18:13'
-updated_date: '2026-10-17 02:53'
+updated_date: '2026-10-19 21:35'
 labels:
   - review-2026-10
   - rig
@@ -38,9 +38,9 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A rig session produces input that asperitas-measure analyses with no hand-set flags
-- [ ] #2 scripts/rig-session.py is deleted
-- [ ] #3 A bench run reproduces a TASK-019.03.04 style result (hardware recheck ticket)
+- [x] #1 A rig session produces input that asperitas-measure analyses with no hand-set flags
+- [x] #2 scripts/rig-session.py is deleted
+- [x] #3 A bench run reproduces a TASK-019.03.04 style result (hardware recheck ticket)
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -56,4 +56,12 @@ Parent is @human because TASK-019.03.04 is. AC1 satisfied by TASK-099.03, AC2 by
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-10-16 owner decision: Owner delegates the open questions: the session command owns the console side and takes an optional probe-reset flag; motion timing comes from the stream itself (device t_ms on the first CTLR OK SET) if that is enough, otherwise a sidecar.
+
+2026-10-19, live session with the owner: all subtasks are done and the owner signed off the bench run (TASK-099.05). AC #1 by TASK-099.03, AC #2 by TASK-099.04, AC #3 by TASK-099.05.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+One asperitas-rig session command writes the raw stream plus a sidecar, asperitas-measure analyze reads it with no hand-set flags, and scripts/rig-session.py is gone. The bench run reproduced the TASK-019.03.04 gain sweep on a bootloaded rig, after three bench-found fixes (TASK-142, TASK-143, TASK-144).
+<!-- SECTION:FINAL_SUMMARY:END -->
