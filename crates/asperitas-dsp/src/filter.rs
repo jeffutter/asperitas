@@ -22,6 +22,11 @@ const SMOOTH_MS: f32 = 5.0;
 /// the filter state (alpha is exactly 0), because `ln(0)` is not representable.
 const MIN_CUTOFF_HZ: f32 = 1e-3;
 
+/// Headroom above `MIN_CUTOFF_HZ` inside which the filter counts as frozen. `exp(ln(MIN))` does
+/// not round-trip exactly in f32, so a smoother settled on the minimum can read slightly above
+/// it. Just above this ratio alpha steps from 0 to about `2π · 1e-3 / fs`.
+const MIN_CUTOFF_FROZEN_RATIO: f32 = 1.001;
+
 /// Parameters for the one-pole low-pass filter.
 #[derive(Clone, Debug)]
 pub struct FilterParams {
@@ -49,6 +54,10 @@ pub struct OnePoleLowPass {
     cutoff_hz: f32,
     /// Smooths `ln(cutoff_hz)`, with the cutoff already clamped to `[MIN_CUTOFF_HZ, nyquist]`.
     smoother: Smoother,
+    /// The smoothed `ln(cutoff)` that `cached_alpha` was computed from; NaN when invalid, so the
+    /// next tick recomputes. Bit-compared, so a settled smoother costs no `exp` calls.
+    cached_ln_cutoff: f32,
+    cached_alpha: f32,
     prev_l: f32,
     prev_r: f32,
 }
@@ -59,6 +68,8 @@ impl Default for OnePoleLowPass {
             sample_rate_hz: 48_000.0,
             cutoff_hz: 48_000.0 / 2.0,
             smoother: Smoother::new(ln(48_000.0 / 2.0), SMOOTH_MS, 48_000.0),
+            cached_ln_cutoff: f32::NAN,
+            cached_alpha: 0.0,
             prev_l: 0.0,
             prev_r: 0.0,
         }
@@ -72,6 +83,8 @@ impl Processor for OnePoleLowPass {
         if hz > 0.0 {
             self.sample_rate_hz = hz;
             self.smoother.update_sample_rate(SMOOTH_MS, hz);
+            // Alpha depends on the sample rate even when ln(cutoff) does not move.
+            self.cached_ln_cutoff = f32::NAN;
             self.recompute();
         }
     }
@@ -85,7 +98,11 @@ impl Processor for OnePoleLowPass {
 
     fn tick(&mut self, input: Frame) -> Frame {
         let ln_cutoff = self.smoother.advance();
-        let alpha = self.alpha(ln_cutoff);
+        if ln_cutoff.to_bits() != self.cached_ln_cutoff.to_bits() {
+            self.cached_alpha = self.alpha(ln_cutoff);
+            self.cached_ln_cutoff = ln_cutoff;
+        }
+        let alpha = self.cached_alpha;
         let (in_l, in_r) = (sanitize(input[0]), sanitize(input[1]));
         self.prev_l = sanitize(self.prev_l + alpha * (in_l - self.prev_l));
         self.prev_r = sanitize(self.prev_r + alpha * (in_r - self.prev_r));
@@ -123,7 +140,7 @@ impl OnePoleLowPass {
     /// Coefficient for a smoothed `ln(cutoff_hz)`; always in `[0, 1]`.
     fn alpha(&self, ln_cutoff: f32) -> f32 {
         let cutoff = exp(ln_cutoff);
-        if cutoff <= MIN_CUTOFF_HZ * 1.001 {
+        if cutoff <= MIN_CUTOFF_HZ * MIN_CUTOFF_FROZEN_RATIO {
             return 0.0;
         }
         // alpha = 1 - exp(-2π · fc / fs)
@@ -235,5 +252,59 @@ mod order_tests {
         let alpha = 1.0 - exp(-2.0 * core::f32::consts::PI * 1000.0 / 8000.0);
         let mut f = f;
         assert!((f.tick([1.0, 1.0])[0] - alpha).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    fn settled(fs: f32, hz: f32) -> OnePoleLowPass {
+        OnePoleLowPass::new(fs, &FilterParams { cutoff_hz: hz })
+    }
+
+    #[test]
+    fn zero_cutoff_gives_alpha_exactly_zero() {
+        let f = settled(48_000.0, 0.0);
+        assert_eq!(f.alpha(ln(MIN_CUTOFF_HZ)).to_bits(), 0);
+    }
+
+    #[test]
+    fn just_above_frozen_threshold_alpha_is_small_and_bounded() {
+        let f = settled(48_000.0, 1000.0);
+        let a = f.alpha(ln(MIN_CUTOFF_HZ * MIN_CUTOFF_FROZEN_RATIO * 1.01));
+        let bound = 2.0 * core::f32::consts::PI * 1.1e-3 / 48_000.0;
+        assert!(a > 0.0 && a <= bound, "alpha {a} bound {bound}");
+    }
+
+    #[test]
+    fn cached_output_matches_uncached_over_glide_and_settle() {
+        let mut cached = settled(48_000.0, 200.0);
+        let mut uncached = settled(48_000.0, 200.0);
+        let p = FilterParams { cutoff_hz: 5000.0 };
+        cached.set_params(&p);
+        uncached.set_params(&p);
+        for n in 0..4000 {
+            let x = [((n as f32) * 0.05).sin(), 0.3];
+            uncached.cached_ln_cutoff = f32::NAN;
+            let (a, b) = (cached.tick(x), uncached.tick(x));
+            assert_eq!(a[0].to_bits(), b[0].to_bits(), "n={n}");
+            assert_eq!(a[1].to_bits(), b[1].to_bits(), "n={n}");
+        }
+    }
+
+    #[test]
+    fn settled_cache_holds_and_sample_rate_change_updates_alpha() {
+        let mut f = settled(48_000.0, 1000.0);
+        f.tick([0.0, 0.0]);
+        let a0 = f.cached_alpha;
+        for _ in 0..100 {
+            f.tick([0.0, 0.0]);
+        }
+        assert_eq!(f.cached_alpha.to_bits(), a0.to_bits());
+        f.set_sample_rate(8000.0);
+        f.snap_params();
+        f.tick([0.0, 0.0]);
+        assert!(f.cached_alpha > a0 * 3.0, "{} vs {}", f.cached_alpha, a0);
     }
 }
