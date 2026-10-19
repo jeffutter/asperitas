@@ -127,7 +127,7 @@ per-transition data this capture never recorded.
 
 **The Pod's RGB LEDs are active-low.** Driving a channel pin `Low` lights it; `High`
 turns it off. This matches libDaisy, whose LED driver inverts. `LED_ACTIVE_LOW = true`
-in `crates/asperitas-logging/src/led.rs` is therefore correct.
+in `crates/asperitas-pod/src/led.rs` (shared by the Pod LED 2 driver and the logging boot LED) is therefore correct.
 
 Verified on hardware 2026-08-01 with `firmware/src/bin/ledtest.rs`, which drives
 D20/D19/D18 directly and walks a fixed five-step sequence. Observed colours were white,

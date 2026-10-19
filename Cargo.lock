@@ -123,6 +123,7 @@ dependencies = [
 name = "asperitas-logging"
 version = "0.1.0"
 dependencies = [
+ "asperitas-pod",
  "asperitas-wire",
  "cortex-m",
  "defmt",

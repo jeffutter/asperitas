@@ -7,19 +7,20 @@ edition = "2021"
 default = []
 # Boot-stage LED indicator + the shared panic handler. Needs GPIO, a timer for the
 # pre-init blink, and a singleton cell — but no transport. `log-usb` enables this.
-boot-led = ["dep:embassy-stm32", "dep:embassy-time", "dep:static_cell"]
+boot-led = ["dep:asperitas-pod", "dep:embassy-stm32", "dep:embassy-time", "dep:static_cell"]
 # USB CDC-ACM serial transport. The three `dep:` entries `boot-led` also lists are
 # repeated deliberately: this feature stays honest about what it needs even if
 # `boot-led` changes later.
-log-usb = ["boot-led", "dep:embassy-usb", "dep:embassy-stm32", "dep:embassy-futures", "dep:embassy-time", "dep:static_cell", "dep:embassy-sync"]
+log-usb = ["boot-led", "dep:asperitas-pod", "dep:embassy-usb", "dep:embassy-stm32", "dep:embassy-futures", "dep:embassy-time", "dep:static_cell", "dep:embassy-sync"]
 # defmt-over-RTT transport. Only `dep:defmt` is the transport itself — the encoder emits
 # frames into whatever global logger the *binary* links, which is `defmt-rtt`, and that has
 # to sit in the binary crate (see the note in `firmware/src/bin/main.rs`). The rest repeats
 # what `boot-led` needs, for the same reason `log-usb` spells them out.
-log-defmt = ["boot-led", "dep:defmt", "dep:embassy-stm32", "dep:embassy-time", "dep:static_cell"]
+log-defmt = ["boot-led", "dep:asperitas-pod", "dep:defmt", "dep:embassy-stm32", "dep:embassy-time", "dep:static_cell"]
 
 [dependencies]
 asperitas-wire = { path = "../asperitas-wire" }
+asperitas-pod = { path = "../asperitas-pod", features = ["pod-hw"], optional = true }
 log = { version = "0.4", default-features = false }
 cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
 

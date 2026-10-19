@@ -1,8 +1,8 @@
 //! LED boot-stage indicator for the Daisy Pod.
 //!
 //! Controls one of the Pod's RGB LEDs as a status indicator, with states for
-//! pre-init, running, and panicked conditions. Polarity is controlled by a
-//! single constant, `LED_ACTIVE_LOW`.
+//! pre-init, running, and panicked conditions. Pin polarity and channel drive
+//! live in `asperitas_pod::led::RgbLed`, which this module composes.
 //!
 //! Every state renders the moment it is set, without any task running.
 //! [`blink_task`] only adds the pre-init *blink*; the underlying colour is
@@ -21,22 +21,10 @@
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use embassy_stm32::{
-    self as hal,
-    gpio::{Level, Output, Speed},
-    Peri,
-};
+use asperitas_pod::led::RgbLed;
+use embassy_stm32::{self as hal, Peri};
 use embassy_time::Timer;
 use static_cell::StaticCell;
-
-/// LED polarity — the Pod's RGB LEDs are active-low: driving a channel pin
-/// `Low` lights it, `High` turns it off. This matches libDaisy, whose LED
-/// driver also inverts.
-///
-/// Verified on hardware via `firmware/src/bin/ledtest.rs`, which
-/// drives the channel pins directly and bypasses this constant entirely.
-/// See `docs/reference/daisy-pod.md` for the observed sequence.
-pub(crate) const LED_ACTIVE_LOW: bool = true;
 
 /// Boot-stage states for the LED indicator.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -80,9 +68,7 @@ impl LedState {
 /// Simple GPIO output (not PWM) — on/off per color channel is sufficient
 /// for visually distinct states.
 pub struct BootLed {
-    red: Output<'static>,
-    green: Output<'static>,
-    blue: Output<'static>,
+    led: RgbLed,
 }
 
 // ---------------------------------------------------------------------------
@@ -126,16 +112,8 @@ pub fn init(
     green_pin: Peri<'static, hal::peripherals::PA6>,
     blue_pin: Peri<'static, hal::peripherals::PA7>,
 ) {
-    let inactive = if LED_ACTIVE_LOW {
-        Level::High
-    } else {
-        Level::Low
-    };
-
     let led = BootLed {
-        red: Output::new(red_pin, inactive, Speed::Low),
-        green: Output::new(green_pin, inactive, Speed::Low),
-        blue: Output::new(blue_pin, inactive, Speed::Low),
+        led: RgbLed::new(red_pin, green_pin, blue_pin),
     };
 
     let boot_led = BOOT_LED_STORAGE.init(led);
@@ -206,44 +184,12 @@ impl BootLed {
 
     /// Set individual color channels.
     pub fn set_color_on(&mut self, red: bool, green: bool, blue: bool) {
-        let on = if LED_ACTIVE_LOW {
-            Level::Low
-        } else {
-            Level::High
-        };
-        let off = if LED_ACTIVE_LOW {
-            Level::High
-        } else {
-            Level::Low
-        };
-
-        if red {
-            self.red.set_level(on);
-        } else {
-            self.red.set_level(off);
-        }
-        if green {
-            self.green.set_level(on);
-        } else {
-            self.green.set_level(off);
-        }
-        if blue {
-            self.blue.set_level(on);
-        } else {
-            self.blue.set_level(off);
-        }
+        self.led.set_channels(red, green, blue);
     }
 
     /// Turn all LEDs off.
     pub fn off(&mut self) {
-        let off = if LED_ACTIVE_LOW {
-            Level::High
-        } else {
-            Level::Low
-        };
-        self.red.set_level(off);
-        self.green.set_level(off);
-        self.blue.set_level(off);
+        self.led.off();
     }
 }
 
@@ -258,9 +204,9 @@ impl BootLed {
 /// - `PreInit`: blink red at ~1 Hz
 /// - `Running`: steady green (polls for state transitions)
 ///
-/// Note: `Panicked` is not handled here. The panic handler sets the LED to
-/// steady red synchronously via [`set_global_state`] and then halts the
-/// async executor, so this task is never polled after a real panic.
+/// - `Panicked`: steady red. The panic handler halts the executor after setting
+///   it, but binaries may also set `Panicked` through [`set_global_state`]
+///   without halting, so this task can still be polled in that state.
 ///
 /// # Example
 ///
@@ -290,9 +236,7 @@ pub async fn blink_task() {
                 Timer::after_millis(500).await;
             }
             LedState::Panicked => {
-                // Unreachable in practice: the panic handler sets steady red
-                // synchronously and then halts the async executor.
-                // Kept as exhaustive match arm to avoid compiler warnings.
+                // Reachable when a binary sets Panicked without halting: steady red.
                 with_led(|led| led.set_state(LedState::Panicked));
                 Timer::after_millis(1000).await;
             }

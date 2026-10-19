@@ -1,14 +1,16 @@
 ---
 id: TASK-106
 title: Share one RgbLed between asperitas-pod and asperitas-logging's boot LED
-status: To Do
+status: In Progress
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-10-16 18:13'
+updated_date: '2026-10-19 02:29'
 labels:
   - review-2026-10
   - pod
   - logging
+  - planned
 dependencies:
   - TASK-094
 priority: low
@@ -28,6 +30,18 @@ Found in the 2026-10-16 whole-codebase review (six read-only Opus reviewers).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 One RgbLed driver and one polarity constant
+- [x] #1 One RgbLed driver and one polarity constant
 - [ ] #2 LED 1 boot, running and panic states re-checked (hardware recheck ticket)
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED (AC1) by the commit carrying Task-Id TASK-106. AC2 remains for the hardware recheck ticket.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC1 done: asperitas_pod::led::RgbLed is the single channel driver and owns the only LED_ACTIVE_LOW (now private). Led2 and logging BootLed compose it; blink_task Panicked arm comment corrected (reachable when a binary sets Panicked without halting); daisy-pod.md points at the pod file. Gates (commit tier) and firmware clippy for all bins pass. AC2 is a HUMAN board recheck covered by TASK-120 and is intentionally left unchecked, so the ticket is not marked Done.
+<!-- SECTION:NOTES:END -->
