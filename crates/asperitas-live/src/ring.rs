@@ -11,8 +11,10 @@ pub enum RingAction {
     Wait,
     /// Play from the ring.
     Run,
-    /// Drop this many of the oldest queued frames, then play.
+    /// Drift: drop this many of the oldest queued frames, then play.
     Trim(usize),
+    /// Priming surplus: drop this many of the oldest queued frames, then play. Not drift.
+    Prime(usize),
 }
 
 /// Fill policy for a ring of fixed capacity. Primed means one host buffer has been queued since
@@ -36,6 +38,13 @@ impl RingSync {
         (self.capacity / 2).max(2 * wanted).min(self.capacity)
     }
 
+    /// Fill level (before the pop) a trim leaves behind: `wanted` plus half the headroom to the
+    /// high-water mark, so the ring is not empty after the callback and the next callback does
+    /// not trim again.
+    fn trim_target(&self, wanted: usize) -> usize {
+        wanted + (self.high_water(wanted) - wanted) / 2
+    }
+
     /// Decide for a callback that needs `wanted` frames while `occupied` are queued.
     pub fn decide(&mut self, occupied: usize, wanted: usize) -> RingAction {
         if !self.primed {
@@ -43,13 +52,13 @@ impl RingSync {
                 return RingAction::Wait;
             }
             self.primed = true;
-            return match occupied - wanted {
+            return match occupied.saturating_sub(self.trim_target(wanted)) {
                 0 => RingAction::Run,
-                surplus => RingAction::Trim(surplus),
+                surplus => RingAction::Prime(surplus),
             };
         }
         if occupied > self.high_water(wanted) {
-            RingAction::Trim(occupied - wanted)
+            RingAction::Trim(occupied - self.trim_target(wanted))
         } else {
             RingAction::Run
         }
@@ -72,13 +81,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn waits_until_one_buffer_is_queued_then_trims_the_surplus() {
+    fn waits_until_one_buffer_is_queued_then_primes_to_a_margin() {
         let mut sync = RingSync::new(4096);
         assert_eq!(sync.decide(0, 128), RingAction::Wait);
         assert_eq!(sync.decide(127, 128), RingAction::Wait);
         assert_eq!(sync.decide(128, 128), RingAction::Run);
         let mut sync = RingSync::new(4096);
-        assert_eq!(sync.decide(1000, 128), RingAction::Trim(872));
+        assert_eq!(sync.decide(1000, 128), RingAction::Run);
+        let mut sync = RingSync::new(4096);
+        assert_eq!(sync.decide(1100, 128), RingAction::Prime(12));
     }
 
     #[test]
@@ -94,16 +105,17 @@ mod tests {
         assert_eq!(sync.decide(128, 128), RingAction::Run);
         sync.underrun();
         assert_eq!(sync.decide(10, 128), RingAction::Wait);
-        assert_eq!(sync.decide(300, 128), RingAction::Trim(172));
         assert_eq!(sync.decide(300, 128), RingAction::Run);
     }
 
     #[test]
-    fn trims_back_to_one_buffer_above_the_high_water_mark() {
+    fn trims_to_a_margin_above_wanted_past_the_high_water_mark() {
         let mut sync = RingSync::new(4096);
         sync.decide(128, 128);
         assert_eq!(sync.decide(2048, 128), RingAction::Run);
-        assert_eq!(sync.decide(2049, 128), RingAction::Trim(1921));
+        assert_eq!(sync.decide(2049, 128), RingAction::Trim(961));
+        // The ring still holds a buffer after the pop, and the next callback does not trim.
+        assert_eq!(sync.decide(1088 - 128 + 64, 128), RingAction::Run);
     }
 
     #[test]
@@ -111,6 +123,6 @@ mod tests {
         let mut sync = RingSync::new(4096);
         sync.decide(1500, 1500);
         assert_eq!(sync.decide(3000, 1500), RingAction::Run);
-        assert_eq!(sync.decide(3001, 1500), RingAction::Trim(1501));
+        assert_eq!(sync.decide(3001, 1500), RingAction::Trim(751));
     }
 }

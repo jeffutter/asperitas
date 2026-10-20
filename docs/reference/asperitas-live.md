@@ -34,7 +34,7 @@ It exits non-zero when a stream reported an error.
   `set_controls` once per 32-frame block, whatever the host buffer length. Decision and evidence:
   [cpal-macos-duplex.md](../investigations/cpal-macos-duplex.md).
 - Line-in uses two independent `cpal` streams joined by a lock-free ring; the output side waits
-  until one host buffer is queued and trims any surplus above that. It waits again after an
-  underrun, and trims back to one host buffer whenever the ring fills past half its capacity (at
-  least two host buffers), so clock drift between the streams does not stick as silence or as
+  until one host buffer is queued and trims a large surplus down to a margin above it. It waits
+  again after an underrun, and trims back to a margin above one host buffer (halfway to the
+  high-water mark) whenever the ring fills past half its capacity (at least two host buffers), so clock drift between the streams does not stick as silence or as
   latency. `--buffer 0` sizes the ring at 16384 frames since the host buffer is unknown up front.

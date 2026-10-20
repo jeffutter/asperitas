@@ -236,6 +236,9 @@ pub fn run(
                         consumer.skip(surplus);
                         trims.trims.fetch_add(1, Ordering::Relaxed);
                     }
+                    RingAction::Prime(surplus) => {
+                        consumer.skip(surplus);
+                    }
                 }
                 let mut short = false;
                 for out in data.chunks_mut(MAX_SLICE * out_channels) {
