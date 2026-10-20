@@ -13,8 +13,9 @@ pub enum Taper {
 
 /// One parameter of a processor: its name, unit, range, taper and default.
 ///
-/// The `min`/`max` range is the span a knob sweeps. It is not enforced on values supplied
-/// elsewhere (CLI, tests); processors sanitise their own inputs.
+/// The `min`/`max` range is the span a knob sweeps. Knob readings clamp to it, and
+/// `Controls::from_values` rejects out-of-range real values; processors still sanitise their
+/// own inputs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParamSpec {
     pub name: &'static str,

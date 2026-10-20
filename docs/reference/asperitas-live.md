@@ -15,9 +15,16 @@ cargo run -p asperitas-live --release -- --line-in --params cutoff_hz=800 gain_d
 |---|---|
 | `--input <wav>` | 48 kHz WAV clip, played in a loop. Exactly one of `--input` and `--line-in` is required. |
 | `--line-in` | Use the default input device (first channel, treated as mono). macOS asks the terminal for microphone permission on first use. Use headphones: a microphone next to speakers feeds back. |
-| `--params k=v ...` | Knob values in real units, the same syntax and translation as `asperitas-cli process` (`cutoff_hz`, `gain_db`). Fixed for the run. |
+| `--params k=v ...` | Starting knob values in real units, the same syntax and translation as `asperitas-cli process` (`cutoff_hz`, `gain_db`). The knob view moves them afterwards. |
 | `--buffer <frames>` | Host buffer size, default 128; `0` takes the device default. Clamped to the device's range. |
-| `--seconds <n>` | Stop after `n` seconds. Without it the stream runs until Enter is pressed. |
+| `--seconds <n>` | Stop after `n` seconds. Without it the stream runs until esc (knob view) or Enter (no terminal). |
+
+## Knob view
+
+On a terminal the knobs are live. `q`/`a` raise/lower cutoff and `w`/`s` raise/lower gain, in steps of
+0.05 of knob travel. Holding shift (or typing the uppercase letter) takes a fine step of 0.005. `esc` or
+ctrl-c quits. When stdin or stdout is not a terminal the view is disabled: the knobs stay at their
+starting values and Enter ends the run.
 
 On exit it prints the stream error count and, for line-in, the ring underrun, overrun and trim counts. Each counts callbacks (events), not samples: an underrun is an output callback that found the ring short, an overrun an input callback that had to drop samples, a trim an output callback that dropped queued frames.
 It exits non-zero when a stream reported an error.
