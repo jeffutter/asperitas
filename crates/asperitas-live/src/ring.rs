@@ -55,6 +55,12 @@ impl RingSync {
         }
     }
 
+    /// True when a callback of `wanted` frames can never prime: the ring holds fewer than two
+    /// such buffers, so waiting for it to fill would last forever.
+    pub fn cannot_prime(&self, wanted: usize) -> bool {
+        wanted * 2 > self.capacity
+    }
+
     /// The callback found the ring short: hold back until a host buffer is queued again.
     pub fn underrun(&mut self) {
         self.primed = false;
@@ -73,6 +79,13 @@ mod tests {
         assert_eq!(sync.decide(128, 128), RingAction::Run);
         let mut sync = RingSync::new(4096);
         assert_eq!(sync.decide(1000, 128), RingAction::Trim(872));
+    }
+
+    #[test]
+    fn cannot_prime_when_the_ring_holds_under_two_buffers() {
+        let sync = RingSync::new(4096);
+        assert!(!sync.cannot_prime(2048));
+        assert!(sync.cannot_prime(2049));
     }
 
     #[test]

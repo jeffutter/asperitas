@@ -82,6 +82,17 @@ fn stream_config(chosen: &SupportedStreamConfig, buffer: u32) -> StreamConfig {
     config
 }
 
+/// Ring size in frames: 8 host buffers of the larger stream, floored at `MIN_RING_FRAMES`. A
+/// default-sized stream counts as `DEFAULT_BUFFER_RING_FRAMES`, since its buffer is unknown until
+/// a callback runs.
+fn ring_capacity(input: BufferSize, output: BufferSize) -> usize {
+    let frames = |b: BufferSize| match b {
+        BufferSize::Fixed(n) => 8 * n as usize,
+        BufferSize::Default => DEFAULT_BUFFER_RING_FRAMES,
+    };
+    frames(input).max(frames(output)).max(MIN_RING_FRAMES)
+}
+
 fn error_callback(counters: &Arc<Counters>, direction: &'static str) -> impl FnMut(cpal::Error) {
     let counters = counters.clone();
     move |e| {
@@ -161,10 +172,7 @@ pub fn run(
         )?;
         let in_channels = in_cfg.channels() as usize;
         let in_conf = stream_config(&in_cfg, buffer);
-        let capacity = match in_conf.buffer_size {
-            BufferSize::Fixed(n) => (8 * n as usize).max(MIN_RING_FRAMES),
-            BufferSize::Default => DEFAULT_BUFFER_RING_FRAMES,
-        };
+        let capacity = ring_capacity(in_conf.buffer_size, out_conf.buffer_size);
         let (mut producer, mut consumer) = HeapRb::<f32>::new(capacity).split();
 
         let overruns = counters.clone();
@@ -195,6 +203,8 @@ pub fn run(
         let underruns = counters.clone();
         let trims = counters.clone();
         let mut sync = RingSync::new(capacity);
+        let mut reported_size = false;
+        let size_errors = counters.clone();
         let mut mono = vec![0.0f32; MAX_SLICE];
         out_dev.build_output_stream(
             out_conf,
@@ -206,6 +216,19 @@ pub fn run(
                 match sync.decide(consumer.occupied_len(), total) {
                     RingAction::Wait => {
                         data.fill(0.0);
+                        if !reported_size && sync.cannot_prime(total) {
+                            // The ring can never hold the buffer this callback wants, so it
+                            // would stay silent without any counter moving. try_lock: an audio
+                            // callback must not block; retry next callback if it is contended.
+                            if let Ok(mut last) = size_errors.last_error.try_lock() {
+                                *last = Some(format!(
+                                    "output host buffer {total} frames exceeds line-in ring \
+                                     capacity {capacity}, pass a smaller --buffer"
+                                ));
+                                size_errors.stream_errors.fetch_add(1, Ordering::Relaxed);
+                                reported_size = true;
+                            }
+                        }
                         return;
                     }
                     RingAction::Run => {}
@@ -282,4 +305,37 @@ pub fn run(
         return Err("stream errors were reported".to_string());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ring_capacity_follows_the_larger_stream() {
+        assert_eq!(
+            ring_capacity(BufferSize::Fixed(256), BufferSize::Fixed(4096)),
+            8 * 4096
+        );
+        assert_eq!(
+            ring_capacity(BufferSize::Fixed(4096), BufferSize::Fixed(256)),
+            8 * 4096
+        );
+    }
+
+    #[test]
+    fn ring_capacity_defaults_and_floor() {
+        assert_eq!(
+            ring_capacity(BufferSize::Default, BufferSize::Default),
+            DEFAULT_BUFFER_RING_FRAMES
+        );
+        assert_eq!(
+            ring_capacity(BufferSize::Fixed(64), BufferSize::Fixed(64)),
+            MIN_RING_FRAMES
+        );
+        assert_eq!(
+            ring_capacity(BufferSize::Fixed(64), BufferSize::Fixed(4096)),
+            8 * 4096
+        );
+    }
 }
