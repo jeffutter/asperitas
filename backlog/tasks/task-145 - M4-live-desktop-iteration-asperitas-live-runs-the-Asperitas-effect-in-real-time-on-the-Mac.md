@@ -3,11 +3,11 @@ id: TASK-145
 title: >-
   M4: live desktop iteration - asperitas-live runs the Asperitas effect in real
   time on the Mac
-status: To Do
+status: Done
 assignee:
   - '@human'
-created_date: '2026-10-19 22:07'
-updated_date: '2026-10-19 22:10'
+created_date: 2026-10-19 22:07
+updated_date: '2026-11-13T21:10:00Z'
 labels:
   - m4
   - live
@@ -40,5 +40,11 @@ Out of scope: any M5 (resonator) work.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: every subtask of this ticket is Done
+- [x] #1 HUMAN: every subtask of this ticket is Done
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-13: Closed with the owner once every subtask was Done. Exit criterion evidence: the live engine matches asperitas-cli and ReplayFx bit for bit (TASK-145.05), the board matches the same reference on real audio at cutoff 2 kHz and gain -6 dB (TASK-145.06, captures/TASK-145.06/), and the owner listened to a --record capture and found loops clean and knobs smooth (TASK-145.07). Deferred by the owner and tracked in TASK-152: an instrument on a real line-in with latency judged, and a by-ear comparison against the Pod running main.
+<!-- SECTION:NOTES:END -->
