@@ -3,7 +3,7 @@ id: doc-001
 title: Asperitas Project Plan
 type: specification
 created_date: '2026-08-01 05:43'
-updated_date: '2026-10-19 22:07'
+updated_date: '2026-11-13 21:40'
 ---
 # Asperitas - Project Plan
 
@@ -26,7 +26,7 @@ architecture and milestones, kept short and updated as work lands.
 | Board bring-up | **Rust-only.** C++ is not a fallback: libDaisy has no Seed3 support | Done. `daisy-embassy` Seed3 support (PR #80) merged; the build tracks `master` with the `seed3` feature, no SHA pin |
 | Control surface | **Daisy Pod** - 2 knobs, encoder + click, 2 buttons, 2 RGB LEDs | Done (`asperitas-pod`, firmware `main`) |
 | Debug | Flash by DFU over the onboard USB-C, or by ST-Link on the SWD pads. Log over the framed USB console or `defmt`/RTT | Both routes work; see `docs/reference/daisy-seed3.md` |
-| Desktop tooling | WAV CLI first, then a live `cpal` host with a thin `crossterm` knob view, then analysis, then CPU-cost harness | CLI done; analysis lives in `asperitas-measure`; live host is M4; bench not started |
+| Desktop tooling | WAV CLI first, then a live `cpal` host with a thin `crossterm` knob view, then analysis, then CPU-cost harness | CLI done; analysis lives in `asperitas-measure`; live host done (M4); bench not started |
 | Test corpus | Real instrument recordings committed to git, alongside synthetic signals | Done (`audio/`) |
 | CI | `lefthook` locally and GitHub Actions, all executing `scripts/gates.sh` at ascending tiers | Done; see `docs/development.md` |
 
@@ -111,7 +111,7 @@ runner (`asperitas-rig`) and the analysis crate (`asperitas-measure`). This is h
 verified without ears; committed captures live in `audio/captures`. Open work is tracked as
 tickets, notably the HUMAN bench runs.
 
-### M4 - Live desktop iteration
+### M4 - Live desktop iteration: done
 A `cpal`-backed live host so sound design stops requiring a flash cycle. Scope:
 
 - **Crate:** `asperitas-live`, in the root workspace: a `cpal` backend running `Asperitas`, with a
@@ -136,6 +136,10 @@ A `cpal`-backed live host so sound design stops requiring a flash cycle. Scope:
   --excerpt`) at the same settings. The bench half is limited by the analog loopback, so its
   tolerance is the comparison's documented residual limit, not float precision; the float claim
   rests on the device and the host running the same `asperitas-dsp` code.
+- **Outcome:** both halves shown (`captures/TASK-145.06/`, the live equivalence tests), and the
+  corpus clips were listened to through `asperitas-live --record`. Not done: an instrument on a
+  real line-in (the dev Mac has no line input) and a by-ear comparison against the Pod running
+  `main`; neither is ticketed.
 
 ### M5 - The resonator
 A resonator `Processor` (comb/bandpass bank, excitation shaping, damping and structure controls,
@@ -168,6 +172,12 @@ Four layers, each catching what the others cannot.
 - **Unit tests:** coefficient computation, parameter curves, wire framing, decoders.
 - **Analysis output:** impulse, frequency, RMS and spectrogram dumps, because seeing a DSP bug is
   easier than hearing it.
+
+**Device-free first.** New DSP work must be exercisable on the host before it touches the board:
+runnable from `asperitas-cli` on a WAV, covered by host tests, and checkable by measurement
+(`asperitas-measure`) without listening. The device and the rig then confirm the same code, not
+discover it. Anything a person has to judge by ear is delivered as rendered clips and plots for
+asynchronous review, not as a live bench session.
 
 **Not automated:** anything needing a person at the board - hearing the result, pot jitter on a
 real Pod, real instruments. Device behavior that can be measured goes through the rig instead;
