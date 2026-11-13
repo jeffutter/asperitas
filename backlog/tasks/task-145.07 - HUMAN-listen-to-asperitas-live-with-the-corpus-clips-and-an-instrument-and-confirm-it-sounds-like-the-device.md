@@ -6,8 +6,8 @@ title: >-
 status: To Do
 assignee:
   - '@human'
-created_date: '2026-10-19 22:10'
-updated_date: '2026-10-19 22:10'
+created_date: 2026-10-19 22:10
+updated_date: '2026-11-13T19:26:00Z'
 labels:
   - m4
   - live
@@ -43,9 +43,19 @@ File any defect found as its own bug ticket under this umbrella with what was he
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: every corpus clip loops with no glitch other than the clip's own end-to-start jump, with the effect audible and both knobs responding while it plays
-- [ ] #2 HUMAN: knob moves from the keyboard are smooth, no zipper noise or clicks, and the fine step is usable
+- [x] #1 HUMAN: every corpus clip loops with no glitch other than the clip's own end-to-start jump, with the effect audible and both knobs responding while it plays
+- [x] #2 HUMAN: knob moves from the keyboard are smooth, no zipper noise or clicks, and the fine step is usable
 - [ ] #3 HUMAN: an instrument on line-in plays through with latency the owner finds acceptable for playing, and no dropouts over a few minutes
 - [ ] #4 HUMAN: at matching knob positions the live host and the Pod running main sound the same on the same source
-- [ ] #5 HUMAN: any defect heard is filed as a bug ticket under TASK-145
+- [x] #5 HUMAN: any defect heard is filed as a bug ticket under TASK-145
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-13: Partly done live with the owner; #3 and #4 are open and the ticket stays To Do.
+
+Heard from a `--record` capture (fb193bb) of asperitas-live played back on the Mac, not from the live output alone: the owner listened to the recording, believes all of it, and heard no loop glitch and a working effect with both knobs responding (#1 ticked on that statement; the owner could not say they had listened to every corpus clip). Knob moves from the keyboard were smooth; no zipper noise or clicks reported (#2). Holding a key does not repeat well, so the owner taps the key; the owner judges this a terminal key-repeat limit, not a defect, so no bug ticket was filed (#5, no defect heard).
+
+Not done: #3 (instrument on line-in, latency, a few minutes of dropouts): the clips are pre-recorded, so latency could not be judged, and the Mac has only the built-in mic as an input (a TRRS-split cable to the headphone jack is not offered as an input). The owner will come back to it later. #4 (live host vs the Pod running main by ear): not checked; the owner said to assume it works, which is not evidence, so it stays unticked. The Pod currently runs the rig image from TASK-145.06, so main needs reflashing before any comparison. The bit-identity of the live engine to asperitas-cli is covered by TASK-145.05 and a 4 s --record capture matched asperitas-cli exactly on the first 144000 frames.
+<!-- SECTION:NOTES:END -->
