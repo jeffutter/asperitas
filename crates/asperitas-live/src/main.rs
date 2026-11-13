@@ -1,6 +1,7 @@
 //! `asperitas-live`: run the Asperitas effect in real time on the default audio devices.
 
 mod backend;
+mod recorder;
 mod terminal;
 
 use std::path::PathBuf;
@@ -31,6 +32,11 @@ struct Args {
     #[arg(long, default_value_t = 128)]
     buffer: u32,
 
+    /// Also write what is sent to the output device (after the clamp) to this 48 kHz stereo
+    /// 32-bit float WAV, overwriting it.
+    #[arg(long, value_name = "WAV")]
+    record: Option<PathBuf>,
+
     /// Stop after this many seconds. Without it the stream runs until esc (knob view) or Enter
     /// (when stdout is not a terminal) is pressed; if stdin is closed the stream runs until killed.
     #[arg(long, value_name = "SECONDS", value_parser = parse_seconds)]
@@ -60,9 +66,13 @@ fn run(args: &Args) -> Result<(), String> {
         None => "line-in".to_string(),
     };
     let seconds = args.seconds;
-    backend::run(clip, &controls, args.buffer, |slot, error| {
-        terminal::wait(slot, error, &controls, &source, seconds)
-    })
+    backend::run(
+        clip,
+        &controls,
+        args.buffer,
+        args.record.as_deref(),
+        |slot, error| terminal::wait(slot, error, &controls, &source, seconds),
+    )
 }
 
 fn main() -> ExitCode {

@@ -1,5 +1,6 @@
 //! The `cpal` shell around the engine: device and stream setup, the line-in ring, counters.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -13,6 +14,7 @@ use cpal::{
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapRb;
 
+use crate::recorder::{RecordTap, Recorder};
 use asperitas_live::ring::{RingAction, RingSync};
 use asperitas_live::{ControlSlot, Engine, LoopSource, Source, SAMPLE_RATE};
 
@@ -123,11 +125,12 @@ fn write_interleaved(frames: &[Frame], data: &mut [f32], channels: usize) {
 
 /// Start the streams, hand the shared knob slot and a reader of the latest stream error to `wait`
 /// (which returns when the session ends), then stop the streams and print the counters and the
-/// last stream error.
+/// last stream error. With `record`, the frames handed to the device are also written to that WAV.
 pub fn run(
     clip: Option<Vec<Frame>>,
     controls: &Controls,
     buffer: u32,
+    record: Option<&Path>,
     wait: impl FnOnce(&ControlSlot, &dyn Fn() -> Option<String>) -> Result<(), String>,
 ) -> Result<(), String> {
     let host = cpal::default_host();
@@ -153,6 +156,13 @@ pub fn run(
         None => Source::External,
     };
     let mut engine = Engine::new(source, slot.clone());
+    let (recorder, mut tap): (Option<Recorder>, Option<RecordTap>) = match record {
+        Some(path) => {
+            let (recorder, tap) = Recorder::start(path)?;
+            (Some(recorder), Some(tap))
+        }
+        None => (None, None),
+    };
 
     let mut scratch_in = vec![[0.0f32; 2]; MAX_SLICE];
     let mut scratch_out = vec![[0.0f32; 2]; MAX_SLICE];
@@ -252,6 +262,9 @@ pub fn run(
                         *f = [s, s];
                     }
                     engine.render(&scratch_in[..n], &mut scratch_out[..n]);
+                    if let Some(tap) = tap.as_mut() {
+                        tap.push(&scratch_out[..n]);
+                    }
                     write_interleaved(&scratch_out[..n], out, out_channels);
                 }
                 if short {
@@ -269,6 +282,9 @@ pub fn run(
                 for out in data.chunks_mut(MAX_SLICE * out_channels) {
                     let n = out.len() / out_channels;
                     engine.render(&[], &mut scratch_out[..n]);
+                    if let Some(tap) = tap.as_mut() {
+                        tap.push(&scratch_out[..n]);
+                    }
                     write_interleaved(&scratch_out[..n], out, out_channels);
                 }
             },
@@ -292,6 +308,7 @@ pub fn run(
 
     let waited = wait(&slot, &|| counters.last_error());
     drop(streams);
+    let recorded = recorder.map(Recorder::finish);
 
     println!(
         "stream errors: {}, underruns: {}, overruns: {}, trims: {}",
@@ -302,6 +319,16 @@ pub fn run(
     );
     if let Some(error) = counters.last_error() {
         eprintln!("asperitas-live: {error}");
+    }
+    if let (Some(path), Some(recorded)) = (record, recorded) {
+        let summary = recorded?;
+        println!(
+            "recorded {} frames ({:.1} s) to {}, {} frames dropped",
+            summary.frames_written,
+            summary.frames_written as f64 / f64::from(SAMPLE_RATE),
+            path.display(),
+            summary.frames_dropped
+        );
     }
     waited?;
     if counters.stream_errors.load(Ordering::Relaxed) > 0 {

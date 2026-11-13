@@ -17,7 +17,17 @@ cargo run -p asperitas-live --release -- --line-in --params cutoff_hz=800 gain_d
 | `--line-in` | Use the default input device (first channel, treated as mono). macOS asks the terminal for microphone permission on first use. Use headphones: a microphone next to speakers feeds back. |
 | `--params k=v ...` | Starting knob values in real units, the same syntax and translation as `asperitas-cli process` (`cutoff_hz`, `gain_db`). The knob view moves them afterwards. |
 | `--buffer <frames>` | Host buffer size, default 128; `0` takes the device default. Clamped to the device's range. |
+| `--record <wav>` | Also write what is sent to the output device, after the clamp, to a 48 kHz stereo 32-bit float WAV (overwritten). Works with `--input` and `--line-in`. |
 | `--seconds <n>` | Stop after `n` seconds. Without it the stream runs until esc (knob view) or Enter (no terminal). |
+
+## Recording
+
+`--record out.wav` writes the frames the engine hands to the device, so a session with knob moves can
+be listened to afterwards without a loopback cable. The audio callback only pushes into a lock-free
+ring and a writer thread does the file I/O. On exit it prints the frames written and dropped; frames
+are dropped (and counted) only if the writer falls two seconds behind, so a nonzero count means the
+file has gaps. The file is the engine's output, not what the device played: it cannot show glitches
+from the host buffer or the audio path, which you hear on the live output.
 
 ## Knob view
 
