@@ -1,0 +1,30 @@
+{
+  "attach_prefix_bytes": 110,
+  "capture": "/private/tmp/claude-501/-Users-jeffutter-src-asperitas/9f5cfbf4-cf7a-4900-bed3-b9063c58453f/scratchpad/nc/gain-vs-bypass.console.zst",
+  "comparison": {
+    "dc_lsb": -0.013778521480077521,
+    "delay_samples": 81,
+    "gain_deviation_db": -6.004717288137322,
+    "loop_gain_db": -6.4147172881373224,
+    "reference_peak_lsb": 4801.6110974277535,
+    "reference_rms_lsb": 456.1258737578241,
+    "residual_peak_at": 1535,
+    "residual_peak_db": -20.69040559577189,
+    "residual_peak_lsb": 443.4725080592885,
+    "residual_rms_db": -28.79242178611028,
+    "residual_rms_lsb": 16.57538478478042,
+    "samples": 144000
+  },
+  "excerpt": "audio/instruments/mandolin_single_note_soft.wav",
+  "failures": [
+    "outside tolerance: loop gain -6.415 dB deviates -6.005 dB from baseline"
+  ],
+  "fx": {
+    "code": 0,
+    "knobs": [
+      null,
+      null
+    ]
+  },
+  "pass": false
+}

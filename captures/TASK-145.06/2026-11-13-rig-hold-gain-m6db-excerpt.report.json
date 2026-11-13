@@ -1,0 +1,28 @@
+{
+  "attach_prefix_bytes": 110,
+  "capture": "captures/TASK-145.06/2026-11-13-rig-hold-gain-m6db-excerpt.console.zst",
+  "comparison": {
+    "dc_lsb": -0.013273189510745353,
+    "delay_samples": 81,
+    "gain_deviation_db": 0.005072410796114701,
+    "loop_gain_db": -0.4049275892038853,
+    "reference_peak_lsb": 4792.2917613534,
+    "reference_rms_lsb": 456.21660555824155,
+    "residual_peak_at": 1502,
+    "residual_peak_db": -21.91203869229919,
+    "residual_peak_lsb": 384.53981764666565,
+    "residual_rms_db": -30.351192846627526,
+    "residual_rms_lsb": 13.855156845644823,
+    "samples": 144000
+  },
+  "excerpt": "audio/instruments/mandolin_single_note_soft.wav",
+  "failures": [],
+  "fx": {
+    "code": 1,
+    "knobs": [
+      null,
+      49151
+    ]
+  },
+  "pass": true
+}

@@ -1,0 +1,16 @@
+{
+  "attach_prefix_bytes": 110,
+  "capture": "/private/tmp/claude-501/-Users-jeffutter-src-asperitas/9f5cfbf4-cf7a-4900-bed3-b9063c58453f/scratchpad/nc/cutoff-vs-bypass.console.zst",
+  "excerpt": "audio/instruments/mandolin_single_note_soft.wav",
+  "failures": [
+    "comparison: alignment failed: alignment slip at window 1: delay 84.087 vs 83.737 samples"
+  ],
+  "fx": {
+    "code": 0,
+    "knobs": [
+      null,
+      null
+    ]
+  },
+  "pass": false
+}
