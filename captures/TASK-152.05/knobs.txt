@@ -1,0 +1,5 @@
+# TASK-152.05: ramp on cutoff (knob 0), step on gain (knob 1), then hold. Clip is 3.0 s.
+0     cutoff_hz=8000 gain_db=0
+0.5   ramp cutoff_hz=400
+1.5   step gain_db=-9
+2.0   ramp cutoff_hz=4000
