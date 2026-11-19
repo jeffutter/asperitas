@@ -95,10 +95,11 @@ enum Command {
         /// Value sent with the effect selection (the rig ignores it).
         #[arg(long, default_value_t = 0)]
         fx_v: u16,
-        /// Knob id (decimal): 0 filter cutoff, 1 output gain. Required: sweep and hold levels mean
-        /// different things on each knob, so there is no safe default.
+        /// Knob id (decimal): 0 filter cutoff, 1 output gain. Required for sweep, soak and hold,
+        /// whose levels mean different things on each knob so there is no safe default; refused
+        /// for `automation`, whose file names its knobs.
         #[arg(long)]
-        knob: u8,
+        knob: Option<u8>,
         /// Give up this many seconds after attaching.
         #[arg(long)]
         max_seconds: f64,
@@ -145,6 +146,12 @@ enum MotionArg {
         /// Level, 0..=1.
         #[arg(long)]
         level: f64,
+    },
+    /// Play an automation file (docs/reference/automation.md) on every knob, its time zero at the
+    /// capture arming; the same file `asperitas-cli process --automation` renders offline.
+    Automation {
+        /// The automation file.
+        file: PathBuf,
     },
 }
 
@@ -246,6 +253,14 @@ fn session_motion(m: MotionArg) -> Result<Motion, ControlError> {
             snap_level,
         },
         MotionArg::Hold { level } => Motion::Hold { level },
+        MotionArg::Automation { file } => Motion::Automation {
+            text: std::fs::read_to_string(&file).map_err(|e| {
+                ControlError::Usage(format!(
+                    "cannot read automation file {}: {e}",
+                    file.display()
+                ))
+            })?,
+        },
     })
 }
 
@@ -411,10 +426,21 @@ mod tests {
     ];
 
     #[test]
-    fn session_requires_an_explicit_knob() {
-        assert!(Cli::try_parse_from(BASE).is_err());
-        let mut with_knob = BASE.to_vec();
-        with_knob.splice(2..2, ["--knob", "1"]);
-        assert!(Cli::try_parse_from(with_knob).is_ok());
+    fn session_takes_an_automation_file_as_its_motion() {
+        let mut args = BASE.to_vec();
+        args.pop();
+        args.extend(["automation", "knobs.txt"]);
+        let Command::Session { motion, knob, .. } = Cli::try_parse_from(args).unwrap().command
+        else {
+            panic!("not a session");
+        };
+        assert_eq!(knob, None);
+        assert!(
+            matches!(motion, MotionArg::Automation { file } if file.as_path() == Path::new("knobs.txt"))
+        );
+        // An automation file is a required argument.
+        assert!(
+            Cli::try_parse_from(BASE.map(|a| if a == "soak" { "automation" } else { a })).is_err()
+        );
     }
 }

@@ -130,9 +130,10 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
   sweep --from 0 --to 1 --duration 30 [--start-after-arm 5]
   soak  [--no-snaps] [--snap-level 0.25]
   hold  --level 0.5
+  automation knobs.txt
 ```
 
-- `--fx-f` is `0` bypass or `1` patch; `--knob` is required and decimal (0 filter cutoff, 1 output gain).
+- `--fx-f` is `0` bypass or `1` patch; `--knob` is required for `sweep`, `soak` and `hold` and decimal (0 filter cutoff, 1 output gain), and refused for `automation`.
   Device selection is the same as the other subcommands (`--device` or the single
   `/dev/cu.usbmodem*` / `/dev/ttyACM*`).
 - `sweep` sends the `--from` level once before the capture arms (so the gain is settled when the
@@ -142,6 +143,19 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
   ramp itself causes no snap), with two snaps (+`--snap-level` for 0.5 s) at 80 s and 160 s of the
   ramp unless `--no-snaps`. `hold` sends one `SET` before the capture arms and releases when the
   dump ends. Levels outside `0..=1` are a usage error (exit 2), never clamped.
+- `automation FILE` plays an automation file (grammar in [automation.md](automation.md)), the same file
+  `asperitas-cli process --automation` renders offline, so one script drives both the offline reference and
+  the board. The script's time zero is the capture arming. Before the capture arms the session overrides
+  both knobs at the script's starting values (a knob the file never names at its default, so the board does not follow
+  the Pod knob), then sends one `CTL SET` per update at the time of the block it latches in (blocks of 32
+  frames at 48 kHz): a `step` is one `SET`, a `ramp` a `SET` every 10 ms (480 frames) ending exactly on its
+  target, not one per block, which would be 1500 replies a second on the console. The wire carries the
+  normalised knob position, so each value is the position the shared real-unit translation gives, converted
+  with the same `level_to_wire` as the other motions. Both knobs are released 0.1 s after the last `SET`. A
+  file that does not parse, names an unknown parameter or a value out of range is a usage error (exit 2)
+  before the port is opened. Example:
+  `asperitas-rig session --out run.console.zst --fx-f 1 --max-seconds 60 automation knobs.txt`.
+  No firmware change is involved; the device sees only `CTL SET`/`REL`.
 - `--probe-reset` runs `probe-rs reset` with the chip description, waits for the console node to
   vanish, then retries attaching for up to 15 s. The chip description path defaults to the repo's
   `firmware/asperitas-h750.yaml`.
@@ -158,7 +172,21 @@ Output: `--out` is the raw stream, zstd-compressed (readable with `asperitas-mea
 by `asperitas_host::session::Sidecar`. It holds `fx_f`, `fx_v`, `knob`, `mode`, `from`, `to`,
 `duration_s`, `start_after_arm_s`, `snaps`, `snap_level`, and the device `t_ms` of the record that
 first showed the capture armed (`arm_t_ms`, a `CAPSTAT` with `delivered>0`) and of the first
-`CTLR OK SET` (`first_set_t_ms`) when the stream held them. Partial runs are still written.
+`CTLR OK SET` (`first_set_t_ms`) when the stream held them. Partial runs are still written. An
+`automation` session has `mode=automation`, no `knob` line, and two lines carrying the script itself:
+`automation_crc32` (CRC-32 of the text) and `automation` (the text on one line, `\\`, newline and
+carriage return escaped). Parsing the sidecar refuses a text that does not match its checksum, so a
+sidecar edited after the session, or one whose script is not the one that ran, is detected before any
+verdict. The session reads the file once and the sidecar records that text, so the capture and the
+sidecar cannot name different scripts.
+
+`asperitas-measure analyze run.console.zst --excerpt clip.wav` judges an automated session: the
+reference runs the clip through the sidecar's script on the same 32-frame block grid as the offline
+render (the script's time zero at the clip's start, which is when the capture arms), at the sidecar's
+effect selection. The device follows the 10 ms ramp staircase rather than every block, a difference
+the comparison tolerance absorbs (a host test plays the staircase through the wire quantisation and
+passes). Without `--excerpt`, with `--expect-fail`, or with a script that no longer parses or matches its
+checksum, it exits 2 with no verdict.
 
 Exit codes: 0 when the device acknowledged `FX`, every `SET` and the `REL`, rejected nothing and
 the dump ended; 1 for incomplete acks or a device `CTLR ERR`; 2 for usage, device, I/O or

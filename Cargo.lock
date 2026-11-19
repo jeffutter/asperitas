@@ -149,6 +149,7 @@ name = "asperitas-host"
 version = "0.1.0"
 dependencies = [
  "asperitas-wire",
+ "crc32fast",
  "proptest",
  "ruzstd",
 ]
@@ -221,6 +222,7 @@ dependencies = [
 name = "asperitas-rig"
 version = "0.1.0"
 dependencies = [
+ "asperitas-dsp",
  "asperitas-host",
  "asperitas-wire",
  "clap",

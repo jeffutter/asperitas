@@ -1,6 +1,8 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod asperitas;
+#[cfg(feature = "std")]
+pub mod automation;
 pub mod filter;
 pub mod gain;
 pub mod param;

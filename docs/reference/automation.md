@@ -2,7 +2,7 @@
 
 `asperitas-cli process in.wav out.wav --processor asperitas --automation knobs.txt` renders a clip
 in which the knobs move. The file is the one definition of knob motion; it is parsed by
-`Automation::parse` in `crates/asperitas-cli/src/automation.rs`. It works only with the `asperitas`
+`Automation::parse` in `crates/asperitas-dsp/src/automation.rs`. It works only with the `asperitas`
 processor and cannot be combined with `--params` (put starting values in the file).
 
 ## Grammar
@@ -44,3 +44,10 @@ The device applies its knob reading once before each block of 32 frames
 frame of the clip. Controls are evaluated (`Automation::controls_at`) only at block starts, so a
 breakpoint at a frame that is not a multiple of 32 takes effect at the next multiple, and a ramp is
 sampled at block starts. `asperitas-live` latches the same way.
+
+## On the device
+
+`asperitas-rig session ... automation FILE` plays the same file on the board over `CTL SET` (see
+[asperitas-rig.md](asperitas-rig.md)), and `asperitas-measure analyze --excerpt` judges that session
+against this render. The device schedule is `Automation::device_schedule`: a step is one update at the
+block it lands in, a ramp one update every 480 frames (10 ms) rather than every block.

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+asperitas-dsp = { path = "../asperitas-dsp", features = ["std"] }
 asperitas-host = { path = "../asperitas-host" }
 asperitas-wire = { path = "../asperitas-wire" }
 clap = { version = "4.6.7", features = ["derive"] }

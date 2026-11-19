@@ -109,7 +109,7 @@ fn sidecar(mode: Mode, knob: u8, from: f64, to: f64) -> Sidecar {
     Sidecar {
         fx_f: 1,
         fx_v: 0,
-        knob,
+        knob: Some(knob),
         mode,
         from,
         to,
@@ -117,6 +117,7 @@ fn sidecar(mode: Mode, knob: u8, from: f64, to: f64) -> Sidecar {
         start_after_arm_s: 1.0,
         snaps: Vec::new(),
         snap_level: 0.0,
+        automation: None,
         arm_t_ms: Some(1000),
         first_set_t_ms: Some(2500),
     }
@@ -232,4 +233,62 @@ fn old_hand_set_flags_are_gone_and_a_bad_sidecar_is_an_error() {
     let cap = with_sidecar("bad", SINE, &sidecar(Mode::Hold, 1, 0.5, 0.5));
     std::fs::write(sidecar_path(std::path::Path::new(&cap)), "nope").unwrap();
     assert_eq!(run(&["analyze", &cap]).status.code(), Some(2));
+}
+
+fn automated(text: &str) -> Sidecar {
+    Sidecar {
+        knob: None,
+        mode: Mode::Automation,
+        from: 0.0,
+        to: 0.0,
+        duration_s: 2.5,
+        start_after_arm_s: 0.0,
+        automation: Some(text.to_string()),
+        ..sidecar(Mode::Hold, 0, 0.0, 0.0)
+    }
+}
+
+#[test]
+fn automated_session_runs_its_script_through_the_reference() {
+    let script = "0 gain_db=-24\n1.5 ramp gain_db=0\n";
+    let cap = with_sidecar("auto", REPLAY, &automated(script));
+    let o = run(&["analyze", &cap, "--excerpt", &root(CLIP)]);
+    let j = json(&o);
+    assert_eq!(j["fx"]["code"], 1);
+    assert_eq!(j["automation"], script);
+    assert!(
+        j["comparison"].is_object() || j["failures"].is_array(),
+        "{j}"
+    );
+    // The same capture judged against a script that sounds different is a different verdict
+    // input: the reference follows the sidecar's script, not a constant.
+    let other = with_sidecar("auto2", REPLAY, &automated("0 gain_db=-60\n"));
+    let j2 = json(&run(&["analyze", &other, "--excerpt", &root(CLIP)]));
+    assert_ne!(j["comparison"], j2["comparison"]);
+}
+
+#[test]
+fn automated_session_is_refused_without_excerpt_or_when_it_cannot_be_reproduced() {
+    let script = "0 gain_db=-24\n";
+    let cap = with_sidecar("auto-bare", REPLAY, &automated(script));
+    assert_eq!(run(&["analyze", &cap]).status.code(), Some(2));
+    assert_eq!(
+        run(&["analyze", &cap, "--excerpt", &root(CLIP), "--expect-fail"])
+            .status
+            .code(),
+        Some(2)
+    );
+    // The script was edited after the session: the checksum no longer matches.
+    let path = std::path::PathBuf::from(&cap);
+    let side = sidecar_path(&path);
+    let text = std::fs::read_to_string(&side).unwrap();
+    std::fs::write(&side, text.replace("gain_db=-24", "gain_db=-12")).unwrap();
+    let o = run(&["analyze", &cap, "--excerpt", &root(CLIP)]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("checksum"));
+    // A script that does not parse cannot be reproduced either (checksum made to match).
+    let bad = with_sidecar("auto-bad", REPLAY, &automated("0 bogus=1\n"));
+    let o = run(&["analyze", &bad, "--excerpt", &root(CLIP)]);
+    assert_eq!(o.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("cannot reproduce"));
 }

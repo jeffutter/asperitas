@@ -24,6 +24,12 @@
 //!   sidecar's effect selection, and for a hold at its knob level. A sweep or soak moves the knob
 //!   during the capture, which the reference cannot follow, so that combination is a usage error.
 //!
+//! - an automation session (`asperitas-rig session ... automation FILE`) carries its script in the
+//!   sidecar and is judged only with `--excerpt`: the reference runs the clip through the same
+//!   `Automation` block-grid render as `asperitas-cli process --automation`, the script's time zero
+//!   at the clip's start (when the capture arms). A script that does not parse, or a sidecar whose
+//!   checksum does not match its text, is refused (exit 2) with no verdict.
+//!
 //! The motion starts at [`Sidecar::motion_start_s`] into the capture: the device clock's span from
 //! the capture arming to the first `SET` when both were recorded, the host's planned delay
 //! otherwise.
@@ -35,9 +41,11 @@
 use std::io::Write;
 use std::path::Path;
 
+use asperitas_dsp::automation::Automation;
 use asperitas_host::outcome::Outcome;
 use asperitas_host::session::{sidecar_path, Mode as Motion, Sidecar};
 use asperitas_stimulus::stimulus::SineParams;
+use asperitas_wire::capture::SAMPLE_RATE_HZ;
 use clap::error::ErrorKind;
 use clap::{Args, Parser, Subcommand};
 use serde_json::{json, Value};
@@ -82,7 +90,8 @@ struct AnalyzeArgs {
 
 enum Mode {
     Baseline(StimulusKind),
-    Excerpt(String, FxSetting),
+    /// The clip, the effect selection and, for an automated session, its script (text and parse).
+    Excerpt(String, FxSetting, Option<(String, Automation)>),
     Sweep(SweepArgs),
     Soak(SoakArgs),
 }
@@ -159,7 +168,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> Outcome
     let expect_fail = matches!(&mode, Mode::Soak(a) if a.expect_fail);
     let judged = match mode {
         Mode::Baseline(kind) => Ok(judge_baseline_capture(&capture, kind)),
-        Mode::Excerpt(wav, fx) => judge_excerpt(&capture, &wav, fx),
+        Mode::Excerpt(wav, fx, script) => judge_excerpt(&capture, &wav, fx, script.as_ref()),
         Mode::Sweep(sweep) => Ok(judge_sweep_capture(&capture, &sweep)),
         Mode::Soak(soak) => Ok(judge_soak_capture(&capture, &soak)),
     };
@@ -213,12 +222,32 @@ fn resolve(args: &AnalyzeArgs) -> Result<Mode, String> {
             return Err("--expect-fail needs a session sidecar beside the capture".into());
         }
         return Ok(match &args.excerpt {
-            Some(wav) => Mode::Excerpt(wav.clone(), FxSetting::BYPASS),
+            Some(wav) => Mode::Excerpt(wav.clone(), FxSetting::BYPASS, None),
             None => Mode::Baseline(args.stimulus.unwrap_or(StimulusKind::Sine)),
         });
     };
     if args.stimulus.is_some() {
         return Err("--stimulus does not apply to a capture with a session sidecar".into());
+    }
+    if side.mode == Motion::Automation {
+        let Some(wav) = &args.excerpt else {
+            return Err(
+                "an automated session has no sweep or soak judgement; analyze it with --excerpt"
+                    .into(),
+            );
+        };
+        if args.expect_fail {
+            return Err("--expect-fail needs a soak or hold session".into());
+        }
+        let text = side
+            .automation
+            .clone()
+            .ok_or("automation sidecar has no script")?;
+        let automation = Automation::parse(&text, SAMPLE_RATE_HZ).map_err(|e| {
+            format!("cannot reproduce the session: its automation does not parse: {e}")
+        })?;
+        let fx = FxSetting::from_code(side.fx_f);
+        return Ok(Mode::Excerpt(wav.clone(), fx, Some((text, automation))));
     }
     let held = side.mode == Motion::Hold;
     if let Some(wav) = &args.excerpt {
@@ -228,12 +257,13 @@ fn resolve(args: &AnalyzeArgs) -> Result<Mode, String> {
             );
         }
         let mut fx = FxSetting::from_code(side.fx_f);
+        let knob = side.knob.ok_or("hold sidecar has no knob")?;
         let wire = asperitas_wire::control::level_to_wire(side.from)
             .ok_or_else(|| format!("sidecar level {} is outside 0..=1", side.from))?;
         fx = fx
-            .with_knob(usize::from(side.knob), wire)
-            .ok_or_else(|| format!("sidecar knob {} is not a knob of the patch", side.knob))?;
-        return Ok(Mode::Excerpt(wav.clone(), fx));
+            .with_knob(usize::from(knob), wire)
+            .ok_or_else(|| format!("sidecar knob {knob} is not a knob of the patch"))?;
+        return Ok(Mode::Excerpt(wav.clone(), fx, None));
     }
     let start_s = side.motion_start_s();
     match side.mode {
@@ -242,9 +272,9 @@ fn resolve(args: &AnalyzeArgs) -> Result<Mode, String> {
                 return Err("--expect-fail needs a soak or hold session".into());
             }
             let kind = match side.knob {
-                0 => SweepKind::LowPass,
-                1 => SweepKind::Gain,
-                k => return Err(format!("sidecar knob {k} has no sweep judgement (0, 1)")),
+                Some(0) => SweepKind::LowPass,
+                Some(1) => SweepKind::Gain,
+                k => return Err(format!("sidecar knob {k:?} has no sweep judgement (0, 1)")),
             };
             Ok(Mode::Sweep(SweepArgs {
                 kind,
@@ -254,6 +284,7 @@ fn resolve(args: &AnalyzeArgs) -> Result<Mode, String> {
                 duration_s: Some(side.duration_s),
             }))
         }
+        Motion::Automation => unreachable!("handled above"),
         Motion::Soak | Motion::Hold => Ok(Mode::Soak(SoakArgs {
             from: side.from,
             to: side.to,
@@ -271,18 +302,29 @@ fn judge_baseline_capture(capture: &Capture, kind: StimulusKind) -> Judged {
 }
 
 /// `Err` only for conditions that are not a verdict about the capture (an unreadable clip).
-fn judge_excerpt(capture: &Capture, wav: &str, fx: FxSetting) -> Result<Judged, String> {
+fn judge_excerpt(
+    capture: &Capture,
+    wav: &str,
+    fx: FxSetting,
+    script: Option<&(String, Automation)>,
+) -> Result<Judged, String> {
     let raw = std::fs::read(wav).map_err(|e| format!("{wav}: {e}"))?;
-    let reference = Reference::from_excerpt_wav_fx(&raw, fx).map_err(|e| format!("{wav}: {e}"))?;
+    let reference = match script {
+        Some((_, automation)) => Reference::from_excerpt_wav_automated(&raw, fx, automation),
+        None => Reference::from_excerpt_wav_fx(&raw, fx),
+    }
+    .map_err(|e| format!("{wav}: {e}"))?;
+    let mut report = json!({"excerpt": wav, "fx": fx});
+    if let Some((text, _)) = script {
+        report["automation"] = json!(text);
+    }
     Ok(match compare(capture, &reference) {
         Ok(c) => {
             let failures = c.check().err().map(|e| e.to_string()).into_iter().collect();
-            Judged::new(json!({"excerpt": wav, "fx": fx, "comparison": c}), failures)
+            report["comparison"] = json!(c);
+            Judged::new(report, failures)
         }
-        Err(e) => Judged::new(
-            json!({"excerpt": wav, "fx": fx}),
-            vec![format!("comparison: {e}")],
-        ),
+        Err(e) => Judged::new(report, vec![format!("comparison: {e}")]),
     })
 }
 

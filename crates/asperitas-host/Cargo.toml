@@ -10,6 +10,8 @@ edition = "2021"
 asperitas-wire = { path = "../asperitas-wire" }
 # Pure-Rust zstd decoder: no C toolchain needed to build the host tooling.
 ruzstd = "0.8.2"
+# Checksum of the automation text a sidecar carries.
+crc32fast = "1"
 
 [dev-dependencies]
 proptest = "1"

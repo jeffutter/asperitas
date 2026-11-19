@@ -1,4 +1,4 @@
-pub mod automation;
+pub use asperitas_dsp::automation;
 pub mod process;
 pub mod review;
 pub mod synth;

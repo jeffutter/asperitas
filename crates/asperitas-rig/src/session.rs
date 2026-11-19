@@ -20,6 +20,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use asperitas_dsp::automation::Automation;
 use asperitas_host::session::{sidecar_path, Mode, Sidecar};
 use asperitas_wire::console::is_boot;
 use asperitas_wire::control::{parse_reply, Command, ErrorCode, Reply, Verb};
@@ -28,6 +29,9 @@ use ruzstd::encoding::{compress_to_vec, CompressionLevel};
 
 use crate::cli::Outcome;
 use crate::control::{frame_command, level_to_wire, schedule, ControlError};
+
+/// Sample rate the automation clock counts frames at: the device's.
+pub const DEVICE_SAMPLE_RATE: u32 = 48_000;
 
 /// Soak ramp: triangle from `SOAK_FROM` up to `SOAK_TO` and back over `SOAK_DURATION_S`, starting
 /// `SOAK_START_S` after the capture arms. It starts and ends at the base value because a first
@@ -64,6 +68,12 @@ pub enum Motion {
     Soak { snaps: Vec<f64>, snap_level: f64 },
     /// One `SET` before the capture arms, held until the dump ends.
     Hold { level: f64 },
+    /// Every knob follows an automation script (`docs/reference/automation.md`), its time zero at
+    /// the capture arming. `text` is the file's contents, read once so the session and its
+    /// sidecar carry the same script. Each knob is overridden from before the arming at the
+    /// script's starting value (the default for a knob the script never names), so the board does
+    /// not follow a physical knob, and released together after the last update.
+    Automation { text: String },
 }
 
 /// What a session asks the device to do.
@@ -73,18 +83,20 @@ pub struct SessionPlan {
     pub fx_f: u8,
     /// Value sent with the effect selection.
     pub fx_v: u16,
-    /// Knob id driven.
-    pub knob: u8,
+    /// Knob id driven by a sweep, soak or hold; `None` for an automation, which names its knobs.
+    pub knob: Option<u8>,
     pub motion: Motion,
 }
 
 /// The `SET`s and the release a [`SessionPlan`] expands to.
 #[derive(Debug, PartialEq)]
 pub struct Timeline {
-    /// Wire values sent right after `FX`, before the capture arms.
-    pub pre: Vec<u16>,
-    /// `(offset after the capture armed, wire value)`, ascending.
-    pub timed: Vec<(Duration, u16)>,
+    /// `(knob, wire value)` sent right after `FX`, before the capture arms.
+    pub pre: Vec<(u8, u16)>,
+    /// `(offset after the capture armed, knob, wire value)`, ascending by offset.
+    pub timed: Vec<(Duration, u8, u16)>,
+    /// Every knob the session overrides, released together.
+    pub knobs: Vec<u8>,
     /// Offset after arming at which to release; `None` releases when the dump ends.
     pub release_at: Option<Duration>,
 }
@@ -92,6 +104,17 @@ pub struct Timeline {
 impl SessionPlan {
     /// Expand the plan. A level outside `0..=1` is refused here, before any port is touched.
     pub fn timeline(&self) -> Result<Timeline, ControlError> {
+        if let Motion::Automation { text } = &self.motion {
+            if self.knob.is_some() {
+                return Err(ControlError::Usage(
+                    "an automation names its own knobs; --knob does not apply".into(),
+                ));
+            }
+            return automation_timeline(text);
+        }
+        let knob = self.knob.ok_or_else(|| {
+            ControlError::Usage("--knob is required for sweep, soak and hold".into())
+        })?;
         match &self.motion {
             Motion::Sweep {
                 from,
@@ -101,11 +124,12 @@ impl SessionPlan {
             } => {
                 let timed: Vec<_> = schedule(*from, *to, *duration)?
                     .into_iter()
-                    .map(|(t, v)| (t + *start_after_arm, v))
+                    .map(|(t, v)| (t + *start_after_arm, knob, v))
                     .collect();
                 Ok(Timeline {
-                    pre: vec![level_to_wire(*from)?],
+                    pre: vec![(knob, level_to_wire(*from)?)],
                     timed,
+                    knobs: vec![knob],
                     release_at: Some(*start_after_arm + *duration + RELEASE_LAG),
                 })
             }
@@ -121,21 +145,24 @@ impl SessionPlan {
                     if snaps.iter().any(|&s| s <= t && t < s + SNAP_WIDTH_S) {
                         v = (v + snap_level).min(1.0);
                     }
-                    timed.push((start + Duration::from_secs_f64(t), level_to_wire(v)?));
+                    timed.push((start + Duration::from_secs_f64(t), knob, level_to_wire(v)?));
                 }
                 Ok(Timeline {
                     pre: Vec::new(),
                     timed,
+                    knobs: vec![knob],
                     release_at: Some(
                         start + Duration::from_secs_f64(SOAK_DURATION_S) + RELEASE_LAG,
                     ),
                 })
             }
             Motion::Hold { level } => Ok(Timeline {
-                pre: vec![level_to_wire(*level)?],
+                pre: vec![(knob, level_to_wire(*level)?)],
                 timed: Vec::new(),
+                knobs: vec![knob],
                 release_at: None,
             }),
+            Motion::Automation { .. } => unreachable!("expanded above"),
         }
     }
 
@@ -167,6 +194,23 @@ impl SessionPlan {
                 *snap_level,
             ),
             Motion::Hold { level } => (Mode::Hold, *level, *level, 0.0, 0.0, Vec::new(), 0.0),
+            Motion::Automation { text } => {
+                // A script that does not parse never reaches a sidecar: `timeline` refuses it
+                // before the session starts.
+                let end = Automation::parse(text, DEVICE_SAMPLE_RATE)
+                    .ok()
+                    .and_then(|a| a.device_schedule().last().map(|e| e.0))
+                    .unwrap_or(0);
+                (
+                    Mode::Automation,
+                    0.0,
+                    0.0,
+                    end as f64 / f64::from(DEVICE_SAMPLE_RATE),
+                    0.0,
+                    Vec::new(),
+                    0.0,
+                )
+            }
         };
         Sidecar {
             fx_f: self.fx_f,
@@ -179,10 +223,45 @@ impl SessionPlan {
             start_after_arm_s,
             snaps,
             snap_level,
+            automation: match &self.motion {
+                Motion::Automation { text } => Some(text.clone()),
+                _ => None,
+            },
             arm_t_ms,
             first_set_t_ms,
         }
     }
+}
+
+/// Expand an automation script. Every knob is overridden at its starting value before the capture
+/// arms, then each update of [`Automation::device_schedule`] goes out at its frame's time. The
+/// wire carries a level in `0..=1`, so each knob position goes through the same
+/// `level_to_wire` the other motions use; a position outside it is refused, never clamped.
+fn automation_timeline(text: &str) -> Result<Timeline, ControlError> {
+    let automation = Automation::parse(text, DEVICE_SAMPLE_RATE)
+        .map_err(|e| ControlError::Usage(format!("automation: {e}")))?;
+    let at = |frame: u64| Duration::from_secs_f64(frame as f64 / f64::from(DEVICE_SAMPLE_RATE));
+    let wire = |position: f32| level_to_wire(f64::from(position));
+    let start = automation.controls_at(0);
+    let knobs: Vec<u8> = (0..start.knobs.len() as u8).collect();
+    let pre = start
+        .knobs
+        .iter()
+        .enumerate()
+        .map(|(k, &p)| Ok((k as u8, wire(p)?)))
+        .collect::<Result<Vec<_>, ControlError>>()?;
+    let mut timed = Vec::new();
+    let mut last = 0;
+    for (frame, knob, position) in automation.device_schedule() {
+        timed.push((at(frame), knob as u8, wire(position)?));
+        last = frame;
+    }
+    Ok(Timeline {
+        pre,
+        timed,
+        knobs,
+        release_at: Some(at(last) + RELEASE_LAG),
+    })
 }
 
 /// Time limits of a session.
@@ -388,9 +467,17 @@ impl<P: Read + Write> Runner<P> {
         self.send(Command::OverrideSet { knob, value })
     }
 
-    fn release(&mut self, knob: u8) -> Result<(), ControlError> {
+    /// Release every knob in `knobs`. All are attempted; the first failure is reported.
+    fn release(&mut self, knobs: &[u8]) -> Result<(), ControlError> {
         self.released = true;
-        self.send(Command::OverrideRelease { knob })
+        let mut first = Ok(());
+        for &knob in knobs {
+            let sent = self.send(Command::OverrideRelease { knob });
+            if first.is_ok() {
+                first = sent;
+            }
+        }
+        first
     }
 
     /// One read: whatever arrives is kept verbatim and offered to the decoder. A port timeout is
@@ -464,8 +551,8 @@ impl<P: Read + Write> Runner<P> {
             }
             self.pump()?;
         }
-        for &value in &timeline.pre {
-            self.send_set(plan.knob, value)?;
+        for &(knob, value) in &timeline.pre {
+            self.send_set(knob, value)?;
         }
 
         while !self.observed.armed {
@@ -484,19 +571,20 @@ impl<P: Read + Write> Runner<P> {
             // release it, so a released session never sends again.
             while !self.released && next < timeline.timed.len() && timeline.timed[next].0 <= elapsed
             {
-                self.send_set(plan.knob, timeline.timed[next].1)?;
+                let (_, knob, value) = timeline.timed[next];
+                self.send_set(knob, value)?;
                 next += 1;
             }
             let due = timeline.release_at.is_some_and(|r| elapsed >= r);
             if !self.released && next == timeline.timed.len() && due {
-                self.release(plan.knob)?;
+                self.release(&timeline.knobs)?;
             }
             if dump_seen_at.is_none() && self.observed.dump_end {
                 dump_seen_at = Some(Instant::now());
                 // A hold has no scheduled release; the dump ending is the cue. The grace below
                 // keeps reading so the acknowledgement lands in the stream.
                 if !self.released {
-                    self.release(plan.knob)?;
+                    self.release(&timeline.knobs)?;
                 }
             }
             if dump_seen_at.is_some_and(|t| t.elapsed() >= opts.dump_grace) {
@@ -540,7 +628,7 @@ pub fn run_session<P: Read + Write>(port: P, plan: &SessionPlan, opts: &SessionO
     let mut error = r.drive(plan, &timeline, opts).err();
     if r.sent_anything && !r.released {
         // Best effort: the failure that got us here is the one worth reporting.
-        if let Err(e) = r.release(plan.knob) {
+        if let Err(e) = r.release(&timeline.knobs) {
             error.get_or_insert(e);
         }
     }
@@ -750,7 +838,7 @@ mod tests {
         SessionPlan {
             fx_f: 1,
             fx_v: 0,
-            knob: 2,
+            knob: Some(2),
             motion: Motion::Sweep {
                 from: 0.0,
                 to: 1.0,
@@ -1072,11 +1160,11 @@ mod tests {
     #[test]
     fn sweep_timeline_is_offset_by_start_after_arm() {
         let t = sweep_plan().timeline().unwrap();
-        assert_eq!(t.timed[0], (Duration::from_millis(20), 0));
-        assert_eq!(t.timed.last().unwrap().1, 0xffff);
+        assert_eq!(t.timed[0], (Duration::from_millis(20), 2, 0));
+        assert_eq!(t.timed.last().unwrap().2, 0xffff);
         assert_eq!(t.release_at, Some(Duration::from_millis(320)));
         // The 'from' level is applied before the capture arms so the first bucket is settled.
-        assert_eq!(t.pre, vec![0]);
+        assert_eq!(t.pre, vec![(2, 0)]);
     }
 
     #[test]
@@ -1090,16 +1178,16 @@ mod tests {
         };
         let t = plan.timeline().unwrap();
         assert_eq!(t.timed.len(), 5001);
-        assert_eq!(t.timed[0], (Duration::from_secs(10), 0x8000));
-        assert_eq!(t.timed.last().unwrap().1, 0x8000);
+        assert_eq!(t.timed[0], (Duration::from_secs(10), 2, 0x8000));
+        assert_eq!(t.timed.last().unwrap().2, 0x8000);
         let peak = t.timed[..1600]
             .iter()
             .chain(&t.timed[1700..3200])
-            .map(|&(_, v)| v)
+            .map(|&(_, _, v)| v)
             .max();
         assert_eq!(peak, Some(level_to_wire(0.95).unwrap()));
         // Ten samples of 50 ms inside each half-second snap sit 0.25 above the ramp.
-        let at = |s: f64| t.timed[(s * 20.0) as usize].1;
+        let at = |s: f64| t.timed[(s * 20.0) as usize].2;
         assert!(at(80.0) > level_to_wire(0.50 + 0.45 * 0.64).unwrap());
         assert!(at(80.5) < at(80.0));
         let none = SessionPlan {
@@ -1114,7 +1202,7 @@ mod tests {
             .unwrap()
             .timed
             .iter()
-            .all(|&(_, v)| v <= level_to_wire(0.95).unwrap()));
+            .all(|&(_, _, v)| v <= level_to_wire(0.95).unwrap()));
         assert_eq!(t.release_at, Some(Duration::from_millis(260_100)));
     }
 
@@ -1127,8 +1215,9 @@ mod tests {
         assert_eq!(
             plan.timeline().unwrap(),
             Timeline {
-                pre: vec![0xffff],
+                pre: vec![(2, 0xffff)],
                 timed: vec![],
+                knobs: vec![2],
                 release_at: None
             }
         );
@@ -1147,5 +1236,146 @@ mod tests {
         );
         assert_eq!(capstat_delivered(b"STATUS proto=1 delivered=7"), None);
         assert_eq!(capstat_delivered(b"CAPSTAT proto=1 expected=1"), None);
+    }
+
+    fn automation_plan(text: &str) -> SessionPlan {
+        SessionPlan {
+            knob: None,
+            motion: Motion::Automation { text: text.into() },
+            ..sweep_plan()
+        }
+    }
+
+    fn wire_of_gain_db(db: f32) -> u16 {
+        let c = asperitas_dsp::asperitas::Controls::from_values(&[("gain_db", db)]).unwrap();
+        level_to_wire(f64::from(c.knobs[1])).unwrap()
+    }
+
+    #[test]
+    fn automation_hold_is_every_knob_set_before_arming_and_nothing_timed() {
+        let t = automation_plan("0 cutoff_hz=1000 gain_db=-6\n")
+            .timeline()
+            .unwrap();
+        let cutoff = asperitas_dsp::asperitas::Controls::from_values(&[("cutoff_hz", 1000.0)])
+            .unwrap()
+            .knobs[0];
+        assert_eq!(
+            t.pre,
+            vec![
+                (0, level_to_wire(f64::from(cutoff)).unwrap()),
+                (1, wire_of_gain_db(-6.0))
+            ]
+        );
+        assert!(t.timed.is_empty());
+        assert_eq!(t.knobs, vec![0, 1]);
+        assert_eq!(t.release_at, Some(RELEASE_LAG));
+    }
+
+    #[test]
+    fn automation_step_is_one_set_at_the_block_start_it_lands_on() {
+        // 1 ms is frame 48, inside the block that starts at 32; the update goes out at 64.
+        let t = automation_plan("0.001 step gain_db=-12\n")
+            .timeline()
+            .unwrap();
+        let at = Duration::from_secs_f64(64.0 / 48_000.0);
+        assert_eq!(t.timed, vec![(at, 1, wire_of_gain_db(-12.0))]);
+        // Knobs the script never names start at their defaults, so the board holds them there.
+        assert_eq!(t.pre[0].0, 0);
+        assert_eq!(t.pre[1], (1, wire_of_gain_db(0.0)));
+        assert_eq!(t.release_at, Some(at + RELEASE_LAG));
+    }
+
+    #[test]
+    fn automation_ramp_is_a_set_every_10_ms_ending_on_the_target() {
+        let t = automation_plan("0 gain_db=-20\n0.1 ramp gain_db=-10\n")
+            .timeline()
+            .unwrap();
+        assert_eq!(t.pre[1], (1, wire_of_gain_db(-20.0)));
+        let offsets: Vec<_> = t.timed.iter().map(|e| e.0).collect();
+        assert_eq!(
+            offsets,
+            (1..=10)
+                .map(|i| Duration::from_millis(10 * i))
+                .collect::<Vec<_>>()
+        );
+        assert!(t.timed.iter().all(|e| e.1 == 1));
+        let values: Vec<u16> = t.timed.iter().map(|e| e.2).collect();
+        assert!(values.windows(2).all(|w| w[0] < w[1]), "{values:?}");
+        assert_eq!(*values.last().unwrap(), wire_of_gain_db(-10.0));
+        assert_eq!(t.release_at, Some(Duration::from_millis(100) + RELEASE_LAG));
+    }
+
+    #[test]
+    fn malformed_automation_or_knob_mismatch_touches_nothing() {
+        let cases = [
+            automation_plan("0 bogus=1\n"),
+            automation_plan("0 gain_db=20\n"),
+            automation_plan("2 gain_db=0\n1 gain_db=-1\n"),
+            SessionPlan {
+                knob: Some(0),
+                ..automation_plan("0 gain_db=0\n")
+            },
+            SessionPlan {
+                knob: None,
+                ..SessionPlan {
+                    motion: Motion::Hold { level: 0.5 },
+                    ..sweep_plan()
+                }
+            },
+        ];
+        for plan in cases {
+            let (rig, written) = Rig::new();
+            let run = run_session(rig, &plan, &opts(3000));
+            assert!(
+                matches!(run.error, Some(ControlError::Usage(_))),
+                "{plan:?}: {:?}",
+                run.error
+            );
+            assert!(cmds(&written).is_empty(), "{plan:?}");
+            assert!(run.raw.is_empty());
+        }
+    }
+
+    #[test]
+    fn automation_session_sets_every_knob_and_releases_them_all_last() {
+        let plan = automation_plan("0 cutoff_hz=1000 gain_db=-20\n0.05 ramp gain_db=-10\n");
+        let (rig, written) = Rig::new();
+        let run = run_session(rig, &plan, &opts(3000));
+        assert!(run.error.is_none(), "{:?}", run.error);
+        let c = cmds(&written);
+        assert_eq!(c[0], Command::ReplayFx { fx: 1, value: 0 });
+        let sets: Vec<(u8, u16)> = c
+            .iter()
+            .filter_map(|c| match c {
+                Command::OverrideSet { knob, value } => Some((*knob, *value)),
+                _ => None,
+            })
+            .collect();
+        // Two pre-arm SETs, then the five ramp steps on the gain knob only.
+        assert_eq!(sets.len(), 7, "{sets:?}");
+        assert_eq!((sets[0].0, sets[1].0), (0, 1));
+        assert!(sets[2..].iter().all(|s| s.0 == 1));
+        assert_eq!(sets.last().unwrap().1, wire_of_gain_db(-10.0));
+        assert_eq!(
+            c[c.len() - 2..],
+            [
+                Command::OverrideRelease { knob: 0 },
+                Command::OverrideRelease { knob: 1 }
+            ]
+        );
+        assert_eq!(run.outcome(), Outcome::Pass, "{}", run.summary());
+    }
+
+    #[test]
+    fn automation_sidecar_carries_the_script_and_names_no_knob() {
+        let text = "0 gain_db=-20\n0.05 ramp gain_db=-10\n";
+        let side = automation_plan(text).sidecar(Some(1), None);
+        assert_eq!(side.mode, Mode::Automation);
+        assert_eq!(side.knob, None);
+        assert_eq!(side.automation.as_deref(), Some(text));
+        assert!((side.duration_s - 0.05).abs() < 1e-9);
+        assert_eq!(Sidecar::parse(&side.render()), Ok(side));
+        // The other motions keep their sidecars free of any automation.
+        assert_eq!(sweep_plan().sidecar(None, None).automation, None);
     }
 }

@@ -18,6 +18,7 @@
 
 use std::fmt;
 
+use asperitas_dsp::automation::Automation;
 use asperitas_dsp::{Controls, KNOB_COUNT};
 use asperitas_host::excerpt::{parse_wav, WavError};
 use asperitas_stimulus::replay_fx::{FxKind, ReplayFx};
@@ -93,10 +94,34 @@ impl Reference {
 
     /// As [`Reference::from_excerpt_wav`], processed by `fx`.
     pub fn from_excerpt_wav_fx(raw: &[u8], fx: FxSetting) -> Result<Reference, CompareError> {
+        Self::build(raw, fx, None)
+    }
+
+    /// As [`Reference::from_excerpt_wav_fx`], with every knob following `automation` from the
+    /// start of the excerpt, which is when the capture arms and the session's script starts. The
+    /// knobs change on the block grid of [`Automation::for_each_block`], the same one
+    /// `asperitas-cli process --automation` renders with. `fx` gives the effect selection; its
+    /// knob overrides are superseded by the script.
+    pub fn from_excerpt_wav_automated(
+        raw: &[u8],
+        fx: FxSetting,
+        automation: &Automation,
+    ) -> Result<Reference, CompareError> {
+        Self::build(raw, fx, Some(automation))
+    }
+
+    fn build(
+        raw: &[u8],
+        fx: FxSetting,
+        automation: Option<&Automation>,
+    ) -> Result<Reference, CompareError> {
         let pcm = parse_wav(raw).map_err(CompareError::Wav)?;
         let kind = fx.kind().ok_or(CompareError::UnknownFx(fx.code))?;
         let mut replay = ReplayFx::new();
-        replay.select(kind, fx.knob_positions());
+        replay.select(
+            kind,
+            automation.map_or_else(|| fx.knob_positions(), |a| a.controls_at(0).knobs),
+        );
         // `asperitas-cli` widens int16 with `asperitas_dsp::pcm::i16_to_f32` and feeds the same value to both lanes.
         let mut frames: Vec<[f32; 2]> = pcm
             .chunks_exact(2)
@@ -105,7 +130,13 @@ impl Reference {
                 [v, v]
             })
             .collect();
-        replay.process(&mut frames);
+        match automation {
+            Some(a) => a.for_each_block(&mut frames, |controls, block| {
+                replay.set_knobs(controls.knobs);
+                replay.process(block);
+            }),
+            None => replay.process(&mut frames),
+        }
         let samples = frames.iter().map(|f| f[0]).collect();
         Ok(Reference {
             samples,
@@ -432,6 +463,71 @@ mod tests {
             let c = compare(&synth(s), &clip_fx(s)).unwrap();
             eprintln!("{s:?}: {}", c.to_json());
             c.check().unwrap_or_else(|e| panic!("{s:?}: {e}"));
+        }
+    }
+
+    const SCRIPT: &str = "0 gain_db=-24 cutoff_hz=8000\n2.5 ramp gain_db=0 cutoff_hz=1000\n";
+
+    /// The replay capture as the board would return it playing `SCRIPT`: the device schedule,
+    /// each level through the wire (`level_to_wire` then `wire_to_level`) and latched at its block.
+    fn synth_automated(a: &Automation) -> Capture {
+        use asperitas_wire::control::{level_to_wire, wire_to_level};
+        let wire = |p: f32| wire_to_level(level_to_wire(f64::from(p)).unwrap());
+        let mut c = replay();
+        let mut frames: Vec<[f32; 2]> = c
+            .samples
+            .iter()
+            .map(|&s| {
+                let v = asperitas_dsp::pcm::i16_to_f32(s);
+                [v, v]
+            })
+            .collect();
+        let mut knobs = a.controls_at(0).knobs.map(wire);
+        let mut replay_fx = ReplayFx::new();
+        replay_fx.select(FxKind::Patch, knobs);
+        let schedule = a.device_schedule();
+        let mut next = 0;
+        for (block, chunk) in frames
+            .chunks_mut(asperitas_dsp::asperitas::BLOCK_FRAMES)
+            .enumerate()
+        {
+            let frame = (block * asperitas_dsp::asperitas::BLOCK_FRAMES) as u64;
+            while next < schedule.len() && schedule[next].0 <= frame {
+                knobs[schedule[next].1] = wire(schedule[next].2);
+                next += 1;
+            }
+            replay_fx.set_knobs(knobs);
+            replay_fx.process(chunk);
+        }
+        for (s, f) in c.samples.iter_mut().zip(&frames) {
+            *s = (f64::from(f[0]) * FULL_SCALE)
+                .round()
+                .clamp(-FULL_SCALE, FULL_SCALE - 1.0) as i16;
+        }
+        c
+    }
+
+    #[test]
+    fn automated_reference_matches_what_the_board_plays_and_rejects_other_schedules() {
+        let raw = std::fs::read(root(&format!("audio/instruments/{MAND_SOFT}.wav"))).unwrap();
+        let a = Automation::parse(SCRIPT, 48_000).unwrap();
+        let taken = synth_automated(&a);
+        let fx = FxSetting::from_code(1);
+        let reference = Reference::from_excerpt_wav_automated(&raw, fx, &a).unwrap();
+        let c = compare(&taken, &reference).unwrap();
+        eprintln!("{}", c.to_json());
+        c.check().unwrap();
+        // The same clip at the script's starting values, or with the script shifted by a second,
+        // is a different sound.
+        let still = Automation::parse("0 gain_db=-24 cutoff_hz=8000\n", 48_000).unwrap();
+        let shifted = Automation::parse(
+            "1 gain_db=-24 cutoff_hz=8000\n3.5 ramp gain_db=0 cutoff_hz=1000\n",
+            48_000,
+        )
+        .unwrap();
+        for other in [still, shifted] {
+            let r = Reference::from_excerpt_wav_automated(&raw, fx, &other).unwrap();
+            assert!(compare(&taken, &r).and_then(|c| c.check()).is_err());
         }
     }
 

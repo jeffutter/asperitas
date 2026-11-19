@@ -21,6 +21,8 @@ pub enum Mode {
     Soak,
     /// One level held for the whole session.
     Hold,
+    /// Every knob driven by an automation script, carried in [`Sidecar::automation`].
+    Automation,
 }
 
 impl Mode {
@@ -29,11 +31,12 @@ impl Mode {
             Mode::Sweep => "sweep",
             Mode::Soak => "soak",
             Mode::Hold => "hold",
+            Mode::Automation => "automation",
         }
     }
 
     fn from_token(s: &str) -> Option<Self> {
-        [Mode::Sweep, Mode::Soak, Mode::Hold]
+        [Mode::Sweep, Mode::Soak, Mode::Hold, Mode::Automation]
             .into_iter()
             .find(|m| m.token() == s)
     }
@@ -46,8 +49,8 @@ pub struct Sidecar {
     pub fx_f: u8,
     /// Value sent with `CTL FX`.
     pub fx_v: u16,
-    /// Knob id the schedule drove.
-    pub knob: u8,
+    /// Knob id the schedule drove. `None` for an automation session, which drives every knob.
+    pub knob: Option<u8>,
     pub mode: Mode,
     /// Knob level at the start of the motion, `0..=1`.
     pub from: f64,
@@ -61,6 +64,9 @@ pub struct Sidecar {
     pub snaps: Vec<f64>,
     /// Soak only: level added during a snap.
     pub snap_level: f64,
+    /// Automation sessions only: the text of the script the session played. Its time zero is the
+    /// capture arming, which is when an excerpt replay starts too.
+    pub automation: Option<String>,
     /// Device `t_ms` of the first status record showing the capture armed, as the stream gave it.
     pub arm_t_ms: Option<u32>,
     /// Device `t_ms` of the first `CTLR OK SET`, as the stream gave it.
@@ -118,12 +124,12 @@ impl Sidecar {
     /// Render as `key=value` lines after a version line.
     pub fn render(&self) -> String {
         let snaps: Vec<String> = self.snaps.iter().map(f64::to_string).collect();
+        let knob = self.knob.map(|k| format!("knob={k}\n")).unwrap_or_default();
         let mut s = format!(
-            "{MAGIC}\nfx_f={}\nfx_v={}\nknob={}\nmode={}\nfrom={}\nto={}\nduration_s={}\n\
+            "{MAGIC}\nfx_f={}\nfx_v={}\n{knob}mode={}\nfrom={}\nto={}\nduration_s={}\n\
              start_after_arm_s={}\nsnaps={}\nsnap_level={}\n",
             self.fx_f,
             self.fx_v,
-            self.knob,
             self.mode.token(),
             self.from,
             self.to,
@@ -132,6 +138,13 @@ impl Sidecar {
             snaps.join(","),
             self.snap_level,
         );
+        if let Some(text) = &self.automation {
+            s.push_str(&format!(
+                "automation_crc32={:08x}\nautomation={}\n",
+                crc32fast::hash(text.as_bytes()),
+                escape(text)
+            ));
+        }
         if let Some(t) = self.arm_t_ms {
             s.push_str(&format!("arm_t_ms={t}\n"));
         }
@@ -164,10 +177,14 @@ impl Sidecar {
         }
         let fx_f = num("fx_f", &take("fx_f")?)?;
         let fx_v = num("fx_v", &take("fx_v")?)?;
-        let knob = num("knob", &take("knob")?)?;
         let mode_text = take("mode")?;
         let mode = Mode::from_token(&mode_text)
             .ok_or_else(|| SidecarError(format!("unknown mode {mode_text:?}")))?;
+        let knob = if mode == Mode::Automation {
+            None
+        } else {
+            Some(num("knob", &take("knob")?)?)
+        };
         let from = num("from", &take("from")?)?;
         let to = num("to", &take("to")?)?;
         let duration_s = num("duration_s", &take("duration_s")?)?;
@@ -182,6 +199,21 @@ impl Sidecar {
                 .collect::<Result<_, _>>()?
         };
         let snap_level = num("snap_level", &take("snap_level")?)?;
+        let automation = if mode == Mode::Automation {
+            let text = unescape(&take("automation")?)?;
+            let want = u32::from_str_radix(&take("automation_crc32")?, 16)
+                .map_err(|_| SidecarError("automation_crc32 is not hex".into()))?;
+            let have = crc32fast::hash(text.as_bytes());
+            if have != want {
+                return Err(SidecarError(format!(
+                    "automation text has checksum {have:08x} but the sidecar names {want:08x}: \
+                     the script was changed after the session"
+                )));
+            }
+            Some(text)
+        } else {
+            None
+        };
         let arm_t_ms = kv
             .remove("arm_t_ms")
             .map(|v| num("arm_t_ms", &v))
@@ -204,10 +236,47 @@ impl Sidecar {
             start_after_arm_s,
             snaps,
             snap_level,
+            automation,
             arm_t_ms,
             first_set_t_ms,
         })
     }
+}
+
+/// The text on one line: backslash, newline and carriage return are escaped.
+fn escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn unescape(text: &str) -> Result<String, SidecarError> {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            other => {
+                return Err(SidecarError(format!(
+                    "automation has a bad escape after a backslash: {other:?}"
+                )))
+            }
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -218,7 +287,7 @@ mod tests {
         Sidecar {
             fx_f: 1,
             fx_v: 0,
-            knob: 0,
+            knob: Some(0),
             mode: Mode::Soak,
             from: 0.5,
             to: 0.95,
@@ -226,6 +295,7 @@ mod tests {
             start_after_arm_s: 10.0,
             snaps: vec![80.0, 160.0],
             snap_level: 0.25,
+            automation: None,
             arm_t_ms: Some(4210),
             first_set_t_ms: None,
         }
@@ -243,6 +313,57 @@ mod tests {
             ..sample()
         };
         assert_eq!(Sidecar::parse(&h.render()), Ok(h));
+    }
+
+    fn automated() -> Sidecar {
+        Sidecar {
+            knob: None,
+            mode: Mode::Automation,
+            from: 0.0,
+            to: 0.0,
+            duration_s: 3.0,
+            start_after_arm_s: 0.0,
+            snaps: vec![],
+            snap_level: 0.0,
+            automation: Some("0 gain_db=-6\n# a \\ path\r\n1.5 ramp cutoff_hz=500\n".into()),
+            ..sample()
+        }
+    }
+
+    #[test]
+    fn automation_text_round_trips_on_one_line() {
+        let s = automated();
+        let text = s.render();
+        assert!(!text.contains("knob="));
+        assert_eq!(
+            text.lines()
+                .filter(|l| l.starts_with("automation="))
+                .count(),
+            1
+        );
+        assert_eq!(Sidecar::parse(&text), Ok(s));
+    }
+
+    #[test]
+    fn automation_with_a_different_text_than_its_checksum_is_refused() {
+        let text = automated().render().replace("gain_db=-6", "gain_db=-7");
+        let e = Sidecar::parse(&text).unwrap_err();
+        assert!(e.0.contains("checksum"), "{e}");
+        let text = automated()
+            .render()
+            .replace("automation_crc32=", "automation_crc32=z");
+        assert!(Sidecar::parse(&text).is_err());
+    }
+
+    #[test]
+    fn automation_keys_belong_to_the_automation_mode_only() {
+        let a = automated().render();
+        assert!(Sidecar::parse(&a.replace("automation_crc32", "x_crc32")).is_err());
+        assert!(Sidecar::parse(&a.replace("mode=automation", "mode=hold")).is_err());
+        let hold = format!("{}automation=x\n", sample().render());
+        assert!(Sidecar::parse(&hold).is_err());
+        // An automation session names no knob; a knob line is a contradiction.
+        assert!(Sidecar::parse(&a.replace("mode=", "knob=1\nmode=")).is_err());
     }
 
     #[test]

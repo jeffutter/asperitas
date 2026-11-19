@@ -1,12 +1,16 @@
-//! Scripted knob motion for the offline render. The grammar is in
-//! `docs/reference/automation.md`.
+//! Scripted knob motion, shared by the offline render, the rig session that plays it on the device
+//! and the analysis that judges that session. The grammar is in `docs/reference/automation.md`.
 //!
 //! The format is one event per line, split on whitespace. No parsing library is used: nothing in
 //! this crate's dependencies expresses a breakpoint list as `time [step|ramp] key=value ...`, and
 //! the grammar is four token kinds.
 
-use asperitas_dsp::asperitas::{Asperitas, Controls, ASPERITAS_PARAMS, BLOCK_FRAMES, KNOB_COUNT};
-use asperitas_dsp::processor::{Frame, Processor};
+use crate::asperitas::{Asperitas, Controls, ASPERITAS_PARAMS, BLOCK_FRAMES, KNOB_COUNT};
+use crate::processor::{Frame, Processor};
+
+/// Spacing of ramp samples in [`Automation::device_schedule`], a multiple of [`BLOCK_FRAMES`]:
+/// 10 ms at 48 kHz.
+pub const DEVICE_STEP_FRAMES: u64 = 480;
 
 /// One knob reaching `position` (normalised knob travel) at `frame`.
 #[derive(Clone, Copy, Debug)]
@@ -134,10 +138,63 @@ impl Automation {
     /// therefore takes effect at the next block start, as on the device. The effect should have
     /// been built with `controls_at(0)`.
     pub fn render(&self, effect: &mut Asperitas, frames: &mut [Frame]) {
-        for (block, chunk) in frames.chunks_mut(BLOCK_FRAMES).enumerate() {
-            effect.set_controls(&self.controls_at((block * BLOCK_FRAMES) as u64));
+        self.for_each_block(frames, |controls, chunk| {
+            effect.set_controls(controls);
             effect.process_block(chunk);
+        });
+    }
+
+    /// Split `frames` into blocks of [`BLOCK_FRAMES`] counted from the start of the clip and call
+    /// `apply` with the controls in force at each block's first frame. This is the one block-grid
+    /// definition; [`render`](Self::render) and any other effect stage driven by the script use it.
+    pub fn for_each_block(
+        &self,
+        frames: &mut [Frame],
+        mut apply: impl FnMut(&Controls, &mut [Frame]),
+    ) {
+        for (block, chunk) in frames.chunks_mut(BLOCK_FRAMES).enumerate() {
+            apply(&self.controls_at((block * BLOCK_FRAMES) as u64), chunk);
         }
+    }
+
+    /// The device schedule: `(frame, knob, position)` for every control update a board playing
+    /// this script needs, ascending by frame. `frame` is a block start (the device latches
+    /// overrides once per block), counted from the start of the clip.
+    ///
+    /// A step is one update at the block its frame falls in or next begins. A ramp is sampled
+    /// every [`DEVICE_STEP_FRAMES`] (10 ms at 48 kHz) instead of every block: the console carries
+    /// one reply per `SET`, so per-block updates would be 1500 per second, and the device smooths
+    /// between them anyway. A knob is only updated when its position differs from the last one
+    /// sent. The knobs' values at frame 0 are not in the list; send [`controls_at`](Self::controls_at)
+    /// `(0)` first.
+    pub fn device_schedule(&self) -> Vec<(u64, usize, f32)> {
+        let block = BLOCK_FRAMES as u64;
+        let ceil_block = |f: u64| f.div_ceil(block) * block;
+        let mut frames = std::collections::BTreeSet::new();
+        let mut last = 0;
+        for points in &self.knobs {
+            for p in points {
+                last = last.max(ceil_block(p.frame));
+                frames.insert(ceil_block(p.frame));
+            }
+        }
+        let mut f = 0;
+        while f <= last {
+            frames.insert(f);
+            f += DEVICE_STEP_FRAMES;
+        }
+        let mut sent = self.controls_at(0).knobs;
+        let mut out = Vec::new();
+        for frame in frames {
+            let now = self.controls_at(frame).knobs;
+            for knob in 0..KNOB_COUNT {
+                if now[knob] != sent[knob] {
+                    sent[knob] = now[knob];
+                    out.push((frame, knob, now[knob]));
+                }
+            }
+        }
+        out
     }
 }
 
@@ -274,5 +331,64 @@ mod tests {
         fx.set_controls(&c1);
         fx.process_block(&mut exact[64..]);
         assert_ne!(exact, render_with(&on_grid));
+    }
+
+    /// The knob positions a device holds at `frame` after playing `a.device_schedule()`.
+    fn played_back(a: &Automation, frame: u64) -> [f32; KNOB_COUNT] {
+        let mut knobs = a.controls_at(0).knobs;
+        for (f, knob, position) in a.device_schedule() {
+            if f <= frame {
+                knobs[knob] = position;
+            }
+        }
+        knobs
+    }
+
+    #[test]
+    fn device_schedule_of_a_step_is_one_update_at_the_next_block_start() {
+        let a = Automation::parse(&format!("{} cutoff_hz=500\n", secs(40)), SR).unwrap();
+        let s = a.device_schedule();
+        assert_eq!(s.len(), 1, "{s:?}");
+        assert_eq!((s[0].0, s[0].1), (64, 0));
+        assert_eq!(s[0].2, a.controls_at(64).knobs[0]);
+    }
+
+    #[test]
+    fn device_schedule_of_a_hold_at_time_zero_is_empty() {
+        let a = Automation::parse("0 gain_db=-6\n0 cutoff_hz=1000\n", SR).unwrap();
+        assert!(a.device_schedule().is_empty());
+    }
+
+    #[test]
+    fn device_schedule_of_a_ramp_samples_every_step_and_ends_on_the_target() {
+        let text = format!("0 step gain_db=-20\n{} ramp gain_db=-10\n", secs(4800));
+        let a = Automation::parse(&text, SR).unwrap();
+        let s = a.device_schedule();
+        assert!(s.iter().all(|&(f, k, _)| k == 1 && f % 32 == 0));
+        let frames: Vec<u64> = s.iter().map(|e| e.0).collect();
+        assert_eq!(frames, (1..=10).map(|i| i * 480).collect::<Vec<u64>>());
+        assert_eq!(s.last().unwrap().2, a.controls_at(4800).knobs[1]);
+        // Between samples the device is at most one step behind the exact render.
+        let step = (a.controls_at(4800).knobs[1] - a.controls_at(0).knobs[1]) / 10.0;
+        for f in (0..6000).step_by(32) {
+            let want = a.controls_at(f).knobs[1];
+            assert!(
+                (played_back(&a, f)[1] - want).abs() <= step * 1.01,
+                "frame {f}"
+            );
+        }
+    }
+
+    #[test]
+    fn device_schedule_agrees_with_controls_at_on_every_step_block() {
+        let text = format!(
+            "0 cutoff_hz=1000 gain_db=-3\n{} step cutoff_hz=200\n{} gain_db=-9\n",
+            secs(100),
+            secs(333)
+        );
+        let a = Automation::parse(&text, SR).unwrap();
+        for f in (0..2000).step_by(32) {
+            assert_eq!(played_back(&a, f), a.controls_at(f).knobs, "frame {f}");
+        }
     }
 }
