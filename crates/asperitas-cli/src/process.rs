@@ -6,6 +6,7 @@ use asperitas_dsp::gain::{Gain, GainParams, GAIN_PARAMS};
 use asperitas_dsp::param::ParamSpec;
 use asperitas_dsp::processor::Processor;
 
+use crate::automation::Automation;
 use crate::wav_io;
 
 /// Arguments for the process subcommand.
@@ -14,6 +15,8 @@ pub struct ProcessArgs {
     pub output_path: String,
     pub processor_name: String,
     pub params: Vec<String>,
+    /// Path of a knob automation file; only the `asperitas` processor has knobs to move.
+    pub automation: Option<String>,
 }
 
 /// Run the process command: read input WAV, process it, write output WAV.
@@ -24,6 +27,12 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
 
     let sample_rate = spec.sample_rate as f32;
     let pairs = parse_param_pairs(&args.params)?;
+    if args.automation.is_some() && args.processor_name != "asperitas" {
+        return Err(format!(
+            "--automation needs the asperitas processor; '{}' has no knobs",
+            args.processor_name
+        ));
+    }
     match args.processor_name.as_str() {
         "gain" => {
             let v = parse_with_table("gain", &GAIN_PARAMS, &pairs)?;
@@ -35,8 +44,24 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
                 .process_block(&mut frames);
         }
         "asperitas" => {
-            let controls = controls_from_pairs(&pairs)?;
-            Asperitas::new(sample_rate, &controls).process_block(&mut frames);
+            if let Some(path) = &args.automation {
+                if !pairs.is_empty() {
+                    return Err(
+                        "--automation and --params both set knobs; put the starting values \
+                         in the automation file"
+                            .to_string(),
+                    );
+                }
+                let text = std::fs::read_to_string(path)
+                    .map_err(|e| format!("cannot read automation file '{path}': {e}"))?;
+                let automation = Automation::parse(&text, spec.sample_rate)
+                    .map_err(|e| format!("{path}: {e}"))?;
+                let mut effect = Asperitas::new(sample_rate, &automation.controls_at(0));
+                automation.render(&mut effect, &mut frames);
+            } else {
+                let controls = controls_from_pairs(&pairs)?;
+                Asperitas::new(sample_rate, &controls).process_block(&mut frames);
+            }
         }
         other => {
             return Err(format!(
@@ -170,6 +195,7 @@ mod tests {
             output_path: output.to_str().unwrap().to_string(),
             processor_name: "gain".to_string(),
             params: vec!["gain_db=0".to_string()],
+            automation: None,
         })
         .unwrap();
 
@@ -206,6 +232,7 @@ mod tests {
             output_path: output.to_str().unwrap().to_string(),
             processor_name: processor.to_string(),
             params: params.iter().map(|p| p.to_string()).collect(),
+            automation: None,
         })
         .unwrap();
         hound::WavReader::open(&output)
@@ -238,6 +265,7 @@ mod tests {
             output_path: dir.path().join("o.wav").to_str().unwrap().to_string(),
             processor_name: "asperitas".to_string(),
             params: params.iter().map(|p| p.to_string()).collect(),
+            automation: None,
         })
         .unwrap_err()
     }
@@ -291,6 +319,7 @@ mod tests {
             output_path: out.to_str().unwrap().to_string(),
             processor_name: "gain".to_string(),
             params: vec!["gain_db=-6".to_string()],
+            automation: None,
         })
         .unwrap();
         let staged: Vec<f32> = hound::WavReader::open(&out)
@@ -316,5 +345,51 @@ mod tests {
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f32, f32::max);
         assert!(max_diff < 0.05, "{max_diff:?}");
+    }
+
+    #[test]
+    fn automation_file_moves_knobs_and_is_refused_off_the_asperitas_processor() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.wav");
+        let auto = dir.path().join("a.txt");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(&input, spec).unwrap();
+        for i in 0..2000i32 {
+            w.write_sample(((i % 200) * 100 - 10_000) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+        std::fs::write(&auto, "0 gain_db=0\n0.01 ramp gain_db=-20\n").unwrap();
+        let run = |name: &str, processor: &str, automation: Option<&std::path::Path>| {
+            let out = dir.path().join(name);
+            let r = run_process(&ProcessArgs {
+                input_path: input.to_str().unwrap().to_string(),
+                output_path: out.to_str().unwrap().to_string(),
+                processor_name: processor.to_string(),
+                params: vec![],
+                automation: automation.map(|p| p.to_str().unwrap().to_string()),
+            });
+            (r, out)
+        };
+        let (r, moved) = run("moved.wav", "asperitas", Some(&auto));
+        r.unwrap();
+        let (r, plain) = run("plain.wav", "asperitas", None);
+        r.unwrap();
+        let read = |p: &std::path::Path| -> Vec<f32> {
+            hound::WavReader::open(p)
+                .unwrap()
+                .samples::<f32>()
+                .map(|s| s.unwrap())
+                .collect()
+        };
+        let (moved, plain) = (read(&moved), read(&plain));
+        assert_eq!(moved.len(), plain.len());
+        assert_ne!(moved, plain, "automation must change the output");
+        let (r, _) = run("g.wav", "gain", Some(&auto));
+        assert!(r.unwrap_err().contains("--automation"));
     }
 }

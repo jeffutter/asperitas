@@ -11,10 +11,7 @@ use crate::controls::ControlSlot;
 /// The effect's sample rate. The device runs the effect at this rate and nothing resamples.
 pub const SAMPLE_RATE: u32 = 48_000;
 
-/// Frames per control block on the device. The firmware applies its knob reading once before
-/// each block of this length; the engine reproduces that timing for any host buffer length by
-/// latching controls only at frame indices divisible by this, counted from stream start.
-pub const BLOCK_FRAMES: usize = 32;
+pub use asperitas_dsp::asperitas::BLOCK_FRAMES;
 
 /// Read a WAV clip for looping. Refuses a clip that is not at [`SAMPLE_RATE`] or has no frames.
 pub fn load_clip(path: &str) -> Result<Vec<Frame>, String> {

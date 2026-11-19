@@ -86,6 +86,7 @@ fn run_golden(processor: &str, variant: &str, params: &[&str], input: &Input) {
         output_path: output_path.clone(),
         processor_name: processor.to_string(),
         params: params.iter().map(|p| p.to_string()).collect(),
+        automation: None,
     })
     .unwrap_or_else(|e| panic!("process {processor} failed: {e}"));
 

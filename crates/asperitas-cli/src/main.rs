@@ -32,6 +32,9 @@ struct ProcessArgs {
     /// Parameters as key=value pairs.
     #[clap(short = 'p', long, num_args = 1..)]
     params: Vec<String>,
+    /// Knob automation file (asperitas processor only); see docs/reference/automation.md.
+    #[clap(long)]
+    automation: Option<String>,
 }
 
 fn main() {
@@ -44,6 +47,7 @@ fn main() {
                 output_path: args.output,
                 processor_name: args.processor,
                 params: args.params,
+                automation: args.automation,
             };
             asperitas_cli::process::run_process(&proc_args)
         }

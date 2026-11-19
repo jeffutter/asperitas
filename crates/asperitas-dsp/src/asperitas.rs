@@ -8,6 +8,11 @@ use crate::processor::{Frame, Processor};
 /// Number of knobs: filter cutoff, then output gain.
 pub const KNOB_COUNT: usize = 2;
 
+/// Frames per control block. The firmware applies its knob reading once before each block of
+/// this length; every host that reproduces the device latches controls only at frame indices
+/// divisible by this, counted from stream start.
+pub const BLOCK_FRAMES: usize = 32;
+
 /// Real-unit parameter table for the knobs, in knob order `[cutoff, gain]`.
 pub const ASPERITAS_PARAMS: [ParamSpec; KNOB_COUNT] = [FILTER_PARAMS[0], GAIN_PARAMS[0]];
 

@@ -20,6 +20,9 @@ Crates (root workspace, `crates/`):
 - `asperitas-live` - real-time desktop runner of the effect over cpal (see
   [docs/reference/asperitas-live.md](docs/reference/asperitas-live.md)).
 
+Knob motion for offline renders (`asperitas-cli process --automation`) is defined in
+[docs/reference/automation.md](docs/reference/automation.md).
+
 `firmware/` is a separate workspace (`src/bin`: main, blinky, ledtest, panictest, podtest, rig).
 
 Other docs: `backlog/docs/doc-001 - Asperitas-Project-Plan.md` (the plan),
