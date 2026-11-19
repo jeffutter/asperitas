@@ -18,6 +18,16 @@ enum Command {
     Process(ProcessArgs),
     /// Generate a synthetic test signal.
     Generate(generate::GenerateArgs),
+    /// Render a manifest of cases into one self-contained HTML review page.
+    Review(ReviewArgs),
+}
+
+#[derive(Parser)]
+struct ReviewArgs {
+    /// Manifest file (TOML); see docs/reference/review.md.
+    manifest: String,
+    /// HTML page to write.
+    output: String,
 }
 
 #[derive(Parser)]
@@ -52,6 +62,12 @@ fn main() {
             asperitas_cli::process::run_process(&proc_args)
         }
         Command::Generate(args) => generate::run_generate(&args),
+        Command::Review(args) => {
+            asperitas_cli::review::run_review(&asperitas_cli::review::ReviewArgs {
+                manifest_path: args.manifest,
+                output_path: args.output,
+            })
+        }
     };
 
     if let Err(e) = result {

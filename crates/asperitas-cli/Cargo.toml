@@ -12,12 +12,16 @@ path = "src/main.rs"
 
 [dependencies]
 asperitas-dsp = { path = "../asperitas-dsp", features = ["std"] }
+asperitas-measure = { version = "0.1.0", path = "../asperitas-measure" }
 asperitas-stimulus = { path = "../asperitas-stimulus", features = ["std"] }
+base64 = "0.23.1"
 clap = { version = "4", features = ["derive"] }
 hound = "3.5"
-
-[dev-dependencies]
+png = "0.18.1"
+rustfft = "6.4.1"
+serde = { version = "1.0.229", features = ["derive"] }
 tempfile = "3"
+toml = "1.2.1"
 
 # Inherit the workspace rustdoc denies (see root Cargo.toml).
 [lints]

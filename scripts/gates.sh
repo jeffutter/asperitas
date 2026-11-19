@@ -211,11 +211,11 @@ gate push dump-reassemble-selftest "=== dump_reassemble --selftest ===" \
 gate push cargo-doc "=== cargo doc (workspace) ===" \
   env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
-# asperitas-measure is excluded: --all-features unifies serde's `std` with logging's `log-usb` ->
-# embassy-usb -> ssmarshal, which stops compiling. The crate has no features, so its default build
-# (`cargo-doc` above) already covers it.
+# asperitas-measure and its dependents asperitas-cli and asperitas-live are excluded: --all-features unifies serde's `std` with logging's `log-usb` ->
+# embassy-usb -> ssmarshal, which stops compiling. None of these crates has features, so their default
+# build (`cargo-doc` above) already covers them.
 gate push cargo-doc-all-features "=== cargo doc (workspace, all features) ===" \
-  env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude asperitas-measure --no-deps --all-features
+  env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude asperitas-measure --exclude asperitas-cli --exclude asperitas-live --no-deps --all-features
 
 # Every firmware variant is a row of scripts/firmware-variants.table; these gates run the driver over
 # it. This check is source-level and builds nothing: it fails when a src/bin file has no row.

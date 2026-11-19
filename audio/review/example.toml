@@ -1,0 +1,23 @@
+# Example review manifest; see docs/reference/review.md.
+# Render and open:
+#   cargo run -p asperitas-cli -- review audio/review/example.toml /private/tmp/review.html
+# Paths resolve relative to this file.
+
+# Knobs at their defaults, compared against the dry clip.
+[[case]]
+name = "mandolin chord, defaults"
+clip = "../instruments/mandolin_chord.wav"
+reference = "dry"
+
+# Static knob settings.
+[[case]]
+name = "fast run, cutoff 2000 Hz, +6 dB"
+clip = "../instruments/mandolin_fast_run.wav"
+params = ["cutoff_hz=2000", "gain_db=6"]
+reference = "dry"
+
+# Scripted knob motion: the cutoff sweeps down and back up.
+[[case]]
+name = "octave mandolin chord, filter sweep"
+clip = "../instruments/octave_mandolin_chord.wav"
+automation = "sweep.txt"

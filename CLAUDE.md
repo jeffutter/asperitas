@@ -22,6 +22,8 @@ Crates (root workspace, `crates/`):
 
 Knob motion for offline renders (`asperitas-cli process --automation`) is defined in
 [docs/reference/automation.md](docs/reference/automation.md).
+A manifest of cases rendered into one self-contained HTML page for listening and review
+(`asperitas-cli review`) is in [docs/reference/review.md](docs/reference/review.md).
 
 `firmware/` is a separate workspace (`src/bin`: main, blinky, ledtest, panictest, podtest, rig).
 

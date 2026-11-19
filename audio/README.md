@@ -115,3 +115,7 @@ repository. Purging old blobs from history needs the owner.
 
 `prepare_corpus.py` is a one-off asset tool, not part of the build or the Nix dev shell.
 It needs `python3` and `numpy` only.
+
+## `review/` - review page example
+
+`review/example.toml` is the example manifest for `asperitas-cli review`, run on the corpus clips above; format in [docs/reference/review.md](../docs/reference/review.md).

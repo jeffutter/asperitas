@@ -1,0 +1,3 @@
+0     cutoff_hz=8000 gain_db=0   # start open
+1.0   ramp cutoff_hz=300         # sweep down, arriving at 1 s
+2.0   ramp cutoff_hz=8000        # and back up
