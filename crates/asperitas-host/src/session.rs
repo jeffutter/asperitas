@@ -67,7 +67,8 @@ pub struct Sidecar {
     /// Automation sessions only: the text of the script the session played. Its time zero is the
     /// capture arming, which is when an excerpt replay starts too.
     pub automation: Option<String>,
-    /// Device `t_ms` of the first status record showing the capture armed, as the stream gave it.
+    /// Device `t_ms` of the record that showed the capture armed, as the stream gave it: the arming
+    /// log record, or the first `CAPSTAT` counting a block when the stream missed it (up to a second late).
     pub arm_t_ms: Option<u32>,
     /// Device `t_ms` of the first `CTLR OK SET`, as the stream gave it.
     pub first_set_t_ms: Option<u32>,

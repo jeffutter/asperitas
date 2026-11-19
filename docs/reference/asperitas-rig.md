@@ -145,13 +145,13 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
   dump ends. Levels outside `0..=1` are a usage error (exit 2), never clamped.
 - `automation FILE` plays an automation file (grammar in [automation.md](automation.md)), the same file
   `asperitas-cli process --automation` renders offline, so one script drives both the offline reference and
-  the board. The script's time zero is the capture arming. Before the capture arms the session overrides
+  the board. The script's time zero is the capture arming, taken from the `rig: capture armed` log record the firmware writes at that instant (exact to the millisecond, not the once-a-second `CAPSTAT`, which can be up to a second late). Before the capture arms the session overrides
   both knobs at the script's starting values (a knob the file never names at its default, so the board does not follow
   the Pod knob), then sends one `CTL SET` per update at the time of the block it latches in (blocks of 32
   frames at 48 kHz): a `step` is one `SET`, a `ramp` a `SET` every 10 ms (480 frames) ending exactly on its
   target, not one per block, which would be 1500 replies a second on the console. The wire carries the
   normalised knob position, so each value is the position the shared real-unit translation gives, converted
-  with the same `level_to_wire` as the other motions. Both knobs are released 0.1 s after the last `SET`. A
+  with the same `level_to_wire` as the other motions. Both knobs stay at their last value, as in the render, and are released when the dump ends. A
   file that does not parse, names an unknown parameter or a value out of range is a usage error (exit 2)
   before the port is opened. Example:
   `asperitas-rig session --out run.console.zst --fx-f 1 --max-seconds 60 automation knobs.txt`.
@@ -171,7 +171,7 @@ Output: `--out` is the raw stream, zstd-compressed (readable with `asperitas-mea
 `<out>.session` is the sidecar, `key=value` lines under an `asperitas-session v1` header, parsed
 by `asperitas_host::session::Sidecar`. It holds `fx_f`, `fx_v`, `knob`, `mode`, `from`, `to`,
 `duration_s`, `start_after_arm_s`, `snaps`, `snap_level`, and the device `t_ms` of the record that
-first showed the capture armed (`arm_t_ms`, a `CAPSTAT` with `delivered>0`) and of the first
+first showed the capture armed (`arm_t_ms`, the `rig: capture armed` log record, or a `CAPSTAT` with `delivered>0` when the stream missed it) and of the first
 `CTLR OK SET` (`first_set_t_ms`) when the stream held them. Partial runs are still written. An
 `automation` session has `mode=automation`, no `knob` line, and two lines carrying the script itself:
 `automation_crc32` (CRC-32 of the text) and `automation` (the text on one line, `\\`, newline and

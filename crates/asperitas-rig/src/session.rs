@@ -251,16 +251,16 @@ fn automation_timeline(text: &str) -> Result<Timeline, ControlError> {
         .map(|(k, &p)| Ok((k as u8, wire(p)?)))
         .collect::<Result<Vec<_>, ControlError>>()?;
     let mut timed = Vec::new();
-    let mut last = 0;
     for (frame, knob, position) in automation.device_schedule() {
         timed.push((at(frame), knob as u8, wire(position)?));
-        last = frame;
     }
+    // The render holds each knob at its last value to the end of the clip, so the board does too:
+    // the release waits for the end of the dump, as for a hold.
     Ok(Timeline {
         pre,
         timed,
         knobs,
-        release_at: Some(at(last) + RELEASE_LAG),
+        release_at: None,
     })
 }
 
@@ -308,9 +308,12 @@ pub struct Observed {
     pub errors: usize,
     /// The reason of the latest `CTLR ERR`.
     pub last_error: Option<ErrorCode>,
-    /// A `CAPSTAT` with `delivered > 0` was read.
+    /// The capture armed: the `rig: capture armed` log record was read, or, failing that, a
+    /// `CAPSTAT` with `delivered > 0`.
     pub armed: bool,
-    /// Device `t_ms` of that record.
+    /// Device `t_ms` of that record. The log record is sent at the instant of arming, so this is
+    /// exact to the millisecond; `CAPSTAT` comes about once a second and can be up to a second
+    /// later, so it is only the fallback for a stream that missed the log record.
     pub arm_t_ms: Option<u32>,
     /// Device `t_ms` of the first `CTLR OK SET`.
     pub first_set_t_ms: Option<u32>,
@@ -323,6 +326,9 @@ impl Observed {
         self.first.get_or_insert((r.seq, r.t_ms));
         if is_boot(r.body) {
             self.boots += 1;
+        } else if r.body.starts_with(CAPTURE_ARMED_LOG) {
+            self.armed = true;
+            self.arm_t_ms.get_or_insert(r.t_ms);
         } else if let Some(delivered) = capstat_delivered(r.body) {
             if delivered == 0 {
                 self.idle_capstat = true;
@@ -370,6 +376,11 @@ impl Observed {
             && !self.armed
     }
 }
+
+/// Start of the log line the rig firmware writes at the instant the capture window opens
+/// (`rig: capture armed for N s ...`, or `... until the ring is full ...`), from `run_capture` in
+/// `firmware/src/bin/rig/timeline.rs`. The excerpt replay and every automation script start there.
+const CAPTURE_ARMED_LOG: &[u8] = b"rig: capture armed";
 
 /// `delivered=N` of a `CAPSTAT` body, or `None` for any other record.
 fn capstat_delivered(body: &[u8]) -> Option<u32> {
@@ -718,6 +729,9 @@ mod tests {
         arm: bool,
         die_after_arm: bool,
         dump_on_arm: bool,
+        /// The dump ends once this many `SET`s have been acknowledged.
+        dump_after_sets: Option<usize>,
+        sets: usize,
         /// After the nth write (0-based) is acknowledged, the device restarts and sends `BOOT`.
         reset_on_write: Option<usize>,
         /// The nth write (0-based) fails once.
@@ -737,6 +751,8 @@ mod tests {
                 arm: true,
                 die_after_arm: false,
                 dump_on_arm: false,
+                dump_after_sets: None,
+                sets: 0,
                 fail_write: None,
                 reset_on_write: None,
                 writes: 0,
@@ -805,6 +821,13 @@ mod tests {
                         self.queue.push_back(f);
                         self.armed = true;
                         if self.dump_on_arm {
+                            let f = self.next_frame(DUMPEND);
+                            self.queue.push_back(f);
+                        }
+                    }
+                    Command::OverrideSet { .. } => {
+                        self.sets += 1;
+                        if self.dump_after_sets == Some(self.sets) {
                             let f = self.next_frame(DUMPEND);
                             self.queue.push_back(f);
                         }
@@ -1045,6 +1068,40 @@ mod tests {
         assert!(sets <= 2, "kept sending SETs after the reset: {sets}");
     }
 
+    fn observe_bodies(bodies: &[(u32, &[u8])]) -> Observed {
+        let mut o = Observed::default();
+        for (i, &(t_ms, body)) in bodies.iter().enumerate() {
+            let mut d = Decoder::new();
+            d.feed(&frame_body(i as u32, t_ms, body), |r| o.observe(r));
+        }
+        o
+    }
+
+    #[test]
+    fn arm_time_is_the_log_record_not_the_next_capstat() {
+        // The device logs the arming at 2305 ms; the first CAPSTAT that counts a block is a
+        // second later. The script's time zero must be the first.
+        let o = observe_bodies(&[
+            (2205, b"CAPSTAT proto=1 delivered=0 expected=30 overrun=0"),
+            (2305, b"rig: capture armed for 10 s (30 blocks)"),
+            (3205, b"CAPSTAT proto=1 delivered=2 expected=28 overrun=0"),
+        ]);
+        assert!(o.armed);
+        assert_eq!(o.arm_t_ms, Some(2305));
+        let ring_fill = observe_bodies(&[(
+            700,
+            b"rig: capture armed until the ring is full (30 blocks)",
+        )]);
+        assert_eq!(ring_fill.arm_t_ms, Some(700));
+    }
+
+    #[test]
+    fn arm_time_falls_back_to_capstat_when_the_log_record_was_missed() {
+        let o = observe_bodies(&[(3205, b"CAPSTAT proto=1 delivered=2 expected=28 overrun=0")]);
+        assert!(o.armed);
+        assert_eq!(o.arm_t_ms, Some(3205));
+    }
+
     #[test]
     fn no_boot_sends_nothing() {
         let (mut rig, written) = Rig::new();
@@ -1268,7 +1325,7 @@ mod tests {
         );
         assert!(t.timed.is_empty());
         assert_eq!(t.knobs, vec![0, 1]);
-        assert_eq!(t.release_at, Some(RELEASE_LAG));
+        assert_eq!(t.release_at, None);
     }
 
     #[test]
@@ -1282,7 +1339,7 @@ mod tests {
         // Knobs the script never names start at their defaults, so the board holds them there.
         assert_eq!(t.pre[0].0, 0);
         assert_eq!(t.pre[1], (1, wire_of_gain_db(0.0)));
-        assert_eq!(t.release_at, Some(at + RELEASE_LAG));
+        assert_eq!(t.release_at, None);
     }
 
     #[test]
@@ -1302,7 +1359,7 @@ mod tests {
         let values: Vec<u16> = t.timed.iter().map(|e| e.2).collect();
         assert!(values.windows(2).all(|w| w[0] < w[1]), "{values:?}");
         assert_eq!(*values.last().unwrap(), wire_of_gain_db(-10.0));
-        assert_eq!(t.release_at, Some(Duration::from_millis(100) + RELEASE_LAG));
+        assert_eq!(t.release_at, None);
     }
 
     #[test]
@@ -1339,7 +1396,9 @@ mod tests {
     #[test]
     fn automation_session_sets_every_knob_and_releases_them_all_last() {
         let plan = automation_plan("0 cutoff_hz=1000 gain_db=-20\n0.05 ramp gain_db=-10\n");
-        let (rig, written) = Rig::new();
+        let (mut rig, written) = Rig::new();
+        // The board ends its dump after the last ramp step, so the release is the dump's cue.
+        rig.dump_after_sets = Some(7);
         let run = run_session(rig, &plan, &opts(3000));
         assert!(run.error.is_none(), "{:?}", run.error);
         let c = cmds(&written);
