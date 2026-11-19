@@ -16,8 +16,10 @@ use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use serde::Deserialize;
 
+use crate::automation::Automation;
 use crate::process::{run_process, ProcessArgs};
 use crate::wav_io;
+use asperitas_dsp::asperitas::BLOCK_FRAMES;
 
 /// Sample rate every clip must have; the effect and the device run at this rate.
 const REQUIRED_RATE: u32 = 48_000;
@@ -220,10 +222,13 @@ fn render_case(case: &Case, base: &Path, tmp: &Path, index: usize) -> Result<Ren
         &left,
     )?;
 
-    let has_step_lines = automation_text
-        .as_deref()
-        .is_some_and(|t| t.lines().any(has_step_event));
-    let checks = run_checks(&left, &right, &dry, has_step_lines);
+    let step_frames = match &automation_text {
+        Some(text) => Automation::parse(text, REQUIRED_RATE)
+            .map_err(|e| format!("case '{name}': {e}"))?
+            .step_frames(),
+        None => Vec::new(),
+    };
+    let checks = run_checks(&left, &right, &dry, &step_frames);
 
     let reference = match reference {
         None => None,
@@ -253,13 +258,10 @@ fn render_case(case: &Case, base: &Path, tmp: &Path, index: usize) -> Result<Ren
     })
 }
 
-/// True when an automation line (comment stripped) has the `step` keyword as its second token.
-fn has_step_event(line: &str) -> bool {
-    let line = line.split('#').next().unwrap_or("");
-    line.split_whitespace().nth(1) == Some("step")
-}
-
-fn run_checks(left: &[f32], right: &[f32], dry: &[f32], has_step_lines: bool) -> Vec<Check> {
+/// Detector events at scripted steps are expected, so they are not counted against the render. The
+/// detector measures level only, so an event is excused by its time alone: it cannot say which
+/// parameter moved.
+fn run_checks(left: &[f32], right: &[f32], dry: &[f32], step_frames: &[u64]) -> Vec<Check> {
     let peak = left.iter().chain(right).fold(0.0f32, |p, s| p.max(s.abs()));
     let clipped = left
         .iter()
@@ -275,8 +277,23 @@ fn run_checks(left: &[f32], right: &[f32], dry: &[f32], has_step_lines: bool) ->
     let steps = detect_param_steps(left);
     let dry_steps = detect_param_steps(dry).count;
     // Attacks in the material flag the detector too, so a step the input already has is not the
-    // render's doing. A `step` line in the automation is expected to flag.
-    let steps_pass = has_step_lines || steps.count <= dry_steps;
+    // render's doing. A step lands at the next block start, and the detector reports a few of its
+    // blocks later (or one block early, from the lag-2 comparison), hence the window. Positions
+    // are capped, so the excused count is matched events and the rest of `count` stays unexpected.
+    let block = asperitas_measure::thresholds::PARAM_STEP_BLOCK_SAMPLES as u64;
+    let early = 2 * block;
+    let late = BLOCK_FRAMES as u64
+        + (asperitas_measure::thresholds::PARAM_STEP_MERGE_BLOCKS as u64 + 1) * block;
+    let at_step = steps
+        .positions
+        .iter()
+        .filter(|&&p| {
+            let p = p as u64;
+            step_frames.iter().any(|&f| p + early >= f && p <= f + late)
+        })
+        .count();
+    let unexpected = steps.count - at_step;
+    let steps_pass = unexpected <= dry_steps;
     let positions: Vec<String> = steps
         .positions
         .iter()
@@ -284,7 +301,7 @@ fn run_checks(left: &[f32], right: &[f32], dry: &[f32], has_step_lines: bool) ->
         .map(|p| format!("{:.3} s", *p as f64 / f64::from(REQUIRED_RATE)))
         .collect();
     let steps_value = format!(
-        "{} event(s), largest {:.1} dB; input clip has {dry_steps}{}",
+        "{} event(s) ({at_step} at scripted steps), largest {:.1} dB; input clip has {dry_steps}{}",
         steps.count,
         steps.max_step_db,
         if positions.is_empty() {
@@ -554,6 +571,15 @@ mod tests {
             "[[case]]\nname = \"hot\"\nclip = \"loud.wav\"\nparams = [\"gain_db=12\"]\n",
         )
         .unwrap();
+        println!(
+            "{}",
+            page.split("parameter steps")
+                .nth(1)
+                .unwrap()
+                .chars()
+                .take(300)
+                .collect::<String>()
+        );
         assert!(page.contains("FAILED"));
         assert!(page.contains("<td class=\"bad\">FAILED</td>"));
         assert!(page.contains("sample(s) at or above"));
@@ -610,5 +636,56 @@ mod tests {
         .unwrap();
         assert!(page.contains("0.25 step gain_db=-12"));
         assert!(!page.contains("FAILED"));
+    }
+
+    /// A 440 Hz tone that drops 12 dB at each frame in `drops`.
+    fn tone_with_drops(drops: &[usize]) -> Vec<f32> {
+        (0..48_000usize)
+            .map(|i| {
+                let level = 0.5 * 0.25f32.powi(drops.iter().filter(|&&d| i >= d).count() as i32);
+                level * (i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin()
+            })
+            .collect()
+    }
+
+    fn steps_check(drops: &[usize], step_frames: &[u64]) -> Check {
+        let out = tone_with_drops(drops);
+        let dry = tone_with_drops(&[]);
+        run_checks(&out, &out, &dry, step_frames)
+            .into_iter()
+            .find(|c| c.name == "parameter steps")
+            .unwrap()
+    }
+
+    #[test]
+    fn a_scripted_step_is_expected_and_an_unscripted_one_is_not() {
+        let scripted = steps_check(&[12_000], &[12_000]);
+        assert!(scripted.pass, "{}", scripted.value);
+        assert!(scripted.value.contains("1 at scripted steps"));
+        assert!(!steps_check(&[12_000], &[]).pass);
+    }
+
+    #[test]
+    fn a_step_line_does_not_excuse_a_jump_elsewhere() {
+        let c = steps_check(&[12_000, 30_000], &[12_000]);
+        assert!(!c.pass, "{}", c.value);
+    }
+
+    #[test]
+    fn bare_default_step_lines_are_expected() {
+        let dir = tempfile::tempdir().unwrap();
+        write_clip(&dir.path().join("a.wav"), 48_000, 0.5);
+        std::fs::write(
+            dir.path().join("k.txt"),
+            "0 cutoff_hz=1000\n0.25 gain_db=-12\n",
+        )
+        .unwrap();
+        let page = page_for(
+            dir.path(),
+            "[[case]]\nname=\"auto\"\nclip=\"a.wav\"\nautomation=\"k.txt\"\n",
+        )
+        .unwrap();
+        assert!(!page.contains("FAILED"));
+        assert!(page.contains("at scripted steps"));
     }
 }

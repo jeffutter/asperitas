@@ -49,14 +49,16 @@ that is not 48 kHz, or an automation or params error from `process`.
 |-------|--------|-----------|
 | peak level | computed in `review.rs` | never (informational) |
 | clipping | computed in `review.rs` | any sample in either channel has magnitude of 0.999 or more |
-| parameter steps | `asperitas_measure::param_step::detect_param_steps`, on the left channel | the render has more events than the dry input clip, and the automation has no `step` line |
+| parameter steps | `asperitas_measure::param_step::detect_param_steps`, on the left channel | the render has more events than the dry input clip, not counting events at a scripted step (`Automation::step_frames`) |
 
 Not covered: `asperitas-measure` has no peak or clipping check for an offline f32 render, so those
 two are computed inline (a max and a count, not an analysis algorithm). Its discontinuity metrics
 need a loopback capture and its alignment, so they do not apply to a render. The step detector flags
 musical attacks too (the corpus clips have over a hundred events each), so the rule compares the
-render against the dry clip rather than against zero; a `step` line in the automation is expected to
-flag and is exempt. The check therefore catches added steps only coarsely; treat it as a tripwire
+render against the dry clip rather than against zero; an event within a few detector blocks of a scripted
+step (any non-ramp breakpoint after frame 0, with or without the `step` keyword) is exempt. The
+exemption is by time only, since the detector measures level and cannot say which parameter moved;
+it covers those events, not the rest of the script. The check therefore catches added steps only coarsely; treat it as a tripwire
 and listen.
 
 ## Size

@@ -115,6 +115,22 @@ impl Automation {
         Ok(Self { knobs })
     }
 
+    /// Frames, sorted and deduplicated, where a knob jumps instead of moving: every non-ramp
+    /// breakpoint after frame 0. A line with no keyword is a step too. A frame-0 breakpoint is the
+    /// starting state, not a change. These are where an unsmoothed level jump is expected.
+    pub fn step_frames(&self) -> Vec<u64> {
+        let mut frames: Vec<u64> = self
+            .knobs
+            .iter()
+            .flatten()
+            .filter(|p| !p.ramp && p.frame > 0)
+            .map(|p| p.frame)
+            .collect();
+        frames.sort_unstable();
+        frames.dedup();
+        frames
+    }
+
     /// The controls in force at exactly `frame`, counted from the start of the clip. A knob holds
     /// its default until first named, holds its last value after its last breakpoint, and
     /// interpolates in knob position (what turning the knob does) toward a `ramp` breakpoint.
@@ -236,6 +252,21 @@ mod tests {
         assert!(Automation::parse("3600.001 gain_db=0", SR).is_err());
         let a = Automation::parse("3600 gain_db=-6", SR).unwrap();
         assert_eq!(a.device_schedule().len(), 1);
+    }
+
+    #[test]
+    fn step_frames_lists_non_ramp_breakpoints_after_frame_zero() {
+        let text = format!(
+            "0 cutoff_hz=1000\n{} gain_db=-12\n{} step gain_db=-6 cutoff_hz=500\n{} ramp gain_db=0\n{} ramp cutoff_hz=900\n",
+            secs(480),
+            secs(960),
+            secs(1440),
+            secs(1920)
+        );
+        let a = Automation::parse(&text, SR).unwrap();
+        assert_eq!(a.step_frames(), vec![480, 960]);
+        let only_ramp = Automation::parse("0 gain_db=0\n0.5 ramp gain_db=-6\n", SR).unwrap();
+        assert!(only_ramp.step_frames().is_empty());
     }
 
     #[test]
