@@ -3,10 +3,11 @@ id: TASK-152
 title: >-
   M4.5: scripted knob automation and device-free audio review, so sound work
   needs the board and a person as little as possible
-status: To Do
+status: Done
 assignee:
   - '@human'
 created_date: '2026-11-13T22:00:00Z'
+updated_date: '2026-11-19T03:40:00Z'
 labels:
   - automation
   - review
@@ -35,5 +36,11 @@ This umbrella is @human because its last subtask is a bench run. It has no work 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 HUMAN: every subtask of this ticket is Done
+- [x] #1 HUMAN: every subtask of this ticket is Done
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-11-18: Closed live with the owner. All five subtasks are Done (152.01 to 152.04 by the loop, 152.05 on the board with the owner); the offline render, the live-engine equivalence test, the review page and the rig automation session all exist, and the board agrees with the offline render (captures/TASK-152.05/).
+<!-- SECTION:NOTES:END -->
