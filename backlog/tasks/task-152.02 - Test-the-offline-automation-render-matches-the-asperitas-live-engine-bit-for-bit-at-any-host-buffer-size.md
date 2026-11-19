@@ -3,14 +3,16 @@ id: TASK-152.02
 title: >-
   Test: the offline automation render matches the asperitas-live engine bit for
   bit at any host buffer size
-status: To Do
+status: Done
 assignee:
-  - '@agent'
+  - '@ralph'
 created_date: '2026-11-13T22:00:00Z'
+updated_date: '2026-11-19T02:19:00Z'
 labels:
   - automation
   - live
   - test
+  - planned
 dependencies:
   - TASK-152.01
 documentation:
@@ -33,9 +35,27 @@ Depends on TASK-152.01, which provides the automation file and the offline rende
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An integration test in crates/asperitas-live/tests/ drives the engine core with an automation file (at least one hold, one ramp and one step, on both knobs, with breakpoints at frames that are and are not multiples of 32) and asserts output bit-identical (f32::to_bits) to the offline render of the same clip and file
-- [ ] #2 The same case runs at host buffer sizes 1, 31, 32, 33, 64, 480, 512, 1024 and a seeded random-length sequence, with identical output across all of them
-- [ ] #3 A negative control shows the test can fail: applying a breakpoint at the exact frame instead of the next 32-frame boundary makes the comparison fail
-- [ ] #4 The test opens no audio device, runs within the cargo test gate's time budget, and states its tolerance and what is excluded (the device-boundary clamp) in its module doc
-- [ ] #5 bash scripts/gates.sh push passes
+- [x] #1 An integration test in crates/asperitas-live/tests/ drives the engine core with an automation file (at least one hold, one ramp and one step, on both knobs, with breakpoints at frames that are and are not multiples of 32) and asserts output bit-identical (f32::to_bits) to the offline render of the same clip and file
+- [x] #2 The same case runs at host buffer sizes 1, 31, 32, 33, 64, 480, 512, 1024 and a seeded random-length sequence, with identical output across all of them
+- [x] #3 A negative control shows the test can fail: applying a breakpoint at the exact frame instead of the next 32-frame boundary makes the comparison fail
+- [x] #4 The test opens no audio device, runs within the cargo test gate's time budget, and states its tolerance and what is excluded (the device-boundary clamp) in its module doc
+- [x] #5 bash scripts/gates.sh push passes
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+SHIPPED by 2ba64b7. This plan is superseded; the ticket's final summary describes what actually landed.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added crates/asperitas-live/tests/equivalence_automation.rs, no production change. Driver publishes controls_at(p) at every 32-multiple and at off-grid breakpoint frames; the boundary publish overwrites the off-grid one before the engine latches. Hosts 1,31,32,33,64,480,512,1024 plus two seeded random sequences are bit-identical to Automation::render. Negative control applies breakpoints at the exact frame and differs. No docs enumerate the equivalence tests, so none updated. gates.sh push passed.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+New integration test equivalence_automation.rs proves the engine core, fed an automation script through the ControlSlot, is bit-identical to the offline automation render at all host buffer sizes, with a negative control.
+<!-- SECTION:FINAL_SUMMARY:END -->
