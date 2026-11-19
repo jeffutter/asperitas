@@ -13,7 +13,7 @@ One event per line. `#` starts a comment; blank lines are ignored.
 <seconds> [step|ramp] key=value [key=value ...]
 ```
 
-- `seconds`: non-negative decimal, not earlier than the previous line. Converted to the nearest
+- `seconds`: non-negative decimal of at most 3600 (`MAX_SCRIPT_SECONDS`), not earlier than the previous line. Converted to the nearest
   frame at the clip's sample rate, counted from the start of the clip.
 - `key=value`: the names and real units of `--params` (`cutoff_hz`, `gain_db`), checked against the
   `ParamSpec` ranges through `Controls::from_values`.

@@ -12,6 +12,10 @@ use crate::processor::{Frame, Processor};
 /// 10 ms at 48 kHz.
 pub const DEVICE_STEP_FRAMES: u64 = 480;
 
+/// Longest script `Automation::parse` accepts, in seconds. Times never decrease, so this bounds
+/// every frame and the length of the device schedule.
+pub const MAX_SCRIPT_SECONDS: f64 = 3600.0;
+
 /// One knob reaching `position` (normalised knob travel) at `frame`.
 #[derive(Clone, Copy, Debug)]
 struct Breakpoint {
@@ -47,6 +51,11 @@ impl Automation {
             if !seconds.is_finite() || seconds < 0.0 {
                 return Err(format!(
                     "line {n}: time {time} must be a finite, non-negative number of seconds"
+                ));
+            }
+            if seconds > MAX_SCRIPT_SECONDS {
+                return Err(format!(
+                    "line {n}: time {time} is beyond the {MAX_SCRIPT_SECONDS} second limit on a script"
                 ));
             }
             if seconds < last_seconds {
@@ -171,17 +180,22 @@ impl Automation {
         let block = BLOCK_FRAMES as u64;
         let ceil_block = |f: u64| f.div_ceil(block) * block;
         let mut frames = std::collections::BTreeSet::new();
-        let mut last = 0;
         for points in &self.knobs {
+            let mut prev_frame = 0;
             for p in points {
-                last = last.max(ceil_block(p.frame));
-                frames.insert(ceil_block(p.frame));
+                let end = ceil_block(p.frame);
+                frames.insert(end);
+                if p.ramp {
+                    // Sample the span being ramped on the absolute DEVICE_STEP_FRAMES grid.
+                    let mut f =
+                        (ceil_block(prev_frame) / DEVICE_STEP_FRAMES + 1) * DEVICE_STEP_FRAMES;
+                    while f < end {
+                        frames.insert(f);
+                        f += DEVICE_STEP_FRAMES;
+                    }
+                }
+                prev_frame = p.frame;
             }
-        }
-        let mut f = 0;
-        while f <= last {
-            frames.insert(f);
-            f += DEVICE_STEP_FRAMES;
         }
         let mut sent = self.controls_at(0).knobs;
         let mut out = Vec::new();
@@ -214,6 +228,14 @@ mod tests {
 
     fn near(a: f32, b: f32) -> bool {
         (a - b).abs() <= 1e-3 * b.abs().max(1.0)
+    }
+
+    #[test]
+    fn parse_bounds_the_script_length() {
+        assert!(Automation::parse("1e12 gain_db=0", SR).is_err());
+        assert!(Automation::parse("3600.001 gain_db=0", SR).is_err());
+        let a = Automation::parse("3600 gain_db=-6", SR).unwrap();
+        assert_eq!(a.device_schedule().len(), 1);
     }
 
     #[test]
