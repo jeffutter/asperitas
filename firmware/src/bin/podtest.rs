@@ -66,8 +66,7 @@ const ENCRAW_MAX_DETENTS_PER_SECOND: u32 = 10;
 /// Worst-case `ENCRAW` rate during deliberate turning: 4 lines/detent × 10
 /// detents/s = **40 lines/s**, against the ~58 lines/s at which the bench
 /// capture lost about 8.8% of its lines (13968 delivered over 240 s, measured
-/// across all line types — see
-/// `backlog/tasks/task-018.04 - Verify-every-Pod-control-on-hardware.md`).
+/// across all line types - see the capture in `captures/ASP-18.4/`).
 ///
 /// That loss figure is approximate and was incurred by a stream that also
 /// carries knob lines at ~100/s, so read 40/s as "the same order as a rate this

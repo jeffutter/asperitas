@@ -9,7 +9,7 @@ audio/
 
 ## `instruments/` — the recorded corpus
 
-Eight clips, **mono 48 kHz 16-bit PCM**, recorded on real instruments (TASK-008.02).
+Eight clips, **mono 48 kHz 16-bit PCM**, recorded on real instruments (ASP-8.2).
 These are what golden tests and ear checks run against for the rest of the project.
 
 | File | Material | Length | Peak | RMS |
@@ -85,9 +85,9 @@ Rig evidence lives in one tree at the repository root, one directory per hardwar
 ticket:
 
 ```
-captures/TASK-x/<date>-rig-<what>.console.zst   raw framed-console capture, zstd
-captures/TASK-x/<date>-rig-<what>.report.json    its `asperitas-measure analyze` verdict
-captures/TASK-x/<name>.txt.zst                   text output of other bench tools, zstd
+captures/ASP-x/<date>-rig-<what>.console.zst   raw framed-console capture, zstd
+captures/ASP-x/<date>-rig-<what>.report.json    its `asperitas-measure analyze` verdict
+captures/ASP-x/<name>.txt.zst                   text output of other bench tools, zstd
 ```
 
 The console capture is the artifact, not the PCM: it carries the device's own `CAPSTAT`,
@@ -95,7 +95,7 @@ The console capture is the artifact, not the PCM: it carries the device's own `C
 it cannot prove:
 
 ```sh
-zstd -dc captures/TASK-x/<name>.console.zst \
+zstd -dc captures/ASP-x/<name>.console.zst \
   | cargo run -p asperitas-host --release --bin dump_reassemble -- --out capture.pcm
 ```
 

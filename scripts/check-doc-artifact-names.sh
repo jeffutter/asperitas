@@ -11,7 +11,7 @@
 # The -n on every make invocation is load-bearing: firmware/Makefile's default goal is `all: build`,
 # so without it this lint would cross-compile firmware in every tier, including pre-commit.
 #
-# Scope is README.md and docs/ on purpose: backlog/** quotes stale names as evidence.
+# Scope is README.md and docs/ on purpose: ticket files quote stale names as evidence.
 #
 # Exit codes: 0 clean, 1 violations (all of them, in one run), 2 the check itself could not run.
 

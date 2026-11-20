@@ -27,7 +27,7 @@ A manifest of cases rendered into one self-contained HTML page for listening and
 
 `firmware/` is a separate workspace (`src/bin`: main, blinky, ledtest, panictest, podtest, rig).
 
-Other docs: `backlog/docs/doc-001 - Asperitas-Project-Plan.md` (the plan),
+Other docs: `docs/doc-001 - Asperitas-Project-Plan.md` (the plan),
 [idea.md](idea.md) (original research handoff), [audio/README.md](audio/README.md) (corpus, goldens,
 captures layout), [docs/development.md](docs/development.md) (gates, nix, lefthook, CI),
 [docs/investigations/seed3-schematic-search-log.md](docs/investigations/seed3-schematic-search-log.md),
@@ -41,7 +41,7 @@ captures layout), [docs/development.md](docs/development.md) (gates, nix, leftho
 - Host crates: `cargo test`, `cargo clippy`, `cargo fmt` at the repo root.
 - Firmware has no host test harness: `cd firmware && make check|clippy|build BINARY=... FEATURES=...`.
   Correctness rests on the cross-build, lints and the rig.
-- Captures: `captures/TASK-x/` holds the rig evidence of each hardware verification ticket (layout and
+- Captures: `captures/ASP-x/` holds the rig evidence of each hardware verification ticket (layout and
   size policy in [audio/README.md](audio/README.md)). Format and flags are in
   [docs/reference/asperitas-rig.md](docs/reference/asperitas-rig.md).
 
@@ -97,23 +97,17 @@ needs a board plugged in, ears, instruments, or a decision that is the owner's t
   has walked through every criterion with it and agreed each one is met. Record that the
   close was done with the owner, so the history shows a person signed off.
 
-Work that is part agent and part human is **split into subtasks** (`TASK-005.01`,
-`TASK-005.02`, …) rather than assigned to one or the other. A parent ticket is an
+Work that is part agent and part human is **split into subtasks** (`ASP-5.1`,
+`ASP-5.2`, …) rather than assigned to one or the other. A parent ticket is an
 umbrella whose only acceptance criterion is that its subtasks are done.
 
 **A parent inherits the strictest assignee among its children.** If any child is
 `@human`, the parent is `@human` too — it cannot be closed until that child is, so an
-agent picking it up can only spin. This is not hypothetical: TASK-004 was left `@agent`
+agent picking it up can only spin. This is not hypothetical: ASP-4 was left `@agent`
 with a `@human` child, reached the execute stage, and the executor correctly reported
 that a person had to flash the board — but with no work left to do it produced no
 commit, tripped the "claimed success but no commit landed" guard, and was re-selected
 until the failure-streak guard halted the whole run.
-
-**Never leave an abandoned task in `backlog/archive/`.** Archiving preserves both the
-ID and the status, so an archived stub sharing an ID with a real task will shadow it
-when dependencies are resolved, and every dependent ticket silently looks blocked
-forever. `backlog doctor` does not catch this — it only scans active and completed
-tasks. Delete throwaways outright.
 
 The failure mode this exists to prevent: an agent marking "audio passthrough works"
 complete because it compiled, having never heard a sound. **Compiling is not evidence.**
@@ -125,40 +119,3 @@ instruments, or an outward-facing action (creating a repo, posting upstream) is 
 or gets split. Pushing `main` to origin is the exception: the owner allows agents to push it,
 and CI runs are readable with `gh`, so a push-and-check-CI step is `@agent` work. Force-pushes
 and other branches or remotes still need asking.
-
-<!-- BACKLOG.MD MCP GUIDELINES START -->
-<!-- backlog.md-instructions-version: 1.48.0 -->
-
-## Code comments
-
-Comments describe the current state of the code and why it is the way it is. They carry no ticket
-numbers, no dates, no measurement history and no narration of earlier versions ("was X until
-TASK-n", "measured on ..."): that belongs in the ticket notes, the commit message or a doc. Do not
-cite line numbers in other files, they go stale; name the function or module instead.
-
-<CRITICAL_INSTRUCTION>
-
-## BACKLOG WORKFLOW INSTRUCTIONS
-
-This project uses Backlog.md MCP for all task and project management activities.
-
-**CRITICAL GUIDANCE**
-
-- If your client supports MCP resources, read `backlog://workflow/overview` to understand when and how to use Backlog for this project.
-- If your client only supports tools or the above request fails, call `backlog.get_backlog_instructions()` to load the tool-oriented overview. Use the `instruction` selector when you need `task-creation`, `task-execution`, or `task-finalization`.
-
-- **First time working here?** Read the overview resource IMMEDIATELY to learn the workflow
-- **Already familiar?** You should have the overview cached ("## Backlog.md Overview (MCP)")
-- **When to read it**: BEFORE creating tasks, or when you're unsure whether to track work
-
-These guides cover:
-- Decision framework for when to create tasks
-- Search-first workflow to avoid duplicates
-- Links to detailed guides for task creation, execution, and finalization
-- MCP tools reference
-
-You MUST read the overview resource to understand the complete workflow. The information is NOT summarized here.
-
-</CRITICAL_INSTRUCTION>
-
-<!-- BACKLOG.MD MCP GUIDELINES END -->

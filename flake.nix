@@ -75,7 +75,7 @@
 
           # `default` is the bench shell. `ci` is the same shell minus the patched probe-rs, which a
           # runner must build from source (about 9.8 of the 10.6 minutes CI spent entering the
-          # shell, TASK-072) and no CI gate uses. Every other package, the toolchain above and the
+          # shell, ASP-70) and no CI gate uses. Every other package, the toolchain above and the
           # shellHook come from this one definition, so `rustc -vV`, the rust-cache key and the
           # elf-check provenance cannot differ between the two.
           mkDevShell =
@@ -100,7 +100,7 @@
                 # --- General tooling ---
                 pkgs.lefthook # git hooks
                 pkgs.yq-go # mikefarah/yq-go (NOT Python yq)
-                pkgs.jq # JSON processing for backlog scripts
+                pkgs.jq # JSON processing for scripts
                 pkgs.sox
               ]
               ++ pkgs.lib.optionals withProbe [

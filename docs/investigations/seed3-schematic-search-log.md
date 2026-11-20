@@ -2,7 +2,7 @@
 
 The evidence trail behind the nRESET answer in
 [nreset-and-reset-catch.md](nreset-and-reset-catch.md), kept so the negative
-results don't have to be rediscovered. Assembled on 2026-09-10 while working TASK-050. Every URL below
+results don't have to be rediscovered. Assembled on 2026-09-10 while working ASP-50. Every URL below
 was fetched (curl HEAD/GET, or in-memory download plus text extraction); nothing here is inferred from
 vendor marketing. Section 3 lists the drawings that do exist; the reset net itself is traced in
 nreset-and-reset-catch.md, using vector geometry and pixel-level reads of those sheets rather than text extraction
@@ -17,7 +17,7 @@ this board's reset line can only be inferred from its predecessors, not read off
 inference is now as far as documents allow it to go, and it comes out benign: every public
 Seed-family sheet that does show the net draws a 10 KΩ pull-up, one tactile button to GND and the debug
 header's pin 10, with no supervisor and no buffer anywhere. Closing the last step needs a written answer
-from Electrosmith (TASK-051) or a scope. The nearest public schematics are the *reduced* Seed Rev7 sheet
+from Electrosmith or a scope. The nearest public schematics are the *reduced* Seed Rev7 sheet
 (2024-02-01) and the *full* Seed Rev4 sheet (2020-06-08, recovered from a GitHub fork of the deleted
 `electro-smith/Hardware` repo); Rev4 does show an `NRST` net, and neither shows any discrete reset-supervisor IC.
 
@@ -112,6 +112,6 @@ Dropped:
 ## Gaps / next steps
 
 1. **Ask Electrosmith directly** (community.daisy.audio, ideally replying in topic 9440 or a new Hardware topic): will the Seed3 schematic be published as the Rev7 one was ("Seed Rev7 Schematic Is Now Live!" precedent, topic 4846)? The narrow question left is only whether the Seed3 kept its predecessors' reset net — a 10 KΩ pull-up to `+3V3_D`, the front-panel button to GND, and (on Rev7) a 100 nF capacitor, with no supervisor or buffer anywhere.
-2. **Bench route, now demoted to a tiebreaker**: an oscilloscope on header pin 10 during an under-reset attach settles the Seed3 question directly. It is worth doing only if `--connect-under-reset` actually misbehaves — TASK-037 passing on the first try is itself evidence, and a scope adds nothing to a pass.
+2. **Bench route, now demoted to a tiebreaker**: an oscilloscope on header pin 10 during an under-reset attach settles the Seed3 question directly. It is worth doing only if `--connect-under-reset` actually misbehaves — ASP-37 passing on the first try is itself evidence, and a scope adds nothing to a pass.
 3. ~~Open the two PDFs visually~~ — done, along with the Seed2 DFM and Patch SM sheets; see the trace in [nreset-and-reset-catch.md](nreset-and-reset-catch.md). What product photography cannot do is settle the Seed3 question: at the resolution of the published images a SOT23-class supervisor near the reset button would be barely a package outline, let alone a readable marking, and the compliance zip holds FCC photographs rather than design data.
 4. Re-check `https://docs.daisy.audio/hardware/Seed3/` periodically; a schematic would appear as a new `products/seed3/*.pdf` key, and the bucket's absent-key response (403) makes probing cheap.

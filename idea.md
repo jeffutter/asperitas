@@ -1,4 +1,4 @@
-> **Superseded by [doc-001 - Asperitas-Project-Plan](backlog/docs/doc-001%20-%20Asperitas-Project-Plan.md).**
+> **Superseded by [doc-001 - Asperitas-Project-Plan](docs/doc-001%20-%20Asperitas-Project-Plan.md).**
 > Kept as the original pre-project research handoff; historical only. The open uncertainty below
 > was settled by doc-001, and the egui and probe-rs main-loop proposals were not adopted.
 

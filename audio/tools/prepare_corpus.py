@@ -8,7 +8,7 @@ rather than folklore. Requires only numpy.
     python3 audio/tools/prepare_corpus.py <raw-takes-dir> [--out audio/instruments]
 
 The raw takes are 44.1 kHz stereo (one mono) at varying length and level. The
-corpus is mono 48 kHz 16-bit, trimmed to ~3 s, as TASK-008.02 specifies.
+corpus is mono 48 kHz 16-bit, trimmed to ~3 s, as ASP-8.2 specifies.
 
 Four transformations, in this order:
 
@@ -26,7 +26,7 @@ Four transformations, in this order:
    in the corpus sits at -3 dBFS.
 
 Step 4 is deliberately a single scalar for the whole corpus, not per-clip
-normalization. TASK-008.02 requires soft/hard dynamic contrast, and normalizing
+normalization. ASP-8.2 requires soft/hard dynamic contrast, and normalizing
 each clip independently would erase exactly that -- the soft and hard plucks would
 come out equally loud. A uniform gain preserves every relative level, both within
 each soft/hard pair and across clips, while moving the whole corpus into usable
@@ -57,7 +57,7 @@ ONSET_THRESHOLD = 0.05
 FADE_IN_SECONDS = 0.005
 FADE_OUT_SECONDS = 0.030
 
-# Raw take -> corpus filename. The corpus names come from TASK-008.02.
+# Raw take -> corpus filename. The corpus names come from ASP-8.2.
 CLIPS = [
     ("mandolin-a-pluck-soft.wav", "mandolin_single_note_soft.wav"),
     ("mandolin-a-pluck-hard.wav", "mandolin_single_note_hard.wav"),

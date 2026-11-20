@@ -1,6 +1,6 @@
 # cpal duplex audio on macOS, and how DSP blocks relate to host buffers
 
-Evidence for the `asperitas-live` design (TASK-145.01). Everything below comes from a throwaway program
+Evidence for the `asperitas-live` design (ASP-141.1). Everything below comes from a throwaway program
 run on this Mac on 2026-10-19; the program lives outside the repo and is not committed. It opened
 `cpal` streams on the default devices, counted what the callbacks received, and ran a bit-exact
 block-size equivalence check against `asperitas-dsp`.

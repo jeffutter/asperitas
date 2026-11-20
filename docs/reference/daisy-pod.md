@@ -98,7 +98,7 @@ counter-clockwise detents a net −38, with per-detent clusters
 to its stated net (+42 against +40, −37 against −38) — the record is aggregate, and the
 host tests assert carry invariants rather than those totals.
 
-**Shipped as of TASK-024 (2026-09-09):** `QUARTER_STEPS_PER_DETENT = 4` in
+**Shipped as of ASP-24 (2026-09-09):** `QUARTER_STEPS_PER_DETENT = 4` in
 `crates/asperitas-pod/src/encoder.rs`. `EncoderDecoder::update()` still counts raw
 transitions; `EncoderDecoder::drain_detents()` converts them to whole detents and is what
 `ControlSurface::poll()` calls, so `ControlEvent::EncoderDelta` carries detents.
@@ -120,7 +120,7 @@ transitions straddle one poll window contributes fewer than four counts and ther
 **defers** a step rather than losing one — replaying the recorded counter-clockwise run
 through the decoder reports nine detents for ten clicks and retains the leftover
 quarter-step. Whether that deficit survives at the corrected ~1 kHz poll rate is
-TASK-029's question, on hardware, with TASK-029.01's raw A/B logging supplying the
+ASP-29's question, on hardware, with ASP-29.1's raw A/B logging supplying the
 per-transition data this capture never recorded.
 
 ### LED drive polarity: active-low (verified)
@@ -174,7 +174,7 @@ comparing device output against desktop CLI output on the same source material.
 ## Self-loopback channel mapping (measured)
 
 Measured 2026-10-08 with a stereo 3.5 mm cable from the Pod's output jack to its input jack and
-`rig`'s 1 kHz sine at -20 dBFS (TASK-038.05 AC #8). In the codec's interleaved SAI words, word 0 is
+`rig`'s 1 kHz sine at -20 dBFS (ASP-38.5 AC #8). In the codec's interleaved SAI words, word 0 is
 what `rig` and `main.rs` call **Left** (`console::MonoLane::Left`) and word 1 is **Right**. Each run
 drove one output word and recorded one input word, 10 s each, with every block proved by
 `dump_reassemble`:
@@ -186,7 +186,7 @@ drove one output word and recorded one input word, 10 s each, with every block p
 | Right only | Right | -20.40 dBFS | -23.42 dBFS |
 
 So the loop is straight. Output Left returns on input Left and Right on Right, both paths have the
-same gain (-0.41 dB end to end at -20 dBFS; the 300 s run in TASK-038.05 repeats it), and Left-to-Right
+same gain (-0.41 dB end to end at -20 dBFS; the 300 s run in ASP-38.5 repeats it), and Left-to-Right
 crosstalk is below the 16-bit capture floor, more than 64 dB down. `rig` records Left by default, and
 that lane carries the stimulus.
 
@@ -196,7 +196,7 @@ left-only tone into headphones and hear which ear it is in.
 
 ## Lab setup: permanent self-loopback (measured)
 
-Recorded 2026-10-15 with the owner at the bench (TASK-034).
+Recorded 2026-10-15 with the owner at the bench (ASP-34).
 
 - **Cable:** a male-to-male 3.5 mm TRS (stereo) cable, roughly 1 ft, coiled, from the Pod's output
   jack to its input jack. It stays in place; every automated `rig` run assumes it is there. To use

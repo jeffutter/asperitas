@@ -1,0 +1,14 @@
+asperitas-session v1
+fx_f=1
+fx_v=0
+mode=automation
+from=0
+to=0
+duration_s=2
+start_after_arm_s=0
+snaps=
+snap_level=0
+automation_crc32=85de4a51
+automation=# ASP-148.5: ramp on cutoff (knob 0), step on gain (knob 1), then hold. Clip is 3.0 s.\n0     cutoff_hz=8000 gain_db=0\n0.5   ramp cutoff_hz=400\n1.5   step gain_db=-9\n2.0   ramp cutoff_hz=4000\n
+arm_t_ms=3205
+first_set_t_ms=1206

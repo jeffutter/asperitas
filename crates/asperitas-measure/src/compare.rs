@@ -327,7 +327,7 @@ mod tests {
 
     fn replay() -> Capture {
         Capture::from_console_zst(root(
-            "captures/TASK-038.09/2026-10-15-rig-excerpt-replay-mand-soft.console.zst",
+            "captures/ASP-38.9/2026-10-15-rig-excerpt-replay-mand-soft.console.zst",
         ))
         .unwrap()
     }

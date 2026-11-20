@@ -27,7 +27,6 @@ asperitas/
 ├── scripts/             # Gate, provenance and bench scripts
 ├── docs/reference/      # Hardware and tooling reference docs
 ├── docs/upstream/       # Notes prepared for upstream projects
-└── backlog/             # Tickets (Backlog.md)
 ```
 
 The key design principle: **DSP logic is decoupled from hardware.** `asperitas-dsp` compiles on your laptop so you can iterate on sound without flashing anything. Only when the effect sounds right does it get wired into `firmware/`.
@@ -88,7 +87,7 @@ cargo build --workspace                              # host crates
 cd firmware && cargo build --release --features seed3   # firmware
 ```
 
-Hardware status, measurements and open questions live in the tickets under `backlog/`, not here.
+Hardware status, measurements and open questions live in the tickets, not here.
 
 ## Reference
 

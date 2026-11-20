@@ -1,0 +1,28 @@
+{
+  "automation": "# ASP-148.5: ramp on cutoff (knob 0), step on gain (knob 1), then hold. Clip is 3.0 s.\n0     cutoff_hz=8000 gain_db=0\n0.5   ramp cutoff_hz=400\n1.5   step gain_db=-9\n2.0   ramp cutoff_hz=4000\n",
+  "capture": "captures/ASP-148.5/2026-11-18-rig-automation-excerpt.console.zst",
+  "comparison": {
+    "dc_lsb": 0.15815528415866037,
+    "delay_samples": 81,
+    "gain_deviation_db": 0.035575776681529225,
+    "loop_gain_db": -0.37442422331847075,
+    "reference_peak_lsb": 9308.166648887214,
+    "reference_rms_lsb": 816.6652903053313,
+    "residual_peak_at": 1613,
+    "residual_peak_db": -26.817238783353496,
+    "residual_peak_lsb": 424.6217256123178,
+    "residual_rms_db": -29.653111274648523,
+    "residual_rms_lsb": 26.877479171467336,
+    "samples": 144000
+  },
+  "excerpt": "audio/instruments/mandolin_single_note_soft.wav",
+  "failures": [],
+  "fx": {
+    "code": 1,
+    "knobs": [
+      null,
+      null
+    ]
+  },
+  "pass": true
+}
