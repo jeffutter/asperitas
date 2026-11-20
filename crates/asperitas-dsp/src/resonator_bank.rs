@@ -118,7 +118,7 @@ const ROOT_DECAY_RANGE: f32 = 0.01;
 const TILT: f32 = 0.5;
 
 /// Highest ring pitch as a fraction of the sample rate; a partial above it is muted.
-const MAX_PITCH_FRACTION: f32 = 0.49;
+pub const MAX_PITCH_FRACTION: f32 = 0.49;
 
 /// Highest root the bank holds. Far above the knob range; it keeps pitches finite.
 const MAX_ROOT_HZ: f32 = 20_000.0;
@@ -258,8 +258,9 @@ impl Resonator {
         self.spread.snap();
     }
 
-    /// The ring pitch of voice `i` (0-based) for a root and structure, before the pitch ceiling.
-    fn partial_hz(root_hz: f32, structure: f32, i: usize) -> f32 {
+    /// The ring pitch in Hz of voice `i` (0-based) for a root and structure, before the pitch
+    /// ceiling ([`MAX_PITCH_FRACTION`]).
+    pub fn partial_hz(root_hz: f32, structure: f32, i: usize) -> f32 {
         let n = (i + 1) as f32;
         let stiffness = structure * STRETCH_MAX;
         root_hz * n * sqrtf(1.0 + stiffness * (n * n - 1.0))

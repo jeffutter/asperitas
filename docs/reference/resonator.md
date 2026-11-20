@@ -286,3 +286,6 @@ asperitas-cli process in.wav out.wav --processor resonator \
 [automation.md](automation.md#resonator-keys), latched on the 32-frame block grid. It replaces
 `--params`; giving both is refused. The render is deterministic: the same input and arguments give
 identical output.
+
+`asperitas-cli analyze` shows the same bank as an impulse and frequency response without a clip; see
+[analyze.md](analyze.md).
