@@ -36,13 +36,13 @@ struct ProcessArgs {
     input: String,
     /// Output WAV file.
     output: String,
-    /// Processor name (gain, filter).
+    /// Processor name (gain, filter, asperitas, resonator).
     #[clap(long)]
     processor: String,
     /// Parameters as key=value pairs.
     #[clap(short = 'p', long, num_args = 1..)]
     params: Vec<String>,
-    /// Knob automation file (asperitas processor only); see docs/reference/automation.md.
+    /// Knob automation file (asperitas and resonator processors); see docs/reference/automation.md.
     #[clap(long)]
     automation: Option<String>,
 }

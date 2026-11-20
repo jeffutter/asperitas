@@ -2,8 +2,9 @@
 
 `asperitas-cli process in.wav out.wav --processor asperitas --automation knobs.txt` renders a clip
 in which the knobs move. The file is the one definition of knob motion; it is parsed by
-`Automation::parse` in `crates/asperitas-dsp/src/automation.rs`. It works only with the `asperitas`
-processor and cannot be combined with `--params` (put starting values in the file).
+`Automation::parse` in `crates/asperitas-dsp/src/automation.rs`. It works with the `asperitas` and
+`resonator` processors (`--processor resonator --automation knobs.txt`) and cannot be combined with
+`--params` (put starting values in the file). Any other processor is refused.
 
 ## Grammar
 
@@ -44,9 +45,9 @@ same grammar, the same latch and the same device schedule for the resonator's co
 are `root_hz`, `structure`, `damping`, `spread` and `excitation_preset`, with the ranges in
 [resonator.md](resonator.md#controls). `root_hz` ramps by equal ratios and the others linearly.
 `excitation_preset` is step-only: `ramp` on it is an error naming the line. `Automation::parse`
-still means the low-pass and gain patch. Wiring this into the CLI and live host is a later ticket
-(ASP-151.6 onward); today it is available to Rust callers, and `Automation::render` drives a
-`Resonator`.
+still means the low-pass and gain patch. `asperitas-cli process --processor resonator --automation
+knobs.txt` renders a clip through it (see [resonator.md](resonator.md#command-line)); the live host
+is not wired to it yet. `Automation::render` drives a `Resonator`.
 
 ## 32-frame latch
 

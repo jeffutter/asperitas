@@ -268,3 +268,21 @@ default (widest) and can only be set by key.
   `2^((100 * semitones + cents) / 1200)` and clamps to 20 to 2000 Hz. A detent is one semitone, or
   a number of cents while fine-tune is on.
 - Controls latch on the 32-frame block grid (`BLOCK_FRAMES`) exactly as for `Controls`.
+
+## Command line
+
+`asperitas-cli process in.wav out.wav --processor resonator [--params key=value ...]` renders a clip
+through the bank. The output is stereo at the input's rate. `--params` takes the real-unit keys of
+[Controls](#controls) through `ResonatorControls::from_values`: `root_hz`, `structure`, `damping`,
+`spread` and `excitation_preset`. Unnamed keys keep their default. An unknown key, a non-numeric
+value or a value outside the range is refused with a message naming the key; nothing is clamped.
+
+```
+asperitas-cli process in.wav out.wav --processor resonator \
+    --params root_hz=220 structure=0.5 damping=0.4 spread=1 excitation_preset=2
+```
+
+`--automation knobs.txt` moves the controls over the clip with the grammar in
+[automation.md](automation.md#resonator-keys), latched on the 32-frame block grid. It replaces
+`--params`; giving both is refused. The render is deterministic: the same input and arguments give
+identical output.

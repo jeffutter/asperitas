@@ -5,6 +5,8 @@ use asperitas_dsp::filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 use asperitas_dsp::gain::{Gain, GainParams, GAIN_PARAMS};
 use asperitas_dsp::param::ParamSpec;
 use asperitas_dsp::processor::Processor;
+use asperitas_dsp::resonator_bank::Resonator;
+use asperitas_dsp::resonator_controls::ResonatorControls;
 
 use crate::automation::Automation;
 use crate::wav_io;
@@ -15,7 +17,8 @@ pub struct ProcessArgs {
     pub output_path: String,
     pub processor_name: String,
     pub params: Vec<String>,
-    /// Path of a knob automation file; only the `asperitas` processor has knobs to move.
+    /// Path of a knob automation file; only the `asperitas` and `resonator`
+    /// processors have knobs to move.
     pub automation: Option<String>,
 }
 
@@ -27,9 +30,11 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
 
     let sample_rate = spec.sample_rate as f32;
     let pairs = parse_param_pairs(&args.params)?;
-    if args.automation.is_some() && args.processor_name != "asperitas" {
+    if args.automation.is_some()
+        && !matches!(args.processor_name.as_str(), "asperitas" | "resonator")
+    {
         return Err(format!(
-            "--automation needs the asperitas processor; '{}' has no knobs",
+            "--automation needs the asperitas or resonator processor; '{}' has no knobs",
             args.processor_name
         ));
     }
@@ -63,9 +68,30 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
                 Asperitas::new(sample_rate, &controls).process_block(&mut frames);
             }
         }
+        "resonator" => {
+            if let Some(path) = &args.automation {
+                if !pairs.is_empty() {
+                    return Err(
+                        "--automation and --params both set knobs; put the starting values \
+                         in the automation file"
+                            .to_string(),
+                    );
+                }
+                let text = std::fs::read_to_string(path)
+                    .map_err(|e| format!("cannot read automation file '{path}': {e}"))?;
+                let automation =
+                    Automation::<ResonatorControls>::parse_for(&text, spec.sample_rate)
+                        .map_err(|e| format!("{path}: {e}"))?;
+                let mut bank = Resonator::new(sample_rate, &automation.controls_at(0).params());
+                automation.render(&mut bank, &mut frames);
+            } else {
+                let controls = resonator_controls_from_pairs(&pairs)?;
+                Resonator::new(sample_rate, &controls.params()).process_block(&mut frames);
+            }
+        }
         other => {
             return Err(format!(
-                "unknown processor '{other}'; supported: gain, filter, asperitas"
+                "unknown processor '{other}'; supported: gain, filter, asperitas, resonator"
             ))
         }
     }
@@ -112,6 +138,23 @@ fn controls_from_pairs(pairs: &[(String, String)]) -> Result<Controls, String> {
         values.push((key.as_str(), value));
     }
     Controls::from_values(&values).map_err(|e| e.to_string())
+}
+
+/// As [`parse_asperitas_controls`], for the resonator's controls (real units, as
+/// `--params root_hz=220 damping=0.4`).
+pub fn parse_resonator_controls(raw: &[String]) -> Result<ResonatorControls, String> {
+    resonator_controls_from_pairs(&parse_param_pairs(raw)?)
+}
+
+fn resonator_controls_from_pairs(pairs: &[(String, String)]) -> Result<ResonatorControls, String> {
+    let mut values = Vec::with_capacity(pairs.len());
+    for (key, value) in pairs {
+        let value = value
+            .parse::<f32>()
+            .map_err(|_| format!("invalid value for {key}: {value}"))?;
+        values.push((key.as_str(), value));
+    }
+    ResonatorControls::from_values(&values).map_err(|e| e.to_string())
 }
 
 fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {
@@ -391,5 +434,149 @@ mod tests {
         assert_ne!(moved, plain, "automation must change the output");
         let (r, _) = run("g.wav", "gain", Some(&auto));
         assert!(r.unwrap_err().contains("--automation"));
+    }
+
+    fn write_ramp(path: &std::path::Path) {
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut w = hound::WavWriter::create(path, spec).unwrap();
+        for i in 0..2000i32 {
+            w.write_sample(((i % 200) * 100 - 10_000) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+    }
+
+    fn read_f32(p: &std::path::Path) -> Vec<f32> {
+        hound::WavReader::open(p)
+            .unwrap()
+            .samples::<f32>()
+            .map(|s| s.unwrap())
+            .collect()
+    }
+
+    fn resonator_args(
+        input: &std::path::Path,
+        output: &std::path::Path,
+        params: &[&str],
+        automation: Option<&std::path::Path>,
+    ) -> ProcessArgs {
+        ProcessArgs {
+            input_path: input.to_str().unwrap().to_string(),
+            output_path: output.to_str().unwrap().to_string(),
+            processor_name: "resonator".to_string(),
+            params: params.iter().map(|p| p.to_string()).collect(),
+            automation: automation.map(|p| p.to_str().unwrap().to_string()),
+        }
+    }
+
+    #[test]
+    fn resonator_renders_stereo_of_matching_length() {
+        let out = run_on_ramp("resonator", &["root_hz=220", "damping=0.4"]);
+        assert_eq!(out.len(), 2000 * 2);
+        assert!(out.iter().all(|s| s.is_finite()));
+    }
+
+    #[test]
+    fn resonator_rejects_unknown_key_and_out_of_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.wav");
+        let output = dir.path().join("out.wav");
+        write_ramp(&input);
+        let err = run_process(&resonator_args(&input, &output, &["bogus=1"], None)).unwrap_err();
+        assert!(err.contains("bogus"), "{err}");
+        let err =
+            run_process(&resonator_args(&input, &output, &["root_hz=1000000"], None)).unwrap_err();
+        assert!(err.contains("root_hz"), "{err}");
+        let err = run_process(&resonator_args(&input, &output, &["damping=-5"], None)).unwrap_err();
+        assert!(err.contains("damping"), "{err}");
+    }
+
+    #[test]
+    fn resonator_accepts_boundary_values() {
+        use asperitas_dsp::resonator_controls::RESONATOR_CONTROL_PARAMS;
+        for spec in RESONATOR_CONTROL_PARAMS.iter() {
+            for v in [spec.min, spec.max] {
+                let out = run_on_ramp("resonator", &[&format!("{}={v}", spec.name)]);
+                assert!(out.iter().all(|s| s.is_finite()), "{} = {v}", spec.name);
+            }
+        }
+    }
+
+    #[test]
+    fn resonator_render_is_deterministic() {
+        let a = run_on_ramp("resonator", &["root_hz=330", "structure=0.5", "spread=0.5"]);
+        let b = run_on_ramp("resonator", &["root_hz=330", "structure=0.5", "spread=0.5"]);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn resonator_automation_latches_on_the_block_grid() {
+        use asperitas_dsp::processor::Frame;
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.wav");
+        let auto = dir.path().join("a.txt");
+        let output = dir.path().join("out.wav");
+        write_ramp(&input);
+        // 0.0105 s is frame 504: inside block 15 (frames 480..512), so it latches at 512.
+        let script = "0 damping=0.2\n0.0105 step damping=0.9\n";
+        std::fs::write(&auto, script).unwrap();
+        run_process(&resonator_args(&input, &output, &[], Some(&auto))).unwrap();
+        let rendered = read_f32(&output);
+
+        let (_, input_frames) = wav_io::read_wav(input.to_str().unwrap()).unwrap();
+        let automation = Automation::<ResonatorControls>::parse_for(script, 48_000).unwrap();
+        let direct = |apply_at: &dyn Fn(usize) -> u64| -> Vec<f32> {
+            let mut frames: Vec<Frame> = input_frames.clone();
+            let mut bank = Resonator::new(48_000.0, &automation.controls_at(0).params());
+            let mut start = 0;
+            while start < frames.len() {
+                let end = (start + 32).min(frames.len());
+                bank.set_params(&automation.controls_at(apply_at(start)).params());
+                bank.process_block(&mut frames[start..end]);
+                start = end;
+            }
+            frames.iter().flat_map(|f| [f[0], f[1]]).collect()
+        };
+        assert_eq!(rendered, direct(&|block_start| block_start as u64));
+
+        // Negative control: latching at the exact frame instead of the block start must differ.
+        let exact = {
+            let mut frames: Vec<Frame> = input_frames.clone();
+            let mut bank = Resonator::new(48_000.0, &automation.controls_at(0).params());
+            bank.set_params(&automation.controls_at(0).params());
+            bank.process_block(&mut frames[..504]);
+            bank.set_params(&automation.controls_at(504).params());
+            bank.process_block(&mut frames[504..]);
+            frames
+                .iter()
+                .flat_map(|f| [f[0], f[1]])
+                .collect::<Vec<f32>>()
+        };
+        assert_ne!(rendered, exact);
+    }
+
+    #[test]
+    fn resonator_automation_conflicts_and_refusals() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.wav");
+        let auto = dir.path().join("a.txt");
+        let output = dir.path().join("out.wav");
+        write_ramp(&input);
+        std::fs::write(&auto, "0 damping=0.2\n").unwrap();
+        let err = run_process(&resonator_args(
+            &input,
+            &output,
+            &["damping=0.3"],
+            Some(&auto),
+        ))
+        .unwrap_err();
+        assert!(err.contains("--params"), "{err}");
+        let mut args = resonator_args(&input, &output, &[], Some(&auto));
+        args.processor_name = "filter".to_string();
+        assert!(run_process(&args).unwrap_err().contains("--automation"));
     }
 }
