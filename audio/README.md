@@ -49,11 +49,21 @@ Keep them archived elsewhere; they cannot be recovered from these files.
 
 ## `goldens/` — frozen processor output
 
-Fifteen files: `gain`, `filter` and `asperitas` (the full effect chain) at default and
-non-default parameters, over synthetic signals and a few instrument clips. Naming is
+Twenty-four files: `gain`, `filter`, `asperitas` (the full effect chain) and `resonator` at
+default and non-default parameters, over synthetic signals and a few instrument clips. Naming is
 `{processor}_{variant}_{input}.wav`, where the variant is `default` or a tag for the
-parameters (`cutoff500`, `boost12`, ...). **32-bit float stereo**, so levels above full
-scale are kept and quiet tails are not quantised away.
+parameters (`cutoff500`, `boost12`, `damping0`, `structure1`, ...). **32-bit float stereo**, so
+levels above full scale are kept and quiet tails are not quantised away.
+
+The `resonator` goldens cover the default voicing (`default`, with the impulse one being the
+bank's own impulse response) and the extremes of damping (`damping0` rings longest, `damping1`
+is shortest) and structure (`structure1`), plus one mono-spread extreme
+(`structure1_damping0_spread0`). Their `root_hz` is set near the input's pitch.
+
+**Size policy.** The goldens total about 14 MB (`du -sk audio/goldens`). Keep them under about
+15 MB; each case adds 0.4 to 1.2 MB to git history for good, so prefer 1 s synthetic inputs and
+add a clip case only when a synthetic one cannot show the change. Going past the cap is a
+decision to review, not a side effect of adding a case.
 
 Generated and checked by `crates/asperitas-cli/tests/golden_tests.rs`:
 

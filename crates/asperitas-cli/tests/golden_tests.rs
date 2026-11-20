@@ -160,6 +160,35 @@ golden_cases! {
         ["cutoff_hz=2000", "gain_db=6"] over Input::Clip("mandolin_fast_run");
 }
 
+// -- Resonator --
+//
+// The impulse goldens are the bank's own impulse response, the clearest guard of its
+// numerics. Damping 0 rings longest and so accumulates the most arithmetic; damping 1 is
+// the shortest decay. Structure 1 is the far end of the structure control, set with a root
+// near the input's pitch. The last case pins the mono spread at both extremes at once.
+
+golden_cases! {
+    golden_resonator_default_impulse: "resonator", "default", [] over Input::Synthetic("impulse");
+    golden_resonator_default_pluck: "resonator", "default", ["root_hz=440"]
+        over Input::Synthetic("pluck");
+    golden_resonator_default_mandolin_single_note_soft: "resonator", "default", ["root_hz=220"]
+        over Input::Clip("mandolin_single_note_soft");
+
+    golden_resonator_damping0_pluck: "resonator", "damping0", ["root_hz=440", "damping=0"]
+        over Input::Synthetic("pluck");
+    golden_resonator_damping0_mandolin_chord: "resonator", "damping0", ["root_hz=220", "damping=0"]
+        over Input::Clip("mandolin_chord");
+    golden_resonator_damping1_pluck: "resonator", "damping1", ["root_hz=440", "damping=1"]
+        over Input::Synthetic("pluck");
+
+    golden_resonator_structure1_sweep: "resonator", "structure1", ["root_hz=440", "structure=1"]
+        over Input::Synthetic("sweep");
+    golden_resonator_structure1_octave_mandolin_single_note_hard: "resonator", "structure1",
+        ["root_hz=220", "structure=1"] over Input::Clip("octave_mandolin_single_note_hard");
+    golden_resonator_extreme_mono_impulse: "resonator", "structure1_damping0_spread0",
+        ["root_hz=440", "structure=1", "damping=0", "spread=0"] over Input::Synthetic("impulse");
+}
+
 // -- Golden comparison helper --
 
 fn compare_golden(path: &str, expected: &[Frame], label: &str) {

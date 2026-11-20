@@ -277,6 +277,9 @@ through the bank. The output is stereo at the input's rate. `--params` takes the
 `spread` and `excitation_preset`. Unnamed keys keep their default. An unknown key, a non-numeric
 value or a value outside the range is refused with a message naming the key; nothing is clamped.
 
+The `resonator_*` goldens in `audio/goldens` freeze this render for the default voicing and the
+extremes of damping and structure (see [audio/README.md](../../audio/README.md)).
+
 ```
 asperitas-cli process in.wav out.wav --processor resonator \
     --params root_hz=220 structure=0.5 damping=0.4 spread=1 excitation_preset=2
