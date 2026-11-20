@@ -8,8 +8,8 @@ stdout. The code is `crates/asperitas-cli/src/analyze.rs`.
 It lives in `asperitas-cli`, not `asperitas-measure`: `asperitas-measure` analyses rig captures and
 depends on the host and wire crates, while `asperitas-cli` already holds the `process` renderer, the
 `--params` parser (`parse_resonator_controls`, so the keys and refusals are the ones `process`
-gives), and the PNG drawing the review page uses. The PNG can be embedded in the review page as
-the spectrogram is.
+gives), and the PNG drawing the review page uses. The review page embeds the PNG
+(`[[response]]` in [review.md](review.md)).
 
 ## Command
 

@@ -1,0 +1,104 @@
+# Resonator review manifest; see docs/reference/review.md (Resonator review).
+# Render and open:
+#   cargo run --release -p asperitas-cli -- review audio/review/resonator.toml /private/tmp/resonator-review.html
+#   open /private/tmp/resonator-review.html
+# Paths resolve relative to this file.
+
+# Renders are embedded as 16-bit PCM to keep the page under the size limit; the checks run on
+# the float render.
+output_format = "pcm16"
+
+[[case]]
+name = "mandolin single note soft, default voicing"
+clip = "../instruments/mandolin_single_note_soft.wav"
+processor = "resonator"
+reference = "dry"
+
+[[case]]
+name = "mandolin single note hard, default voicing"
+clip = "../instruments/mandolin_single_note_hard.wav"
+processor = "resonator"
+reference = "dry"
+
+[[case]]
+name = "mandolin fast run, default voicing"
+clip = "../instruments/mandolin_fast_run.wav"
+processor = "resonator"
+reference = "dry"
+
+[[case]]
+name = "mandolin chord, default voicing"
+clip = "../instruments/mandolin_chord.wav"
+processor = "resonator"
+reference = "dry"
+
+[[case]]
+name = "octave mandolin single note soft, default voicing"
+clip = "../instruments/octave_mandolin_single_note_soft.wav"
+processor = "resonator"
+reference = "dry"
+
+[[case]]
+name = "octave mandolin single note hard, default voicing"
+clip = "../instruments/octave_mandolin_single_note_hard.wav"
+processor = "resonator"
+reference = "dry"
+
+[[case]]
+name = "octave mandolin fast run, default voicing"
+clip = "../instruments/octave_mandolin_fast_run.wav"
+processor = "resonator"
+reference = "dry"
+
+[[case]]
+name = "octave mandolin chord, default voicing"
+clip = "../instruments/octave_mandolin_chord.wav"
+processor = "resonator"
+reference = "dry"
+
+[[case]]
+name = "mandolin chord, damping sweep"
+clip = "../instruments/mandolin_chord.wav"
+processor = "resonator"
+automation = "resonator-mandolin-damping-sweep.txt"
+
+[[case]]
+name = "mandolin chord, structure sweep"
+clip = "../instruments/mandolin_chord.wav"
+processor = "resonator"
+automation = "resonator-mandolin-structure-sweep.txt"
+
+[[case]]
+name = "octave mandolin chord, damping sweep"
+clip = "../instruments/octave_mandolin_chord.wav"
+processor = "resonator"
+automation = "resonator-octave-mandolin-damping-sweep.txt"
+
+[[case]]
+name = "octave mandolin chord, structure sweep"
+clip = "../instruments/octave_mandolin_chord.wav"
+processor = "resonator"
+automation = "resonator-octave-mandolin-structure-sweep.txt"
+
+[[response]]
+name = "default voicing"
+
+[[response]]
+name = "damping 0"
+params = ["damping=0"]
+
+[[response]]
+name = "damping 1"
+params = ["damping=1"]
+
+[[response]]
+name = "structure 0"
+params = ["structure=0"]
+
+[[response]]
+name = "structure 1"
+params = ["structure=1"]
+
+[[response]]
+name = "spread 0"
+params = ["spread=0"]

@@ -272,7 +272,7 @@ const RIGHT_RGB: [u8; 3] = [40, 90, 200];
 /// log frequency axis from 20 Hz to Nyquist, the top of the scale at the next multiple of 10 dB
 /// above the strongest bin and 90 dB of range below it, vertical lines at 100 Hz, 1 kHz and
 /// 10 kHz, horizontal lines every 20 dB. Left is red, right is blue.
-fn plot_png(a: &Analysis) -> Result<Vec<u8>, String> {
+pub(crate) fn plot_png(a: &Analysis) -> Result<Vec<u8>, String> {
     let h = 2 * PANEL_H;
     let mut c = Canvas::new(h);
     let inner = PANEL_H - 2 * MARGIN;

@@ -1,0 +1,2 @@
+0   root_hz=440 damping=0 structure=0   # ring on the open A, longest decay
+3.0 ramp damping=1                          # shortest, darkest ring by the end

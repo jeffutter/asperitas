@@ -16,10 +16,12 @@ use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
 use serde::Deserialize;
 
+use crate::analyze::{analyze, peaks_report, plot_png};
 use crate::automation::Automation;
-use crate::process::{run_process, ProcessArgs};
+use crate::process::{parse_resonator_controls, run_process, ProcessArgs};
 use crate::wav_io;
 use asperitas_dsp::asperitas::BLOCK_FRAMES;
+use asperitas_dsp::resonator_controls::ResonatorControls;
 
 /// Sample rate every clip must have; the effect and the device run at this rate.
 const REQUIRED_RATE: u32 = 48_000;
@@ -42,6 +44,23 @@ pub struct ReviewArgs {
 struct Manifest {
     #[serde(default)]
     case: Vec<Case>,
+    /// `"float32"` (default) embeds each render exactly as `process` writes it; `"pcm16"`
+    /// embeds it as 16-bit PCM to halve its size. The checks always run on the float render.
+    output_format: Option<String>,
+    #[serde(default)]
+    response: Vec<Response>,
+}
+
+/// An impulse and frequency response of the resonator at one setting, as `analyze` draws it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Response {
+    name: String,
+    /// `key=value` resonator settings, as `process --params`.
+    #[serde(default)]
+    params: Vec<String>,
+    /// Impulse length in seconds; the root T60 when absent.
+    length_s: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +68,8 @@ struct Manifest {
 struct Case {
     name: String,
     clip: String,
+    /// `"asperitas"` (default) or `"resonator"`, as `process --processor`.
+    processor: Option<String>,
     /// Automation file; mutually exclusive with `params`.
     automation: Option<String>,
     /// `key=value` knob settings, as `process --params`.
@@ -96,21 +117,70 @@ pub fn build_page(manifest_path: &Path) -> Result<String, String> {
         }
     }
 
+    let pcm16 = match manifest.output_format.as_deref() {
+        None | Some("float32") => false,
+        Some("pcm16") => true,
+        Some(other) => {
+            return Err(format!(
+                "output_format '{other}' is not one of \"float32\", \"pcm16\""
+            ))
+        }
+    };
+    for (i, r) in manifest.response.iter().enumerate() {
+        if r.name.trim().is_empty() {
+            return Err(format!("response {}: name is empty", i + 1));
+        }
+        if manifest.response[..i].iter().any(|o| o.name == r.name) {
+            return Err(format!("response '{}': name appears twice", r.name));
+        }
+    }
+
     let tmp = tempfile::tempdir().map_err(|e| format!("cannot create temp dir: {e}"))?;
     let mut rendered = Vec::new();
     for (i, case) in manifest.case.iter().enumerate() {
-        rendered.push(render_case(case, base, tmp.path(), i)?);
+        rendered.push(render_case(case, base, tmp.path(), i, pcm16)?);
     }
 
-    let page = page_html(&rendered);
+    let mut responses = Vec::new();
+    for r in &manifest.response {
+        responses.push(render_response(r)?);
+    }
+
+    let page = page_html(&rendered, &responses);
     if page.len() > MAX_PAGE_BYTES {
         return Err(format!(
             "page is {} bytes, over the {MAX_PAGE_BYTES} byte limit for an artifact page; \
-             use shorter clips or fewer cases",
+             use shorter clips, fewer cases or output_format = \"pcm16\"",
             page.len()
         ));
     }
     Ok(page)
+}
+
+/// A response as the page shows it.
+struct RenderedResponse {
+    name: String,
+    params: String,
+    png: Vec<u8>,
+    peaks: String,
+}
+
+fn render_response(r: &Response) -> Result<RenderedResponse, String> {
+    let name = &r.name;
+    let controls =
+        parse_resonator_controls(&r.params).map_err(|e| format!("response '{name}': {e}"))?;
+    let a = analyze(REQUIRED_RATE as f32, &controls.params(), r.length_s)
+        .map_err(|e| format!("response '{name}': {e}"))?;
+    Ok(RenderedResponse {
+        name: name.clone(),
+        params: if r.params.is_empty() {
+            "defaults (every knob at its default)".to_string()
+        } else {
+            r.params.join(" ")
+        },
+        png: plot_png(&a).map_err(|e| format!("response '{name}': {e}"))?,
+        peaks: peaks_report(&a),
+    })
 }
 
 struct Rendered {
@@ -164,8 +234,20 @@ fn read_clip(case: &str, field: &str, path: &Path) -> Result<Vec<f32>, String> {
     Ok(frames.iter().map(|f| f[0]).collect())
 }
 
-fn render_case(case: &Case, base: &Path, tmp: &Path, index: usize) -> Result<Rendered, String> {
+fn render_case(
+    case: &Case,
+    base: &Path,
+    tmp: &Path,
+    index: usize,
+    pcm16: bool,
+) -> Result<Rendered, String> {
     let name = &case.name;
+    let processor = case.processor.as_deref().unwrap_or("asperitas");
+    if !matches!(processor, "asperitas" | "resonator") {
+        return Err(format!(
+            "case '{name}': processor '{processor}' is not one of \"asperitas\", \"resonator\""
+        ));
+    }
     let clip_path = resolve(base, &case.clip);
     let dry = read_clip(name, "clip", &clip_path)?;
 
@@ -205,7 +287,7 @@ fn render_case(case: &Case, base: &Path, tmp: &Path, index: usize) -> Result<Ren
     run_process(&ProcessArgs {
         input_path: path_str(&clip_path)?.to_string(),
         output_path: path_str(&out_path)?.to_string(),
-        processor_name: "asperitas".to_string(),
+        processor_name: processor.to_string(),
         params: case.params.clone(),
         automation: case
             .automation
@@ -217,12 +299,19 @@ fn render_case(case: &Case, base: &Path, tmp: &Path, index: usize) -> Result<Ren
     let out_path_s = path_str(&out_path)?;
     let (_, out_frames) = wav_io::read_wav(out_path_s)?;
     let (left, right): (Vec<f32>, Vec<f32>) = out_frames.iter().map(|f| (f[0], f[1])).unzip();
-    let output = media(
-        std::fs::read(&out_path).map_err(|e| format!("case '{name}': {e}"))?,
-        &left,
-    )?;
+    let wav = if pcm16 {
+        pcm16_wav(&left, &right)
+    } else {
+        std::fs::read(&out_path).map_err(|e| format!("case '{name}': {e}"))?
+    };
+    let output = media(wav, &left)?;
 
     let step_frames = match &automation_text {
+        Some(text) if processor == "resonator" => {
+            Automation::<ResonatorControls>::parse_for(text, REQUIRED_RATE)
+                .map_err(|e| format!("case '{name}': {e}"))?
+                .step_frames()
+        }
         Some(text) => Automation::parse(text, REQUIRED_RATE)
             .map_err(|e| format!("case '{name}': {e}"))?
             .step_frames(),
@@ -328,6 +417,31 @@ fn run_checks(left: &[f32], right: &[f32], dry: &[f32], step_frames: &[u64]) -> 
             pass: steps_pass,
         },
     ]
+}
+
+/// A stereo 16-bit PCM WAV at the review rate, samples rounded and clamped.
+fn pcm16_wav(left: &[f32], right: &[f32]) -> Vec<u8> {
+    let data_len = (left.len() * 4) as u32;
+    let mut w = Vec::with_capacity(44 + data_len as usize);
+    w.extend_from_slice(b"RIFF");
+    w.extend_from_slice(&(36 + data_len).to_le_bytes());
+    w.extend_from_slice(b"WAVEfmt ");
+    w.extend_from_slice(&16u32.to_le_bytes());
+    w.extend_from_slice(&1u16.to_le_bytes());
+    w.extend_from_slice(&2u16.to_le_bytes());
+    w.extend_from_slice(&REQUIRED_RATE.to_le_bytes());
+    w.extend_from_slice(&(REQUIRED_RATE * 4).to_le_bytes());
+    w.extend_from_slice(&4u16.to_le_bytes());
+    w.extend_from_slice(&16u16.to_le_bytes());
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&data_len.to_le_bytes());
+    for (l, r) in left.iter().zip(right) {
+        for s in [l, r] {
+            let q = (s.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+            w.extend_from_slice(&q.to_le_bytes());
+        }
+    }
+    w
 }
 
 fn media(wav: Vec<u8>, mono: &[f32]) -> Result<Media, String> {
@@ -441,7 +555,7 @@ fn media_html(label: &str, m: &Media) -> String {
     )
 }
 
-fn page_html(cases: &[Rendered]) -> String {
+fn page_html(cases: &[Rendered], responses: &[RenderedResponse]) -> String {
     let mut h = String::new();
     h.push_str(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
@@ -471,6 +585,7 @@ fn page_html(cases: &[Rendered]) -> String {
          .spec{width:100%;height:160px;display:block;border:1px solid var(--line);\
          image-rendering:auto}\
          a{color:var(--wave)}audio{width:100%}.note{color:var(--mute);font-size:.8rem;margin:4px 0}\
+         .resp{width:100%;height:auto;display:block;border:1px solid var(--line)}\
          pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:4px 0}\
          </style></head><body><main><h1>Asperitas review</h1>",
     );
@@ -485,6 +600,24 @@ fn page_html(cases: &[Rendered]) -> String {
         );
     }
     h.push_str("</table>");
+    if !responses.is_empty() {
+        h.push_str("<section id=\"responses\"><h2>Response</h2>");
+        for r in responses {
+            let _ = write!(
+                h,
+                "<div class=\"clip\"><h3>{}</h3><pre>{}</pre>\
+                 <img class=\"resp\" alt=\"impulse and frequency response\" \
+                 src=\"data:image/png;base64,{}\">\
+                 <p class=\"note\">Top: impulse response. Bottom: magnitude response, 20 Hz \
+                 to Nyquist; left red, right blue.</p><pre>{}</pre></div>",
+                escape(&r.name),
+                escape(&r.params),
+                b64(&r.png),
+                escape(&r.peaks)
+            );
+        }
+        h.push_str("</section>");
+    }
     for (i, c) in cases.iter().enumerate() {
         let _ = write!(
             h,
@@ -687,5 +820,116 @@ mod tests {
         .unwrap();
         assert!(!page.contains("FAILED"));
         assert!(page.contains("at scripted steps"));
+    }
+
+    #[test]
+    fn resonator_cases_render_from_params_and_automation() {
+        let dir = tempfile::tempdir().unwrap();
+        write_clip(&dir.path().join("a.wav"), 48_000, 0.5);
+        std::fs::write(
+            dir.path().join("k.txt"),
+            "0 root_hz=220 damping=0\n0.4 ramp damping=1\n",
+        )
+        .unwrap();
+        let page = page_for(
+            dir.path(),
+            "[[case]]\nname=\"p\"\nclip=\"a.wav\"\nprocessor=\"resonator\"\n\
+             params=[\"root_hz=220\"]\n\
+             [[case]]\nname=\"a\"\nclip=\"a.wav\"\nprocessor=\"resonator\"\n\
+             automation=\"k.txt\"\n",
+        )
+        .unwrap();
+        assert!(page.contains("params: root_hz=220"));
+        assert!(page.contains("0.4 ramp damping=1"));
+    }
+
+    #[test]
+    fn bad_processor_and_resonator_key_name_the_case() {
+        let dir = tempfile::tempdir().unwrap();
+        write_clip(&dir.path().join("a.wav"), 48_000, 0.5);
+        let bad_key = page_for(
+            dir.path(),
+            "[[case]]\nname=\"x\"\nclip=\"a.wav\"\nprocessor=\"resonator\"\nparams=[\"cutoff_hz=1\"]\n",
+        )
+        .unwrap_err();
+        assert!(
+            bad_key.contains("'x'") && bad_key.contains("cutoff_hz"),
+            "{bad_key}"
+        );
+        let bad_proc = page_for(
+            dir.path(),
+            "[[case]]\nname=\"x\"\nclip=\"a.wav\"\nprocessor=\"gain\"\n",
+        )
+        .unwrap_err();
+        assert!(
+            bad_proc.contains("'x'") && bad_proc.contains("processor"),
+            "{bad_proc}"
+        );
+    }
+
+    #[test]
+    fn response_section_embeds_the_plot_and_peaks() {
+        let dir = tempfile::tempdir().unwrap();
+        write_clip(&dir.path().join("a.wav"), 48_000, 0.5);
+        let page = page_for(
+            dir.path(),
+            "[[case]]\nname=\"c\"\nclip=\"a.wav\"\n\
+             [[response]]\nname=\"damped\"\nparams=[\"damping=1\"]\n",
+        )
+        .unwrap();
+        assert!(page.contains("<h2>Response</h2>"));
+        assert!(page.contains("damped") && page.contains("damping=1"));
+        assert!(page.contains("class=\"resp\""));
+        assert!(page.contains("partial expected_hz peak_hz"));
+
+        let bad = page_for(
+            dir.path(),
+            "[[case]]\nname=\"c\"\nclip=\"a.wav\"\n\
+             [[response]]\nname=\"r\"\nparams=[\"bogus=1\"]\n",
+        )
+        .unwrap_err();
+        assert!(
+            bad.contains("response 'r'") && bad.contains("bogus"),
+            "{bad}"
+        );
+        let dup = page_for(
+            dir.path(),
+            "[[case]]\nname=\"c\"\nclip=\"a.wav\"\n[[response]]\nname=\"r\"\n[[response]]\nname=\"r\"\n",
+        )
+        .unwrap_err();
+        assert!(dup.contains("twice"), "{dup}");
+    }
+
+    #[test]
+    fn pcm16_output_is_smaller_and_the_page_is_deterministic() {
+        let dir = tempfile::tempdir().unwrap();
+        write_clip(&dir.path().join("a.wav"), 48_000, 0.5);
+        let case = "[[case]]\nname=\"c\"\nclip=\"a.wav\"\nprocessor=\"resonator\"\n\
+                    [[response]]\nname=\"r\"\n";
+        let float = page_for(dir.path(), case).unwrap();
+        let pcm = page_for(dir.path(), &format!("output_format=\"pcm16\"\n{case}")).unwrap();
+        assert!(pcm.len() < float.len());
+        assert_eq!(
+            pcm,
+            page_for(dir.path(), &format!("output_format=\"pcm16\"\n{case}")).unwrap()
+        );
+        assert_eq!(float, page_for(dir.path(), case).unwrap());
+        let bad = page_for(dir.path(), &format!("output_format=\"mp3\"\n{case}")).unwrap_err();
+        assert!(bad.contains("output_format"), "{bad}");
+    }
+
+    #[test]
+    fn committed_resonator_manifest_parses_and_its_files_exist() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../audio/review");
+        let text = std::fs::read_to_string(dir.join("resonator.toml")).unwrap();
+        let m: Manifest = toml::from_str(&text).unwrap();
+        assert!(m.case.len() >= 12 && !m.response.is_empty());
+        for c in &m.case {
+            assert!(dir.join(&c.clip).is_file(), "{}", c.clip);
+            if let Some(a) = &c.automation {
+                let t = std::fs::read_to_string(dir.join(a)).unwrap();
+                Automation::<ResonatorControls>::parse_for(&t, REQUIRED_RATE).unwrap();
+            }
+        }
     }
 }

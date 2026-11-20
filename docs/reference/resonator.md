@@ -277,6 +277,9 @@ through the bank. The output is stereo at the input's rate. `--params` takes the
 `spread` and `excitation_preset`. Unnamed keys keep their default. An unknown key, a non-numeric
 value or a value outside the range is refused with a message naming the key; nothing is clamped.
 
+A page of rendered corpus clips, sweeps and response plots for listening away from the bench is
+built by `asperitas-cli review` ([review.md](review.md#resonator-review)).
+
 The `resonator_*` goldens in `audio/goldens` freeze this render for the default voicing and the
 extremes of damping and structure (see [audio/README.md](../../audio/README.md)).
 

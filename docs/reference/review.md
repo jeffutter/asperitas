@@ -19,9 +19,21 @@ manifest's directory.
 |-----|----------|---------|
 | `name` | yes | Shown on the page; must be unique. |
 | `clip` | yes | Input WAV, 48 kHz, mono or stereo, 16-bit PCM or 32-bit float. |
+| `processor` | no | `"asperitas"` (default) or `"resonator"`, as `process --processor`. The knob keys in `params` and `automation` are that processor's. |
 | `automation` | no | Knob automation file, grammar in [automation.md](automation.md). |
 | `params` | no | List of `key=value` knob settings, as `process --params`. Not with `automation`. |
 | `reference` | no | `"dry"` (the input clip) or the path of a 48 kHz WAV, such as a previous render. |
+
+Top-level keys, before the first table:
+
+| Key | Meaning |
+|-----|---------|
+| `output_format` | `"float32"` (default) embeds each render exactly as `process` writes it. `"pcm16"` embeds it as 16-bit PCM, half the size; it is for listening only, and the checks always run on the float render. |
+
+`[[response]]` tables add the resonator's impulse and frequency response, drawn as
+[analyze.md](analyze.md) draws it: `name` (unique), `params` (`key=value` resonator settings, as
+`process --params`) and optional `length_s`. The page shows each as an embedded PNG with its
+settings and the peaks report, after the summary table.
 
 A case with neither `automation` nor `params` renders with every knob at its default. The example
 manifest is [audio/review/example.toml](../../audio/review/example.toml) and runs on the committed
@@ -66,3 +78,18 @@ and listen.
 The whole page must stay under 14 MB (the artifact page limit is 16 MB); otherwise the command fails
 and suggests shorter clips or fewer cases. A 3 s corpus clip adds about 1.5 MB for its output
 (stereo float WAV, base64) plus a few hundred KB of plots.
+
+## Resonator review
+
+[audio/review/resonator.toml](../../audio/review/resonator.toml) is the resonator's manifest: each
+corpus clip dry and through the default voicing, a damping sweep and a structure sweep on each
+family's chord clip (driven by `audio/review/resonator-*-sweep.txt`), and response plots for the
+default voicing, damping 0 and 1, structure 0 and 1 and spread 0. It uses `output_format = "pcm16"`
+to stay under the size limit. Regenerate and open it after a voicing change:
+
+```bash
+cargo run --release -p asperitas-cli -- review audio/review/resonator.toml /private/tmp/resonator-review.html
+open /private/tmp/resonator-review.html
+```
+
+The build takes about 15 s in release and is deterministic: two runs give byte-identical pages.

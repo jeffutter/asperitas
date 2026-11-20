@@ -1,0 +1,2 @@
+0   root_hz=220 structure=0 damping=0.3  # pure harmonic series
+3.0 ramp structure=1                       # most stretched, inharmonic by the end
