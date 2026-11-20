@@ -5,8 +5,12 @@
 //! this crate's dependencies expresses a breakpoint list as `time [step|ramp] key=value ...`, and
 //! the grammar is four token kinds.
 
-use crate::asperitas::{Asperitas, Controls, ASPERITAS_PARAMS, BLOCK_FRAMES, KNOB_COUNT};
+use crate::asperitas::{Asperitas, Controls, ASPERITAS_PARAMS, BLOCK_FRAMES};
+use crate::param::ParamSpec;
 use crate::processor::{Frame, Processor};
+use crate::resonator_bank::Resonator;
+use crate::resonator_controls::{ResonatorControls, RESONATOR_CONTROL_PARAMS};
+use std::marker::PhantomData;
 
 /// Spacing of ramp samples in [`Automation::device_schedule`], a multiple of [`BLOCK_FRAMES`]:
 /// 10 ms at 48 kHz.
@@ -25,17 +29,106 @@ struct Breakpoint {
     ramp: bool,
 }
 
-/// A parsed automation file: per knob, breakpoints sorted by frame.
-#[derive(Clone, Debug)]
-pub struct Automation {
-    knobs: [Vec<Breakpoint>; KNOB_COUNT],
+/// A set of knobs an automation file can drive: a table of parameters, one normalised position per
+/// parameter, and the one translation from real-unit `key=value` pairs to positions.
+pub trait ControlSurface: Clone + Default {
+    /// The real-unit table, one entry per knob.
+    const PARAMS: &'static [ParamSpec];
+
+    /// Normalised knob positions, in table order.
+    fn positions(&self) -> &[f32];
+
+    /// Mutable normalised knob positions, in table order.
+    fn positions_mut(&mut self) -> &mut [f32];
+
+    /// Build from real-unit pairs; the error text names the problem.
+    fn from_real_values(values: &[(&str, f32)]) -> Result<Self, String>;
+
+    /// Whether the knob at `index` has no values between its settings, so a `ramp` has no meaning.
+    fn is_discrete(_index: usize) -> bool {
+        false
+    }
 }
 
-impl Automation {
-    /// Parse `text`, converting each time in seconds to the nearest frame at `sample_rate`.
-    /// Every problem is an error naming the line; nothing is clamped or skipped.
+impl ControlSurface for Controls {
+    const PARAMS: &'static [ParamSpec] = &ASPERITAS_PARAMS;
+
+    fn positions(&self) -> &[f32] {
+        &self.knobs
+    }
+
+    fn positions_mut(&mut self) -> &mut [f32] {
+        &mut self.knobs
+    }
+
+    fn from_real_values(values: &[(&str, f32)]) -> Result<Self, String> {
+        Controls::from_values(values).map_err(|e| e.to_string())
+    }
+}
+
+impl ControlSurface for ResonatorControls {
+    const PARAMS: &'static [ParamSpec] = &RESONATOR_CONTROL_PARAMS;
+
+    fn positions(&self) -> &[f32] {
+        &self.positions
+    }
+
+    fn positions_mut(&mut self) -> &mut [f32] {
+        &mut self.positions
+    }
+
+    fn from_real_values(values: &[(&str, f32)]) -> Result<Self, String> {
+        ResonatorControls::from_values(values).map_err(|e| e.to_string())
+    }
+
+    fn is_discrete(index: usize) -> bool {
+        RESONATOR_CONTROL_PARAMS[index].name == "excitation_preset"
+    }
+}
+
+/// A parsed automation file: per knob, breakpoints sorted by frame. `C` is the control surface
+/// the file drives; it is [`Controls`] unless named otherwise.
+#[derive(Clone, Debug)]
+pub struct Automation<C: ControlSurface = Controls> {
+    knobs: Vec<Vec<Breakpoint>>,
+    surface: PhantomData<fn() -> C>,
+}
+
+impl Automation<Controls> {
+    /// Parse a script for the low-pass and gain patch. See [`Automation::parse_for`].
     pub fn parse(text: &str, sample_rate: u32) -> Result<Self, String> {
-        let mut knobs: [Vec<Breakpoint>; KNOB_COUNT] = std::array::from_fn(|_| Vec::new());
+        Self::parse_for(text, sample_rate)
+    }
+
+    /// Process `frames` in place in blocks of [`BLOCK_FRAMES`] counted from the start of the clip,
+    /// applying the controls at each block's first frame. A breakpoint between two block starts
+    /// therefore takes effect at the next block start, as on the device. The effect should have
+    /// been built with `controls_at(0)`.
+    pub fn render(&self, effect: &mut Asperitas, frames: &mut [Frame]) {
+        self.for_each_block(frames, |controls, chunk| {
+            effect.set_controls(controls);
+            effect.process_block(chunk);
+        });
+    }
+}
+
+impl Automation<ResonatorControls> {
+    /// As [`Automation::<Controls>::render`](Automation::render), for the resonator bank. The bank
+    /// should have been built with the params of `controls_at(0)`.
+    pub fn render(&self, bank: &mut Resonator, frames: &mut [Frame]) {
+        self.for_each_block(frames, |controls, chunk| {
+            bank.set_params(&controls.params());
+            bank.process_block(chunk);
+        });
+    }
+}
+
+impl<C: ControlSurface> Automation<C> {
+    /// Parse `text` for the control surface `C`, converting each time in seconds to the nearest
+    /// frame at `sample_rate`. Every problem is an error naming the line; nothing is clamped or
+    /// skipped. A `ramp` on a discrete knob is an error.
+    pub fn parse_for(text: &str, sample_rate: u32) -> Result<Self, String> {
+        let mut knobs: Vec<Vec<Breakpoint>> = vec![Vec::new(); C::PARAMS.len()];
         let mut last_seconds = 0.0f64;
         for (idx, raw) in text.lines().enumerate() {
             let n = idx + 1;
@@ -99,20 +192,28 @@ impl Automation {
             if values.is_empty() {
                 return Err(format!("line {n}: no key=value after the time"));
             }
-            let controls = Controls::from_values(&values).map_err(|e| format!("line {n}: {e}"))?;
+            let controls = C::from_real_values(&values).map_err(|e| format!("line {n}: {e}"))?;
             for (key, _) in &values {
-                let knob = ASPERITAS_PARAMS
+                let knob = C::PARAMS
                     .iter()
                     .position(|spec| spec.name == *key)
-                    .expect("from_values accepted the key");
+                    .expect("from_real_values accepted the key");
+                if ramp && C::is_discrete(knob) {
+                    return Err(format!(
+                        "line {n}: {key} has no values between its settings and cannot ramp; use step"
+                    ));
+                }
                 knobs[knob].push(Breakpoint {
                     frame,
-                    position: controls.knobs[knob],
+                    position: controls.positions()[knob],
                     ramp,
                 });
             }
         }
-        Ok(Self { knobs })
+        Ok(Self {
+            knobs,
+            surface: PhantomData,
+        })
     }
 
     /// Frames, sorted and deduplicated, where a knob jumps instead of moving: every non-ramp
@@ -134,19 +235,19 @@ impl Automation {
     /// The controls in force at exactly `frame`, counted from the start of the clip. A knob holds
     /// its default until first named, holds its last value after its last breakpoint, and
     /// interpolates in knob position (what turning the knob does) toward a `ramp` breakpoint.
-    pub fn controls_at(&self, frame: u64) -> Controls {
-        let mut controls = Controls::default();
+    pub fn controls_at(&self, frame: u64) -> C {
+        let mut controls = C::default();
         for (knob, points) in self.knobs.iter().enumerate() {
             let next_idx = points.partition_point(|p| p.frame <= frame);
             let prev = match next_idx.checked_sub(1) {
                 Some(i) => points[i],
                 None => Breakpoint {
                     frame: 0,
-                    position: controls.knobs[knob],
+                    position: controls.positions()[knob],
                     ramp: false,
                 },
             };
-            controls.knobs[knob] = match points.get(next_idx) {
+            controls.positions_mut()[knob] = match points.get(next_idx) {
                 Some(next) if next.ramp => {
                     // next.frame > frame >= prev.frame, so the span is non-zero.
                     let t = (frame - prev.frame) as f32 / (next.frame - prev.frame) as f32;
@@ -158,25 +259,10 @@ impl Automation {
         controls
     }
 
-    /// Process `frames` in place in blocks of [`BLOCK_FRAMES`] counted from the start of the clip,
-    /// applying the controls at each block's first frame. A breakpoint between two block starts
-    /// therefore takes effect at the next block start, as on the device. The effect should have
-    /// been built with `controls_at(0)`.
-    pub fn render(&self, effect: &mut Asperitas, frames: &mut [Frame]) {
-        self.for_each_block(frames, |controls, chunk| {
-            effect.set_controls(controls);
-            effect.process_block(chunk);
-        });
-    }
-
     /// Split `frames` into blocks of [`BLOCK_FRAMES`] counted from the start of the clip and call
     /// `apply` with the controls in force at each block's first frame. This is the one block-grid
-    /// definition; [`render`](Self::render) and any other effect stage driven by the script use it.
-    pub fn for_each_block(
-        &self,
-        frames: &mut [Frame],
-        mut apply: impl FnMut(&Controls, &mut [Frame]),
-    ) {
+    /// definition; `render` and any other effect stage driven by the script use it.
+    pub fn for_each_block(&self, frames: &mut [Frame], mut apply: impl FnMut(&C, &mut [Frame])) {
         for (block, chunk) in frames.chunks_mut(BLOCK_FRAMES).enumerate() {
             apply(&self.controls_at((block * BLOCK_FRAMES) as u64), chunk);
         }
@@ -213,14 +299,14 @@ impl Automation {
                 prev_frame = p.frame;
             }
         }
-        let mut sent = self.controls_at(0).knobs;
+        let mut sent = self.controls_at(0).positions().to_vec();
         let mut out = Vec::new();
         for frame in frames {
-            let now = self.controls_at(frame).knobs;
-            for knob in 0..KNOB_COUNT {
-                if now[knob] != sent[knob] {
-                    sent[knob] = now[knob];
-                    out.push((frame, knob, now[knob]));
+            let now = self.controls_at(frame);
+            for (knob, &position) in now.positions().iter().enumerate() {
+                if position != sent[knob] {
+                    sent[knob] = position;
+                    out.push((frame, knob, position));
                 }
             }
         }
@@ -231,6 +317,7 @@ impl Automation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asperitas::KNOB_COUNT;
 
     const SR: u32 = 48_000;
 
@@ -442,6 +529,120 @@ mod tests {
         let a = Automation::parse(&text, SR).unwrap();
         for f in (0..2000).step_by(32) {
             assert_eq!(played_back(&a, f), a.controls_at(f).knobs, "frame {f}");
+        }
+    }
+
+    mod resonator {
+        use super::*;
+        use crate::resonator_bank::Resonator;
+        use crate::resonator_controls::ResonatorControls;
+
+        type RAuto = Automation<ResonatorControls>;
+
+        fn parse(text: &str) -> Result<RAuto, String> {
+            RAuto::parse_for(text, SR)
+        }
+
+        fn real(a: &RAuto, frame: u64) -> [f32; 5] {
+            a.controls_at(frame).values()
+        }
+
+        #[test]
+        fn step_hold_and_ramp_on_the_resonator_keys() {
+            let text = format!(
+                "0 root_hz=110 damping=0.2\n{} step structure=0.8\n{} ramp damping=0.6\n",
+                secs(480),
+                secs(1480)
+            );
+            let a = parse(&text).unwrap();
+            // Step: jumps on its frame, holds after.
+            assert!(near(real(&a, 479)[1], 0.0));
+            assert!(near(real(&a, 480)[1], 0.8));
+            assert!(near(real(&a, 100_000)[1], 0.8));
+            // Hold: root_hz is never named again.
+            for f in [0, 479, 480, 1480, 9999] {
+                assert!(near(real(&a, f)[0], 110.0), "root at {f}");
+            }
+            // Ramp: damping goes from 0.2 at 0 to 0.6 at 1480 (ramp from its previous breakpoint).
+            assert!(near(real(&a, 0)[2], 0.2));
+            assert!(near(real(&a, 740)[2], 0.4));
+            assert!(near(real(&a, 1480)[2], 0.6));
+            assert!(near(real(&a, 1481)[2], 0.6));
+        }
+
+        #[test]
+        fn root_ramp_is_geometric_and_the_preset_steps() {
+            let text = format!(
+                "0 root_hz=50 excitation_preset=1\n{} ramp root_hz=200\n{} excitation_preset=3\n",
+                secs(1000),
+                secs(600)
+            );
+            // Times must not decrease, so the preset step is on a later line.
+            assert!(parse(&text).is_err());
+            let text = format!(
+                "0 root_hz=50 excitation_preset=1\n{} excitation_preset=3\n{} ramp root_hz=200\n",
+                secs(500),
+                secs(1000)
+            );
+            let a = parse(&text).unwrap();
+            // The ramp runs from the previous root breakpoint (frame 0, 50 Hz), so its midpoint
+            // at frame 500 is the geometric mean 100 Hz.
+            assert!(near(real(&a, 500)[0], 100.0));
+            assert!(near(real(&a, 750)[0], 141.42), "{}", real(&a, 750)[0]);
+            assert_eq!(real(&a, 499)[4], 1.0);
+            assert_eq!(real(&a, 500)[4], 3.0);
+            assert_eq!(a.step_frames(), vec![500]);
+        }
+
+        #[test]
+        fn a_preset_ramp_and_unknown_keys_are_refused_with_the_line() {
+            let e = parse("0 excitation_preset=1\n1 ramp excitation_preset=2\n").unwrap_err();
+            assert!(
+                e.contains("line 2") && e.contains("excitation_preset") && e.contains("ramp"),
+                "{e}"
+            );
+            let e = parse("0 cutoff_hz=100\n").unwrap_err();
+            assert!(e.contains("line 1") && e.contains("cutoff_hz"), "{e}");
+            let e = parse("0 excitation_preset=1.5\n").unwrap_err();
+            assert!(
+                e.contains("line 1") && e.contains("excitation_preset"),
+                "{e}"
+            );
+        }
+
+        fn render_with(a: &RAuto) -> Vec<Frame> {
+            // The bank sums the channels, so the opposed-channel `input()` would be silent.
+            let mut frames: Vec<Frame> = input().iter().map(|f| [f[0], f[0]]).collect();
+            let mut bank = Resonator::default();
+            bank.set_sample_rate(SR as f32);
+            bank.set_params(&a.controls_at(0).params());
+            a.render(&mut bank, &mut frames);
+            frames
+        }
+
+        #[test]
+        fn a_breakpoint_between_block_starts_lands_on_the_next_block_start() {
+            let off_grid = parse(&format!("{} damping=1\n", secs(40))).unwrap();
+            let on_grid = parse(&format!("{} damping=1\n", secs(64))).unwrap();
+            let at_zero = parse("0 damping=1\n").unwrap();
+            assert_eq!(render_with(&off_grid), render_with(&on_grid));
+            assert_ne!(render_with(&off_grid), render_with(&at_zero));
+        }
+
+        #[test]
+        fn device_schedule_emits_updates_for_resonator_keys() {
+            let a = parse(&format!("{} structure=0.5\n", secs(40))).unwrap();
+            let s = a.device_schedule();
+            assert_eq!(s.len(), 1, "{s:?}");
+            assert_eq!((s[0].0, s[0].1), (64, 1));
+            assert_eq!(s[0].2, a.controls_at(64).positions[1]);
+            let p = parse(&format!(
+                "0 excitation_preset=1\n{} excitation_preset=2\n",
+                secs(100)
+            ))
+            .unwrap();
+            let s = p.device_schedule();
+            assert_eq!((s[0].0, s[0].1), (128, 4));
         }
     }
 }

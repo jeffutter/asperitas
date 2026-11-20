@@ -37,6 +37,17 @@ decrease, a token that is not `key=value`, a line with no key. Nothing is clampe
 1.5   ramp cutoff_hz=8000 gain_db=0
 ```
 
+## Resonator keys
+
+`Automation<ResonatorControls>` (parsed with `Automation::<ResonatorControls>::parse_for`) uses the
+same grammar, the same latch and the same device schedule for the resonator's controls. The keys
+are `root_hz`, `structure`, `damping`, `spread` and `excitation_preset`, with the ranges in
+[resonator.md](resonator.md#controls). `root_hz` ramps by equal ratios and the others linearly.
+`excitation_preset` is step-only: `ramp` on it is an error naming the line. `Automation::parse`
+still means the low-pass and gain patch. Wiring this into the CLI and live host is a later ticket
+(ASP-151.6 onward); today it is available to Rust callers, and `Automation::render` drives a
+`Resonator`.
+
 ## 32-frame latch
 
 The device applies its knob reading once before each block of 32 frames

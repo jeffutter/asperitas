@@ -233,3 +233,38 @@ under 0.08 per sample against a snapped-smoother negative control, and hostile p
 `processor_laws!` instantiation `resonator_bank_laws` and `bank_worst_case_stays_under_the_bound`
 in `crates/asperitas-dsp/tests/property_tests.rs` cover finite and bounded output (longest
 decay, both ends of structure, the whole root range, full-scale and non-finite input).
+
+## Controls
+
+`ResonatorControls` (`crates/asperitas-dsp/src/resonator_controls.rs`) is the one definition of the
+resonator's control surface, the counterpart of `Controls` for the low-pass and gain patch. Every
+surface (Pod, a future `--params`, `CTL SET`, automation) translates its input into it.
+`Controls`, `Asperitas` and `ASPERITAS_PARAMS` are unchanged.
+
+`RESONATOR_CONTROL_PARAMS` is the table, five entries in this order. The first four are copied
+from `RESONATOR_PARAMS`, so ranges are defined once.
+
+| key | unit | range | taper | default | Pod control |
+|-----|------|-------|-------|---------|-------------|
+| `root_hz` | Hz | 20 to 2000 | log | 110 | encoder |
+| `structure` | | 0 to 1 | linear | 0 | knob 1 |
+| `damping` | | 0 to 1 | linear | 0.5 | knob 2 |
+| `spread` | | 0 to 1 | linear | 1 | none |
+| `excitation_preset` | | 1 to 3 | linear | 1 | button 1 |
+
+Button 2 is reserved and has no control. Spread has no Pod control: on the Pod it stays at its
+default (widest) and can only be set by key.
+
+- Positions are normalised in `[0, 1]`. Out-of-range positions clamp; NaN falls back to the
+  parameter's default (`values()` and `params()`).
+- `from_values` takes real-unit `key=value` pairs and refuses, never clamps: an unknown key, a
+  non-finite value, a value outside the range, and a non-integer `excitation_preset`. Each message
+  names the parameter. Unnamed keys keep their default; a repeated key takes its last value.
+- `excitation_preset` is the 1-based index into `EXCITATION_PRESETS`. It is discrete: its position
+  rounds to the nearest preset, and button 1 cycles it.
+- `values()` gives the real-unit values for display; `params()` (also `From<&ResonatorControls>`)
+  gives the `ResonatorParams` for `Resonator::set_params`.
+- Encoder stepping rule: `with_root_offset(semitones, cents)` multiplies the root by
+  `2^((100 * semitones + cents) / 1200)` and clamps to 20 to 2000 Hz. A detent is one semitone, or
+  a number of cents while fine-tune is on.
+- Controls latch on the 32-frame block grid (`BLOCK_FRAMES`) exactly as for `Controls`.
