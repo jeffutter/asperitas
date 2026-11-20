@@ -3,8 +3,9 @@
 //! Run with: `cargo test -p asperitas-dsp`
 
 use asperitas_dsp::{
-    FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor, ResonatorVoice,
-    ResonatorVoiceParams, FILTER_PARAMS, GAIN_PARAMS, RESONATOR_VOICE_PARAMS,
+    Excitation, ExcitationParams, FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor,
+    ResonatorVoice, ResonatorVoiceParams, EXCITATION_PARAMS, FILTER_PARAMS, GAIN_PARAMS,
+    RESONATOR_VOICE_PARAMS,
 };
 use proptest::prelude::*;
 
@@ -358,6 +359,37 @@ processor_laws!(
     tail: |p: &ResonatorVoiceParams| {
         (2.5 * p.decay_s.max(0.001) * RATE) as usize + 10_000
     },
+);
+
+processor_laws!(
+    excitation_laws,
+    Excitation,
+    params: (
+        EXCITATION_PARAMS[0].min - 5.0..=EXCITATION_PARAMS[0].max * 1.5,
+        -0.2f32..=1.2,
+        EXCITATION_PARAMS[2].min - 0.1..=EXCITATION_PARAMS[2].max * 1.5,
+    )
+        .prop_map(|(low_cut_hz, transient, drive_limit)| ExcitationParams {
+            low_cut_hz,
+            transient,
+            drive_limit,
+        }),
+    hostile: (arb_hostile_f32(), arb_hostile_f32(), arb_hostile_f32()).prop_map(
+        |(low_cut_hz, transient, drive_limit)| ExcitationParams {
+            low_cut_hz,
+            transient,
+            drive_limit,
+        }
+    ),
+    // The limiter is last, so output stays under its ceiling. The ceiling starts at the default
+    // (the maximum of its range) and glides to a target clamped into the range, so it never
+    // exceeds the default ceiling. Independently, the high-pass output is at most twice the
+    // input peak (input minus a convex average of past inputs) and the transient stage at most
+    // triples it, and the limiter never raises a magnitude, so 6 x peak also bounds the output.
+    bound: |_: &ExcitationParams, peak: f32| (6.0 * peak).min(EXCITATION_PARAMS[2].max),
+    // The slowest tail is the 10 Hz high-pass state (about 764 samples per time constant); 20k
+    // samples is over 26 of them.
+    tail: |_: &ExcitationParams| 20_000,
 );
 
 proptest! {
