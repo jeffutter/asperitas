@@ -3,7 +3,8 @@
 //! Run with: `cargo test -p asperitas-dsp`
 
 use asperitas_dsp::{
-    FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor, FILTER_PARAMS, GAIN_PARAMS,
+    Excitation, ExcitationParams, FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor,
+    EXCITATION_PARAMS, FILTER_PARAMS, GAIN_PARAMS,
 };
 use proptest::prelude::*;
 
@@ -94,10 +95,10 @@ fn law_silence<P: Processor + Default>(
 ) -> Result<(), TestCaseError> {
     let mut p = configured::<P>(params);
     render_block(&mut p, history);
-    // The slowest tail is a 20 Hz one-pole (about 380 samples per time constant); 20k samples is
-    // over 50 of them.
-    let out = render_block(&mut p, &vec![Frame::default(); 20_000]);
-    for f in &out[10_000..] {
+    // The slowest tail is the excitation stage's 10 Hz high-pass state (about 764 samples per
+    // time constant); the check starts after 20k samples, over 26 of them, and runs 20k more.
+    let out = render_block(&mut p, &vec![Frame::default(); 40_000]);
+    for f in &out[20_000..] {
         prop_assert!(
             f[0].abs() < 1e-6 && f[1].abs() < 1e-6,
             "not silent: {:?}",
@@ -330,6 +331,34 @@ processor_laws!(
     // A one-pole low-pass is a convex average of past inputs, so it cannot exceed the largest
     // input magnitude.
     bound: |_: &FilterParams, peak: f32| peak,
+);
+
+processor_laws!(
+    excitation_laws,
+    Excitation,
+    params: (
+        EXCITATION_PARAMS[0].min - 5.0..=EXCITATION_PARAMS[0].max * 1.5,
+        -0.2f32..=1.2,
+        EXCITATION_PARAMS[2].min - 0.1..=EXCITATION_PARAMS[2].max * 1.5,
+    )
+        .prop_map(|(low_cut_hz, transient, drive_limit)| ExcitationParams {
+            low_cut_hz,
+            transient,
+            drive_limit,
+        }),
+    hostile: (arb_hostile_f32(), arb_hostile_f32(), arb_hostile_f32()).prop_map(
+        |(low_cut_hz, transient, drive_limit)| ExcitationParams {
+            low_cut_hz,
+            transient,
+            drive_limit,
+        }
+    ),
+    // The limiter is last, so output stays under its ceiling. The ceiling starts at the default
+    // (the maximum of its range) and glides to a target clamped into the range, so it never
+    // exceeds the default ceiling. Independently, the high-pass output is at most twice the
+    // input peak (input minus a convex average of past inputs) and the transient stage at most
+    // triples it, and the limiter never raises a magnitude, so 6 x peak also bounds the output.
+    bound: |_: &ExcitationParams, peak: f32| (6.0 * peak).min(EXCITATION_PARAMS[2].max),
 );
 
 proptest! {
