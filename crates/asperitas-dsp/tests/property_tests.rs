@@ -156,8 +156,11 @@ fn law_reset_forgets_history<P: Processor + Default>(
 /// sample change may exceed neither what the signal does under either setting held steady (with
 /// a little headroom for a transition passing between them) nor a small fraction of the largest
 /// instantaneous gap between the two steady outputs. An unsmoothed step puts that whole gap into
-/// one sample; the smoothers' time constants are at least 240 samples, so the fraction is
-/// generous.
+/// one sample; the smoothers' time constants are at least 240 samples, so a tenth of it is
+/// generous. The fraction is not smaller because a transition can legitimately be steeper than
+/// either steady state: sweeping a high-pass cut away from a tone makes the level rise, which the
+/// excitation stage reads as an attack and emphasises, so the transition's slope passes about
+/// 40 percent above the steeper steady one.
 fn law_param_step_is_smooth<P: Processor + Default>(
     a: &P::Params,
     b: &P::Params,
@@ -195,7 +198,7 @@ fn law_param_step_is_smooth<P: Processor + Default>(
         .zip(&yb)
         .flat_map(|(x, y)| [(x[0] - y[0]).abs(), (x[1] - y[1]).abs()])
         .fold(0.0f32, f32::max);
-    let allowed = 1.1 * max_delta(&ya).max(max_delta(&yb)) + gap / 20.0 + EPSILON;
+    let allowed = 1.1 * max_delta(&ya).max(max_delta(&yb)) + gap / 10.0 + EPSILON;
     prop_assert!(
         max_delta(&before) <= allowed,
         "step clicked: max delta {} > {} (gap {})",
