@@ -10,7 +10,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use asperitas_measure::param_step::detect_param_steps;
+use asperitas_measure::param_step::detect_param_steps_windowed;
 use base64::Engine as _;
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
@@ -363,11 +363,12 @@ fn run_checks(left: &[f32], right: &[f32], dry: &[f32], step_frames: &[u64]) -> 
         "silence".to_string()
     };
 
-    let steps = detect_param_steps(left);
-    let dry_steps = detect_param_steps(dry).count;
+    let window = asperitas_measure::thresholds::PARAM_STEP_MUSIC_WINDOW_SAMPLES;
+    let steps = detect_param_steps_windowed(left, window);
+    let dry_steps = detect_param_steps_windowed(dry, window).count;
     // Attacks in the material flag the detector too, so a step the input already has is not the
-    // render's doing. A step lands at the next block start, and the detector reports a few of its
-    // blocks later (or one block early, from the lag-2 comparison), hence the window. Positions
+    // render's doing. A step lands at the next block start, and the detector reports it at its
+    // largest level change, within a few hops of it either way, hence the window. Positions
     // are capped, so the excused count is matched events and the rest of `count` stays unexpected.
     let block = asperitas_measure::thresholds::PARAM_STEP_BLOCK_SAMPLES as u64;
     let early = 2 * block;

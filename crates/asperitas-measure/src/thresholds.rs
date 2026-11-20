@@ -114,18 +114,33 @@ pub const SPUR_REPORT_COUNT: usize = 8;
 /// Origin: set from the fixtures' measured worst spur (see `metrics.rs` tests).
 pub const SPUR_MAX_DBC: f64 = -80.0;
 
-/// Block length for the parameter-step envelope, samples (1 ms at 48 kHz, a whole number of
-/// periods of the rig's 1 kHz sine so a steady tone has constant block RMS).
+/// Hop between parameter-step comparisons, samples (1 ms at 48 kHz): the resolution of event
+/// positions and of the merge distance.
 ///
 /// Origin: calibrated against the fixtures.
 pub const PARAM_STEP_BLOCK_SAMPLES: usize = 48;
 
-/// Largest allowed change in block RMS between blocks one or two apart, dB.
+/// Comparison window for ringing musical material, samples (7 ms). Resonator renders of the
+/// corpus clips carry amplitude beating between partials that the shorter
+/// [`PARAM_STEP_WINDOW_SAMPLES`] reads as extra steps.
+///
+/// Origin: smallest window tried for which every case of `audio/review/resonator.toml` passes.
+pub const PARAM_STEP_MUSIC_WINDOW_SAMPLES: usize = 336;
+
+/// Largest allowed change in RMS between the windows before and after a hop, dB.
 ///
 /// Origin: set from `param_step.rs` tests: a 10.4 dB level change (`gain_db` 10.4) through the
-/// smoothed `Gain` (10 ms time constant) peaks at 2.8 dB over two blocks, the same change snapped
-/// (unsmoothed) reads 10.4 dB. 5 dB sits between with 1.5x margin either side.
+/// smoothed `Gain` (10 ms time constant) peaks at 3.9 dB, the same change snapped (unsmoothed)
+/// reads 10.2 dB, and steady decaying tones from 98 Hz to 1 kHz read at most 1.4 dB. 5 dB sits
+/// 2x below the snapped step, 1.3x above the smoothed one and 3.7x above steady tones; the
+/// smoothed margin is thin because a 10 ms ramp is genuinely fast against a window this short.
 pub const PARAM_STEP_MAX_DB: f64 = 5.0;
+
+/// Length of each of the two adjacent RMS windows compared at every hop, in samples (about 4.3 ms).
+/// About a cycle of a 230 Hz tone: long enough that steady tones from 98 Hz up read within about 1.5 dB, short enough that the ramp of a smoothed gain change reads below the limit (a longer window sees more of that ramp).
+///
+/// Origin: measured in `param_step.rs` tests across 110 Hz to 1 kHz tones.
+pub const PARAM_STEP_WINDOW_SAMPLES: usize = 208;
 
 /// Blocks quieter than this RMS (linear, full scale 1.0) are ignored, so a dB ratio against idle
 /// noise cannot read as a step. About 2 LSB of 16-bit, as [`SILENCE_LSB`].
