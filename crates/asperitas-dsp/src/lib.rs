@@ -10,6 +10,7 @@ pub mod param;
 pub mod pcm;
 pub mod processor;
 pub mod resonator;
+pub mod resonator_bank;
 mod smooth;
 
 pub use asperitas::{Asperitas, Controls, ASPERITAS_PARAMS, KNOB_COUNT};
@@ -19,3 +20,4 @@ pub use gain::{Gain, GainParams, GAIN_PARAMS};
 pub use param::{ParamSpec, Taper};
 pub use processor::{Frame, Processor};
 pub use resonator::{ResonatorVoice, ResonatorVoiceParams, RESONATOR_VOICE_PARAMS};
+pub use resonator_bank::{Resonator, ResonatorParams, BANK_GAIN, RESONATOR_PARAMS, VOICE_COUNT};

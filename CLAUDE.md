@@ -20,8 +20,8 @@ Crates (root workspace, `crates/`):
 - `asperitas-live` - real-time desktop runner of the effect over cpal (see
   [docs/reference/asperitas-live.md](docs/reference/asperitas-live.md)).
 
-The resonator parts in `asperitas-dsp` (the single tuned voice: parameters, formulation, bound; and
-the excitation stage) are described in [docs/reference/resonator.md](docs/reference/resonator.md).
+The resonator parts in `asperitas-dsp` (the single tuned voice: parameters, formulation, bound; the
+excitation stage; and the resonator bank that composes them with damping, structure and spread) are described in [docs/reference/resonator.md](docs/reference/resonator.md).
 
 Knob motion for offline renders (`asperitas-cli process --automation`) is defined in
 [docs/reference/automation.md](docs/reference/automation.md).

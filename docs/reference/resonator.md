@@ -1,7 +1,7 @@
 # Resonator
 
 The resonator work is split so each part can be judged and measured without the others. This page
-records the parts that exist.
+records the parts that exist: the voice, the excitation stage and the bank that composes them.
 
 ## Resonator voice
 
@@ -10,7 +10,7 @@ pitch when excited and decays over a set time. A resonator bank is built from ma
 a `Processor` (`no_std`, no allocation, no `Result`) exported from `asperitas-dsp` together with
 `ResonatorVoiceParams` and `RESONATOR_VOICE_PARAMS`.
 
-Out of scope: more than one voice, stereo, and any host wiring (CLI, live, rig, firmware). Excitation
+Out of scope here: more than one voice (see the bank below), stereo, and any host wiring (CLI, live, rig, firmware). Excitation
 shaping is the separate stage below.
 
 ### Parameters
@@ -138,3 +138,98 @@ From the tests in `excitation.rs` and `crates/asperitas-dsp/tests/property_tests
   magnitude. Property tests cover finite and bounded output, silence in and out, `process_block`
   equal to repeated `tick`, `reset` forgetting history, parameter steps without clicks, and hostile
   parameters and input.
+
+## Resonator bank
+
+Code: `crates/asperitas-dsp/src/resonator_bank.rs`, exported as `Resonator`, `ResonatorParams`,
+`RESONATOR_PARAMS`, `VOICE_COUNT` and `BANK_GAIN`. It is the effect itself: a `Processor`
+(`no_std`, no allocation, no `Result`) beside `Asperitas`, which is unchanged. The tuning model,
+voice count and default voicing follow `backlog/decisions/decision-001 - M5-resonator-tuning-voices-and-pod-mapping.md`:
+a root note plus a structure series, the root a plain input to the bank so a pitch tracker can
+later drive it, 8 voices, and a default voicing of A2, structure 0, damping 0.5, gentle excitation,
+wide spread. Not part of it: the knob mapping (`Controls`), host wiring, pitch tracking, modulation.
+
+### Signal flow
+
+1. The two input channels are averaged to one: `0.5 * (l + r)`.
+2. `Excitation` shapes it. The stage is stereo, so it is fed the mono signal on both channels and
+   channel 0 is taken; the second channel is wasted work, accepted to reuse the stage unchanged.
+3. Each of the 8 `ResonatorVoice`s rings from that signal (`tick_mono`).
+4. Each voice output is scaled by `BANK_GAIN` (2), a smoothed mute gain and an equal-power pan
+   gain, and summed into left and right.
+
+### Parameters
+
+`RESONATOR_PARAMS` is the only source of range, taper and default for the four bank fields. The
+excitation fields are the nested `ResonatorParams::excitation` and are described by
+`EXCITATION_PARAMS` above. NaN becomes the default and everything else clamps.
+
+| name        | unit | range     | taper  | default | meaning |
+|-------------|------|-----------|--------|---------|---------|
+| `root_hz`   | Hz   | 20 - 2000 | log    | 110     | pitch of voice 1 (110 Hz is A2); the processor holds 1 Hz - 20 kHz |
+| `structure` | -    | 0 - 1     | linear | 0       | 0 pure harmonic series, 1 most stretched (inharmonic) |
+| `damping`   | -    | 0 - 1     | linear | 0.5     | higher is a shorter, darker ring |
+| `spread`    | -    | 0 - 1     | linear | 1       | 0 mono, 1 widest placement; smoothed over 10 ms |
+
+### Tuning model
+
+Voice `n` (1 to 8) rings at `root * n * sqrt(1 + B * (n^2 - 1))` with `B = structure * 0.02`. This
+is the stiff-string stretch of a harmonic series: structure 0 gives `n * root`; at structure 1
+partial 8 sits at about 12 times the root instead of 8, and the root itself never moves. It is a
+single smooth control that goes from a pure series to a bell-like one. A partial above 0.49 of the
+sample rate has its gain glided to zero (10 ms) instead of stacking at the voice's pitch ceiling.
+Pitch changes are smoothed by the voices (`ln(pitch)`, 10 ms).
+
+### Damping
+
+Root T60 is `10 s * 0.01^damping`: 10 s at 0, 1 s at 0.5 (the default), 0.1 s at 1. Partial `n`
+rings for the root T60 divided by `1 + 0.5 * damping * (n - 1)`, so the more the bank is damped
+the sooner its higher partials die: the tail is shorter and darker together. At damping 0 every
+partial rings 10 s. `ResonatorParams::root_decay_s` gives the root T60. Decay changes are
+smoothed by the voices (`ln(decay)`, 10 ms).
+
+### Spread
+
+Voice `i` (0-based) sits at pan `(-1)^(i+1) * (i + 1) / 8`: alternating left and right, the root
+at -0.125 and the highest partial at +1 (hard right). The effective pan is that times `spread`.
+Gains are `cos` and `sin` of `pi/4 * (pan + 1)`, evaluated as `(cos t -/+ sin t) / sqrt(2)` with
+`t = pi/4 * pan`, so equal power at any pan and, at pan 0, one expression for both channels:
+spread 0 gives left equal to right bit for bit. Pan gains are recomputed only when the smoothed
+spread changes.
+
+### Makeup gain and bound
+
+A voice is unit gain at its resonance and its impulse response is small (see Bound above), so the
+bank applies `BANK_GAIN = 2`, which also returns the 3 dB the centre of the field loses to equal
+power. The bound is
+
+```
+|out| <= BANK_GAIN * VOICE_COUNT * min(2.0, 6 * input_peak)
+```
+
+(a voice never exceeds its input, an equal-power gain never exceeds 1, the excitation output never
+exceeds `min(drive_limit_max, 6 * peak)`): 32 for a full-scale input. It holds while parameters
+glide. It is a bound, not a level.
+
+### Cost
+
+`cargo run --release -p asperitas-dsp --example bank_cost` times `process_block` over 32 frames.
+Host measurement (not the Cortex-M7; the device check is the budget check on the rig, with the
+decision record's target of at most 25 % of the 667 us block, about 165 us):
+
+| case | per 32-frame block | share of 667 us |
+|------|--------------------|-----------------|
+| settled params, default voicing | 2.14 us | 0.3 % |
+| params moved every block (every voice recomputes `exp`, `sin`, `cos` every sample) | 8.92 us | 1.3 % |
+
+### Tests
+
+Unit tests in `resonator_bank.rs`: the ring pitch of every partial at structure 0 and 1 (within
+0.5 %), the damping direction with a swapped negative control, the default one-second root ring,
+spread 0 giving identical channels and spread 1 putting voice 8 only on the right (with the
+spread 0 negative control), muting above the pitch ceiling, silence after the tail, `reset`
+idempotence and determinism, `process_block` equal to repeated `tick`, a parameter step
+under 0.08 per sample against a snapped-smoother negative control, and hostile parameters. The
+`processor_laws!` instantiation `resonator_bank_laws` and `bank_worst_case_stays_under_the_bound`
+in `crates/asperitas-dsp/tests/property_tests.rs` cover finite and bounded output (longest
+decay, both ends of structure, the whole root range, full-scale and non-finite input).

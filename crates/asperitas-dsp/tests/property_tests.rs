@@ -4,8 +4,8 @@
 
 use asperitas_dsp::{
     Excitation, ExcitationParams, FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor,
-    ResonatorVoice, ResonatorVoiceParams, EXCITATION_PARAMS, FILTER_PARAMS, GAIN_PARAMS,
-    RESONATOR_VOICE_PARAMS,
+    Resonator, ResonatorParams, ResonatorVoice, ResonatorVoiceParams, BANK_GAIN, EXCITATION_PARAMS,
+    FILTER_PARAMS, GAIN_PARAMS, RESONATOR_PARAMS, RESONATOR_VOICE_PARAMS, VOICE_COUNT,
 };
 use proptest::prelude::*;
 
@@ -391,6 +391,116 @@ processor_laws!(
     // samples is over 26 of them.
     tail: |_: &ExcitationParams| 20_000,
 );
+
+/// Bank params in and a little beyond the table range, the root past the pitch ceiling included.
+fn arb_bank_params() -> impl Strategy<Value = ResonatorParams> {
+    (
+        RESONATOR_PARAMS[0].min - 5.0..=RESONATOR_PARAMS[0].max * 4.0,
+        -0.2f32..=1.2,
+        -0.2f32..=1.2,
+        -0.2f32..=1.2,
+        (
+            EXCITATION_PARAMS[0].min - 5.0..=EXCITATION_PARAMS[0].max * 1.5,
+            -0.2f32..=1.2,
+            EXCITATION_PARAMS[2].min - 0.1..=EXCITATION_PARAMS[2].max * 1.5,
+        ),
+    )
+        .prop_map(
+            |(root_hz, structure, damping, spread, (low_cut_hz, transient, drive_limit))| {
+                ResonatorParams {
+                    root_hz,
+                    structure,
+                    damping,
+                    spread,
+                    excitation: ExcitationParams {
+                        low_cut_hz,
+                        transient,
+                        drive_limit,
+                    },
+                }
+            },
+        )
+}
+
+/// Bank params that are NaN, infinite or extreme in every field.
+fn arb_hostile_bank_params() -> impl Strategy<Value = ResonatorParams> {
+    (
+        arb_hostile_f32(),
+        arb_hostile_f32(),
+        arb_hostile_f32(),
+        arb_hostile_f32(),
+        (arb_hostile_f32(), arb_hostile_f32(), arb_hostile_f32()),
+    )
+        .prop_map(
+            |(root_hz, structure, damping, spread, (low_cut_hz, transient, drive_limit))| {
+                ResonatorParams {
+                    root_hz,
+                    structure,
+                    damping,
+                    spread,
+                    excitation: ExcitationParams {
+                        low_cut_hz,
+                        transient,
+                        drive_limit,
+                    },
+                }
+            },
+        )
+}
+
+/// The documented bank bound: every voice is bounded by its input, an equal-power gain is at most
+/// one, and the excitation output is at most `min(drive_limit_max, 6 * peak)`.
+fn bank_bound(peak: f32) -> f32 {
+    BANK_GAIN * VOICE_COUNT as f32 * (6.0 * peak).min(EXCITATION_PARAMS[2].max)
+}
+
+processor_laws!(
+    resonator_bank_laws,
+    Resonator,
+    params: arb_bank_params(),
+    hostile: arb_hostile_bank_params(),
+    bound: |_: &ResonatorParams, peak: f32| bank_bound(peak),
+    // Silent after two and a half root decays (the root rings longest) plus the excitation
+    // high-pass settling, with margin.
+    tail: |p: &ResonatorParams| (2.5 * p.root_decay_s() * RATE) as usize + 20_000,
+);
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    /// The worst case: longest decay and heaviest drive at either end of structure and across the
+    /// root range, with full-scale and hostile input, stays finite and under the bound.
+    #[test]
+    fn bank_worst_case_stays_under_the_bound(
+        root_hz in RESONATOR_PARAMS[0].min..=RESONATOR_PARAMS[0].max,
+        structure in prop_oneof![Just(0.0f32), Just(1.0f32)],
+        spread in prop_oneof![Just(0.0f32), Just(1.0f32)],
+        sign in prop_oneof![Just(1.0f32), Just(-1.0f32)],
+        phase in 0usize..64,
+        hostile in prop::bool::ANY,
+    ) {
+        let params = ResonatorParams {
+            root_hz,
+            structure,
+            damping: RESONATOR_PARAMS[2].min,
+            spread,
+            excitation: ExcitationParams {
+                transient: 1.0,
+                ..ExcitationParams::default()
+            },
+        };
+        let mut r = Resonator::new(RATE, &params);
+        let limit = bank_bound(1.0) * (1.0 + EPSILON);
+        for n in 0..20_000usize {
+            // Full-scale square wave, sometimes with a non-finite sample mixed in.
+            let v = if (n + phase) / 16 % 2 == 0 { sign } else { -sign };
+            let v = if hostile && n % 97 == 0 { f32::NAN } else { v };
+            let f = r.tick([v, v]);
+            prop_assert!(f[0].is_finite() && f[1].is_finite());
+            prop_assert!(f[0].abs() <= limit && f[1].abs() <= limit, "{:?} > {}", f, limit);
+        }
+    }
+}
 
 proptest! {
     #[test]
