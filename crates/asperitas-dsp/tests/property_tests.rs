@@ -3,7 +3,8 @@
 //! Run with: `cargo test -p asperitas-dsp`
 
 use asperitas_dsp::{
-    FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor, FILTER_PARAMS, GAIN_PARAMS,
+    FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor, ResonatorVoice,
+    ResonatorVoiceParams, FILTER_PARAMS, GAIN_PARAMS, RESONATOR_VOICE_PARAMS,
 };
 use proptest::prelude::*;
 
@@ -91,13 +92,14 @@ fn law_finite_and_bounded<P: Processor + Default>(
 fn law_silence<P: Processor + Default>(
     params: &P::Params,
     history: &[Frame],
+    tail: impl Fn(&P::Params) -> usize,
 ) -> Result<(), TestCaseError> {
     let mut p = configured::<P>(params);
     render_block(&mut p, history);
-    // The slowest tail is a 20 Hz one-pole (about 380 samples per time constant); 20k samples is
-    // over 50 of them.
-    let out = render_block(&mut p, &vec![Frame::default(); 20_000]);
-    for f in &out[10_000..] {
+    // Wait `tail` samples, then require silence over the next `tail`.
+    let tail = tail(params);
+    let out = render_block(&mut p, &vec![Frame::default(); 2 * tail]);
+    for f in &out[tail..] {
         prop_assert!(
             f[0].abs() < 1e-6 && f[1].abs() < 1e-6,
             "not silent: {:?}",
@@ -242,8 +244,9 @@ fn arb_hostile_frame() -> impl Strategy<Value = Frame> {
 /// - `params`: strategy for params in and a little beyond the knob range.
 /// - `hostile`: strategy for params that include NaN, infinities and extremes.
 /// - `bound`: `|params, input_peak| -> f32`, the largest output magnitude the processor may make.
+/// - `tail`: `|params| -> usize`, samples after which a decayed tail must be silent.
 macro_rules! processor_laws {
-    ($m:ident, $ty:ty, params: $params:expr, hostile: $hostile:expr, bound: $bound:expr $(,)?) => {
+    ($m:ident, $ty:ty, params: $params:expr, hostile: $hostile:expr, bound: $bound:expr, tail: $tail:expr $(,)?) => {
         mod $m {
             use super::*;
 
@@ -255,7 +258,7 @@ macro_rules! processor_laws {
 
                 #[test]
                 fn silence_in_silence_out(params in $params, history in arb_block()) {
-                    law_silence::<$ty>(&params, &history)?;
+                    law_silence::<$ty>(&params, &history, $tail)?;
                 }
 
                 #[test]
@@ -318,6 +321,7 @@ processor_laws!(
     bound: |p: &GainParams, peak: f32| {
         peak * libm::powf(10.0, p.gain_db / 20.0).clamp(0.0, 8192.0).max(1.0)
     },
+    tail: |_: &GainParams| 10_000,
 );
 
 processor_laws!(
@@ -330,6 +334,30 @@ processor_laws!(
     // A one-pole low-pass is a convex average of past inputs, so it cannot exceed the largest
     // input magnitude.
     bound: |_: &FilterParams, peak: f32| peak,
+    // The slowest tail is a 20 Hz one-pole (about 380 samples per time constant); 10k samples is
+    // over 25 of them.
+    tail: |_: &FilterParams| 10_000,
+);
+
+processor_laws!(
+    resonator_laws,
+    ResonatorVoice,
+    // Decay 0 and pitch above Nyquist are included: they are sanitised, not hostile.
+    params: (
+        RESONATOR_VOICE_PARAMS[0].min..=RESONATOR_VOICE_PARAMS[0].max * 1.5,
+        0.0f32..=RESONATOR_VOICE_PARAMS[1].max * 1.5,
+    )
+        .prop_map(|(pitch_hz, decay_s)| ResonatorVoiceParams { pitch_hz, decay_s }),
+    hostile: (arb_hostile_f32(), arb_hostile_f32())
+        .prop_map(|(pitch_hz, decay_s)| ResonatorVoiceParams { pitch_hz, decay_s }),
+    // The state is a contraction by r < 1 plus (1 - r) times the input, so it never exceeds the
+    // input peak.
+    bound: |_: &ResonatorVoiceParams, peak: f32| peak,
+    // Silent after two decay times (-120 dB), with margin. A decay under the 1 ms floor is held
+    // at the floor.
+    tail: |p: &ResonatorVoiceParams| {
+        (2.5 * p.decay_s.max(0.001) * RATE) as usize + 10_000
+    },
 );
 
 proptest! {
