@@ -145,12 +145,15 @@ A `cpal`-backed live host so sound design stops requiring a flash cycle. Scope:
 A resonator `Processor` (comb/bandpass bank, excitation shaping, damping and structure controls,
 stereo spread) with its own `Params`, added beside `Asperitas` rather than replacing it. Golden
 regression tests against the committed corpus; impulse and frequency response output from the CLI
-or `asperitas-measure` to see what the bank does. The knob-to-parameter mapping for the Pod's two
-knobs and encoder is an owner decision.
+or `asperitas-measure` to see what the bank does. The tuning model, voice budget, Pod mapping and
+default voicing are decided in
+[decision-001](../backlog/decisions/decision-001%20-%20M5-resonator-tuning-voices-and-pod-mapping.md).
 
 ### M6 - Musical interactivity
 Envelope follower and the smoothed random-walk modulation source, modulating resonator
-parameters. This is what separates the project from a static filter bank.
+parameters. This is what separates the project from a static filter bank. Pitch tracking from the
+input, driving the resonator's root note, is the owner's end goal for the tuning model and belongs
+here (see decision-001).
 
 ### M7 - Polish and hardware
 CPU-cost harness and headroom work, preset save/recall to QSPI flash, and only then enclosure,
