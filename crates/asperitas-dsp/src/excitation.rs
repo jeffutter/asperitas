@@ -18,7 +18,7 @@
 use crate::envelope::EnvelopeFollower;
 use crate::param::{ParamSpec, Taper};
 use crate::processor::{Frame, Processor};
-use crate::smooth::{sanitize, Smoother};
+use crate::smooth::{clean, sanitize, Smoother};
 use libm::{copysignf, expf as exp, fabsf, logf as ln, tanhf};
 
 /// Parameter table for [`Excitation`]; the only source of its ranges, tapers and defaults.
@@ -103,15 +103,6 @@ impl Default for ExcitationParams {
             transient: EXCITATION_PARAMS[1].default,
             drive_limit: EXCITATION_PARAMS[2].default,
         }
-    }
-}
-
-/// NaN becomes the spec's default and everything else clamps to its range.
-fn clean(v: f32, spec: &ParamSpec) -> f32 {
-    if v.is_nan() {
-        spec.default
-    } else {
-        v.clamp(spec.min, spec.max)
     }
 }
 

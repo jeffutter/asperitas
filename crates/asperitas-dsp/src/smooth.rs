@@ -18,6 +18,7 @@
 //!
 //! Time constants live next to the processor that uses them as a named `SMOOTH_MS` constant.
 
+use crate::param::ParamSpec;
 use libm::expf as exp;
 
 /// Magnitudes below this are flushed to zero. It is far below any audible level (-600 dB
@@ -35,6 +36,15 @@ pub(crate) fn sanitize(x: f32) -> f32 {
         x
     } else {
         0.0
+    }
+}
+
+/// NaN becomes the spec's default and everything else clamps to its range.
+pub(crate) fn clean(v: f32, spec: &ParamSpec) -> f32 {
+    if v.is_nan() {
+        spec.default
+    } else {
+        v.clamp(spec.min, spec.max)
     }
 }
 

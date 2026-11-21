@@ -169,6 +169,45 @@ that window. Property tests cover finite, non-negative output no larger than the
 part in a million of f32 rounding) for any parameters and any input including NaN and infinities,
 `process_block` equal to repeated `tick`, and an idempotent `reset`.
 
+## Random walk
+
+Code: `crates/asperitas-dsp/src/random_walk.rs`, exported as `RandomWalk`, `RandomWalkParams` and
+`RANDOM_WALK_PARAMS`. A mono, `no_std`, allocation-free slowly wandering control value: a
+modulation source, not a `Processor`. It is not routed to any parameter yet.
+
+The walk moves between random targets in -1..1. A phase advances by `rate_hz / sample_rate` per
+sample; the output is `from + (to - from) * smoothstep(phase)`, and when the phase passes 1 the
+remainder is carried, `from` becomes `to` and a new target is drawn. Smoothstep has zero slope at
+both ends, so segments join without corners.
+
+| Name | Unit | Range | Taper | Default |
+|------|------|-------|-------|---------|
+| `rate_hz` | Hz (targets per second) | 0.01 - 20 | log | 0.5 |
+
+NaN falls to the default; others clamp. The seed is a `new(sample_rate_hz, seed, &params)` argument,
+not a parameter. `tick`, `process_block(&mut [f32])`, `value`, `reset`, `max_step`, `set_params`
+and `set_sample_rate` make up the interface; `set_params` and `set_sample_rate` commute.
+
+- Range: the output is a convex combination of two targets in -1..1, so it stays in -1..1 for any
+  parameters.
+- Step bound: consecutive samples differ by at most `3 * rate_hz / sample_rate` (`max_step()`;
+  smoothstep's slope is at most 1.5 and two targets are at most 2 apart). At 20 Hz that is 0.0014
+  at 44.1 kHz and 0.00125 at 48 kHz, small enough not to click a smoothed parameter.
+- Determinism: all random state is `u32` moved with wrapping integer operations and a draw becomes
+  a float by an exact 24-bit conversion, so a seed gives the same bits on host and device, for any
+  split of the samples into blocks. `reset()` restores exactly what `new()` built, the value 0 and
+  the start of the seed's sequence. Different seeds give different sequences.
+- PRNG: the MurmurHash3 32-bit finalizer scrambles the seed (neighbouring seeds are unrelated and
+  seed 0 is valid), then xorshift32 (13, 17, 5) draws the targets. `asperitas-dsp` depends only on
+  `libm`, so no generator crate was present to reuse.
+
+Measured (`random_walk.rs` tests): the mean over 8 seeds is within 0.05 of 0 at 44.1 and 48 kHz. The
+time for the normalised autocorrelation to fall below 1/e is 76.5 ms at 10 Hz and 38.2 ms at 20 Hz,
+identical at 44.1 and 48 kHz to within 0.1 %, so it scales as `0.765 / rate_hz` (the tests allow
+10 %). Property tests cover finite output in -1..1 and the step bound for any seed, rate (including
+hostile values) and sample rate, `process_block` equal to repeated `tick` for any split, and `reset`
+replaying the start.
+
 ## Resonator bank
 
 Code: `crates/asperitas-dsp/src/resonator_bank.rs`, exported as `Resonator`, `ResonatorParams`,

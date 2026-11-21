@@ -15,7 +15,7 @@
 //! `docs/reference/resonator.md`.
 
 use crate::param::{ParamSpec, Taper};
-use crate::smooth::sanitize;
+use crate::smooth::{clean, sanitize};
 use libm::{expf as exp, fabsf};
 
 /// Parameter table for [`EnvelopeFollower`]; the only source of its ranges, tapers and defaults.
@@ -55,15 +55,6 @@ impl Default for EnvelopeParams {
             attack_ms: ENVELOPE_PARAMS[0].default,
             release_ms: ENVELOPE_PARAMS[1].default,
         }
-    }
-}
-
-/// NaN becomes the spec's default and everything else clamps to its range.
-fn clean(v: f32, spec: &ParamSpec) -> f32 {
-    if v.is_nan() {
-        spec.default
-    } else {
-        v.clamp(spec.min, spec.max)
     }
 }
 

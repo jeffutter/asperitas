@@ -4,9 +4,10 @@
 
 use asperitas_dsp::{
     EnvelopeFollower, EnvelopeParams, Excitation, ExcitationParams, FilterParams, Frame, Gain,
-    GainParams, OnePoleLowPass, Processor, Resonator, ResonatorParams, ResonatorVoice,
-    ResonatorVoiceParams, BANK_GAIN, ENVELOPE_PARAMS, EXCITATION_PARAMS, FILTER_PARAMS,
-    GAIN_PARAMS, RESONATOR_PARAMS, RESONATOR_VOICE_PARAMS, VOICE_COUNT,
+    GainParams, OnePoleLowPass, Processor, RandomWalk, RandomWalkParams, Resonator,
+    ResonatorParams, ResonatorVoice, ResonatorVoiceParams, BANK_GAIN, ENVELOPE_PARAMS,
+    EXCITATION_PARAMS, FILTER_PARAMS, GAIN_PARAMS, RANDOM_WALK_PARAMS, RESONATOR_PARAMS,
+    RESONATOR_VOICE_PARAMS, VOICE_COUNT,
 };
 use proptest::prelude::*;
 
@@ -610,6 +611,59 @@ proptest! {
         a.reset();
         prop_assert_eq!(a.value().to_bits(), once.value().to_bits());
         prop_assert_eq!(a.value(), 0.0);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Random walk (a mono control source, not a Processor)
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn random_walk_is_finite_in_range_and_step_bounded(
+        seed in any::<u32>(),
+        rate in prop_oneof![
+            RANDOM_WALK_PARAMS[0].min..=RANDOM_WALK_PARAMS[0].max,
+            Just(RANDOM_WALK_PARAMS[0].max),
+            arb_hostile_f32(),
+        ],
+        fs in prop_oneof![Just(44_100.0f32), Just(48_000.0f32), 8_000.0f32..=192_000.0],
+    ) {
+        let mut w = RandomWalk::new(fs, seed, &RandomWalkParams { rate_hz: rate });
+        let bound = w.max_step();
+        let mut prev = w.value();
+        for _ in 0..4000 {
+            let y = w.tick();
+            prop_assert!(y.is_finite() && (-1.0..=1.0).contains(&y), "y = {}", y);
+            // Slack for f32 rounding in the interpolation.
+            prop_assert!((y - prev).abs() <= bound * 1.0001 + 1e-6, "step {} bound {}", (y - prev).abs(), bound);
+            prev = y;
+        }
+    }
+
+    #[test]
+    fn random_walk_block_equals_ticks_for_any_split(
+        seed in any::<u32>(),
+        rate in RANDOM_WALK_PARAMS[0].min..=RANDOM_WALK_PARAMS[0].max,
+        splits in prop::collection::vec(1usize..700, 1..8),
+    ) {
+        let mut a = RandomWalk::new(RATE, seed, &RandomWalkParams { rate_hz: rate });
+        let mut b = a.clone();
+        for len in splits {
+            let mut out = vec![0.0f32; len];
+            a.process_block(&mut out);
+            for o in &out {
+                prop_assert_eq!(b.tick().to_bits(), o.to_bits());
+            }
+        }
+        a.reset();
+        let mut fresh = RandomWalk::new(RATE, seed, &RandomWalkParams { rate_hz: rate });
+        // Same rate in force, so reset replays the start of the sequence.
+        for _ in 0..300 {
+            prop_assert_eq!(a.tick().to_bits(), fresh.tick().to_bits());
+        }
     }
 }
 
