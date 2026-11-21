@@ -29,6 +29,10 @@ log-usb = ["asperitas-logging/log-usb"]
 # no pipe, no drain task. See docs/reference/flashing.md ("ST-Link probe") and
 # docs/investigations/rtt-and-dcache.md.
 log-defmt = ["asperitas-logging/log-defmt", "dep:defmt-rtt"]
+# Run the resonator in `main` with the Pod mapping (docs/reference/daisy-pod.md, "Resonator mapping
+# as built") instead of the low-pass and gain patch. Additive and never in `default`; the effect is
+# chosen at build time so the patch build is untouched and the device has no boot-time selection.
+resonator = []
 # Stimulus generators for `rig`, mutually exclusive by a `const` assert in `src/bin/rig/generator.rs`.
 #
 # None of them belongs in `default`: `--features seed3,stim-ess` adds to the defaults rather than

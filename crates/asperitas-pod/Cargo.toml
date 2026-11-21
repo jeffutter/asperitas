@@ -15,9 +15,9 @@ embassy-time = { version = "0.5", default-features = false }
 # pod-hw dependencies — versions must match daisy-embassy
 embassy-stm32 = { version = "0.6.0", optional = true, default-features = false, features = ["stm32h750ib"] }
 
-[dev-dependencies]
-# Real smoothed parameter for the knob_override upstream-of-smoothing test.
+# The resonator's control surface, which the Pod mapping translates onto.
 asperitas-dsp = { path = "../asperitas-dsp" }
+libm = "0.2"
 
 # Inherit the workspace rustdoc denies (see root Cargo.toml).
 [lints]

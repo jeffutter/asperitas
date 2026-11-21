@@ -31,3 +31,7 @@ pub mod ticker_guard;
 
 // Host override of knob values, upstream of DSP smoothing. Pure logic, host-testable.
 pub mod knob_override;
+
+// The Pod's mapping onto the resonator's controls and the two LEDs' colours. Pure logic,
+// host-testable.
+pub mod resonator_surface;

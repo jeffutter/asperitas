@@ -31,6 +31,8 @@
 # layout     rtt  features                              tag       env                         bins                    actions
 internal     0    seed3                                 -         -                           *,-rig                  build
 internal     0    seed3                                 -         -                           *                       clippy
+internal     0    seed3,resonator                       -         -                           main                    build,clippy
+internal     1    seed3,log-defmt,resonator             -         -                           main                    build,grade,clippy
 internal     1    seed3,log-defmt                       -         -                           *                       build,grade,clippy
 
 bootloaded   0    seed3                                 -         -                           blinky,main,rig         build,grade

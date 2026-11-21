@@ -121,6 +121,12 @@ impl Led2 {
         }
     }
 
+    /// Set the channels directly; `true` lights the channel. For a caller that already holds
+    /// the three flags (see `asperitas_pod::resonator_surface::Rgb`).
+    pub fn set_channels(&mut self, red: bool, green: bool, blue: bool) {
+        self.led.set_channels(red, green, blue);
+    }
+
     /// Set the LED colour.
     ///
     /// Immediately drives the pins - does not require any background task.

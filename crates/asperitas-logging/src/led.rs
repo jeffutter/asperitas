@@ -84,6 +84,22 @@ static mut BOOT_LED_REF: *mut BootLed = core::ptr::null_mut();
 /// Global atomic state — read by blink_task, written by main() and panic_handler.
 static LED_STATE: AtomicU32 = AtomicU32::new(0); // 0 = PreInit (default)
 
+/// Channels [`LedState::Running`] shows, packed as red = bit 2, green = bit 1, blue = bit 0.
+/// Steady green until a binary calls [`set_user_colour`].
+static RUNNING_COLOUR: AtomicU32 = AtomicU32::new(0b010);
+
+/// Replace the colour [`LedState::Running`] shows, for a binary that uses LED 1 as an indicator
+/// once boot is over. Takes effect at once while the state is `Running`, and is what
+/// `Running` shows from then on, including through [`blink_task`]. `PreInit` and `Panicked`
+/// keep their red regardless, so a failed boot or a panic is never masked.
+pub fn set_user_colour(red: bool, green: bool, blue: bool) {
+    let packed = (u32::from(red) << 2) | (u32::from(green) << 1) | u32::from(blue);
+    RUNNING_COLOUR.store(packed, Ordering::Release);
+    if LedState::from_u32(LED_STATE.load(Ordering::Acquire)) == LedState::Running {
+        let _ = with_led(|led| led.set_state(LedState::Running));
+    }
+}
+
 /// Initialize the singleton BootLed.
 ///
 /// Consumes the three RGB LED pins and stores the driver in static storage,
@@ -172,8 +188,9 @@ impl BootLed {
                 self.set_color_on(true, false, false);
             }
             LedState::Running => {
-                // Green on, others off
-                self.set_color_on(false, true, false);
+                // Steady green unless the binary set its own colour.
+                let c = RUNNING_COLOUR.load(Ordering::Acquire);
+                self.set_color_on(c & 0b100 != 0, c & 0b010 != 0, c & 0b001 != 0);
             }
             LedState::Panicked => {
                 // Red on, others off
@@ -202,7 +219,7 @@ impl BootLed {
 /// Runs forever — does not return.
 ///
 /// - `PreInit`: blink red at ~1 Hz
-/// - `Running`: steady green (polls for state transitions)
+/// - `Running`: steady green, or the colour from [`set_user_colour`] (polls for state transitions)
 ///
 /// - `Panicked`: steady red. The panic handler halts the executor after setting
 ///   it, but binaries may also set `Panicked` through [`set_global_state`]

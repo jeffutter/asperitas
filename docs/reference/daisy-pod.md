@@ -153,6 +153,48 @@ defines `SAMPLE_RATE` as **48014.f** — not 48000. That odd figure is a consequ
 the achievable clock divider, not a typo. Nothing forces us to match it, but it explains
 any small discrepancy when comparing against C++ reference behaviour.
 
+## Resonator mapping as built
+
+`main` runs the low-pass and gain patch by default. Building it with `--features resonator`
+(`cd firmware && make build BINARY=main FEATURES="seed3 resonator"`) runs the resonator with the
+mapping below instead. The effect is chosen at build time: the feature is additive, needs no boot-time
+control, and leaves the patch build untouched. The mapping lives in one pure type,
+`asperitas_pod::resonator_surface::ResonatorSurface`, on top of the shared `ResonatorControls`; the
+firmware only feeds it decoded events and latches the result. It is covered by host tests
+(`cargo test -p asperitas-pod`).
+
+| Input | Control |
+|---|---|
+| Knob 1 | Structure |
+| Knob 2 | Damping |
+| Encoder turn | Root, whole semitones per detent (one cent per detent while fine-tune is on), clamped to 20 Hz to 2 kHz |
+| Encoder click | Toggles fine-tune |
+| Button 1 | Next excitation preset, wrapping after the last |
+| Button 2 | Reserved, does nothing |
+
+Spread is not on the Pod; it stays at its default (wide) unless a host override sets it. Host
+overrides (`CTL SET`) merge over all five positions, as for the rig.
+
+LED 1 shows the root's pitch class (nearest semitone, C first), through `ROOT_COLOURS`:
+
+| Class | C | C# | D | D# | E | F | F# | G | G# | A | A# | B |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Colour | red | yellow | yellow | green | green | cyan | blue | blue | magenta | magenta | white | white |
+
+Seven on/off colours cover twelve classes, so a sharp shares the colour of the natural above it. The
+default root, A2 (110 Hz), is magenta. While fine-tune is on, LED 1 blinks its colour at about 2 Hz.
+LED 1 keeps its boot red and panic red: the colour only applies once the state is Running
+(`asperitas_logging::led::set_user_colour`).
+
+LED 2 shows the input peak of the last 50 ms: off below -40 dBFS, green from -40 dBFS, yellow from
+-12 dBFS, red from -1 dBFS.
+
+Audio callback cost: per block it latches the five positions, merges host overrides, sets the
+resonator parameters and processes. The input peak scan (32 samples, one relaxed atomic store) is the
+one addition beyond control latching and exists only for LED 2. It allocates nothing and holds no lock
+across the block. The cost on the Cortex-M7 against the 667 microsecond deadline is not yet measured on
+the board.
+
 ## No Pod support exists in daisy-embassy
 
 `daisy-embassy` has `src/pins/pins_seed.rs` and `src/pins/pins_patch_sm.rs` — there is

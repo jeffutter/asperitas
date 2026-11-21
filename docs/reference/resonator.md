@@ -266,7 +266,8 @@ default (widest) and can only be set by key.
   gives the `ResonatorParams` for `Resonator::set_params`.
 - Encoder stepping rule: `with_root_offset(semitones, cents)` multiplies the root by
   `2^((100 * semitones + cents) / 1200)` and clamps to 20 to 2000 Hz. A detent is one semitone, or
-  a number of cents while fine-tune is on.
+  one cent while fine-tune is on. The Pod mapping as built (LEDs, fine-tune, build feature) is in
+  [daisy-pod.md](daisy-pod.md#resonator-mapping-as-built).
 - Controls latch on the 32-frame block grid (`BLOCK_FRAMES`) exactly as for `Controls`.
 
 ## Command line
