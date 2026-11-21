@@ -4,7 +4,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use asperitas_dsp::asperitas::Controls;
 use asperitas_dsp::processor::Frame;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
@@ -16,7 +15,7 @@ use ringbuf::HeapRb;
 
 use crate::recorder::{RecordTap, Recorder};
 use asperitas_live::ring::{RingAction, RingSync};
-use asperitas_live::{ControlSlot, Engine, LoopSource, Source, SAMPLE_RATE};
+use asperitas_live::{ControlSlot, EffectKind, Engine, LoopSource, Source, SAMPLE_RATE};
 
 /// Largest slice rendered at once; a longer host buffer is rendered in several slices so the
 /// callback never allocates.
@@ -123,12 +122,14 @@ fn write_interleaved(frames: &[Frame], data: &mut [f32], channels: usize) {
     }
 }
 
-/// Start the streams, hand the shared knob slot and a reader of the latest stream error to `wait`
+/// Start the streams running `effect`, whose control surface `slot` holds, hand the slot and a
+/// reader of the latest stream error to `wait`
 /// (which returns when the session ends), then stop the streams and print the counters and the
 /// last stream error. With `record`, the frames handed to the device are also written to that WAV.
 pub fn run(
     clip: Option<Vec<Frame>>,
-    controls: &Controls,
+    effect: EffectKind,
+    slot: Arc<ControlSlot>,
     buffer: u32,
     record: Option<&Path>,
     wait: impl FnOnce(&ControlSlot, &dyn Fn() -> Option<String>) -> Result<(), String>,
@@ -149,13 +150,12 @@ pub fn run(
     let out_conf = stream_config(&out_cfg, buffer);
 
     let counters = Arc::new(Counters::default());
-    let slot = Arc::new(ControlSlot::new(controls));
     let live = clip.is_none();
     let source = match clip {
         Some(frames) => Source::Loop(LoopSource::new(frames)),
         None => Source::External,
     };
-    let mut engine = Engine::new(source, slot.clone());
+    let mut engine = Engine::with_effect(effect, source, slot.clone());
     let (recorder, mut tap): (Option<Recorder>, Option<RecordTap>) = match record {
         Some(path) => {
             let (recorder, tap) = Recorder::start(path)?;

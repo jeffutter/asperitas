@@ -5,7 +5,8 @@ use std::cell::Cell;
 use std::sync::Arc;
 
 use asperitas_dsp::asperitas::Controls;
-use asperitas_live::{ControlSlot, Engine, LoopSource, Source};
+use asperitas_dsp::resonator_controls::ResonatorControls;
+use asperitas_live::{ControlSlot, EffectKind, Engine, LoopSource, Source};
 
 struct Counting;
 
@@ -42,6 +43,32 @@ fn render_does_not_allocate() {
     let before = ALLOCS.with(|c| c.get());
     for _ in 0..50 {
         slot.write(&Controls { knobs: [0.3, 0.6] });
+        looped.render(&[], &mut out);
+        live.render(&input, &mut out);
+    }
+    assert_eq!(ALLOCS.with(|c| c.get()), before);
+}
+
+#[test]
+fn resonator_render_does_not_allocate() {
+    let slot = Arc::new(ControlSlot::new(&ResonatorControls::default()));
+    let clip: Vec<[f32; 2]> = (0..300).map(|i| [i as f32 * 1e-3; 2]).collect();
+    let mut looped = Engine::with_effect(
+        EffectKind::Resonator,
+        Source::Loop(LoopSource::new(clip)),
+        slot.clone(),
+    );
+    let mut live = Engine::with_effect(EffectKind::Resonator, Source::External, slot.clone());
+    let input = vec![[0.1f32; 2]; 513];
+    let mut out = vec![[0.0f32; 2]; 513];
+
+    let before = ALLOCS.with(|c| c.get());
+    for i in 0..50 {
+        // Every control moves, the preset through all its settings.
+        let preset = (i % 3) as f32 / 2.0;
+        slot.write(&ResonatorControls {
+            positions: [0.3 + 0.01 * i as f32, 0.6, 0.4, 0.8, preset],
+        });
         looped.render(&[], &mut out);
         live.render(&input, &mut out);
     }

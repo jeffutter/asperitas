@@ -6,13 +6,33 @@ mod terminal;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
-use asperitas_cli::process::parse_asperitas_controls;
-use clap::{ArgGroup, Parser};
+use asperitas_cli::process::{parse_asperitas_controls, parse_resonator_controls};
+use asperitas_live::view::ViewSurface;
+use asperitas_live::{load_clip, ControlSlot, EffectKind};
+use clap::{ArgGroup, Parser, ValueEnum};
 
-use asperitas_live::load_clip;
+/// The effects `--effect` selects.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum EffectArg {
+    /// The low-pass and gain patch (`cutoff_hz`, `gain_db`).
+    #[default]
+    Asperitas,
+    /// The resonator bank (`root_hz`, `structure`, `damping`, `spread`, `excitation_preset`).
+    Resonator,
+}
 
-/// Play a looping clip or live line-in through the Asperitas effect.
+impl From<EffectArg> for EffectKind {
+    fn from(arg: EffectArg) -> Self {
+        match arg {
+            EffectArg::Asperitas => EffectKind::Asperitas,
+            EffectArg::Resonator => EffectKind::Resonator,
+        }
+    }
+}
+
+/// Play a looping clip or live line-in through an effect (Asperitas by default).
 #[derive(Parser)]
 #[command(version, group(ArgGroup::new("source").required(true).args(["input", "line_in"])))]
 struct Args {
@@ -24,7 +44,12 @@ struct Args {
     #[arg(long)]
     line_in: bool,
 
-    /// Knob values in real units, as for `asperitas-cli process`: `cutoff_hz=2000 gain_db=-6`.
+    /// Effect to run.
+    #[arg(long, value_enum, default_value_t = EffectArg::Asperitas)]
+    effect: EffectArg,
+
+    /// Knob values in real units, as for `asperitas-cli process` with the same effect:
+    /// `cutoff_hz=2000 gain_db=-6` for asperitas, `root_hz=220 damping=0.4` for resonator.
     #[arg(long, num_args = 1.., value_name = "KEY=VALUE")]
     params: Vec<String>,
 
@@ -56,7 +81,13 @@ fn parse_seconds(text: &str) -> Result<f64, String> {
 }
 
 fn run(args: &Args) -> Result<(), String> {
-    let controls = parse_asperitas_controls(&args.params)?;
+    match args.effect {
+        EffectArg::Asperitas => run_with(args, parse_asperitas_controls(&args.params)?),
+        EffectArg::Resonator => run_with(args, parse_resonator_controls(&args.params)?),
+    }
+}
+
+fn run_with<C: ViewSurface>(args: &Args, controls: C) -> Result<(), String> {
     let clip = match &args.input {
         Some(path) => Some(load_clip(&path.to_string_lossy())?),
         None => None,
@@ -68,7 +99,8 @@ fn run(args: &Args) -> Result<(), String> {
     let seconds = args.seconds;
     backend::run(
         clip,
-        &controls,
+        args.effect.into(),
+        Arc::new(ControlSlot::new(&controls)),
         args.buffer,
         args.record.as_deref(),
         |slot, error| terminal::wait(slot, error, &controls, &source, seconds),
@@ -88,7 +120,8 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_seconds;
+    use super::{parse_seconds, Args, EffectArg};
+    use clap::Parser;
 
     #[test]
     fn rejects_unusable_seconds() {
@@ -101,5 +134,29 @@ mod tests {
     fn accepts_sane_seconds() {
         assert_eq!(parse_seconds("0.5"), Ok(0.5));
         assert_eq!(parse_seconds("3600"), Ok(3600.0));
+    }
+
+    #[test]
+    fn no_selector_runs_the_asperitas_effect() {
+        let args = Args::parse_from(["asperitas-live", "--line-in"]);
+        assert_eq!(args.effect, EffectArg::Asperitas);
+        let args = Args::parse_from(["asperitas-live", "--line-in", "--effect", "resonator"]);
+        assert_eq!(args.effect, EffectArg::Resonator);
+        assert!(Args::try_parse_from(["asperitas-live", "--line-in", "--effect", "x"]).is_err());
+    }
+
+    #[test]
+    fn params_are_parsed_for_the_selected_effect() {
+        use asperitas_cli::process::{parse_asperitas_controls, parse_resonator_controls};
+        let root = ["root_hz=220".to_string()];
+        assert!(parse_resonator_controls(&root).is_ok());
+        assert!(parse_asperitas_controls(&root).is_err());
+        let cutoff = ["cutoff_hz=2000".to_string()];
+        assert!(parse_asperitas_controls(&cutoff).is_ok());
+        let err = parse_resonator_controls(&cutoff).unwrap_err();
+        assert!(
+            err.contains("cutoff_hz") && err.contains("resonator"),
+            "{err}"
+        );
     }
 }

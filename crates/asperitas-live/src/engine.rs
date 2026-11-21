@@ -5,6 +5,8 @@ use std::sync::Arc;
 use asperitas_cli::wav_io::read_wav;
 use asperitas_dsp::asperitas::{Asperitas, Controls};
 use asperitas_dsp::processor::{Frame, Processor};
+use asperitas_dsp::resonator_bank::Resonator;
+use asperitas_dsp::resonator_controls::ResonatorControls;
 
 use crate::controls::ControlSlot;
 
@@ -61,10 +63,26 @@ pub enum Source {
     External,
 }
 
+/// Which effect the engine runs. The slot it reads holds that effect's control surface:
+/// [`Controls`] for `Asperitas`, [`ResonatorControls`] for `Resonator`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EffectKind {
+    /// The low-pass and gain patch.
+    #[default]
+    Asperitas,
+    /// The resonator bank.
+    Resonator,
+}
+
+enum Effect {
+    Asperitas(Asperitas),
+    Resonator(Box<Resonator>),
+}
+
 /// Source, effect and control latch. Output is pre-clamp: the clamp to [-1, 1] belongs to the
 /// device boundary, not to the processing.
 pub struct Engine {
-    effect: Asperitas,
+    effect: Effect,
     source: Source,
     slot: Arc<ControlSlot>,
     /// Frames rendered since stream start.
@@ -72,9 +90,25 @@ pub struct Engine {
 }
 
 impl Engine {
-    /// An engine whose effect starts with the slot's current controls already in force.
+    /// An engine running [`EffectKind::Asperitas`], with the slot's current controls already in
+    /// force.
     pub fn new(source: Source, slot: Arc<ControlSlot>) -> Self {
-        let effect = Asperitas::new(SAMPLE_RATE as f32, &slot.read());
+        Self::with_effect(EffectKind::Asperitas, source, slot)
+    }
+
+    /// An engine running `kind`, whose effect starts with the slot's current controls already in
+    /// force. The slot must have been created from that effect's control surface.
+    pub fn with_effect(kind: EffectKind, source: Source, slot: Arc<ControlSlot>) -> Self {
+        let sample_rate = SAMPLE_RATE as f32;
+        let effect = match kind {
+            EffectKind::Asperitas => {
+                Effect::Asperitas(Asperitas::new(sample_rate, &slot.read::<Controls>()))
+            }
+            EffectKind::Resonator => Effect::Resonator(Box::new(Resonator::new(
+                sample_rate,
+                &slot.read::<ResonatorControls>().params(),
+            ))),
+        };
         Self {
             effect,
             source,
@@ -97,8 +131,12 @@ impl Engine {
         while done < out.len() {
             let into_block = (self.frame % BLOCK_FRAMES as u64) as usize;
             if into_block == 0 {
-                let controls: Controls = self.slot.read();
-                self.effect.set_controls(&controls);
+                match &mut self.effect {
+                    Effect::Asperitas(fx) => fx.set_controls(&self.slot.read::<Controls>()),
+                    Effect::Resonator(fx) => {
+                        fx.set_params(&self.slot.read::<ResonatorControls>().params())
+                    }
+                }
             }
             let n = (BLOCK_FRAMES - into_block).min(out.len() - done);
             let segment = &mut out[done..done + n];
@@ -106,7 +144,10 @@ impl Engine {
                 Source::Loop(clip) => clip.fill(segment),
                 Source::External => segment.copy_from_slice(&external[done..done + n]),
             }
-            self.effect.process_block(segment);
+            match &mut self.effect {
+                Effect::Asperitas(fx) => fx.process_block(segment),
+                Effect::Resonator(fx) => fx.process_block(segment),
+            }
             self.frame += n as u64;
             done += n;
         }

@@ -4,13 +4,12 @@
 use std::io::{self, IsTerminal, Write};
 use std::time::{Duration, Instant};
 
-use asperitas_dsp::asperitas::Controls;
 use crossterm::cursor::{Hide, MoveToColumn, MoveUp, Show};
 use crossterm::event::{self, Event};
 use crossterm::terminal::{self, Clear, ClearType};
 use crossterm::{queue, ExecutableCommand};
 
-use asperitas_live::view::{handle_key, render_view, Action};
+use asperitas_live::view::{handle_key, render_view, Action, ViewSurface};
 use asperitas_live::ControlSlot;
 
 /// How long one wait for a key lasts; it bounds how late `--seconds` can end the session.
@@ -67,10 +66,10 @@ fn draw(out: &mut impl Write, lines: &[String], redraw: bool) -> io::Result<()> 
 /// Block until the session ends. On a terminal that is esc, ctrl-c or `seconds`, while key
 /// presses write knob positions into `slot`; otherwise the knobs stay fixed and the session
 /// ends after `seconds` or on Enter; `error` reports the latest stream error for the view; with stdin closed and no `seconds` it runs until killed.
-pub fn wait(
+pub fn wait<C: ViewSurface>(
     slot: &ControlSlot,
     error: &dyn Fn() -> Option<String>,
-    initial: &Controls,
+    initial: &C,
     source: &str,
     seconds: Option<f64>,
 ) -> Result<(), String> {

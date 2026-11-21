@@ -1,9 +1,12 @@
 //! The pure logic of the terminal knob view: key presses to actions and knob readout text.
 //!
-//! Nothing here touches the terminal, so it is unit-tested. Real units come from
-//! [`ASPERITAS_PARAMS`] through [`Controls::values`]; this module holds no taper or range.
+//! Nothing here touches the terminal, so it is unit-tested. Real units come from the effect's
+//! parameter table through [`ViewSurface::real_values`]; this module holds no taper or range.
 
-use asperitas_dsp::asperitas::{Controls, ASPERITAS_PARAMS, KNOB_COUNT};
+use asperitas_dsp::asperitas::Controls;
+use asperitas_dsp::automation::ControlSurface;
+use asperitas_dsp::excitation::EXCITATION_PRESETS;
+use asperitas_dsp::resonator_controls::ResonatorControls;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 /// Knob step per key press. 0.05 makes 20 presses from end to end, coarse enough to sweep a
@@ -13,25 +16,68 @@ pub const COARSE_STEP: f32 = 0.05;
 /// Knob step per shifted key press, a tenth of [`COARSE_STEP`] for settling on a value.
 pub const FINE_STEP: f32 = 0.005;
 
-/// Knob labels and the (raise, lower) keys, in knob order.
-const KNOB_KEYS: [(&str, char, char); KNOB_COUNT] = [("cutoff", 'q', 'a'), ("gain", 'w', 's')];
-
 /// Width of the bar in a readout line, in characters.
 const BAR_WIDTH: usize = 10;
 
+/// A control surface the knob view can show: its labels, keys and real-unit readout.
+pub trait ViewSurface: ControlSurface {
+    /// Knob label and the (raise, lower) keys, in knob order.
+    const KEYS: &'static [(&'static str, char, char)];
+
+    /// The real-unit value of every knob, in table order.
+    fn real_values(&self) -> Vec<f32>;
+
+    /// Readout text for the real-unit `value` of knob `index`.
+    fn format_real(index: usize, value: f32) -> String {
+        format_value(value, Self::PARAMS[index].unit)
+    }
+}
+
+impl ViewSurface for Controls {
+    const KEYS: &'static [(&'static str, char, char)] = &[("cutoff", 'q', 'a'), ("gain", 'w', 's')];
+
+    fn real_values(&self) -> Vec<f32> {
+        self.values().to_vec()
+    }
+}
+
+impl ViewSurface for ResonatorControls {
+    const KEYS: &'static [(&'static str, char, char)] = &[
+        ("root", 'q', 'a'),
+        ("structure", 'w', 's'),
+        ("damping", 'e', 'd'),
+        ("spread", 'r', 'f'),
+        ("preset", 't', 'g'),
+    ];
+
+    fn real_values(&self) -> Vec<f32> {
+        self.values().to_vec()
+    }
+
+    fn format_real(index: usize, value: f32) -> String {
+        if Self::is_discrete(index) {
+            format!("{} of {}", value as usize, EXCITATION_PRESETS.len())
+        } else {
+            format_value(value, Self::PARAMS[index].unit)
+        }
+    }
+}
+
 /// What a key press asks the view to do.
 #[derive(Clone, Debug, PartialEq)]
-pub enum Action {
+pub enum Action<C> {
     /// Publish these knob positions.
-    Set(Controls),
+    Set(C),
     /// Leave the view.
     Quit,
     /// Nothing changes.
     None,
 }
 
-/// Translate one key event into an [`Action`] given the current knob positions.
-pub fn handle_key(controls: &Controls, key: KeyEvent) -> Action {
+/// Translate one key event into an [`Action`] given the current knob positions. A continuous
+/// knob moves by [`COARSE_STEP`] (or [`FINE_STEP`] when shifted) and clamps to `[0, 1]`; a
+/// discrete knob moves one setting per press whatever the step.
+pub fn handle_key<C: ViewSurface>(controls: &C, key: KeyEvent) -> Action<C> {
     if key.kind == KeyEventKind::Release {
         return Action::None;
     }
@@ -49,16 +95,23 @@ pub fn handle_key(controls: &Controls, key: KeyEvent) -> Action {
     let fine = key.modifiers.contains(KeyModifiers::SHIFT) || c.is_ascii_uppercase();
     let c = c.to_ascii_lowercase();
     let step = if fine { FINE_STEP } else { COARSE_STEP };
-    for (knob, &(_, up, down)) in KNOB_KEYS.iter().enumerate() {
-        let delta = if c == up {
-            step
+    for (knob, &(_, up, down)) in C::KEYS.iter().enumerate() {
+        let direction = if c == up {
+            1.0
         } else if c == down {
-            -step
+            -1.0
         } else {
             continue;
         };
         let mut next = controls.clone();
-        next.knobs[knob] = (controls.knobs[knob] + delta).clamp(0.0, 1.0);
+        let spec = &C::PARAMS[knob];
+        let position = &mut next.positions_mut()[knob];
+        if C::is_discrete(knob) {
+            let setting = spec.from_normalised(*position).round() + direction;
+            *position = spec.to_normalised(setting.clamp(spec.min, spec.max));
+        } else {
+            *position = (*position + direction * step).clamp(0.0, 1.0);
+        }
         return Action::Set(next);
     }
     Action::None
@@ -74,15 +127,15 @@ fn format_value(value: f32, unit: &str) -> String {
 }
 
 /// One readout line for `knob`, for example `cutoff [q/a]  ######....  0.62  (2.1 kHz)`.
-pub fn readout_line(controls: &Controls, knob: usize) -> String {
-    let (label, up, down) = KNOB_KEYS[knob];
-    let position = controls.knobs[knob].clamp(0.0, 1.0);
+pub fn readout_line<C: ViewSurface>(controls: &C, knob: usize) -> String {
+    let (label, up, down) = C::KEYS[knob];
+    let position = controls.positions()[knob].clamp(0.0, 1.0);
     let filled = (position * BAR_WIDTH as f32).round() as usize;
     let bar: String = (0..BAR_WIDTH)
         .map(|i| if i < filled { '#' } else { '.' })
         .collect();
-    let real = format_value(controls.values()[knob], ASPERITAS_PARAMS[knob].unit);
-    format!("{label:<6} [{up}/{down}]  {bar}  {position:.2}  ({real})")
+    let real = C::format_real(knob, controls.real_values()[knob]);
+    format!("{label:<9} [{up}/{down}]  {bar}  {position:.2}  ({real})")
 }
 
 /// Widest status line, in characters, so it never wraps and breaks the redraw's line count.
@@ -108,9 +161,9 @@ fn status_line(error: Option<&str>) -> String {
 
 /// The whole view as lines, with no line terminators. The last line is the latest stream error,
 /// blank when there is none, so the line count is constant.
-pub fn render_view(controls: &Controls, source: &str, error: Option<&str>) -> Vec<String> {
+pub fn render_view<C: ViewSurface>(controls: &C, source: &str, error: Option<&str>) -> Vec<String> {
     let mut lines = vec![format!(" asperitas-live  src: {source}"), String::new()];
-    lines.extend((0..KNOB_COUNT).map(|k| format!(" {}", readout_line(controls, k))));
+    lines.extend((0..C::KEYS.len()).map(|k| format!(" {}", readout_line(controls, k))));
     lines.push(String::new());
     lines.push(" shift = fine step   esc = quit".to_string());
     lines.push(status_line(error));
@@ -120,6 +173,7 @@ pub fn render_view(controls: &Controls, source: &str, error: Option<&str>) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+    use asperitas_dsp::asperitas::ASPERITAS_PARAMS;
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent::new(code, modifiers)
@@ -133,7 +187,7 @@ mod tests {
         Controls { knobs: [a, b] }
     }
 
-    fn set(action: Action) -> [f32; 2] {
+    fn set(action: Action<Controls>) -> [f32; 2] {
         match action {
             Action::Set(c) => c.knobs,
             other => panic!("expected Set, got {other:?}"),
@@ -212,7 +266,7 @@ mod tests {
         let gain = ASPERITAS_PARAMS[1].from_normalised(0.5);
         let line = readout_line(&c, 0);
         assert!(
-            line.starts_with("cutoff [q/a]  ######....  0.62  ("),
+            line.starts_with("cutoff    [q/a]  ######....  0.62  ("),
             "{line}"
         );
         assert!(
@@ -221,10 +275,86 @@ mod tests {
         );
         let line = readout_line(&c, 1);
         assert!(
-            line.starts_with("gain   [w/s]  #####.....  0.50  ("),
+            line.starts_with("gain      [w/s]  #####.....  0.50  ("),
             "{line}"
         );
         assert!(line.ends_with(&format!("({gain:.1} dB)")), "{line}");
+    }
+
+    fn rset(action: Action<ResonatorControls>) -> [f32; 5] {
+        match action {
+            Action::Set(c) => c.positions,
+            other => panic!("expected Set, got {other:?}"),
+        }
+    }
+
+    fn rat(positions: [f32; 5]) -> ResonatorControls {
+        ResonatorControls { positions }
+    }
+
+    #[test]
+    fn resonator_keys_move_the_right_control() {
+        let c = rat([0.5; 5]);
+        for (i, (up, down)) in [('q', 'a'), ('w', 's'), ('e', 'd'), ('r', 'f')]
+            .into_iter()
+            .enumerate()
+        {
+            let mut raised = [0.5; 5];
+            raised[i] += COARSE_STEP;
+            assert_eq!(rset(handle_key(&c, press(up))), raised, "{up}");
+            let mut lowered = [0.5; 5];
+            lowered[i] -= COARSE_STEP;
+            assert_eq!(rset(handle_key(&c, press(down))), lowered, "{down}");
+        }
+        let fine = key(KeyCode::Char('E'), KeyModifiers::SHIFT);
+        assert_eq!(
+            rset(handle_key(&c, fine)),
+            [0.5, 0.5, 0.5 + FINE_STEP, 0.5, 0.5]
+        );
+    }
+
+    #[test]
+    fn resonator_values_clamp_at_both_ends() {
+        assert_eq!(rset(handle_key(&rat([0.99; 5]), press('q')))[0], 1.0);
+        assert_eq!(rset(handle_key(&rat([0.0; 5]), press('a')))[0], 0.0);
+    }
+
+    #[test]
+    fn preset_moves_one_setting_per_press_fine_or_coarse() {
+        let n = EXCITATION_PRESETS.len();
+        let position = |p: usize| (p - 1) as f32 / (n - 1) as f32;
+        let at_preset = |p: usize| rat([0.5, 0.5, 0.5, 0.5, position(p)]);
+        for press_key in [press('t'), key(KeyCode::Char('T'), KeyModifiers::SHIFT)] {
+            for p in 1..n {
+                let next = rset(handle_key(&at_preset(p), press_key))[4];
+                assert!((next - position(p + 1)).abs() < 1e-6, "{p}: {next}");
+            }
+            assert_eq!(rset(handle_key(&at_preset(n), press_key))[4], 1.0);
+        }
+        for p in 2..=n {
+            let next = rset(handle_key(&at_preset(p), press('g')))[4];
+            assert!((next - position(p - 1)).abs() < 1e-6, "{p}: {next}");
+        }
+        assert_eq!(rset(handle_key(&at_preset(1), press('g')))[4], 0.0);
+    }
+
+    #[test]
+    fn resonator_readout_shows_normalised_and_real_units() {
+        let c = rat([0.5, 0.25, 0.75, 1.0, 0.5]);
+        let v = c.values();
+        let line = readout_line(&c, 0);
+        assert!(
+            line.starts_with("root      [q/a]  #####.....  0.50  ("),
+            "{line}"
+        );
+        assert!(line.ends_with(&format!("({:.1} Hz)", v[0])), "{line}");
+        let line = readout_line(&c, 3);
+        assert!(line.contains("##########  1.00"), "{line}");
+        let line = readout_line(&c, 4);
+        assert!(line.starts_with("preset    [t/g]"), "{line}");
+        assert!(line.ends_with("(2 of 3)"), "{line}");
+        let view = render_view(&c, "loop a.wav", None);
+        assert_eq!(view.len(), 2 + 5 + 3);
     }
 
     #[test]
