@@ -410,9 +410,9 @@ jump from 110 Hz to 880 Hz moves at most 118 cents per block.
 
 The stage follows whatever the tracker is confident about. The tracker's limits carry over: a close
 chromatic cluster reads as a confident wrong note and a major triad as no estimate (the root then
-holds). Noise and the chords tested produce confidence under 0.8, so the root does not move. In the
-synthetic notes of `asperitas-measure`, a hard cut at the end of an 880 Hz note makes the tracker
-report the octave below with confidence 0.97 for about 60 ms, and the root follows it.
+holds). Noise and the chords tested produce confidence under 0.8, so the root does not move. A
+note that ends abruptly drops the tracker's confidence to 0 within one or two analyses, so the root
+holds instead of following a stale reading.
 
 ### Tests
 

@@ -684,10 +684,29 @@ mod tests {
         assert_eq!(scored(&s.samples, &s.truth), scored(&s.samples, &s.truth));
     }
 
+    /// The abrupt end of each synthetic note never reads as a confident octave below: after the
+    /// cut the confidence is under the threshold or the held estimate is still the note.
+    #[test]
+    fn a_cut_synthetic_note_has_no_confident_wrong_octave_frames() {
+        let s = synthetic_notes(RATE);
+        let track = run_tracker(&s.samples, RATE, 0.8);
+        for (i, &hz) in NOTE_HZ.iter().enumerate() {
+            let cut = i as f64 * NOTE_S + NOTE_S - NOTE_GAP_S;
+            let next = (i + 1) as f64 * NOTE_S;
+            for f in track.iter().filter(|f| f.t_s > cut + 0.003 && f.t_s < next) {
+                assert!(
+                    f.conf < 0.8 || (1200.0 * (f.hz / hz).log2()).abs() < 50.0,
+                    "note {i} ({hz} Hz) at {}: {} Hz, confidence {}",
+                    f.t_s,
+                    f.hz,
+                    f.conf
+                );
+            }
+        }
+    }
+
     /// The tracker's trace over the plucked-style notes drives the root-follow stage: after each
-    /// onset the root lands on the snapped played note and holds through the decay. The abrupt cut
-    /// at the end of a synthetic note makes the tracker read the octave below with high confidence
-    /// for about 60 ms, so the silent gap is not asserted.
+    /// onset the root lands on the snapped played note and holds through the decay.
     #[test]
     fn root_follow_lands_on_each_plucked_note_and_holds_in_the_decay() {
         use asperitas_dsp::{RootFollow, RootFollowParams};

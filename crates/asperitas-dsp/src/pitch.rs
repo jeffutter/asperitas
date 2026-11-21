@@ -101,6 +101,11 @@ const PEAK_K: f32 = 0.9;
 const HIGH_CLARITY: f32 = 0.9;
 /// Lowest frequency the high band may report.
 const HIGH_MIN_HZ: f32 = 550.0;
+/// Hops of raw input energy kept to judge whether the signal has just ended.
+const LEVEL_HOPS: usize = 8;
+/// The signal has just ended when the newest hop carries less than this fraction of the mean
+/// energy of the last [`LEVEL_HOPS`] hops.
+const CUT_FRACTION: f32 = 0.01;
 /// Key maxima kept per analysis; more than this in a window means noise.
 const MAX_PEAKS: usize = 24;
 
@@ -326,6 +331,10 @@ pub struct PitchTracker {
     low: Band<LOW_WINDOW, { LOW_MAX_LAG + 2 }>,
     high: Band<HIGH_WINDOW, { HIGH_MAX_LAG + 2 }>,
     since_analysis: usize,
+    /// Energy of the raw input in the hop being filled, and in the last `LEVEL_HOPS` hops.
+    hop_energy: f32,
+    hop_history: [f32; LEVEL_HOPS],
+    hop_head: usize,
     estimate: f32,
     confidence: f32,
 }
@@ -351,6 +360,9 @@ impl PitchTracker {
             low: Band::new(LOW_DECIM, LOW_MIN_LAG, LOW_CUTOFF_HZ, rate),
             high: Band::new(HIGH_DECIM, HIGH_MIN_LAG, HIGH_CUTOFF_HZ, rate),
             since_analysis: 0,
+            hop_energy: 0.0,
+            hop_history: [0.0; LEVEL_HOPS],
+            hop_head: 0,
             estimate: 0.0,
             confidence: 0.0,
         };
@@ -382,6 +394,7 @@ impl PitchTracker {
         let y = sanitize(x - self.dc_x1 + self.dc_r * self.dc_y1);
         self.dc_x1 = x;
         self.dc_y1 = y;
+        self.hop_energy += x * x;
         self.low.push(y);
         self.high.push(y);
         self.since_analysis += 1;
@@ -398,13 +411,32 @@ impl PitchTracker {
         }
     }
 
+    /// Whether the input has just stopped: the hop that ended now holds almost none of the energy
+    /// of the recent hops. Measured on the raw input because the DC blocker and the band filters
+    /// ring on after a hard cut, which keeps their windows from looking silent.
+    fn just_cut(&mut self) -> bool {
+        self.hop_history[self.hop_head] = self.hop_energy;
+        self.hop_head = (self.hop_head + 1) % LEVEL_HOPS;
+        let newest = self.hop_energy;
+        self.hop_energy = 0.0;
+        let mean = self.hop_history.iter().sum::<f32>() / LEVEL_HOPS as f32;
+        newest <= CUT_FRACTION * mean
+    }
+
     fn analyse(&mut self) {
         let rate = self.sample_rate_hz;
         let high = self
             .high
             .analyse(rate)
             .filter(|c| c.hz >= HIGH_MIN_HZ && c.clarity >= HIGH_CLARITY);
-        let pick = high.or_else(|| self.low.analyse(rate));
+        // The low band's window outlives the signal by tens of milliseconds, and it cannot see a
+        // fundamental above about 750 Hz, so a note cut there reads as the octave below with high
+        // clarity. A signal that has just ended gets no estimate; the held one is kept.
+        let pick = if self.just_cut() {
+            None
+        } else {
+            high.or_else(|| self.low.analyse(rate))
+        };
         match pick {
             Some(c) if c.hz.is_finite() && c.hz > 0.0 => {
                 self.confidence = c.clarity;
@@ -434,6 +466,9 @@ impl PitchTracker {
         self.low.reset();
         self.high.reset();
         self.since_analysis = 0;
+        self.hop_energy = 0.0;
+        self.hop_history = [0.0; LEVEL_HOPS];
+        self.hop_head = 0;
         self.estimate = 0.0;
         self.confidence = 0.0;
     }
@@ -458,5 +493,53 @@ mod tests {
         }
         assert!((t.estimate_hz() - 220.0).abs() < 1.0, "{}", t.estimate_hz());
         assert!(t.confidence() > 0.95);
+    }
+
+    /// A decaying 880 Hz note cut hard, with or without a short fade, leaves no confident
+    /// estimate at the octave below while the low band's window still holds the tail.
+    #[test]
+    fn a_cut_high_note_does_not_read_as_the_octave_below() {
+        let rate = 48_000.0f32;
+        for fade_s in [0.0f32, 0.005] {
+            let cut_s = 0.44f32;
+            let mut t = PitchTracker::new(
+                rate,
+                &PitchParams {
+                    clarity_threshold: 0.8,
+                },
+            );
+            let mut seen_note = false;
+            for i in 0..(0.6 * rate) as usize {
+                let time = i as f32 / rate;
+                let gain = if time >= cut_s + fade_s {
+                    0.0
+                } else if time > cut_s {
+                    1.0 - (time - cut_s) / fade_s
+                } else {
+                    1.0
+                };
+                let mut v = 0.0;
+                for k in 1..=4 {
+                    let kf = k as f32;
+                    v += sinf(2.0 * core::f32::consts::PI * kf * 880.0 * time) / kf
+                        * libm::expf(-time * kf / 0.4);
+                }
+                t.tick(0.4 * gain * v);
+                if (i + 1) % PITCH_HOP == 0 {
+                    if time < cut_s - 0.05 && t.confidence() >= 0.8 {
+                        seen_note |= (t.estimate_hz() - 880.0).abs() < 10.0;
+                    }
+                    if time > cut_s + fade_s {
+                        assert!(
+                            t.confidence() < 0.8 || t.estimate_hz() > 700.0,
+                            "t={time} fade={fade_s}: {} Hz at {}",
+                            t.estimate_hz(),
+                            t.confidence()
+                        );
+                    }
+                }
+            }
+            assert!(seen_note, "the note was never found");
+        }
     }
 }

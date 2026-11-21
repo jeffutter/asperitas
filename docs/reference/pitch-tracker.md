@@ -42,7 +42,8 @@ Two bands keep the cost down (a 41 Hz period is 1171 samples at 48 kHz):
 | high | 4th-order Butterworth 9 kHz   | 24 kHz  | 160 samples, 6.7 ms | 10..48 (2400..500 Hz) |
 
 The high band is used when its peak is at 550 Hz or above with clarity 0.9 or more; otherwise the
-low band decides. An analysis runs every 128 input samples (2.7 ms, four 32-frame blocks). A DC
+low band decides. A signal that has just stopped gets no estimate from either band (see
+[Hard cuts](#hard-cuts)). An analysis runs every 128 input samples (2.7 ms, four 32-frame blocks). A DC
 blocker (15 Hz) precedes both bands. At another sample rate the lag limits keep their sample
 counts, so the range in Hz scales with the rate.
 
@@ -74,6 +75,23 @@ The confidence ceiling is 0.8 (the default clarity threshold, so a rejected inpu
 | six open guitar strings (E2 A2 D3 G3 B3 E4, five harmonics each)  | 0.54            |
 | C3 E3 G3 Bb3 D4 voicing                                            | 0.48            |
 | C3 Eb3 F#3 A3 (diminished seventh)                                 | 0.48            |
+
+## Hard cuts
+
+The low band's 64 ms window outlives a hard cut, and it cannot see a fundamental above about 750 Hz
+(lag 8 at 6 kHz), so on a note cut at 880 Hz or higher it would find the second lag, the octave
+below, with clarity 0.97 for about 60 ms. The cut also leaves a slow decay in the filtered windows
+(the 15 Hz DC blocker's step response), so the band windows do not look silent for that long. The
+tracker therefore watches the raw input: it keeps the energy of each of the last 8 hops (21 ms), and
+when the newest hop holds under 1% of their mean energy the analysis reports confidence 0 and keeps
+the held estimate. The check costs one multiply-add per sample and eight stored floats.
+
+Effect, measured on a decaying 880, 1318.5 and 1760 Hz note cut at once or faded over 5 ms: no
+frame after the cut has confidence 0.8 or more at an estimate below 700 Hz, where before 19 to 22
+frames (about 55 ms) did. The recorded mandolin and octave mandolin clips decay rather than cut,
+and their accuracy rows in [pitch-accuracy.md](pitch-accuracy.md) did not move; only the octave
+mandolin chord's confident fraction changed, by 0.1 point. A cut tone of 659 Hz or lower never showed
+it, because the low band reads its own fundamental.
 
 ## Known failure modes
 
