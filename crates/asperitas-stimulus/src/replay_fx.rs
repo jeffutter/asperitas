@@ -1,26 +1,40 @@
-//! The rig's selectable effect stage: bypass, or the [`Asperitas`] patch `main` runs.
+//! The rig's selectable effect stage: bypass, the [`Asperitas`] patch `main` runs, or the
+//! [`Resonator`] bank.
 //!
 //! Bypass touches no sample, so the output stays bit-exact with the bare generator or replay.
 //! Patch is the same filter-then-gain chain, driven by the same two normalised knobs
 //! ([`Controls`]), so the rig measures what `main` ships and no knob mapping lives outside
-//! `asperitas-dsp`.
+//! `asperitas-dsp`. The resonator is driven by [`ResonatorControls`]' five normalised positions
+//! through its own `params()` translation, with `set_params` before each block, as the offline
+//! render does.
+//!
+//! Knobs travel as one array of [`MAX_KNOBS`] positions indexed by knob id; a stage reads the
+//! first [`FxKind::knob_count`] of them. State is held by value, so selecting a stage allocates
+//! nothing.
 
 use asperitas_dsp::asperitas::{Asperitas, Controls, KNOB_COUNT};
 use asperitas_dsp::processor::{Frame, Processor};
+use asperitas_dsp::resonator_bank::Resonator;
+use asperitas_dsp::resonator_controls::{ResonatorControls, RESONATOR_KNOB_COUNT};
+
+/// Knob ids any stage accepts: the widest control surface, the resonator's.
+pub const MAX_KNOBS: usize = RESONATOR_KNOB_COUNT;
 
 /// Which stage the replay runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FxKind {
     Bypass,
     Patch,
+    Resonator,
 }
 
 impl FxKind {
-    /// Map the wire code (`0` bypass, `1` patch); `None` for anything else.
+    /// Map the wire code (`0` bypass, `1` patch, `2` resonator); `None` for anything else.
     pub fn from_code(code: u8) -> Option<Self> {
         match code {
             0 => Some(FxKind::Bypass),
             1 => Some(FxKind::Patch),
+            2 => Some(FxKind::Resonator),
             _ => None,
         }
     }
@@ -30,7 +44,39 @@ impl FxKind {
         match self {
             FxKind::Bypass => "bypass",
             FxKind::Patch => "patch",
+            FxKind::Resonator => "resonator",
         }
+    }
+
+    /// How many knob ids the stage has: ids at or above this do nothing.
+    pub fn knob_count(self) -> usize {
+        match self {
+            FxKind::Bypass => 0,
+            FxKind::Patch => KNOB_COUNT,
+            FxKind::Resonator => RESONATOR_KNOB_COUNT,
+        }
+    }
+
+    /// The knob positions the stage starts from, in id order. Entries past
+    /// [`knob_count`](Self::knob_count) are 0.
+    pub fn default_knobs(self) -> [f32; MAX_KNOBS] {
+        let mut out = [0.0; MAX_KNOBS];
+        match self {
+            FxKind::Bypass | FxKind::Patch => {
+                out[..KNOB_COUNT].copy_from_slice(&Controls::default().knobs)
+            }
+            FxKind::Resonator => out = ResonatorControls::default().positions,
+        }
+        out
+    }
+
+    /// `knobs` as a full array for this stage: ids the slice does not reach keep the stage's
+    /// default, entries beyond [`MAX_KNOBS`] are ignored.
+    fn fill(self, knobs: &[f32]) -> [f32; MAX_KNOBS] {
+        let mut out = self.default_knobs();
+        let n = knobs.len().min(MAX_KNOBS);
+        out[..n].copy_from_slice(&knobs[..n]);
+        out
     }
 }
 
@@ -38,9 +84,10 @@ impl FxKind {
 pub struct ReplayFx {
     kind: FxKind,
     patch: Asperitas,
+    resonator: Resonator,
     smoothing: bool,
-    /// The knob positions the patch was last parameterised from.
-    knobs: [f32; KNOB_COUNT],
+    /// The knob positions the stage was last parameterised from.
+    knobs: [f32; MAX_KNOBS],
 }
 
 impl Default for ReplayFx {
@@ -55,8 +102,9 @@ impl ReplayFx {
         Self {
             kind: FxKind::Bypass,
             patch: Asperitas::default(),
+            resonator: Resonator::default(),
             smoothing: true,
-            knobs: Controls::default().knobs,
+            knobs: FxKind::Patch.default_knobs(),
         }
     }
 
@@ -75,37 +123,62 @@ impl ReplayFx {
     pub fn set_sample_rate(&mut self, hz: f32) {
         if hz > 0.0 {
             self.patch.set_sample_rate(hz);
+            self.resonator.set_sample_rate(hz);
             if !self.smoothing {
                 self.patch.snap_params();
+                self.resonator.snap_params();
             }
         }
     }
 
-    /// Re-parameterise the patch from `knobs` without resetting it: filter history and any
+    /// Re-parameterise the selected stage from `knobs` (indexed by knob id; ids the slice does not
+    /// reach keep the stage's default) without resetting it: filter or ring history and any
     /// in-flight smoothing ramp carry on, so a sweep is continuous. Bypass: a no-op that touches
     /// nothing. When built unsmoothed the new values are snapped in. Knobs equal to the ones
     /// already applied do nothing, so it is cheap to call every block.
-    pub fn set_knobs(&mut self, knobs: [f32; KNOB_COUNT]) {
+    pub fn set_knobs(&mut self, knobs: impl AsRef<[f32]>) {
+        let knobs = self.kind.fill(knobs.as_ref());
         if knobs == self.knobs {
             return;
         }
         self.knobs = knobs;
-        if self.kind == FxKind::Patch {
-            self.patch.set_controls(&Controls { knobs });
-            if !self.smoothing {
-                self.patch.snap_params();
-            }
+        self.apply();
+    }
+
+    /// Choose the stage and set its knobs. A patch or resonator starts from a clean state with no
+    /// smoothing ramp, so the same selection always produces the same output.
+    pub fn select(&mut self, kind: FxKind, knobs: impl AsRef<[f32]>) {
+        self.kind = kind;
+        self.knobs = kind.fill(knobs.as_ref());
+        self.apply();
+        match kind {
+            FxKind::Bypass => {}
+            FxKind::Patch => self.patch.reset(),
+            FxKind::Resonator => self.resonator.reset(),
         }
     }
 
-    /// Choose the stage and, for patch, set its knobs. Patch starts from a clean state with no
-    /// smoothing ramp, so the same selection always produces the same output.
-    pub fn select(&mut self, kind: FxKind, knobs: [f32; KNOB_COUNT]) {
-        self.kind = kind;
-        self.knobs = knobs;
-        if kind == FxKind::Patch {
-            self.patch.set_controls(&Controls { knobs });
-            self.patch.reset();
+    /// Push `self.knobs` into the selected stage.
+    fn apply(&mut self) {
+        match self.kind {
+            FxKind::Bypass => {}
+            FxKind::Patch => {
+                let mut knobs = [0.0; KNOB_COUNT];
+                knobs.copy_from_slice(&self.knobs[..KNOB_COUNT]);
+                self.patch.set_controls(&Controls { knobs });
+                if !self.smoothing {
+                    self.patch.snap_params();
+                }
+            }
+            FxKind::Resonator => {
+                let controls = ResonatorControls {
+                    positions: self.knobs,
+                };
+                self.resonator.set_params(&controls.params());
+                if !self.smoothing {
+                    self.resonator.snap_params();
+                }
+            }
         }
     }
 
@@ -116,8 +189,10 @@ impl ReplayFx {
 
     /// Process `frames` in place. No allocation; bypass returns before reading a sample.
     pub fn process(&mut self, frames: &mut [Frame]) {
-        if self.kind == FxKind::Patch {
-            self.patch.process_block(frames);
+        match self.kind {
+            FxKind::Bypass => {}
+            FxKind::Patch => self.patch.process_block(frames),
+            FxKind::Resonator => self.resonator.process_block(frames),
         }
     }
 }
@@ -277,6 +352,42 @@ mod tests {
     fn wire_codes() {
         assert_eq!(FxKind::from_code(0), Some(FxKind::Bypass));
         assert_eq!(FxKind::from_code(1), Some(FxKind::Patch));
-        assert_eq!(FxKind::from_code(2), None);
+        assert_eq!(FxKind::from_code(2), Some(FxKind::Resonator));
+        assert_eq!(FxKind::from_code(3), None);
+    }
+
+    #[test]
+    fn resonator_equals_the_bank_it_wraps_and_moves_with_its_knobs() {
+        let mut positions = ResonatorControls::default().positions;
+        positions[0] = 0.4;
+        let params = ResonatorControls { positions }.params();
+        let mut fx = ReplayFx::new();
+        fx.select(FxKind::Resonator, positions);
+        let mut want = Resonator::new(48_000.0, &params);
+        let (mut a, mut e) = (ramp(), ramp());
+        fx.process(&mut a);
+        want.process_block(&mut e);
+        assert_eq!(bits(&a), bits(&e));
+        // A different structure changes the next block, and a short slice leaves the rest at
+        // their defaults.
+        let before = run_block(&mut fx);
+        fx.set_knobs([0.4, 0.9]);
+        let after = run_block(&mut fx);
+        assert_ne!(bits(&before), bits(&after));
+    }
+
+    #[test]
+    fn a_knob_the_patch_does_not_have_changes_nothing() {
+        let mut a = ReplayFx::new();
+        let mut b = ReplayFx::new();
+        a.select(FxKind::Patch, [0.3, 0.6, 0.0, 0.0, 0.0]);
+        b.select(FxKind::Patch, [0.3, 0.6, 0.9, 0.9, 0.9]);
+        assert_eq!(bits(&run_block(&mut a)), bits(&run_block(&mut b)));
+    }
+
+    #[test]
+    fn stage_state_stays_a_few_kilobytes() {
+        // The rig callback runs from a static; this pins how much the resonator adds to it.
+        assert!(core::mem::size_of::<ReplayFx>() < 8192);
     }
 }

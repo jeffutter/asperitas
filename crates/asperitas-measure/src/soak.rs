@@ -302,7 +302,7 @@ mod tests {
         // block is not itself a step or a ramp.
         let start = (coarse(0.0) + 60.0) / 72.0;
         for _ in 0..2000 {
-            chain.process_block_with(&mut [[0.0f32; 2]; 32], |base| [base[0], start]);
+            chain.process_block_with(&mut [[0.0f32; 2]; 32], |base| base[1] = start);
         }
         chain.reset();
         let mut samples = Vec::with_capacity(n);
@@ -316,7 +316,7 @@ mod tests {
                 knob = (coarse(t) + 60.0) / 72.0;
             }
             let mut out = [[0.0f32; 2]; 32];
-            chain.process_block_with(&mut out, |base| [base[0], knob]);
+            chain.process_block_with(&mut out, |base| base[1] = knob);
             samples.extend(
                 out.iter()
                     .map(|f| (f[0] * FULL_SCALE as f32).round() as i16),

@@ -22,7 +22,7 @@
 //! CTL RST                      restart the device
 //! CTL SET k=<2 hex> v=<4 hex>  override knob k with value v (0x0000..=0xFFFF spans 0.0..=1.0)
 //! CTL REL k=<2 hex>            release the override on knob k
-//! CTL FX f=<2 hex> v=<4 hex>   rig effect stage f (00 bypass, 01 Asperitas patch); v is reserved
+//! CTL FX f=<2 hex> v=<4 hex>   rig effect stage f (00 bypass, 01 Asperitas patch, 02 resonator); v is reserved
 //! ```
 //!
 //! Device to host:

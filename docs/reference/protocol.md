@@ -14,6 +14,7 @@ to see the field-offset constants).
 | Capture ring geometry and the derived capture budgets | `asperitas_wire::capture` |
 | Excerpt flash layout, slot header, `EXCSTART`/`EXCDATA`/`EXCEND`, `EXCOK`/`EXCFAIL`/`EXCPLAY`/`EXCPLAYFAIL`, flash rules, replay CRC posture | `asperitas_wire::excerpt` |
 | Host control verbs `CTL ...` and replies `CTLR ...` | `asperitas_wire::control` |
+| `CTL FX` stage codes (`00` bypass, `01` patch, `02` resonator) and their knob ids | `asperitas_wire::control` for the grammar; `asperitas_stimulus::replay_fx::FxKind` for the codes and knob counts; [asperitas-rig.md](./asperitas-rig.md) for how to select and drive each stage |
 | Firmware wiring of the control channel (consumer task, override merge, version, reset reason, restart, panic path) | `firmware/src/host_control.rs` module docs |
 | Device-side console runtime (ring, drain task, ZLP handling, panic path) | `asperitas-logging` |
 

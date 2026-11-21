@@ -14,6 +14,7 @@ use asperitas_rig::cli::{list_candidates, pick_device, run, Deadline, Outcome};
 use asperitas_rig::control::{
     query, restart, run_override, schedule, ControlError, Link, OverridePlan, RestartOpts,
 };
+use asperitas_rig::knob::{check_knob_for_stage, real_to_level, resolve_knob};
 use asperitas_rig::session::{
     probe_reset, run_session, session_error, write_session, Motion, SessionOpts, SessionPlan,
     DEFAULT_SNAPS, DEFAULT_SNAP_LEVEL,
@@ -62,12 +63,22 @@ enum Command {
     Override {
         #[command(flatten)]
         device: DeviceArg,
-        /// Knob id (decimal, as in the firmware knob table).
+        /// Knob id (decimal, as in the firmware knob table) or a parameter name: `cutoff_hz`,
+        /// `gain_db` (patch) or `root_hz`, `structure`, `damping`, `spread`, `excitation_preset`
+        /// (resonator).
         #[arg(long)]
-        knob: u8,
+        knob: String,
         /// Hold the knob at this level, 0..=1, for the whole duration.
-        #[arg(long, conflicts_with = "sweep", required_unless_present = "sweep")]
+        #[arg(
+            long,
+            conflicts_with_all = ["sweep", "real"],
+            required_unless_present_any = ["sweep", "real"]
+        )]
         value: Option<f64>,
+        /// Hold the knob at this real-unit value (Hz, dB, ...) for the whole duration; `--knob`
+        /// must be a parameter name. Out of its range is refused, never clamped.
+        #[arg(long, conflicts_with = "sweep")]
+        real: Option<f64>,
         /// Sweep the knob linearly `FROM:TO` (levels 0..=1) over the duration.
         #[arg(long)]
         sweep: Option<String>,
@@ -89,17 +100,19 @@ enum Command {
         /// Raw stream output path (zstd); the sidecar is written beside it as `<out>.session`.
         #[arg(long)]
         out: PathBuf,
-        /// Effect selection: 0 bypass, 1 patch.
+        /// Effect selection: 0 bypass, 1 patch, 2 resonator.
         #[arg(long)]
         fx_f: u8,
         /// Value sent with the effect selection (the rig ignores it).
         #[arg(long, default_value_t = 0)]
         fx_v: u16,
-        /// Knob id (decimal): 0 filter cutoff, 1 output gain. Required for sweep, soak and hold,
-        /// whose levels mean different things on each knob so there is no safe default; refused
-        /// for `automation`, whose file names its knobs.
+        /// Knob id (decimal) or parameter name of the selected effect. Patch: 0 `cutoff_hz`,
+        /// 1 `gain_db`. Resonator: 0 `root_hz`, 1 `structure`, 2 `damping`, 3 `spread`,
+        /// 4 `excitation_preset`. Levels are normalised 0..=1 on every knob. Required for sweep,
+        /// soak and hold, whose levels mean different things on each knob so there is no safe
+        /// default; refused for `automation`, whose file names its knobs.
         #[arg(long)]
-        knob: Option<u8>,
+        knob: Option<String>,
         /// Give up this many seconds after attaching.
         #[arg(long)]
         max_seconds: f64,
@@ -324,15 +337,23 @@ fn go(command: Command) -> Result<Outcome, ControlError> {
             device,
             knob,
             value,
+            real,
             sweep,
             duration,
             out,
             max_drops,
         } => {
-            let (from, to) = match (value, sweep) {
-                (Some(v), None) => (v, v),
-                (None, Some(s)) => parse_sweep(&s)?,
-                _ => unreachable!("clap enforces exactly one of --value and --sweep"),
+            let (knob, from, to) = match (real, value, sweep) {
+                (Some(r), None, None) => {
+                    let (id, level) = real_to_level(&knob, r)?;
+                    (id, level, level)
+                }
+                (None, Some(v), None) => (resolve_knob(&knob, None)?, v, v),
+                (None, None, Some(s)) => {
+                    let (a, b) = parse_sweep(&s)?;
+                    (resolve_knob(&knob, None)?, a, b)
+                }
+                _ => unreachable!("clap enforces exactly one of --value, --real and --sweep"),
             };
             let plan = OverridePlan {
                 knob,
@@ -362,6 +383,10 @@ fn go(command: Command) -> Result<Outcome, ControlError> {
             chip_description,
             motion,
         } => {
+            let knob = knob.map(|k| resolve_knob(&k, Some(fx_f))).transpose()?;
+            if let Some(k) = knob {
+                check_knob_for_stage(fx_f, k)?;
+            }
             let plan = SessionPlan {
                 fx_f,
                 fx_v,
@@ -442,5 +467,46 @@ mod tests {
         assert!(
             Cli::try_parse_from(BASE.map(|a| if a == "soak" { "automation" } else { a })).is_err()
         );
+    }
+
+    #[test]
+    fn session_and_override_take_a_parameter_name_for_the_knob() {
+        let mut args = BASE.to_vec();
+        args.pop();
+        args.extend(["--knob", "damping", "hold", "--level", "0.5"]);
+        let Command::Session { knob, .. } = Cli::try_parse_from(args).unwrap().command else {
+            panic!("not a session");
+        };
+        assert_eq!(knob.as_deref(), Some("damping"));
+        let ok = Cli::try_parse_from([
+            "asperitas-rig",
+            "override",
+            "--knob",
+            "root_hz",
+            "--real",
+            "220",
+            "--duration",
+            "5",
+            "--out",
+            "o.txt",
+        ]);
+        assert!(ok.is_ok());
+        // --real is a hold, so it cannot sweep or carry a level as well.
+        for extra in [["--sweep", "0:1"], ["--value", "0.5"]] {
+            let mut a = vec![
+                "asperitas-rig",
+                "override",
+                "--knob",
+                "root_hz",
+                "--real",
+                "220",
+                "--duration",
+                "5",
+                "--out",
+                "o.txt",
+            ];
+            a.extend(extra);
+            assert!(Cli::try_parse_from(a).is_err(), "{extra:?}");
+        }
     }
 }

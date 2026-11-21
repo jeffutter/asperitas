@@ -20,7 +20,9 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use asperitas_dsp::automation::Automation;
+use asperitas_dsp::asperitas::Controls;
+use asperitas_dsp::automation::{Automation, ControlSurface};
+use asperitas_dsp::resonator_controls::ResonatorControls;
 use asperitas_host::session::{sidecar_path, Mode, Sidecar};
 use asperitas_wire::console::is_boot;
 use asperitas_wire::control::{parse_reply, Command, ErrorCode, Reply, Verb};
@@ -29,6 +31,7 @@ use ruzstd::encoding::{compress_to_vec, CompressionLevel};
 
 use crate::cli::Outcome;
 use crate::control::{frame_command, level_to_wire, schedule, ControlError};
+use crate::knob::FX_RESONATOR;
 
 /// Sample rate the automation clock counts frames at: the device's.
 pub const DEVICE_SAMPLE_RATE: u32 = 48_000;
@@ -79,7 +82,7 @@ pub enum Motion {
 /// What a session asks the device to do.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionPlan {
-    /// Effect selection (`00` bypass, `01` patch).
+    /// Effect selection (`00` bypass, `01` patch, `02` resonator).
     pub fx_f: u8,
     /// Value sent with the effect selection.
     pub fx_v: u16,
@@ -110,7 +113,11 @@ impl SessionPlan {
                     "an automation names its own knobs; --knob does not apply".into(),
                 ));
             }
-            return automation_timeline(text);
+            return if self.fx_f == FX_RESONATOR {
+                automation_timeline::<ResonatorControls>(text)
+            } else {
+                automation_timeline::<Controls>(text)
+            };
         }
         let knob = self.knob.ok_or_else(|| {
             ControlError::Usage("--knob is required for sweep, soak and hold".into())
@@ -197,10 +204,11 @@ impl SessionPlan {
             Motion::Automation { text } => {
                 // A script that does not parse never reaches a sidecar: `timeline` refuses it
                 // before the session starts.
-                let end = Automation::parse(text, DEVICE_SAMPLE_RATE)
-                    .ok()
-                    .and_then(|a| a.device_schedule().last().map(|e| e.0))
-                    .unwrap_or(0);
+                let end = if self.fx_f == FX_RESONATOR {
+                    last_update_frame::<ResonatorControls>(text)
+                } else {
+                    last_update_frame::<Controls>(text)
+                };
                 (
                     Mode::Automation,
                     0.0,
@@ -233,19 +241,27 @@ impl SessionPlan {
     }
 }
 
-/// Expand an automation script. Every knob is overridden at its starting value before the capture
+/// The frame of the script's last device update; 0 for an empty or unparsable script.
+fn last_update_frame<C: ControlSurface>(text: &str) -> u64 {
+    Automation::<C>::parse_for(text, DEVICE_SAMPLE_RATE)
+        .ok()
+        .and_then(|a| a.device_schedule().last().map(|e| e.0))
+        .unwrap_or(0)
+}
+
+/// Expand an automation script for control surface `C`. Every knob is overridden at its starting value before the capture
 /// arms, then each update of [`Automation::device_schedule`] goes out at its frame's time. The
 /// wire carries a level in `0..=1`, so each knob position goes through the same
 /// `level_to_wire` the other motions use; a position outside it is refused, never clamped.
-fn automation_timeline(text: &str) -> Result<Timeline, ControlError> {
-    let automation = Automation::parse(text, DEVICE_SAMPLE_RATE)
+fn automation_timeline<C: ControlSurface>(text: &str) -> Result<Timeline, ControlError> {
+    let automation = Automation::<C>::parse_for(text, DEVICE_SAMPLE_RATE)
         .map_err(|e| ControlError::Usage(format!("automation: {e}")))?;
     let at = |frame: u64| Duration::from_secs_f64(frame as f64 / f64::from(DEVICE_SAMPLE_RATE));
     let wire = |position: f32| level_to_wire(f64::from(position));
     let start = automation.controls_at(0);
-    let knobs: Vec<u8> = (0..start.knobs.len() as u8).collect();
+    let knobs: Vec<u8> = (0..start.positions().len() as u8).collect();
     let pre = start
-        .knobs
+        .positions()
         .iter()
         .enumerate()
         .map(|(k, &p)| Ok((k as u8, wire(p)?)))
@@ -1360,6 +1376,57 @@ mod tests {
         assert!(values.windows(2).all(|w| w[0] < w[1]), "{values:?}");
         assert_eq!(*values.last().unwrap(), wire_of_gain_db(-10.0));
         assert_eq!(t.release_at, None);
+    }
+
+    fn resonator_plan(text: &str) -> SessionPlan {
+        SessionPlan {
+            fx_f: FX_RESONATOR,
+            ..automation_plan(text)
+        }
+    }
+
+    fn wire_of_resonator(key: &str, value: f32) -> (u8, u16) {
+        let (id, level) = crate::knob::real_to_level(key, f64::from(value)).unwrap();
+        (id, level_to_wire(level).unwrap())
+    }
+
+    #[test]
+    fn resonator_automation_overrides_all_five_knobs_with_real_unit_keys() {
+        let t = resonator_plan("0 root_hz=220 damping=0.3\n0.05 ramp damping=0.8\n")
+            .timeline()
+            .unwrap();
+        assert_eq!(t.knobs, vec![0, 1, 2, 3, 4]);
+        assert_eq!(t.pre.len(), 5);
+        assert_eq!(t.pre[0], wire_of_resonator("root_hz", 220.0));
+        assert_eq!(t.pre[2], wire_of_resonator("damping", 0.3));
+        // Untouched knobs start from their table default.
+        assert_eq!(t.pre[1], wire_of_resonator("structure", 0.0));
+        assert!(t.timed.iter().all(|e| e.1 == 2));
+        assert_eq!(
+            t.timed.last().unwrap().2,
+            wire_of_resonator("damping", 0.8).1
+        );
+    }
+
+    #[test]
+    fn resonator_automation_refuses_a_patch_key_a_bad_value_and_a_ramped_preset() {
+        for text in [
+            "0 cutoff_hz=1000\n",
+            "0 damping=3\n",
+            "0 excitation_preset=1.5\n",
+            "0 excitation_preset=1\n1 ramp excitation_preset=2\n",
+        ] {
+            let e = resonator_plan(text).timeline().unwrap_err().to_string();
+            let key = text.split(['=', ' ']).nth(1).unwrap();
+            assert!(e.contains(key), "{text:?}: {e}");
+        }
+    }
+
+    #[test]
+    fn resonator_sidecar_ends_at_its_own_last_update() {
+        let side = resonator_plan("0 damping=0.1\n0.1 step damping=0.9\n").sidecar(None, None);
+        assert_eq!(side.fx_f, FX_RESONATOR);
+        assert!((side.duration_s - 0.1).abs() < 1e-9, "{}", side.duration_s);
     }
 
     #[test]

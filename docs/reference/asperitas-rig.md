@@ -91,6 +91,7 @@ asperitas-rig query [--device P]
 asperitas-rig restart [--device P] [--reenumerate-timeout 15]
 asperitas-rig override --knob 2 --value 0.5   --duration 10 --out o.txt [--device P] [--max-drops N]
 asperitas-rig override --knob 2 --sweep 0:1   --duration 10 --out o.txt
+asperitas-rig override --knob damping --real 0.5 --duration 10 --out o.txt
 ```
 
 - `query` prints `fw=<version> reset_reason=<token>`.
@@ -101,8 +102,11 @@ asperitas-rig override --knob 2 --sweep 0:1   --duration 10 --out o.txt
   The query reply is the proof of life. Fails (exit 2) after `--reenumerate-timeout` seconds.
 - `override` holds (`--value L`) or sweeps (`--sweep FROM:TO`, linear, 20 steps per second)
   knob `--knob K` while capturing the same port for `--duration`, writes the usual artifact,
-  then releases. Levels are `0..=1` and map to the wire range `0x0000..=0xFFFF`; a level
-  outside `0..=1` is a usage error (exit 2), never clamped.
+  then releases. `K` is a decimal id or a parameter name of either effect (see the knob tables under
+  Replay effect). Levels are `0..=1` and map to the wire range `0x0000..=0xFFFF`; a level
+  outside `0..=1` is a usage error (exit 2), never clamped. `--real V` holds the knob at a real-unit
+  value (Hz, dB, a preset number) instead; `--knob` must then be a name, and a value outside the
+  parameter's range is a usage error that names it.
 
 **Release guarantee.** `override` always sends `REL` for its knob after the last `SET`: after
 a finished sweep, after the capture dies mid-run, and after a failed write. The capture
@@ -133,7 +137,12 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
   automation knobs.txt
 ```
 
-- `--fx-f` is `0` bypass or `1` patch; `--knob` is required for `sweep`, `soak` and `hold` and decimal (0 filter cutoff, 1 output gain), and refused for `automation`.
+- `--fx-f` is `0` bypass, `1` patch or `2` resonator; `--knob` is required for `sweep`, `soak` and `hold`
+  and refused for `automation`. It is a decimal id or the parameter's name, resolved against the
+  selected effect: patch `cutoff_hz` (0) and `gain_db` (1); resonator `root_hz` (0), `structure` (1),
+  `damping` (2), `spread` (3), `excitation_preset` (4). The levels of `sweep`, `soak` and `hold` stay
+  normalised `0..=1` on every knob. A name that is not that effect's, or an id the effect does not have,
+  is a usage error naming it (exit 2) before the port is opened.
   Device selection is the same as the other subcommands (`--device` or the single
   `/dev/cu.usbmodem*` / `/dev/ttyACM*`).
 - `sweep` sends the `--from` level once before the capture arms (so the gain is settled when the
@@ -146,15 +155,20 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
 - `automation FILE` plays an automation file (grammar in [automation.md](automation.md)), the same file
   `asperitas-cli process --automation` renders offline, so one script drives both the offline reference and
   the board. The script's time zero is the capture arming, taken from the `rig: capture armed` log record the firmware writes at that instant (exact to the millisecond, not the once-a-second `CAPSTAT`, which can be up to a second late). Before the capture arms the session overrides
-  both knobs at the script's starting values (a knob the file never names at its default, so the board does not follow
+  every knob of the effect (two for the patch, five for the resonator) at the script's starting values (a knob the file never names at its default, so the board does not follow
   the Pod knob), then sends one `CTL SET` per update at the time of the block it latches in (blocks of 32
   frames at 48 kHz): a `step` is one `SET`, a `ramp` a `SET` every 10 ms (480 frames) ending exactly on its
   target, not one per block, which would be 1500 replies a second on the console. The wire carries the
   normalised knob position, so each value is the position the shared real-unit translation gives, converted
-  with the same `level_to_wire` as the other motions. Both knobs stay at their last value, as in the render, and are released when the dump ends. A
-  file that does not parse, names an unknown parameter or a value out of range is a usage error (exit 2)
-  before the port is opened. Example:
-  `asperitas-rig session --out run.console.zst --fx-f 1 --max-seconds 60 automation knobs.txt`.
+  with the same `level_to_wire` as the other motions. Every knob stays at its last value, as in the render, and is released when the dump ends. The
+  file is parsed against the effect `--fx-f` selects, so with `--fx-f 2` it uses the resonator's keys
+  (`root_hz`, `structure`, `damping`, `spread`, `excitation_preset`; a `ramp` on the preset is refused,
+  it has nothing between its settings). A file that does not parse, names an unknown parameter (a patch
+  key under `--fx-f 2` included) or a value out of range is a usage error naming it (exit 2) before the
+  port is opened. Example:
+  `asperitas-rig session --out run.console.zst --fx-f 1 --max-seconds 60 automation knobs.txt`, or with
+  `--fx-f 2` and a resonator script. `asperitas-measure analyze` has no resonator reference yet: it
+  refuses an `--fx-f 2` capture with a named error rather than judging it against the patch.
   No firmware change is involved; the device sees only `CTL SET`/`REL`.
 - `--probe-reset` runs `probe-rs reset` with the chip description, waits for the console node to
   vanish, then retries attaching for up to 15 s. The chip description path defaults to the repo's
@@ -199,17 +213,37 @@ a bench run against hardware is a separate ticket.
 Every `rig` build runs an effect stage after its stimulus generator: the sine (the default),
 `stim-ess`, `stim-pulse` and the `stim-excerpt` replay all carry the same stage,
 `asperitas_stimulus::fx_chain::FxChain`. Generator first, effect second, then the encoder; the capture is of the
-codec input, as before. The stage is bypass or the `asperitas_dsp::Asperitas` patch, the same
-low-pass-then-gain chain `main` runs, so the rig measures what ships and no knob mapping lives outside
-`asperitas-dsp`. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
+codec input, as before. The stage is bypass, the `asperitas_dsp::Asperitas` patch (the same
+low-pass-then-gain chain `main` runs) or the `asperitas_dsp::Resonator` bank, so the rig measures what
+ships and no knob mapping lives outside `asperitas-dsp`. Wire form: `CTL FX f=<2 hex> v=<4 hex>`, answered `CTLR OK FX`.
 
 | `f` | effect | `v` |
 |-----|--------|-----|
 | `00` | bypass (default) | ignored |
 | `01` | `Asperitas` patch at its default knob positions (filter open at 20 kHz, 0 dB) | ignored; kept in the frame so the wire shape stays stable |
+| `02` | resonator bank at its default control positions | ignored |
+
+An `f` other than these is refused and changes nothing.
 
 Move the patch with `CTL SET`/`REL`: knob `00` is the filter cutoff (20 Hz to 20 kHz, log taper) and knob
 `01` the output gain (-60 dB to +12 dB), both through the `asperitas-dsp` parameter tables.
+
+Move the resonator the same way. Its knob ids are the order of `RESONATOR_CONTROL_PARAMS`
+([resonator.md](resonator.md)):
+
+| knob | key | meaning |
+|------|-----|---------|
+| `00` | `root_hz` | root pitch |
+| `01` | `structure` | partial stretch |
+| `02` | `damping` | ring decay |
+| `03` | `spread` | stereo spread |
+| `04` | `excitation_preset` | discrete: 1-based preset index |
+
+The wire carries the normalised position, 16 bits. The host turns a real-unit value into that position
+with the dsp tables (`ControlSurface::from_real_values`, the translation `asperitas-cli process --params` and
+an automation file use), so a position is off the offline render's by at most one wire step. The preset is
+discrete: it rounds to the nearest preset, so the step is invisible there. A patch ignores ids `02`
+to `04`; `bypass` ignores all of them.
 
 - **Sine and the other periodic generators.** They run from the first callback, so `FX` is accepted
   any time before the capture arms and the effect is in place for the whole capture; `SET`/`REL` move it
@@ -219,7 +253,7 @@ Move the patch with `CTL SET`/`REL`: knob `00` is the filter cutoff (20 Hz to 20
   `FX` you sent with the capture (`analyze --fx`).
 - **Default is bit-exact.** Bypass touches no sample, so captures taken without sending `FX`
   are unchanged from before the control existed. Sending `f=00` returns to that state.
-- **Replies.** `CTLR ERR bad-value` for an `f` other than `00` and `01`; `CTLR ERR busy` once a capture is armed
+- **Replies.** `CTLR ERR bad-value` for an `f` other than `00`, `01` and `02`; `CTLR ERR busy` once a capture is armed
   (a change mid-capture would make the recording unrepeatable); `CTLR ERR unknown-verb` for any
   other `CTL` verb, which this binary does not serve. `FX`, `SET` and `REL` are served by every
   stimulus build with the console (`log-usb`); the RTT-only builds have no console to send them on.
@@ -232,13 +266,15 @@ Move the patch with `CTL SET`/`REL`: knob `00` is the filter cutoff (20 Hz to 20
   stored samples and cannot detect the effect.
 - **Applied at the next block** after the reply; the processor starts from a clean state with no
   smoothing ramp, so a given selection always produces the same output.
-- **Live override.** `CTL SET k=<00|01> v=<4 hex>` and `CTL REL k=<00|01>` override the patch's
-  cutoff (`00`) and gain (`01`), and unlike `FX` they are accepted while a capture is armed, so an
-  override sweep moves the effect mid-capture. Other knob ids get `bad-knob`. Each block merges the
-  overrides over the patch's default knob positions through the shipped `KnobOverride<2>`, upstream of the
-  effect's smoothing, as `main` does; bypass ignores them. A `REL` returns that knob to its default.
-  Cost: a critical section and a compare per block, plus one `set_controls` (a `powf`, and an `expf`
-  for the filter) when a value moved.
+- **Live override.** `CTL SET k=<2 hex> v=<4 hex>` and `CTL REL k=<2 hex>` override a knob of the
+  selected stage (patch `00` cutoff and `01` gain; resonator `00` to `04` above), and unlike `FX` they are
+  accepted while a capture is armed, so an override sweep moves the effect mid-capture. Knob ids of 5
+  or more get `bad-knob`. Each block merges the overrides over the stage's default knob positions
+  through the shipped `KnobOverride<5>`, upstream of the effect's smoothing, as `main` does; bypass
+  ignores them. A `REL` returns that knob to its default. Cost: a critical section and a compare per
+  block, plus one `set_controls` (a `powf`, and an `expf` for the filter) for the patch or one
+  `set_params` for the resonator when a value moved. The resonator's state is held by value in the chain
+  the rig keeps in a static; the callback allocates nothing and takes no lock beyond that critical section.
 - **`unsmoothed-params` feature.** `--features seed3,unsmoothed-params` (sine) or
   `--features seed3,stim-excerpt,unsmoothed-params` (excerpt) builds the effect without smoothing, so an override steps the parameter on the next sample. It exists only
   to prove the discontinuity detector can see a step; never use it for ordinary captures.

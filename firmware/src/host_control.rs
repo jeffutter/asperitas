@@ -24,10 +24,10 @@
 //!   flow control does not engage in practice.
 //! - **Replies never block.** They go through `emit_record`, which commits whole or not at all and
 //!   returns `false` when the console has no room. A dropped reply is the host's timeout to handle.
-//! - **Override.** `SET`/`REL` write a `cortex_m::interrupt::Mutex<RefCell<KnobOverride<2>>>`.
+//! - **Override.** `SET`/`REL` write a `cortex_m::interrupt::Mutex<RefCell<KnobOverride<KNOBS>>>`.
 //!   `main` calls [`merge`] on the knob readings inside the audio callback, after the pot read and
 //!   before the knobs reach the effect, so injected values pass through the DSP smoothing as a turned
-//!   pot does. Knob ids 0 and 1; anything else is `bad-knob`. `podtest` logs raw ADC counts to
+//!   pot does. Knob ids `0..KNOBS` (five); anything else is `bad-knob`. `podtest` logs raw ADC counts to
 //!   measure the pot itself, so it accepts and holds overrides but does not merge them into its log.
 //! - **Version.** `build.rs` exports `ASPERITAS_VERSION` = `CARGO_PKG_VERSION` + `+` +
 //!   `git describe --always --dirty --tags` (the package version alone without git), filtered to
@@ -57,8 +57,10 @@ use asperitas_pod::knob_override::KnobOverride;
 use asperitas_wire::control::{VersionText, VERSION_MAX};
 use cortex_m::interrupt::Mutex;
 
-/// Knobs the Pod exposes to the DSP: knob 1 and knob 2, ids 0 and 1.
-pub const KNOBS: usize = asperitas_dsp::KNOB_COUNT;
+/// Knob ids the override table holds: the widest effect stage's control surface (the resonator's
+/// five). `main` and `podtest` read only the first [`asperitas_dsp::KNOB_COUNT`] (the two Pod
+/// pots), so ids beyond those are accepted and held but nothing there reads them.
+pub const KNOBS: usize = asperitas_dsp::RESONATOR_KNOB_COUNT;
 
 static OVERRIDE: Mutex<RefCell<KnobOverride<KNOBS>>> =
     Mutex::new(RefCell::new(KnobOverride::new()));
@@ -77,10 +79,22 @@ pub fn capture_reset_reason() {
     rcc.rsr().modify(|w| w.set_rmvf(true));
 }
 
-/// Resolve the value of each knob: the host's where overridden, the pot's otherwise. Cheap enough
-/// for the audio callback: one critical section around a two-element copy.
-pub fn merge(knobs: [f32; KNOBS]) -> [f32; KNOBS] {
-    cortex_m::interrupt::free(|cs| OVERRIDE.borrow(cs).borrow().merge(knobs))
+/// Resolve the value of each knob: the host's where overridden, the pot's otherwise. `knobs` holds
+/// the readings of ids `0..N`; at most [`KNOBS`] entries are used. Cheap enough for the audio
+/// callback: one critical section around a copy of at most five floats.
+pub fn merge<const N: usize>(knobs: [f32; N]) -> [f32; N] {
+    let mut out = knobs;
+    merge_in_place(&mut out);
+    out
+}
+
+/// As [`merge`], rewriting `knobs` in place; entries beyond [`KNOBS`] are left alone.
+pub fn merge_in_place(knobs: &mut [f32]) {
+    let n = knobs.len().min(KNOBS);
+    let mut full = [0.0; KNOBS];
+    full[..n].copy_from_slice(&knobs[..n]);
+    let merged = cortex_m::interrupt::free(|cs| OVERRIDE.borrow(cs).borrow().merge(full));
+    knobs[..n].copy_from_slice(&merged[..n]);
 }
 
 #[cfg(feature = "log-usb")]

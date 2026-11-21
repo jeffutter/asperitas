@@ -46,8 +46,9 @@ are `root_hz`, `structure`, `damping`, `spread` and `excitation_preset`, with th
 [resonator.md](resonator.md#controls). `root_hz` ramps by equal ratios and the others linearly.
 `excitation_preset` is step-only: `ramp` on it is an error naming the line. `Automation::parse`
 still means the low-pass and gain patch. `asperitas-cli process --processor resonator --automation
-knobs.txt` renders a clip through it (see [resonator.md](resonator.md#command-line)); the live host
-is not wired to it yet. `Automation::render` drives a `Resonator`.
+knobs.txt` renders a clip through it (see [resonator.md](resonator.md#command-line)), and
+`asperitas-rig session --fx-f 2 ... automation FILE` plays the same file on the rig's resonator stage.
+`Automation::render` drives a `Resonator`.
 
 ## 32-frame latch
 
@@ -61,5 +62,5 @@ sampled at block starts. `asperitas-live` latches the same way.
 
 `asperitas-rig session ... automation FILE` plays the same file on the board over `CTL SET` (see
 [asperitas-rig.md](asperitas-rig.md)), and `asperitas-measure analyze --excerpt` judges that session
-against this render. The device schedule is `Automation::device_schedule`: a step is one update at the
+against this render (for the patch; `analyze` has no resonator reference yet). The device schedule is `Automation::device_schedule`: a step is one update at the
 block it lands in, a ramp one update every 480 frames (10 ms) rather than every block.

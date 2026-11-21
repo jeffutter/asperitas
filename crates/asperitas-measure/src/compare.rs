@@ -117,6 +117,11 @@ impl Reference {
     ) -> Result<Reference, CompareError> {
         let pcm = parse_wav(raw).map_err(CompareError::Wav)?;
         let kind = fx.kind().ok_or(CompareError::UnknownFx(fx.code))?;
+        // The reference is built from the patch's two knobs; a resonator reference would need its
+        // five, and giving it the patch's would compare against the wrong render.
+        if kind == FxKind::Resonator {
+            return Err(CompareError::UnsupportedFx(fx.code));
+        }
         let mut replay = ReplayFx::new();
         replay.select(
             kind,
@@ -150,6 +155,8 @@ pub enum CompareError {
     Wav(WavError),
     /// The `CTL FX` code names no effect.
     UnknownFx(u8),
+    /// The effect exists on the rig but this comparison cannot yet build its reference.
+    UnsupportedFx(u8),
     /// The reference is shorter than one alignment window.
     ReferenceTooShort {
         have: usize,
@@ -170,6 +177,11 @@ impl fmt::Display for CompareError {
         match self {
             CompareError::Wav(e) => write!(f, "excerpt WAV rejected: {e:?}"),
             CompareError::UnknownFx(c) => write!(f, "unknown effect code {c}"),
+            CompareError::UnsupportedFx(c) => write!(
+                f,
+                "effect code {c} (resonator) cannot be compared by analyze yet; \
+                 only bypass and the patch have a reference here"
+            ),
             CompareError::ReferenceTooShort { have, need } => {
                 write!(f, "reference has {have} samples, need at least {need}")
             }
@@ -560,6 +572,15 @@ mod tests {
         assert_eq!(k[0], Controls::default().knobs[0]);
         assert_eq!(k[1], 1.0);
         assert!(s.with_knob(KNOB_COUNT, 0).is_none());
+    }
+
+    #[test]
+    fn resonator_reference_is_refused_not_built_from_patch_knobs() {
+        let raw = std::fs::read(root(&format!("audio/instruments/{MAND_SOFT}.wav"))).unwrap();
+        assert!(matches!(
+            Reference::from_excerpt_wav_fx(&raw, FxSetting::from_code(2)),
+            Err(CompareError::UnsupportedFx(2))
+        ));
     }
 
     #[test]

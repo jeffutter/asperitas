@@ -23,6 +23,7 @@
 
 pub mod cli;
 pub mod control;
+pub mod knob;
 pub mod session;
 
 use std::fmt::Write as _;

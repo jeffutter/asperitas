@@ -1,8 +1,8 @@
 //! A stimulus generator followed by the selectable [`ReplayFx`] stage.
 //!
 //! The rig plays one generator per build and runs the same stage after whichever it is: sine,
-//! sweep, pulse or the excerpt replay. The stage is bypass or the [`Asperitas`](asperitas_dsp::Asperitas)
-//! patch `main` runs. This is that pairing as a plain host-testable unit, so the bypass-identity
+//! sweep, pulse or the excerpt replay. The stage is bypass, the [`Asperitas`](asperitas_dsp::Asperitas)
+//! patch `main` runs, or the [`Resonator`](asperitas_dsp::Resonator) bank. This is that pairing as a plain host-testable unit, so the bypass-identity
 //! guarantee and the knob behaviour are pinned without a board. Order is fixed: generator first,
 //! stage second, and the capture (the codec input) never enters here.
 //!
@@ -11,21 +11,21 @@
 //!
 //! ## Callback cost
 //!
-//! Bypass adds one enum compare per block. With the patch selected the added work is one
-//! `set_knobs` compare plus the filter and gain over 32 frames per block. No allocation, no
-//! await, no lock held across anything.
+//! Bypass adds one enum compare per block. With the patch or the resonator selected the added work
+//! is one `set_knobs` compare plus the stage over 32 frames per block; while a resonator knob moves,
+//! one `set_params` per block retunes the bank. No allocation, no await, no lock held across
+//! anything.
 
-use crate::replay_fx::{FxKind, ReplayFx};
+use crate::replay_fx::{FxKind, ReplayFx, MAX_KNOBS};
 use crate::stimulus::Stimulus;
-use asperitas_dsp::asperitas::{Controls, KNOB_COUNT};
 use asperitas_dsp::processor::{Frame, Processor};
 
 /// Generator `G` followed by the replay stage.
 pub struct FxChain<G> {
     gen: G,
     fx: ReplayFx,
-    /// The knob positions a live override replaces: the patch's defaults.
-    base: [f32; KNOB_COUNT],
+    /// The knob positions a live override replaces: the selected stage's defaults.
+    base: [f32; MAX_KNOBS],
 }
 
 impl<G> FxChain<G> {
@@ -34,7 +34,7 @@ impl<G> FxChain<G> {
         Self {
             gen,
             fx: ReplayFx::new(),
-            base: Controls::default().knobs,
+            base: FxKind::Patch.default_knobs(),
         }
     }
 
@@ -44,7 +44,7 @@ impl<G> FxChain<G> {
         Self {
             gen,
             fx: ReplayFx::new_unsmoothed(),
-            base: Controls::default().knobs,
+            base: FxKind::Patch.default_knobs(),
         }
     }
 
@@ -53,14 +53,14 @@ impl<G> FxChain<G> {
         &self.gen
     }
 
-    /// Choose stage `code` (see [`FxKind::from_code`]). The patch starts at its default knob
+    /// Choose stage `code` (see [`FxKind::from_code`]). The stage starts at its default knob
     /// positions; `_value` is accepted so the wire shape stays stable and is ignored. `false` for
     /// an unknown code, changing nothing.
     pub fn select(&mut self, code: u8, _value: u16) -> bool {
         let Some(kind) = FxKind::from_code(code) else {
             return false;
         };
-        self.base = Controls::default().knobs;
+        self.base = kind.default_knobs();
         self.fx.select(kind, self.base);
         true
     }
@@ -74,18 +74,16 @@ impl<G> FxChain<G> {
 impl<G: Processor> FxChain<G> {
     /// Render a block from the generator, then run the stage over it in place.
     ///
-    /// `knobs` maps the patch's default knob positions to the ones actually applied; the rig
-    /// passes its live override merge here. It runs only when the patch is selected, so bypass
-    /// stays free of it.
-    pub fn process_block_with(
-        &mut self,
-        block: &mut [Frame],
-        knobs: impl FnOnce([f32; KNOB_COUNT]) -> [f32; KNOB_COUNT],
-    ) {
+    /// `knobs` rewrites the selected stage's default knob positions (indexed by knob id) into the
+    /// ones actually applied; the rig passes its live override merge here. It runs only when a
+    /// stage is selected, so bypass stays free of it.
+    pub fn process_block_with(&mut self, block: &mut [Frame], knobs: impl FnOnce(&mut [f32])) {
         self.gen.process_block(block);
         if self.fx.kind() != FxKind::Bypass {
+            let mut applied = self.base;
+            knobs(&mut applied);
             // Upstream of smoothing; a no-op when the values are unchanged.
-            self.fx.set_knobs(knobs(self.base));
+            self.fx.set_knobs(applied);
             self.fx.process(block);
         }
     }
@@ -122,7 +120,7 @@ impl<G: Processor> Processor for FxChain<G> {
     }
 
     fn process_block(&mut self, block: &mut [Frame]) {
-        self.process_block_with(block, |base| base);
+        self.process_block_with(block, |_| {});
     }
 }
 
@@ -156,6 +154,7 @@ mod tests {
     extern crate std;
     use super::*;
     use crate::stimulus::Sine;
+    use asperitas_dsp::asperitas::Controls;
     use std::vec::Vec;
 
     fn bare() -> Sine {
@@ -223,6 +222,40 @@ mod tests {
     }
 
     #[test]
+    fn resonator_is_selectable_and_unknown_codes_change_nothing() {
+        let mut c = chain(true);
+        assert!(c.select(2, 0));
+        assert_eq!(c.kind(), FxKind::Resonator);
+        let mut a = [0u8; 200];
+        let n = c.describe(&mut a);
+        assert!(core::str::from_utf8(&a[..n])
+            .unwrap()
+            .ends_with(" fx=resonator"));
+        assert!(!c.select(3, 0));
+        assert_eq!(c.kind(), FxKind::Resonator);
+    }
+
+    #[test]
+    fn resonator_knob_override_reaches_all_five_ids() {
+        let mut c = chain(false);
+        c.select(2, 0);
+        let plain = render(&mut c, 50);
+        for id in 0..5 {
+            let mut d = chain(false);
+            d.select(2, 0);
+            let mut all = Vec::new();
+            for _ in 0..50 {
+                let mut out = SILENCE;
+                d.process_block_with(&mut out, |k| k[id] = if id == 4 { 1.0 } else { 0.9 });
+                all.extend_from_slice(&out);
+            }
+            let moved = plain.iter().zip(&all).any(|(a, b)| a != b);
+            // The sine generator is audible to every control except where the bank is silent.
+            assert!(moved, "knob {id} had no effect");
+        }
+    }
+
+    #[test]
     fn description_truncates_rather_than_panics() {
         let mut c = chain(true);
         c.select(1, 100);
@@ -246,7 +279,7 @@ mod tests {
         let mut quiet = 0.0;
         for _ in 0..200 {
             let mut out = SILENCE;
-            c.process_block_with(&mut out, |b| [b[0], 0.0]); // minimum gain
+            c.process_block_with(&mut out, |b| b[1] = 0.0); // minimum gain
             quiet = peak(&out);
         }
         let loud = peak(&render(&mut bare(), 200)[4800..]);
@@ -260,7 +293,7 @@ mod tests {
         let mut filtered = 0.0;
         for _ in 0..200 {
             let mut out = SILENCE;
-            c.process_block_with(&mut out, |b| [0.0, b[1]]); // lowest cutoff
+            c.process_block_with(&mut out, |b| b[0] = 0.0); // lowest cutoff
             filtered = peak(&out);
         }
         let raw = peak(&render(&mut bare(), 200)[4800..]);
@@ -275,13 +308,13 @@ mod tests {
         let mut loud = 0.0;
         for _ in 0..200 {
             out = SILENCE;
-            c.process_block_with(&mut out, |b| b);
+            c.process_block_with(&mut out, |_| {});
             loud = peak(&out);
         }
         let mut quiet = 0.0;
         for _ in 0..2000 {
             out = SILENCE;
-            c.process_block_with(&mut out, |b| [b[0], 0.0]);
+            c.process_block_with(&mut out, |b| b[1] = 0.0);
             quiet = peak(&out);
         }
         assert!(quiet < loud * 0.05, "{loud} -> {quiet}");
@@ -329,7 +362,7 @@ mod tests {
         c.select(1, 0);
         for _ in 0..200 {
             let mut out = SILENCE;
-            c.process_block_with(&mut out, |b| [b[0], 0.0]);
+            c.process_block_with(&mut out, |b| b[1] = 0.0);
         }
         let mut twin = chain(false);
         twin.select(1, 0);
@@ -337,12 +370,12 @@ mod tests {
 
         let after_reset = {
             let mut out = SILENCE;
-            c.process_block_with(&mut out, |b| [b[0], 0.0]);
+            c.process_block_with(&mut out, |b| b[1] = 0.0);
             out
         };
         let fresh = {
             let mut out = SILENCE;
-            twin.process_block_with(&mut out, |b| [b[0], 0.0]);
+            twin.process_block_with(&mut out, |b| b[1] = 0.0);
             out
         };
         // The generator restarted, so the unfiltered first sample is the fresh one's; the
