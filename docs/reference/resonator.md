@@ -173,7 +173,7 @@ part in a million of f32 rounding) for any parameters and any input including Na
 
 Code: `crates/asperitas-dsp/src/random_walk.rs`, exported as `RandomWalk`, `RandomWalkParams` and
 `RANDOM_WALK_PARAMS`. A mono, `no_std`, allocation-free slowly wandering control value: a
-modulation source, not a `Processor`. It is not routed to any parameter yet.
+modulation source, not a `Processor`. The modulation stage below routes it to spread.
 
 The walk moves between random targets in -1..1. A phase advances by `rate_hz / sample_rate` per
 sample; the output is `from + (to - from) * smoothstep(phase)`, and when the phase passes 1 the
@@ -302,6 +302,70 @@ under 0.08 per sample against a snapped-smoother negative control, and hostile p
 `processor_laws!` instantiation `resonator_bank_laws` and `bank_worst_case_stays_under_the_bound`
 in `crates/asperitas-dsp/tests/property_tests.rs` cover finite and bounded output (longest
 decay, both ends of structure, the whole root range, full-scale and non-finite input).
+
+## Modulation stage
+
+Code: `crates/asperitas-dsp/src/modulated_resonator.rs`, exported as `ModulatedResonator`,
+`ModulationParams`, `MODULATION_ROUTES` and the `Source`, `Target`, `Polarity` and `Route` types. A
+`Processor` that owns a `Resonator`, an `EnvelopeFollower` and a `RandomWalk` (seed
+`MODULATION_WALK_SEED`); `no_std` and allocation-free. `Resonator` and `Asperitas` are unchanged.
+The routing is decision-002 section 1.
+
+`ModulationParams` holds the unmodulated `base: ResonatorParams`, `follower_depth` and `walk_depth`
+(both default 0), the follower's attack and release and the walk's rate.
+
+### Targets and polarity
+
+One constant table, `MODULATION_ROUTES`, so a target change is a one-line edit:
+
+| Source | Target | Polarity | Effect |
+|--------|--------|----------|--------|
+| follower, level `0..1` | damping | down (unipolar) | lowers damping from the base value, so the ring only gets longer and the knob is the floor |
+| random walk, `-1..1` | spread | up (bipolar) | moves spread both ways around the base value |
+
+The table can name any of root (in cents), structure, damping and spread; the other targets are not
+routed by default.
+
+### Depth law
+
+`depth_eff = depth^2`, with depth clamped to `0..1` and NaN counting as 0. The offset of a target is
+`sign * depth_eff * source` and is added to the base value in the unit of the target: the parameter
+range for structure, damping and spread, `ROOT_CENTS_SPAN` (100 cents) for the root. The sum is
+clamped to the range of the parameter's `ParamSpec` in `RESONATOR_PARAMS`; there are no new range
+tables. So damping becomes `clamp(base - depth^2 * level)` and spread `clamp(base + depth^2 * walk)`.
+
+### Update rate
+
+Every sample the follower is fed the mean of the two input channels (non-finite samples count as
+silence) and the walk advances, so the sources do not depend on how the samples are split into
+blocks. Every 32 frames (`BLOCK_FRAMES`) the effective parameters are computed and, if they differ
+bitwise from the last set, applied with `Resonator::set_params`; the bank's 10 ms smoothing keeps
+the change click-free. `set_params` on the stage applies the effective values at once.
+`effective_params()` returns what the bank currently targets. `reset()` resets the bank, follower
+and walk, so the walk replays the start of its sequence.
+
+### Depth 0
+
+A target whose offset is exactly 0 keeps the base value's bits, so with every depth 0 the output is
+bit-identical to `Resonator` for the same input and params.
+
+### Bound
+
+Modulation only changes parameter values, and the bank's bound holds at any parameters, so
+`|out| <= BANK_GAIN * VOICE_COUNT * min(2.0, 6 * input_peak)`, at most 32, for any depth, params
+and input including NaN and infinities.
+
+### Tests
+
+Unit tests in `modulated_resonator.rs`: depth 0 (and NaN depths) bit-identical to `Resonator` over
+noise and a tone, with a negative control that differs when either depth is non-zero; a settled
+follower level `x` gives damping `base - depth^2 * x` (loud against quiet) and never exceeds the
+base; the effective spread equals `base + depth^2 * walk` at every block end of a 10 s trace
+against a reference walk, deviates both ways by at most `depth^2` and stays in `0..1`; untargeted
+parameters keep the base bits; hostile depths, params and input stay finite and under 32; a
+parameter step with both routes at full depth moves the output under 0.08 per sample at every
+phase (the bank's step detector and limit); `process_block` equals repeated `tick` for odd block
+splits; `reset` replays the same output and walk trace.
 
 ## Controls
 

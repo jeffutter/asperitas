@@ -7,6 +7,7 @@ pub mod envelope;
 pub mod excitation;
 pub mod filter;
 pub mod gain;
+pub mod modulated_resonator;
 pub mod param;
 pub mod pcm;
 #[cfg(feature = "pitch")]
@@ -23,6 +24,10 @@ pub use envelope::{EnvelopeFollower, EnvelopeParams, ENVELOPE_PARAMS};
 pub use excitation::{Excitation, ExcitationParams, EXCITATION_PARAMS, EXCITATION_PRESETS};
 pub use filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 pub use gain::{Gain, GainParams, GAIN_PARAMS};
+pub use modulated_resonator::{
+    ModulatedResonator, ModulationParams, Polarity, Route, Source, Target, MODULATION_ROUTES,
+    MODULATION_WALK_SEED, ROOT_CENTS_SPAN,
+};
 pub use param::{ParamSpec, Taper};
 #[cfg(feature = "pitch")]
 pub use pitch::{PitchParams, PitchTracker, PITCH_HOP, PITCH_PARAMS};
