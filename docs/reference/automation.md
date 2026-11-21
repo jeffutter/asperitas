@@ -48,12 +48,12 @@ are `root_hz`, `structure`, `damping`, `spread`, `excitation_preset`, `follower_
 [resonator.md](resonator.md#controls). Keys ramp in knob position: `root_hz` and the log-taper keys
 (`follower_attack_ms`, `follower_release_ms`, `walk_rate_hz`) by equal ratios, the others linearly.
 `excitation_preset`, `root_source` and `root_offset_semitones` are step-only: `ramp` on one is an
-error naming the line. The modulation and root keys are accepted and latched like the others, but
-`Automation::render` drives a plain `Resonator` and ignores them until a host wires them in. `Automation::parse`
-still means the low-pass and gain patch. `asperitas-cli process --processor resonator --automation
+error naming the line. The modulation and root keys are latched like the others.
+`Automation::render_tracked` drives a `TrackedResonator`, which uses all of them (the offline
+`process` and `trace` commands do); `Automation::render` drives a plain `Resonator` and ignores the
+modulation and root keys. `Automation::parse` still means the low-pass and gain patch. `asperitas-cli process --processor resonator --automation
 knobs.txt` renders a clip through it (see [resonator.md](resonator.md#command-line)), and
 `asperitas-rig session --fx-f 2 ... automation FILE` plays the same file on the rig's resonator stage.
-`Automation::render` drives a `Resonator`.
 
 ## 32-frame latch
 

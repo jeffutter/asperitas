@@ -1,12 +1,14 @@
 //! Process a WAV file through a named DSP processor.
 
+use asperitas_dsp::asperitas::BLOCK_FRAMES;
 use asperitas_dsp::asperitas::{Asperitas, Controls};
 use asperitas_dsp::filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 use asperitas_dsp::gain::{Gain, GainParams, GAIN_PARAMS};
 use asperitas_dsp::param::ParamSpec;
+use asperitas_dsp::processor::Frame;
 use asperitas_dsp::processor::Processor;
-use asperitas_dsp::resonator_bank::Resonator;
 use asperitas_dsp::resonator_controls::ResonatorControls;
+use asperitas_dsp::tracked_resonator::TrackedResonator;
 
 use crate::automation::Automation;
 use crate::wav_io;
@@ -69,25 +71,8 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
             }
         }
         "resonator" => {
-            if let Some(path) = &args.automation {
-                if !pairs.is_empty() {
-                    return Err(
-                        "--automation and --params both set knobs; put the starting values \
-                         in the automation file"
-                            .to_string(),
-                    );
-                }
-                let text = std::fs::read_to_string(path)
-                    .map_err(|e| format!("cannot read automation file '{path}': {e}"))?;
-                let automation =
-                    Automation::<ResonatorControls>::parse_for(&text, spec.sample_rate)
-                        .map_err(|e| format!("{path}: {e}"))?;
-                let mut bank = Resonator::new(sample_rate, &automation.controls_at(0).params());
-                automation.render(&mut bank, &mut frames);
-            } else {
-                let controls = resonator_controls_from_pairs(&pairs)?;
-                Resonator::new(sample_rate, &controls.params()).process_block(&mut frames);
-            }
+            let drive = ResonatorDrive::load(&pairs, args.automation.as_deref(), spec.sample_rate)?;
+            drive.render(sample_rate, &mut frames, |_| {});
         }
         other => {
             return Err(format!(
@@ -100,6 +85,64 @@ pub fn run_process(args: &ProcessArgs) -> Result<(), String> {
     // carries over from the input file.
     wav_io::write_wav(&args.output_path, spec.sample_rate, &frames)?;
     Ok(())
+}
+
+/// The controls a resonator render runs under: one fixed set, or a script of knob motion.
+pub(crate) enum ResonatorDrive {
+    Fixed(ResonatorControls),
+    Script(Automation<ResonatorControls>),
+}
+
+impl ResonatorDrive {
+    /// Parse `--params` pairs or an automation file (not both) through [`ResonatorControls`].
+    pub(crate) fn load(
+        pairs: &[(String, String)],
+        automation: Option<&str>,
+        sample_rate: u32,
+    ) -> Result<Self, String> {
+        let Some(path) = automation else {
+            return Ok(Self::Fixed(resonator_controls_from_pairs(pairs)?));
+        };
+        if !pairs.is_empty() {
+            return Err(
+                "--automation and --params both set knobs; put the starting values \
+                        in the automation file"
+                    .to_string(),
+            );
+        }
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read automation file '{path}': {e}"))?;
+        Automation::<ResonatorControls>::parse_for(&text, sample_rate)
+            .map(Self::Script)
+            .map_err(|e| format!("{path}: {e}"))
+    }
+
+    /// Render `frames` in place through the tracked resonator stage on the block grid, calling
+    /// `observe` after each block. This is the one resonator render path of the CLI.
+    pub(crate) fn render(
+        &self,
+        sample_rate: f32,
+        frames: &mut [Frame],
+        mut observe: impl FnMut(&TrackedResonator),
+    ) {
+        match self {
+            Self::Fixed(controls) => {
+                let mut stage = TrackedResonator::new(sample_rate, controls);
+                for chunk in frames.chunks_mut(BLOCK_FRAMES) {
+                    stage.process_block(chunk);
+                    observe(&stage);
+                }
+            }
+            Self::Script(automation) => {
+                let mut stage = TrackedResonator::new(sample_rate, &automation.controls_at(0));
+                automation.for_each_block(frames, |controls, chunk| {
+                    stage.set_controls(controls);
+                    stage.process_block(chunk);
+                    observe(&stage);
+                });
+            }
+        }
+    }
 }
 
 /// Resolve `key=value` pairs against a processor's parameter table. Returns one value per table
@@ -157,7 +200,7 @@ fn resonator_controls_from_pairs(pairs: &[(String, String)]) -> Result<Resonator
     ResonatorControls::from_values(&values).map_err(|e| e.to_string())
 }
 
-fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {
+pub(crate) fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {
     let mut pairs = Vec::new();
     for arg in raw {
         let parts: Vec<&str> = arg.splitn(2, '=').collect();
@@ -173,6 +216,7 @@ fn parse_param_pairs(raw: &[String]) -> Result<Vec<(String, String)>, String> {
 mod tests {
     use super::*;
     use asperitas_dsp::asperitas::ASPERITAS_PARAMS;
+    use asperitas_dsp::resonator_bank::Resonator;
 
     #[test]
     fn gain_parse_rejects_unknown_key() {
@@ -557,6 +601,76 @@ mod tests {
                 .collect::<Vec<f32>>()
         };
         assert_ne!(rendered, exact);
+    }
+
+    /// Without modulation or tracking the render is the plain bank's, sample for sample.
+    #[test]
+    fn resonator_render_with_default_new_keys_is_the_plain_bank() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.wav");
+        let output = dir.path().join("out.wav");
+        write_ramp(&input);
+        run_process(&resonator_args(
+            &input,
+            &output,
+            &["root_hz=180", "damping=0.4"],
+            None,
+        ))
+        .unwrap();
+        let (_, mut frames) = wav_io::read_wav(input.to_str().unwrap()).unwrap();
+        let controls =
+            parse_resonator_controls(&["root_hz=180".into(), "damping=0.4".into()]).unwrap();
+        Resonator::new(48_000.0, &controls.params()).process_block(&mut frames);
+        let want: Vec<f32> = frames.iter().flat_map(|f| [f[0], f[1]]).collect();
+        assert_eq!(read_f32(&output), want);
+    }
+
+    #[test]
+    fn resonator_modulation_keys_change_the_render_and_bad_ones_are_refused() {
+        let plain = run_on_ramp("resonator", &["root_hz=220"]);
+        let modulated = run_on_ramp(
+            "resonator",
+            &[
+                "root_hz=220",
+                "follower_depth=1",
+                "walk_depth=1",
+                "walk_rate_hz=5",
+            ],
+        );
+        assert_ne!(plain, modulated);
+
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("in.wav");
+        let output = dir.path().join("out.wav");
+        write_ramp(&input);
+        for (arg, key) in [
+            ("follower_depth=2", "follower_depth"),
+            ("walk_rate_hz=-1", "walk_rate_hz"),
+            ("root_source=3", "root_source"),
+            ("root_offset_semitones=99", "root_offset_semitones"),
+            ("nope=1", "nope"),
+        ] {
+            let err = run_process(&resonator_args(&input, &output, &[arg], None)).unwrap_err();
+            assert!(err.contains(key), "{arg}: {err}");
+        }
+    }
+
+    /// A tracked root follows a generated plucked note: its effective root lands on the note.
+    #[test]
+    fn resonator_tracked_root_follows_a_plucked_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("pluck.wav");
+        let frames = crate::synth::to_stereo(&crate::synth::generate_pluck(48_000, 1.0, 330.0));
+        wav_io::write_wav(input.to_str().unwrap(), 48_000, &frames).unwrap();
+        let run = crate::trace::trace_clip(&crate::trace::TraceArgs {
+            input: input.to_str().unwrap().to_string(),
+            output_prefix: String::new(),
+            params: vec!["root_source=2".into(), "root_hz=110".into()],
+            automation: None,
+        })
+        .unwrap();
+        let root = run.rows.last().unwrap().effective_root_hz;
+        assert!((root - 329.63).abs() < 5.0, "root {root}");
     }
 
     #[test]

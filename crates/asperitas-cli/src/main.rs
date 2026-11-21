@@ -22,10 +22,26 @@ enum Command {
     Review(ReviewArgs),
     /// Write the resonator's impulse and frequency response as CSV and a PNG plot.
     Analyze(AnalyzeArgs),
+    /// Render a WAV through the resonator and write the follower, random walk, pitch estimate, confidence and effective root over time as CSV and a PNG.
+    Trace(TraceArgs),
     /// Run the pitch tracker over a WAV or a built-in signal and write estimate against time as CSV and a PNG.
     Pitch(PitchArgs),
     /// Run the pitch tracker over the recorded corpus and the built-in signals and write a table.
     PitchCorpus(PitchCorpusArgs),
+}
+
+#[derive(Parser)]
+struct TraceArgs {
+    /// Input WAV file.
+    input: String,
+    /// Output prefix: writes <prefix>_trace.csv and <prefix>_trace.png.
+    output_prefix: String,
+    /// Resonator settings as key=value pairs, as `process --params`.
+    #[clap(short = 'p', long, num_args = 1..)]
+    params: Vec<String>,
+    /// Knob automation file, as `process --automation`.
+    #[clap(long)]
+    automation: Option<String>,
 }
 
 #[derive(Parser)]
@@ -126,6 +142,12 @@ fn main() {
             })
             .map(|report| print!("{report}"))
         }
+        Command::Trace(args) => asperitas_cli::trace::run_trace(&asperitas_cli::trace::TraceArgs {
+            input: args.input,
+            output_prefix: args.output_prefix,
+            params: args.params,
+            automation: args.automation,
+        }),
         Command::Pitch(args) => {
             asperitas_cli::pitch_report::run_pitch(&asperitas_cli::pitch_report::PitchArgs {
                 input: args.input,

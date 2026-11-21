@@ -69,3 +69,32 @@ harmonic series within 2 cents, odd partials stronger on the left and even parti
 `--params structure=1` moves partial 8 to about 12 times the root, `spread=0` makes the two
 channels identical, and a larger `damping` shortens the impulse response and lowers the upper peaks
 relative to the root.
+
+## Trace
+
+`asperitas-cli trace <in.wav> <prefix> [--params key=value ...] [--automation FILE]` is the sibling
+for a clip: `analyze` takes no input, so it cannot show how the follower, the random walk and the
+tracked root move over a real signal. It renders the clip exactly as
+`process --processor resonator` does (the same `TrackedResonator` on the same 32-frame block grid,
+the same `--params` and `--automation` keys with the same refusals, see
+[resonator.md](resonator.md#command-line) and [automation.md](automation.md#resonator-keys)) and
+records the stage's signals once per block. The code is `crates/asperitas-cli/src/trace.rs`. Exit 1
+on any refusal.
+
+`<prefix>_trace.csv` has one row per block, numbers as `{:.9e}`, identical between runs:
+
+| column | meaning |
+| --- | --- |
+| `block` | block index from 0 |
+| `t_s` | time of the end of the block in seconds |
+| `follower` | envelope follower level, 0 to 1 |
+| `walk` | random walk value, -1 to 1 |
+| `estimate_hz` | the tracker's held estimate; 0 before the first confident one |
+| `confidence` | the tracker's clarity at its latest analysis, 0 to 1 |
+| `root_hz` | the root the bank is tuned to: tracked root and modulation included |
+
+`<prefix>_trace.png` has three panels over the clip's duration, left edge to right edge:
+the follower (red) and walk (blue) on one scale from -1 at the bottom to 1 at the top with the zero
+line in the middle; the confidence (red) from 0 to 1 with a line at the 0.8 root-follow threshold;
+and the estimate (blue) and `root_hz` (red) on a log frequency axis spanning the octaves they use,
+a line at each octave. The follower and walk are traced whether or not their depths are above 0.

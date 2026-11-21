@@ -10,6 +10,8 @@ use crate::param::ParamSpec;
 use crate::processor::{Frame, Processor};
 use crate::resonator_bank::Resonator;
 use crate::resonator_controls::{ResonatorControls, RESONATOR_CONTROL_PARAMS};
+#[cfg(feature = "pitch")]
+use crate::tracked_resonator::TrackedResonator;
 use std::marker::PhantomData;
 
 /// Spacing of ramp samples in [`Automation::device_schedule`], a multiple of [`BLOCK_FRAMES`]:
@@ -119,6 +121,19 @@ impl Automation<ResonatorControls> {
         self.for_each_block(frames, |controls, chunk| {
             bank.set_params(&controls.params());
             bank.process_block(chunk);
+        });
+    }
+}
+
+#[cfg(feature = "pitch")]
+impl Automation<ResonatorControls> {
+    /// As [`render`](Self::render), for the tracked resonator stage: the controls in force at
+    /// each block start go to [`TrackedResonator::set_controls`] and the block through
+    /// [`TrackedResonator::process_block`]. The stage should have been built with `controls_at(0)`.
+    pub fn render_tracked(&self, stage: &mut TrackedResonator, frames: &mut [Frame]) {
+        self.for_each_block(frames, |controls, chunk| {
+            stage.set_controls(controls);
+            stage.process_block(chunk);
         });
     }
 }

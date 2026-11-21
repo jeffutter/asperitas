@@ -486,7 +486,11 @@ default (widest) and can only be set by key.
 ## Command line
 
 `asperitas-cli process in.wav out.wav --processor resonator [--params key=value ...]` renders a clip
-through the bank. The output is stereo at the input's rate. `--params` takes the real-unit keys of
+through `TrackedResonator` (`asperitas-dsp/src/tracked_resonator.rs`): the pitch tracker, the
+root-follow stage and the modulated resonator, run in that order once per 32-frame block. With
+`root_source` manual and both depths 0 this is bit-identical to the bank alone. With `root_source`
+tracked the root lags the note by the tracker latency ([pitch-tracker.md](pitch-tracker.md)) plus the
+glide; the stage does not compensate. The output is stereo at the input's rate. `--params` takes the real-unit keys of
 [Controls](#controls) through `ResonatorControls::from_values`: `root_hz`, `structure`, `damping`,
 `spread` and `excitation_preset`, and the modulation and root-source keys of the table. Unnamed keys keep their default. An unknown key, a non-numeric
 value or a value outside the range is refused with a message naming the key; nothing is clamped.
@@ -507,5 +511,6 @@ asperitas-cli process in.wav out.wav --processor resonator \
 `--params`; giving both is refused. The render is deterministic: the same input and arguments give
 identical output.
 
-`asperitas-cli analyze` shows the same bank as an impulse and frequency response without a clip; see
-[analyze.md](analyze.md).
+`asperitas-cli analyze` shows the same bank as an impulse and frequency response without a clip, and
+`asperitas-cli trace` plots the follower, random walk, pitch estimate, confidence and effective root
+of a rendered clip over time; see [analyze.md](analyze.md).

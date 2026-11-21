@@ -5,4 +5,5 @@ mod plot;
 pub mod process;
 pub mod review;
 pub mod synth;
+pub mod trace;
 pub mod wav_io;

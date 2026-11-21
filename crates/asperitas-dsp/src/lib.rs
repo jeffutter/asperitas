@@ -19,6 +19,8 @@ pub mod resonator_bank;
 pub mod resonator_controls;
 pub mod root_follow;
 mod smooth;
+#[cfg(feature = "pitch")]
+pub mod tracked_resonator;
 
 pub use asperitas::{Asperitas, Controls, ASPERITAS_PARAMS, KNOB_COUNT};
 pub use envelope::{EnvelopeFollower, EnvelopeParams, ENVELOPE_PARAMS};
@@ -43,3 +45,5 @@ pub use root_follow::{
     RootFollow, RootFollowParams, CONFIDENCE_THRESHOLD, GLIDE_MS, LOW_CONFIDENCE_HOLDS,
     ROOT_FOLLOW_PARAMS, SNAP_SEMITONES,
 };
+#[cfg(feature = "pitch")]
+pub use tracked_resonator::{Trace, TrackedResonator};

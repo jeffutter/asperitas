@@ -31,7 +31,7 @@ Knob motion for offline renders (`asperitas-cli process --automation`) is define
 A manifest of cases rendered into one self-contained HTML page for listening and review
 (`asperitas-cli review`) is in [docs/reference/review.md](docs/reference/review.md).
 The resonator's impulse and frequency response as CSV and a PNG plot (`asperitas-cli analyze`) is in
-[docs/reference/analyze.md](docs/reference/analyze.md).
+[docs/reference/analyze.md](docs/reference/analyze.md); `asperitas-cli trace` plots the follower, random walk, pitch estimate and effective root of a rendered clip (same page).
 The pitch tracker's accuracy over the corpus and a synthetic sweep, as a table and CSV/PNG per clip
 (`asperitas-cli pitch`, `pitch-corpus`), is in [docs/reference/pitch-accuracy.md](docs/reference/pitch-accuracy.md).
 

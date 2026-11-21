@@ -208,6 +208,16 @@ impl ModulatedResonator {
         }
     }
 
+    /// The envelope follower's current level, for inspection.
+    pub fn follower_value(&self) -> f32 {
+        self.follower.value()
+    }
+
+    /// The random walk's current value, for inspection.
+    pub fn walk_value(&self) -> f32 {
+        self.walk.value()
+    }
+
     /// Base values with every route's offset added; a target with no offset keeps the base bits.
     fn compute_effective(&self) -> [f32; 4] {
         let mut v = Self::base_values(&self.params.base);
