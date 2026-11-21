@@ -1391,12 +1391,12 @@ mod tests {
     }
 
     #[test]
-    fn resonator_automation_overrides_all_five_knobs_with_real_unit_keys() {
+    fn resonator_automation_overrides_every_knob_with_real_unit_keys() {
         let t = resonator_plan("0 root_hz=220 damping=0.3\n0.05 ramp damping=0.8\n")
             .timeline()
             .unwrap();
-        assert_eq!(t.knobs, vec![0, 1, 2, 3, 4]);
-        assert_eq!(t.pre.len(), 5);
+        assert_eq!(t.knobs, (0..13).collect::<Vec<u8>>());
+        assert_eq!(t.pre.len(), 13);
         assert_eq!(t.pre[0], wire_of_resonator("root_hz", 220.0));
         assert_eq!(t.pre[2], wire_of_resonator("damping", 0.3));
         // Untouched knobs start from their table default.

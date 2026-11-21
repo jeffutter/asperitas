@@ -82,7 +82,7 @@ impl ControlSurface for ResonatorControls {
     }
 
     fn is_discrete(index: usize) -> bool {
-        RESONATOR_CONTROL_PARAMS[index].name == "excitation_preset"
+        crate::resonator_controls::is_discrete(index)
     }
 }
 
@@ -543,7 +543,7 @@ mod tests {
             RAuto::parse_for(text, SR)
         }
 
-        fn real(a: &RAuto, frame: u64) -> [f32; 5] {
+        fn real(a: &RAuto, frame: u64) -> [f32; crate::resonator_controls::RESONATOR_KNOB_COUNT] {
             a.controls_at(frame).values()
         }
 
@@ -608,6 +608,72 @@ mod tests {
                 e.contains("line 1") && e.contains("excitation_preset"),
                 "{e}"
             );
+        }
+
+        #[test]
+        fn modulation_keys_step_hold_and_ramp() {
+            let text = format!(
+                "0 follower_depth=0.2 walk_rate_hz=0.5\n{} step walk_depth=0.6\n{} ramp follower_depth=0.6\n",
+                secs(480),
+                secs(1480)
+            );
+            let a = parse(&text).unwrap();
+            // Step: walk_depth jumps on its frame and holds.
+            assert!(near(real(&a, 479)[6], 0.0));
+            assert!(near(real(&a, 480)[6], 0.6));
+            assert!(near(real(&a, 100_000)[6], 0.6));
+            // Hold: the rate is never named again.
+            for f in [0, 480, 1480, 9999] {
+                assert!(near(real(&a, f)[9], 0.5), "rate at {f}");
+            }
+            // Ramp: follower_depth goes 0.2 -> 0.6 over frames 0..1480.
+            assert!(near(real(&a, 740)[5], 0.4));
+            assert!(near(real(&a, 1480)[5], 0.6));
+        }
+
+        #[test]
+        fn root_source_and_semitone_offset_are_step_only() {
+            let e = parse("0 root_source=1\n1 ramp root_source=2\n").unwrap_err();
+            assert!(
+                e.contains("line 2") && e.contains("root_source") && e.contains("ramp"),
+                "{e}"
+            );
+            let e =
+                parse("0 root_offset_semitones=0\n1 ramp root_offset_semitones=5\n").unwrap_err();
+            assert!(
+                e.contains("line 2") && e.contains("root_offset_semitones"),
+                "{e}"
+            );
+            let a = parse(&format!(
+                "0 root_source=1\n{} root_source=2 root_offset_cents=0\n{} ramp root_offset_cents=50\n",
+                secs(500),
+                secs(1000)
+            ))
+            .unwrap();
+            assert_eq!(real(&a, 499)[10], 1.0);
+            assert_eq!(real(&a, 500)[10], 2.0);
+            assert!(near(real(&a, 750)[12], 25.0));
+            assert!(a.controls_at(500).root_follow_params().tracking);
+            assert!(!a.controls_at(499).root_follow_params().tracking);
+        }
+
+        #[test]
+        fn new_keys_latch_on_the_32_frame_block_grid() {
+            // A breakpoint at frame 40 is inside the block starting at 32, so it lands at 64.
+            let a = parse(&format!("{} walk_depth=0.8 root_source=2\n", secs(40))).unwrap();
+            let mut frames = vec![[0.0f32; 2]; 128];
+            let mut seen = Vec::new();
+            a.for_each_block(&mut frames, |c, _| {
+                let v = c.values();
+                seen.push((v[6], v[10]));
+            });
+            assert_eq!(seen[0], (0.0, 1.0)); // frame 0
+            assert_eq!(seen[1], (0.0, 1.0)); // frame 32, before the breakpoint's block
+            assert!(near(seen[2].0, 0.8) && seen[2].1 == 2.0); // frame 64, on the grid
+            assert!(near(seen[3].0, 0.8) && seen[3].1 == 2.0); // frame 96, after
+            let s = a.device_schedule();
+            assert!(s.iter().all(|&(f, _, _)| f == 64), "{s:?}");
+            assert_eq!(s.len(), 2);
         }
 
         fn render_with(a: &RAuto) -> Vec<Frame> {

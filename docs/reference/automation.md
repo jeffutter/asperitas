@@ -42,9 +42,14 @@ decrease, a token that is not `key=value`, a line with no key. Nothing is clampe
 
 `Automation<ResonatorControls>` (parsed with `Automation::<ResonatorControls>::parse_for`) uses the
 same grammar, the same latch and the same device schedule for the resonator's controls. The keys
-are `root_hz`, `structure`, `damping`, `spread` and `excitation_preset`, with the ranges in
-[resonator.md](resonator.md#controls). `root_hz` ramps by equal ratios and the others linearly.
-`excitation_preset` is step-only: `ramp` on it is an error naming the line. `Automation::parse`
+are `root_hz`, `structure`, `damping`, `spread`, `excitation_preset`, `follower_depth`,
+`walk_depth`, `follower_attack_ms`, `follower_release_ms`, `walk_rate_hz`, `root_source`,
+`root_offset_semitones` and `root_offset_cents`, with the units, ranges and defaults in
+[resonator.md](resonator.md#controls). Keys ramp in knob position: `root_hz` and the log-taper keys
+(`follower_attack_ms`, `follower_release_ms`, `walk_rate_hz`) by equal ratios, the others linearly.
+`excitation_preset`, `root_source` and `root_offset_semitones` are step-only: `ramp` on one is an
+error naming the line. The modulation and root keys are accepted and latched like the others, but
+`Automation::render` drives a plain `Resonator` and ignores them until a host wires them in. `Automation::parse`
 still means the low-pass and gain patch. `asperitas-cli process --processor resonator --automation
 knobs.txt` renders a clip through it (see [resonator.md](resonator.md#command-line)), and
 `asperitas-rig session --fx-f 2 ... automation FILE` plays the same file on the rig's resonator stage.

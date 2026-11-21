@@ -66,7 +66,8 @@ impl<const N: usize> ControlState<N> {
 #[cfg(not(feature = "resonator"))]
 static KNOB_STATE: ControlState<2> = ControlState::new();
 
-/// The resonator's five control positions: root, structure, damping, spread, preset.
+/// The resonator's control positions: root, structure, damping, spread, preset, then the modulation
+/// and root-source keys (held at their defaults until a host drives them).
 #[cfg(feature = "resonator")]
 static CONTROL_STATE: ControlState<{ asperitas_dsp::RESONATOR_KNOB_COUNT }> = ControlState::new();
 
@@ -104,7 +105,7 @@ impl AudioProcessor for KnobChain {
 /// the effect they drive.
 ///
 /// Per block the callback reads five atomics, merges host overrides (one critical section around
-/// a five-float copy), latches the parameters, processes, and stores the input's peak for LED 2.
+/// a copy of the control floats), latches the parameters, processes, and stores the input's peak for LED 2.
 /// It allocates nothing and holds no lock across the block.
 #[cfg(feature = "resonator")]
 struct ResonatorChain {
@@ -183,7 +184,7 @@ const LED_TICKS: u32 = 50;
 const FINE_BLINK_REFRESHES: u32 = 5;
 
 /// Control task for the resonator build: polls the knobs, encoder and buttons at ~1 kHz, applies
-/// the events to the Pod mapping, publishes the five control positions for the audio callback, and
+/// the events to the Pod mapping, publishes the control positions for the audio callback, and
 /// drives both LEDs (LED 1 root colour, LED 2 input level).
 ///
 /// Same ticker and catch-up bound as `knob_poll_task`; `ControlSurface::poll` needs the 1 kHz

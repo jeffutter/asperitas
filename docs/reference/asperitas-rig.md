@@ -155,7 +155,7 @@ asperitas-rig session --out run.console.zst --fx-f 1 --knob 0 --max-seconds 330 
 - `automation FILE` plays an automation file (grammar in [automation.md](automation.md)), the same file
   `asperitas-cli process --automation` renders offline, so one script drives both the offline reference and
   the board. The script's time zero is the capture arming, taken from the `rig: capture armed` log record the firmware writes at that instant (exact to the millisecond, not the once-a-second `CAPSTAT`, which can be up to a second late). Before the capture arms the session overrides
-  every knob of the effect (two for the patch, five for the resonator) at the script's starting values (a knob the file never names at its default, so the board does not follow
+  every knob of the effect (two for the patch, thirteen for the resonator) at the script's starting values (a knob the file never names at its default, so the board does not follow
   the Pod knob), then sends one `CTL SET` per update at the time of the block it latches in (blocks of 32
   frames at 48 kHz): a `step` is one `SET`, a `ramp` a `SET` every 10 ms (480 frames) ending exactly on its
   target, not one per block, which would be 1500 replies a second on the console. The wire carries the

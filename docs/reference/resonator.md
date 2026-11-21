@@ -434,8 +434,10 @@ resonator's control surface, the counterpart of `Controls` for the low-pass and 
 surface (Pod, a future `--params`, `CTL SET`, automation) translates its input into it.
 `Controls`, `Asperitas` and `ASPERITAS_PARAMS` are unchanged.
 
-`RESONATOR_CONTROL_PARAMS` is the table, five entries in this order. The first four are copied
-from `RESONATOR_PARAMS`, so ranges are defined once.
+`RESONATOR_CONTROL_PARAMS` is the table, thirteen entries in this order. The first four are copied
+from `RESONATOR_PARAMS` and the modulation and offset entries from `ENVELOPE_PARAMS`,
+`RANDOM_WALK_PARAMS` and `ROOT_FOLLOW_PARAMS`, so ranges are defined once. The first five keys, their
+order and defaults are those of the original surface; the rest are appended.
 
 | key | unit | range | taper | default | Pod control |
 |-----|------|-------|-------|---------|-------------|
@@ -444,6 +446,14 @@ from `RESONATOR_PARAMS`, so ranges are defined once.
 | `damping` | | 0 to 1 | linear | 0.5 | knob 2 |
 | `spread` | | 0 to 1 | linear | 1 | none |
 | `excitation_preset` | | 1 to 3 | linear | 1 | button 1 |
+| `follower_depth` | | 0 to 1 | linear | 0 | none yet |
+| `walk_depth` | | 0 to 1 | linear | 0 | none yet |
+| `follower_attack_ms` | ms | 0.1 to 500 | log | 5 | none yet |
+| `follower_release_ms` | ms | 1 to 5000 | log | 100 | none yet |
+| `walk_rate_hz` | Hz | 0.01 to 20 | log | 0.5 | none yet |
+| `root_source` | | 1 to 2 (1 manual, 2 tracked) | linear | 1 | none yet |
+| `root_offset_semitones` | st | -48 to 48 | linear | 0 | none yet |
+| `root_offset_cents` | cents | -100 to 100 | linear | 0 | none yet |
 
 Button 2 is reserved and has no control. Spread has no Pod control: on the Pod it stays at its
 default (widest) and can only be set by key.
@@ -451,10 +461,20 @@ default (widest) and can only be set by key.
 - Positions are normalised in `[0, 1]`. Out-of-range positions clamp; NaN falls back to the
   parameter's default (`values()` and `params()`).
 - `from_values` takes real-unit `key=value` pairs and refuses, never clamps: an unknown key, a
-  non-finite value, a value outside the range, and a non-integer `excitation_preset`. Each message
+  non-finite value, a value outside the range, and a non-integer value for a discrete key. Each message
   names the parameter. Unnamed keys keep their default; a repeated key takes its last value.
 - `excitation_preset` is the 1-based index into `EXCITATION_PRESETS`. It is discrete: its position
-  rounds to the nearest preset, and button 1 cycles it.
+  rounds to the nearest preset, and button 1 cycles it. `root_source` and `root_offset_semitones`
+  are discrete too: whole numbers, positions round, automation cannot ramp them.
+- Default positions leave modulation off (both depths 0) and the root manual, and the default
+  position of every key maps to its table default exactly, so the default controls translate to
+  `ModulationParams::default()` and `RootFollowParams::default()`. The first-listen values
+  (depth 0.15, release 200 ms, walk 0.3 Hz) are for the host wiring to preset, not table defaults.
+- `modulation_params()` gives the `ModulationParams` for `ModulatedResonator` (base `params()`, the
+  two depths, the follower's attack and release, the walk's rate); `root_follow_params()` gives the
+  `RootFollowParams` for `RootFollow` (tracking when `root_source` is 2, `root_hz` as the manual
+  root, the semitone and cent offsets). Neither is wired into a host yet; the CLI, live, rig and
+  firmware still use `params()` only.
 - `values()` gives the real-unit values for display; `params()` (also `From<&ResonatorControls>`)
   gives the `ResonatorParams` for `Resonator::set_params`.
 - Encoder stepping rule: `with_root_offset(semitones, cents)` multiplies the root by
@@ -468,7 +488,7 @@ default (widest) and can only be set by key.
 `asperitas-cli process in.wav out.wav --processor resonator [--params key=value ...]` renders a clip
 through the bank. The output is stereo at the input's rate. `--params` takes the real-unit keys of
 [Controls](#controls) through `ResonatorControls::from_values`: `root_hz`, `structure`, `damping`,
-`spread` and `excitation_preset`. Unnamed keys keep their default. An unknown key, a non-numeric
+`spread` and `excitation_preset`, and the modulation and root-source keys of the table. Unnamed keys keep their default. An unknown key, a non-numeric
 value or a value outside the range is refused with a message naming the key; nothing is clamped.
 
 A page of rendered corpus clips, sweeps and response plots for listening away from the bench is

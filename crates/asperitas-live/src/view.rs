@@ -281,15 +281,19 @@ mod tests {
         assert!(line.ends_with(&format!("({gain:.1} dB)")), "{line}");
     }
 
+    /// The first five positions (the ones the view drives).
     fn rset(action: Action<ResonatorControls>) -> [f32; 5] {
         match action {
-            Action::Set(c) => c.positions,
+            Action::Set(c) => c.positions[..5].try_into().unwrap(),
             other => panic!("expected Set, got {other:?}"),
         }
     }
 
+    /// Controls with the first five positions set and the rest at their defaults.
     fn rat(positions: [f32; 5]) -> ResonatorControls {
-        ResonatorControls { positions }
+        let mut c = ResonatorControls::default();
+        c.positions[..5].copy_from_slice(&positions);
+        c
     }
 
     #[test]

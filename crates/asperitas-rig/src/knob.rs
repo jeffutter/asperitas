@@ -136,8 +136,8 @@ mod tests {
         assert!(check_knob_for_stage(FX_PATCH, 1).is_ok());
         let e = usage(check_knob_for_stage(FX_PATCH, 2).unwrap_err());
         assert!(e.contains("knob 2"), "{e}");
-        assert!(check_knob_for_stage(FX_RESONATOR, 4).is_ok());
-        assert!(check_knob_for_stage(FX_RESONATOR, 5).is_err());
+        assert!(check_knob_for_stage(FX_RESONATOR, 12).is_ok());
+        assert!(check_knob_for_stage(FX_RESONATOR, 13).is_err());
         assert!(check_knob_for_stage(0, 200).is_ok());
     }
 

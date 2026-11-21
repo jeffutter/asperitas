@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use asperitas_dsp::automation::ControlSurface;
 
-/// Most knobs any control surface has (the resonator's five).
-pub const MAX_KNOBS: usize = 5;
+/// Most knobs any control surface has (the resonator's thirteen).
+pub const MAX_KNOBS: usize = asperitas_dsp::RESONATOR_KNOB_COUNT;
 
 /// One shared set of knob positions for whichever effect runs. The writer stores each knob as
 /// `f32` bits; the audio callback reads them without locking or allocating. Knobs are independent
@@ -75,7 +75,7 @@ mod tests {
             ResonatorControls::default()
         );
         let c = ResonatorControls {
-            positions: [0.1, 0.2, 0.3, 0.4, 0.5],
+            positions: std::array::from_fn(|i| 0.1 * (i + 1) as f32 / 2.0),
         };
         slot.write(&c);
         assert_eq!(slot.read::<ResonatorControls>(), c);

@@ -4,8 +4,8 @@
 //! Bypass touches no sample, so the output stays bit-exact with the bare generator or replay.
 //! Patch is the same filter-then-gain chain, driven by the same two normalised knobs
 //! ([`Controls`]), so the rig measures what `main` ships and no knob mapping lives outside
-//! `asperitas-dsp`. The resonator is driven by [`ResonatorControls`]' five normalised positions
-//! through its own `params()` translation, with `set_params` before each block, as the offline
+//! `asperitas-dsp`. The resonator is driven by [`ResonatorControls`]' normalised positions
+//! through its own `params()` translation (the modulation keys are not read yet), with `set_params` before each block, as the offline
 //! render does.
 //!
 //! Knobs travel as one array of [`MAX_KNOBS`] positions indexed by knob id; a stage reads the

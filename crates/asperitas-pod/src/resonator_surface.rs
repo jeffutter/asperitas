@@ -126,7 +126,7 @@ impl ResonatorSurface {
             ControlEvent::ClickPress => self.fine = !self.fine,
             ControlEvent::Button1Press => {
                 let count = EXCITATION_PRESETS.len();
-                let current = roundf(self.controls.values()[PRESET]) as usize;
+                let current = roundf(self.controls.value(PRESET)) as usize;
                 let next = current.clamp(1, count) % count + 1;
                 self.controls.positions[PRESET] =
                     RESONATOR_CONTROL_PARAMS[PRESET].to_normalised(next as f32);
@@ -139,7 +139,7 @@ impl ResonatorSurface {
         }
     }
 
-    /// All five control positions for the two knob readings: structure and damping from the
+    /// All control positions for the two knob readings: structure and damping from the
     /// knobs as given (clamping and NaN handling belong to [`ResonatorControls`]), the rest from
     /// the surface.
     pub fn positions(&self, knobs: [f32; 2]) -> [f32; RESONATOR_KNOB_COUNT] {
@@ -163,7 +163,7 @@ impl ResonatorSurface {
 
     /// The root frequency in hertz, for LED 1.
     pub fn root_hz(&self) -> f32 {
-        self.controls.values()[ROOT]
+        self.controls.value(ROOT)
     }
 }
 
@@ -219,7 +219,10 @@ mod tests {
                 direct.positions[STRUCTURE] = knobs[0];
                 direct.positions[DAMPING] = knobs[1];
                 assert_eq!(via_surface.params(), direct.params());
-                assert_eq!(via_surface.values().map(f32::is_nan), [false; 5]);
+                assert_eq!(
+                    via_surface.values().map(f32::is_nan),
+                    [false; RESONATOR_KNOB_COUNT]
+                );
             }
         }
     }

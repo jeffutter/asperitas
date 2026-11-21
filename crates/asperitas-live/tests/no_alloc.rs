@@ -66,9 +66,9 @@ fn resonator_render_does_not_allocate() {
     for i in 0..50 {
         // Every control moves, the preset through all its settings.
         let preset = (i % 3) as f32 / 2.0;
-        slot.write(&ResonatorControls {
-            positions: [0.3 + 0.01 * i as f32, 0.6, 0.4, 0.8, preset],
-        });
+        let mut controls = ResonatorControls::default();
+        controls.positions[..5].copy_from_slice(&[0.3 + 0.01 * i as f32, 0.6, 0.4, 0.8, preset]);
+        slot.write(&controls);
         looped.render(&[], &mut out);
         live.render(&input, &mut out);
     }
