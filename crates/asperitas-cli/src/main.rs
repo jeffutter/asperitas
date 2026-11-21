@@ -22,6 +22,45 @@ enum Command {
     Review(ReviewArgs),
     /// Write the resonator's impulse and frequency response as CSV and a PNG plot.
     Analyze(AnalyzeArgs),
+    /// Run the pitch tracker over a WAV or a built-in signal and write estimate against time as CSV and a PNG.
+    Pitch(PitchArgs),
+    /// Run the pitch tracker over the recorded corpus and the built-in signals and write a table.
+    PitchCorpus(PitchCorpusArgs),
+}
+
+#[derive(Parser)]
+struct PitchArgs {
+    /// Input WAV file, or synthetic:sweep, synthetic:notes or synthetic:noise.
+    input: String,
+    /// Output prefix: writes <prefix>.csv and <prefix>.png.
+    output_prefix: String,
+    /// The signal is a chord: score confidence only.
+    #[clap(long)]
+    chordal: bool,
+    /// The pitch the clip is meant to hold; reports the reference's offset from it.
+    #[clap(long)]
+    nominal_hz: Option<f64>,
+    /// Tracker clarity threshold, 0.5 to 0.99.
+    #[clap(long, default_value_t = 0.8)]
+    clarity_threshold: f32,
+    /// Width of "correct" in cents.
+    #[clap(long, default_value_t = 50.0)]
+    tolerance_cents: f64,
+}
+
+#[derive(Parser)]
+struct PitchCorpusArgs {
+    /// Directory to write <clip>.csv, <clip>.png and table.md into.
+    output_dir: String,
+    /// Directory of corpus WAV files.
+    #[clap(long, default_value = "audio/instruments")]
+    corpus_dir: String,
+    /// Tracker clarity threshold, 0.5 to 0.99.
+    #[clap(long, default_value_t = 0.8)]
+    clarity_threshold: f32,
+    /// Width of "correct" in cents.
+    #[clap(long, default_value_t = 50.0)]
+    tolerance_cents: f64,
 }
 
 #[derive(Parser)]
@@ -86,6 +125,26 @@ fn main() {
                 output_prefix: args.output_prefix,
             })
             .map(|report| print!("{report}"))
+        }
+        Command::Pitch(args) => {
+            asperitas_cli::pitch_report::run_pitch(&asperitas_cli::pitch_report::PitchArgs {
+                input: args.input,
+                output_prefix: args.output_prefix,
+                chordal: args.chordal,
+                nominal_hz: args.nominal_hz,
+                clarity_threshold: args.clarity_threshold,
+                tolerance_cents: args.tolerance_cents,
+            })
+            .map(|table| print!("{table}"))
+        }
+        Command::PitchCorpus(args) => {
+            asperitas_cli::pitch_report::run_corpus(&asperitas_cli::pitch_report::CorpusArgs {
+                corpus_dir: args.corpus_dir,
+                output_dir: args.output_dir,
+                clarity_threshold: args.clarity_threshold,
+                tolerance_cents: args.tolerance_cents,
+            })
+            .map(|table| print!("{table}"))
         }
         Command::Generate(args) => generate::run_generate(&args),
         Command::Review(args) => {

@@ -8,6 +8,7 @@
 //! - [`baseline`] judges a steady-stimulus loopback capture against the rig baseline.
 //! - [`compare`] checks a replayed excerpt against the `asperitas-cli` reference.
 //! - [`metrics`] reports level, silence, discontinuity candidates and spurs as JSON.
+//! - [`pitch_accuracy`] scores the pitch tracker against an offline reference or exact synthetic truth.
 //! - [`param_step`] flags audible level steps from unsmoothed parameter changes.
 //! - [`sweep`] judges a knob sweep: response direction, monotonicity and flat regions.
 //! - [`soak`] judges a long capture while a parameter moves: dropouts, discontinuities and steps.
@@ -21,6 +22,7 @@ pub mod cli;
 pub mod compare;
 pub mod metrics;
 pub mod param_step;
+pub mod pitch_accuracy;
 pub mod soak;
 pub mod stimulus;
 pub mod sweep;

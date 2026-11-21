@@ -37,6 +37,10 @@ dynamic contrast to react to, and per-clip normalization would erase exactly the
 they were recorded for. Note the ~7 dB peak gap between the soft and hard mandolin plucks:
 that gap is the signal.
 
+The eight clips are also the input of the pitch tracker accuracy harness (`asperitas-cli pitch-corpus`,
+[docs/reference/pitch-accuracy.md](../docs/reference/pitch-accuracy.md)); it reads `chord` and
+`single_note` out of the file names, so a rename needs the harness changed too.
+
 ### Provenance
 
 The originals were recorded at 44.1 kHz stereo (one take mono) at varying length, then

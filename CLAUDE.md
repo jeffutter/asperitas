@@ -32,6 +32,8 @@ A manifest of cases rendered into one self-contained HTML page for listening and
 (`asperitas-cli review`) is in [docs/reference/review.md](docs/reference/review.md).
 The resonator's impulse and frequency response as CSV and a PNG plot (`asperitas-cli analyze`) is in
 [docs/reference/analyze.md](docs/reference/analyze.md).
+The pitch tracker's accuracy over the corpus and a synthetic sweep, as a table and CSV/PNG per clip
+(`asperitas-cli pitch`, `pitch-corpus`), is in [docs/reference/pitch-accuracy.md](docs/reference/pitch-accuracy.md).
 
 `firmware/` is a separate workspace (`src/bin`: main, blinky, ledtest, panictest, podtest, rig).
 

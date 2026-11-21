@@ -7,8 +7,10 @@ input and says how sure it is. It is `no_std`, allocation-free and fixed-memory,
 internal-flash image has only a few hundred bytes of headroom and adding the module, unused, moved
 inlining in the resonator enough to overflow `main` by 32 bytes; a firmware that uses the tracker
 enables `pitch` and has to find the flash for it. It is a control source, not a
-`Processor`. It does not decide what the resonator does with a low-confidence estimate, and nothing
-in the CLI, live runner, rig or firmware uses it yet.
+`Processor`. It does not decide what the resonator does with a low-confidence estimate. Only the
+accuracy harness (`asperitas-cli pitch`) uses it; the effect chain, live runner, rig and firmware do
+not yet. Its accuracy on the recorded corpus, with the failure modes, is in
+[pitch-accuracy.md](pitch-accuracy.md).
 
 ## API
 

@@ -2,6 +2,7 @@
 //! given setting, as CSV and as a PNG plot, so tuning, ringing and the effect of damping, structure
 //! and spread can be read without listening. See `docs/reference/analyze.md`.
 
+use crate::plot::{Canvas, AXIS, GRID, PLOT_W};
 use crate::process::parse_resonator_controls;
 use asperitas_dsp::processor::Processor;
 use asperitas_dsp::resonator_bank::{Resonator, MAX_PITCH_FRACTION, VOICE_COUNT};
@@ -18,7 +19,6 @@ const FLOOR: f64 = 1e-12;
 /// Longest impulse response analysed, in seconds (the longest root T60).
 const MAX_LENGTH_S: f32 = 10.0;
 
-const PLOT_W: usize = 960;
 const PANEL_H: usize = 280;
 const MARGIN: usize = 8;
 /// Dynamic range of the frequency-response panel in dB.
@@ -234,36 +234,6 @@ pub fn peaks_report(a: &Analysis) -> String {
     s
 }
 
-struct Canvas {
-    px: Vec<u8>,
-}
-
-impl Canvas {
-    fn new(h: usize) -> Self {
-        Self {
-            px: vec![255; PLOT_W * h * 3],
-        }
-    }
-    fn set(&mut self, x: usize, y: usize, rgb: [u8; 3]) {
-        let i = (y * PLOT_W + x) * 3;
-        if x < PLOT_W && i + 2 < self.px.len() {
-            self.px[i..i + 3].copy_from_slice(&rgb);
-        }
-    }
-    fn vline(&mut self, x: usize, y0: usize, y1: usize, rgb: [u8; 3]) {
-        for y in y0.min(y1)..=y0.max(y1) {
-            self.set(x, y, rgb);
-        }
-    }
-    fn hline(&mut self, y: usize, rgb: [u8; 3]) {
-        for x in 0..PLOT_W {
-            self.set(x, y, rgb);
-        }
-    }
-}
-
-const GRID: [u8; 3] = [215, 215, 215];
-const AXIS: [u8; 3] = [120, 120, 120];
 const LEFT_RGB: [u8; 3] = [200, 50, 40];
 const RIGHT_RGB: [u8; 3] = [40, 90, 200];
 
@@ -346,15 +316,7 @@ pub(crate) fn plot_png(a: &Analysis) -> Result<Vec<u8>, String> {
         }
     }
 
-    let mut out = Vec::new();
-    {
-        let mut enc = png::Encoder::new(&mut out, PLOT_W as u32, h as u32);
-        enc.set_color(png::ColorType::Rgb);
-        enc.set_depth(png::BitDepth::Eight);
-        let mut w = enc.write_header().map_err(|e| format!("png: {e}"))?;
-        w.write_image_data(&c.px).map_err(|e| format!("png: {e}"))?;
-    }
-    Ok(out)
+    c.encode_png()
 }
 
 /// Run the command: write the three files and return the peaks report.
