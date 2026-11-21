@@ -189,6 +189,20 @@ golden_cases! {
         ["root_hz=440", "structure=1", "damping=0", "spread=0"] over Input::Synthetic("impulse");
 }
 
+// -- Modulation and tracking --
+//
+// The follower drives damping and the random walk drives spread. `modulated` has both at depth
+// 0.5 over a manual root; `tracked` follows the pitch of the 440 Hz pluck, so its effective root
+// differs from the manual `root_hz=110`.
+
+golden_cases! {
+    golden_resonator_modulated_pluck: "resonator", "modulated",
+        ["root_hz=440", "follower_depth=0.5", "walk_depth=0.5", "walk_rate_hz=2"]
+        over Input::Synthetic("pluck");
+    golden_resonator_tracked_pluck: "resonator", "tracked", ["root_source=2", "root_hz=110"]
+        over Input::Synthetic("pluck");
+}
+
 // -- Golden comparison helper --
 
 fn compare_golden(path: &str, expected: &[Frame], label: &str) {

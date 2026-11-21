@@ -1,0 +1,101 @@
+# Modulation and tracking review manifest; see docs/reference/review.md (Modulation and tracking review).
+# Render and open:
+#   cargo run --release -p asperitas-cli -- review audio/review/modulation.toml /private/tmp/modulation-review.html
+#   open /private/tmp/modulation-review.html
+# Paths resolve relative to this file. The cases are for listening; judging them is a separate step.
+# The follower drives damping and the random walk drives spread.
+
+output_format = "pcm16"
+
+[[case]]
+name = "follower to damping, soft note, depth 0.15 (first-listen default)"
+clip = "../instruments/mandolin_single_note_soft.wav"
+processor = "resonator"
+trace = true
+params = ["root_hz=440", "follower_depth=0.15"]
+
+[[case]]
+name = "follower to damping, hard note, depth 0.15 (first-listen default)"
+clip = "../instruments/mandolin_single_note_hard.wav"
+processor = "resonator"
+trace = true
+params = ["root_hz=440", "follower_depth=0.15"]
+
+[[case]]
+name = "follower to damping, hard note, depth 1 (exaggerated)"
+clip = "../instruments/mandolin_single_note_hard.wav"
+processor = "resonator"
+trace = true
+params = ["root_hz=440", "follower_depth=1"]
+
+[[case]]
+name = "follower to damping, fast run, depth 0.15 (first-listen default)"
+clip = "../instruments/mandolin_fast_run.wav"
+processor = "resonator"
+trace = true
+params = ["root_hz=440", "follower_depth=0.15"]
+
+[[case]]
+name = "follower to damping, fast run, depth 1 (exaggerated)"
+clip = "../instruments/mandolin_fast_run.wav"
+processor = "resonator"
+trace = true
+params = ["root_hz=440", "follower_depth=1"]
+reference = "dry"
+
+[[case]]
+name = "random walk to spread, chord, 0.1 Hz"
+clip = "../instruments/mandolin_chord.wav"
+processor = "resonator"
+trace = true
+params = ["root_hz=196", "walk_depth=0.5", "walk_rate_hz=0.1"]
+
+[[case]]
+name = "random walk to spread, chord, 5 Hz"
+clip = "../instruments/mandolin_chord.wav"
+processor = "resonator"
+trace = true
+params = ["root_hz=196", "walk_depth=0.5", "walk_rate_hz=5"]
+
+[[case]]
+name = "manual root, soft note"
+clip = "../instruments/mandolin_single_note_soft.wav"
+processor = "resonator"
+trace = true
+params = ["root_source=1", "root_hz=440"]
+reference = "dry"
+
+[[case]]
+name = "tracked root, soft note"
+clip = "../instruments/mandolin_single_note_soft.wav"
+processor = "resonator"
+trace = true
+params = ["root_source=2", "root_hz=110"]
+
+[[case]]
+name = "manual root, fast run (note change)"
+clip = "../instruments/mandolin_fast_run.wav"
+processor = "resonator"
+trace = true
+params = ["root_source=1", "root_hz=440"]
+
+[[case]]
+name = "tracked root, fast run (note change)"
+clip = "../instruments/mandolin_fast_run.wav"
+processor = "resonator"
+trace = true
+params = ["root_source=2", "root_hz=440"]
+
+[[case]]
+name = "manual root, chord"
+clip = "../instruments/mandolin_chord.wav"
+processor = "resonator"
+trace = true
+params = ["root_source=1", "root_hz=196"]
+
+[[case]]
+name = "tracked root, chord"
+clip = "../instruments/mandolin_chord.wav"
+processor = "resonator"
+trace = true
+params = ["root_source=2", "root_hz=196"]

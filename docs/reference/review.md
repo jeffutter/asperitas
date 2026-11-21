@@ -23,6 +23,7 @@ manifest's directory.
 | `automation` | no | Knob automation file, grammar in [automation.md](automation.md). |
 | `params` | no | List of `key=value` knob settings, as `process --params`. Not with `automation`. |
 | `reference` | no | `"dry"` (the input clip) or the path of a 48 kHz WAV, such as a previous render. |
+| `trace` | no | `true` draws the resonator stage's trace under the case (default `false`); needs `processor = "resonator"`. |
 
 Top-level keys, before the first table:
 
@@ -93,3 +94,30 @@ open /private/tmp/resonator-review.html
 ```
 
 The build takes about 15 s in release and is deterministic: two runs give byte-identical pages.
+
+## Modulation and tracking review
+
+[audio/review/modulation.toml](../../audio/review/modulation.toml) holds the cases for the
+envelope follower, the random walk and the tracked root, rendered for asynchronous listening. Every
+case sets `trace = true`, so the page shows the trace plot ([analyze.md](analyze.md)) under the
+audio: follower and walk, confidence against the 0.8 gate, and the tracker estimate with the
+effective root. The follower drives damping and the random walk drives spread. Judging the
+renders is the listening step, not part of this page.
+
+- Follower to damping: the soft and hard single note and the fast run at depth 0.15 (the
+  first-listen default), and the hard note and the fast run at depth 1, all with root 440 Hz.
+- Random walk to spread: the mandolin chord at depth 0.5, at 0.1 Hz and at 5 Hz, root 196 Hz.
+- Tracked root against manual root: the soft note, the fast run (note changes) and the chord, each
+  as a `root_source=1` render and a `root_source=2` render. The chord is the case where the tracker
+  is least sure of one pitch, so its parameter-steps check reports the root jumps and can fail;
+  that is evidence for the listener, not a broken page.
+
+The page uses `output_format = "pcm16"` and is about 11 MB. Build and open it:
+
+```bash
+cargo run --release -p asperitas-cli -- review audio/review/modulation.toml /private/tmp/modulation-review.html
+open /private/tmp/modulation-review.html
+```
+
+Two builds give byte-identical pages. The regression goldens for the same renders are described in
+[audio/README.md](../../audio/README.md).

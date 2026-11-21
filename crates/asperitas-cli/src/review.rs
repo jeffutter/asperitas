@@ -77,6 +77,10 @@ struct Case {
     params: Vec<String>,
     /// `"dry"` (the input clip) or the path of a WAV, such as a previous render.
     reference: Option<String>,
+    /// Draw the resonator stage's trace (follower, walk, confidence, estimate, effective root)
+    /// under the case; `processor = "resonator"` only.
+    #[serde(default)]
+    trace: bool,
 }
 
 struct Check {
@@ -188,6 +192,8 @@ struct Rendered {
     settings: String,
     output: Media,
     reference: Option<(String, Media)>,
+    /// The trace plot as PNG, for cases with `trace = true`.
+    trace_png: Option<Vec<u8>>,
     checks: Vec<Check>,
 }
 
@@ -248,6 +254,11 @@ fn render_case(
             "case '{name}': processor '{processor}' is not one of \"asperitas\", \"resonator\""
         ));
     }
+    if case.trace && processor != "resonator" {
+        return Err(format!(
+            "case '{name}': trace needs processor \"resonator\", not '{processor}'"
+        ));
+    }
     let clip_path = resolve(base, &case.clip);
     let dry = read_clip(name, "clip", &clip_path)?;
 
@@ -296,6 +307,22 @@ fn render_case(
     })
     .map_err(|e| format!("case '{name}': {e}"))?;
 
+    let trace_png = if case.trace {
+        let run = crate::trace::trace_clip(&crate::trace::TraceArgs {
+            input: path_str(&clip_path)?.to_string(),
+            output_prefix: String::new(),
+            params: case.params.clone(),
+            automation: case
+                .automation
+                .as_ref()
+                .map(|a| resolve(base, a).to_string_lossy().into_owned()),
+        })
+        .map_err(|e| format!("case '{name}': trace: {e}"))?;
+        Some(crate::trace::plot_png(&run).map_err(|e| format!("case '{name}': trace: {e}"))?)
+    } else {
+        None
+    };
+
     let out_path_s = path_str(&out_path)?;
     let (_, out_frames) = wav_io::read_wav(out_path_s)?;
     let (left, right): (Vec<f32>, Vec<f32>) = out_frames.iter().map(|f| (f[0], f[1])).unzip();
@@ -343,6 +370,7 @@ fn render_case(
         settings,
         output,
         reference,
+        trace_png,
         checks,
     })
 }
@@ -632,6 +660,17 @@ fn page_html(cases: &[Rendered], responses: &[RenderedResponse]) -> String {
         h.push_str(&media_html("Output", &c.output));
         if let Some((label, m)) = &c.reference {
             h.push_str(&media_html(label, m));
+        }
+        if let Some(png) = &c.trace_png {
+            let _ = write!(
+                h,
+                "<h3>Trace</h3><img class=\"resp\" alt=\"resonator trace\" \
+                 src=\"data:image/png;base64,{}\">\
+                 <p class=\"note\">Follower (red) and walk (blue), confidence with the follow \
+                 threshold, and the tracker estimate (blue) with the effective root (red), over \
+                 the clip. See analyze.md.</p>",
+                b64(png)
+            );
         }
         h.push_str("<h3>Checks on the output</h3><table><tr><th>Check</th><th>Result</th><th>Detail</th></tr>");
         for ck in &c.checks {
@@ -931,6 +970,43 @@ mod tests {
                 let t = std::fs::read_to_string(dir.join(a)).unwrap();
                 Automation::<ResonatorControls>::parse_for(&t, REQUIRED_RATE).unwrap();
             }
+        }
+    }
+
+    #[test]
+    fn trace_case_embeds_a_second_png_and_is_deterministic() {
+        let dir = tempfile::tempdir().unwrap();
+        write_clip(&dir.path().join("a.wav"), 48_000, 0.5);
+        let plain = "[[case]]\nname=\"c\"\nclip=\"a.wav\"\nprocessor=\"resonator\"\n";
+        let traced = format!("{plain}trace=true\n");
+        let a = page_for(dir.path(), plain).unwrap();
+        let b = page_for(dir.path(), &traced).unwrap();
+        assert!(!a.contains("<h3>Trace</h3>"));
+        assert!(b.contains("<h3>Trace</h3>") && b.contains("resonator trace"));
+        assert_eq!(b, page_for(dir.path(), &traced).unwrap());
+    }
+
+    #[test]
+    fn trace_on_the_asperitas_processor_is_refused_naming_the_case() {
+        let dir = tempfile::tempdir().unwrap();
+        write_clip(&dir.path().join("a.wav"), 48_000, 0.5);
+        let err = page_for(
+            dir.path(),
+            "[[case]]\nname=\"x\"\nclip=\"a.wav\"\ntrace=true\n",
+        )
+        .unwrap_err();
+        assert!(err.contains("'x'") && err.contains("trace"), "{err}");
+    }
+
+    #[test]
+    fn committed_modulation_manifest_parses_and_its_files_exist() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../audio/review");
+        let text = std::fs::read_to_string(dir.join("modulation.toml")).unwrap();
+        let m: Manifest = toml::from_str(&text).unwrap();
+        assert!(m.case.len() >= 10 && m.case.iter().all(|c| c.trace));
+        for c in &m.case {
+            assert!(dir.join(&c.clip).is_file(), "{}", c.clip);
+            parse_resonator_controls(&c.params).unwrap();
         }
     }
 }
