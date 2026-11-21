@@ -17,6 +17,7 @@ pub mod random_walk;
 pub mod resonator;
 pub mod resonator_bank;
 pub mod resonator_controls;
+pub mod root_follow;
 mod smooth;
 
 pub use asperitas::{Asperitas, Controls, ASPERITAS_PARAMS, KNOB_COUNT};
@@ -37,4 +38,8 @@ pub use resonator::{ResonatorVoice, ResonatorVoiceParams, RESONATOR_VOICE_PARAMS
 pub use resonator_bank::{Resonator, ResonatorParams, BANK_GAIN, RESONATOR_PARAMS, VOICE_COUNT};
 pub use resonator_controls::{
     ResonatorControls, ResonatorControlsError, RESONATOR_CONTROL_PARAMS, RESONATOR_KNOB_COUNT,
+};
+pub use root_follow::{
+    RootFollow, RootFollowParams, CONFIDENCE_THRESHOLD, GLIDE_MS, LOW_CONFIDENCE_HOLDS,
+    ROOT_FOLLOW_PARAMS, SNAP_SEMITONES,
 };

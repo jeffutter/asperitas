@@ -367,6 +367,66 @@ parameter step with both routes at full depth moves the output under 0.08 per sa
 phase (the bank's step detector and limit); `process_block` equals repeated `tick` for odd block
 splits; `reset` replays the same output and walk trace.
 
+## Tracked root
+
+Code: `crates/asperitas-dsp/src/root_follow.rs`, exported as `RootFollow`, `RootFollowParams` and the
+constants `CONFIDENCE_THRESHOLD`, `GLIDE_MS`, `SNAP_SEMITONES`, `LOW_CONFIDENCE_HOLDS` and the table
+`ROOT_FOLLOW_PARAMS`. A control-rate stage, `no_std` and allocation-free, that turns the pitch
+tracker's estimate and confidence into the `root_hz` fed to the bank. The bank is unchanged. The
+behaviour is decision-002 section 3. The stage does not own a `PitchTracker` (the `pitch` feature is
+off by default for firmware flash reasons); the caller passes `estimate_hz()` and `confidence()` to
+`process_block`, once per 32-frame block (`BLOCK_FRAMES`), and gives the result to the bank.
+
+### Behaviour
+
+| Setting | Value |
+|---|---|
+| Confidence threshold | 0.8, equal to the tracker's default clarity threshold (a test asserts they match) |
+| Low confidence, unvoiced or non-finite input | hold the last target |
+| Snapping | the estimate is rounded to the nearest equal-tempered semitone, A4 = 440 Hz |
+| Glide | one-pole in the semitone (log-frequency) domain, time constant 20 ms, one step per block |
+| Offset | `offset_semitones` (-48..48) plus `offset_cents` (-100..100) added to the glided value, a transposition |
+| Clamp | the result is clamped to the `root_hz` range of `RESONATOR_PARAMS`, 20 Hz to 2 kHz |
+
+Before the first voiced estimate the target is the manual root, and switching tracking on starts the
+glide at the manual root (not snapped), so a switch does not jump. The output is never NaN: every
+input is checked and a NaN result falls back to the default root.
+
+### Tracking off
+
+With `tracking: false` the stage returns `manual_root_hz` with its bits untouched (no snapping,
+glide or offset), so a bank driven by the stage is bit-identical to one driven by the manual root.
+
+### Added latency
+
+Tracking adds the tracker's onset latency (4 ms at 1760 Hz to 52 ms at 41 Hz, from
+`docs/reference/pitch-tracker.md`), up to one 32-frame block (0.67 ms at 48 kHz) and the glide.
+Measured with sine notes through the tracker and the stage (`root_follow_tests.rs`, 220 Hz to 330 Hz,
+a 7 semitone change): the root is within 20 cents of the new note 145 ms after the change, of which
+the glide is most (about 3.5 time constants, 70 ms, to cover 7 semitones to within 0.2). An octave
+jump from 110 Hz to 880 Hz moves at most 118 cents per block.
+
+### Known limits
+
+The stage follows whatever the tracker is confident about. The tracker's limits carry over: a close
+chromatic cluster reads as a confident wrong note and a major triad as no estimate (the root then
+holds). Noise and the chords tested produce confidence under 0.8, so the root does not move. In the
+synthetic notes of `asperitas-measure`, a hard cut at the end of an 880 Hz note makes the tracker
+report the octave below with confidence 0.97 for about 60 ms, and the root follows it.
+
+### Tests
+
+Unit tests in `root_follow.rs`: tracking off returns the manual root bits for hostile inputs, with a
+negative control that tracking on differs; low confidence, unvoiced and NaN hold the root bit for
+bit; the manual root before the first voiced estimate; snapping at 30 and 60 cents; the glide step is
+bounded by the coefficient and takes many blocks; the offset; finite, in-range output over a grid of
+hostile inputs; the restart on switching on. Integration tests in
+`crates/asperitas-dsp/tests/root_follow_tests.rs`: follow time, hold on silence, noise and a chord
+leave the root alone, glide and range, and the whole chain with tracking off bit-identical to the
+manual-root bank (negative control: tracking on differs). A test in
+`crates/asperitas-measure/src/pitch_accuracy.rs` feeds the tracker trace of the synthetic plucked
+notes to the stage and checks the root sits on the snapped note during each decay.
+
 ## Controls
 
 `ResonatorControls` (`crates/asperitas-dsp/src/resonator_controls.rs`) is the one definition of the

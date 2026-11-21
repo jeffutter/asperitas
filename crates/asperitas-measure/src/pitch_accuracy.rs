@@ -683,4 +683,53 @@ mod tests {
         let s = synthetic_notes(RATE);
         assert_eq!(scored(&s.samples, &s.truth), scored(&s.samples, &s.truth));
     }
+
+    /// The tracker's trace over the plucked-style notes drives the root-follow stage: after each
+    /// onset the root lands on the snapped played note and holds through the decay. The abrupt cut
+    /// at the end of a synthetic note makes the tracker read the octave below with high confidence
+    /// for about 60 ms, so the silent gap is not asserted.
+    #[test]
+    fn root_follow_lands_on_each_plucked_note_and_holds_in_the_decay() {
+        use asperitas_dsp::{RootFollow, RootFollowParams};
+        let s = synthetic_notes(RATE);
+        let track = run_tracker(&s.samples, RATE, 0.8);
+        let mut stage = RootFollow::new(RATE);
+        stage.set_params(&RootFollowParams {
+            tracking: true,
+            manual_root_hz: 110.0,
+            ..RootFollowParams::default()
+        });
+        // One tracker frame is HOP samples, four 32-frame blocks of the stage.
+        let blocks_per_frame = HOP / 32;
+        let root_at_frame_end: Vec<(f64, f64)> = track
+            .iter()
+            .map(|f| {
+                let mut hz = 0.0;
+                for _ in 0..blocks_per_frame {
+                    hz = stage.process_block(f.hz as f32, f.conf as f32);
+                }
+                (f.t_s, f64::from(hz))
+            })
+            .collect();
+        let at = |t: f64| {
+            root_at_frame_end
+                .iter()
+                .min_by(|a, b| (a.0 - t).abs().total_cmp(&(b.0 - t).abs()))
+                .unwrap()
+                .1
+        };
+        for (i, &hz) in NOTE_HZ.iter().enumerate() {
+            let start = i as f64 * NOTE_S;
+            let st = (12.0 * (hz / 440.0).log2()).round();
+            let want = 440.0 * 2f64.powf(st / 12.0);
+            // Well into the decay and just before the note is cut: on the snapped note.
+            for t in [start + 0.30, start + 0.43] {
+                let got = at(t);
+                assert!(
+                    (1200.0 * (got / want).log2()).abs() < 5.0,
+                    "note {i} ({hz} Hz, snapped {want}) at {t}: root {got}"
+                );
+            }
+        }
+    }
 }
