@@ -5,7 +5,12 @@ edition = "2021"
 
 [features]
 default = []
-std = []
+# Host builds. Implies `pitch` so every host test run covers the tracker.
+std = ["pitch"]
+# The pitch tracker. Off by default so the firmware image, which sits within a few hundred bytes of
+# the 128K internal flash, does not shift until the firmware uses the tracker: merely adding the
+# module moved the resonator inlining and overflowed `main` by 32 bytes.
+pitch = []
 
 [dependencies]
 libm = "0.2"
@@ -16,3 +21,7 @@ proptest = "1"
 # Inherit the workspace rustdoc denies (see root Cargo.toml).
 [lints]
 workspace = true
+
+[[example]]
+name = "pitch_cost"
+required-features = ["pitch"]

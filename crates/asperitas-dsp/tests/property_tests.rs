@@ -9,6 +9,8 @@ use asperitas_dsp::{
     EXCITATION_PARAMS, FILTER_PARAMS, GAIN_PARAMS, RANDOM_WALK_PARAMS, RESONATOR_PARAMS,
     RESONATOR_VOICE_PARAMS, VOICE_COUNT,
 };
+#[cfg(feature = "pitch")]
+use asperitas_dsp::{PitchParams, PitchTracker};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -677,4 +679,55 @@ fn gain_smoother_tail_reaches_exactly_zero() {
         last = g.tick([1.0, 1.0]);
     }
     assert_eq!(last, [0.0, 0.0]);
+}
+
+// ---------------------------------------------------------------------------
+// Pitch tracker (a mono control source, not a Processor)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "pitch")]
+fn arb_pitch_sample() -> impl Strategy<Value = f32> {
+    prop_oneof![
+        8 => -1.0f32..=1.0,
+        1 => -1e30f32..=1e30,
+        1 => prop::sample::select(vec![
+            f32::NAN, f32::INFINITY, f32::NEG_INFINITY, f32::MAX, f32::MIN, 1e-40, 0.0,
+        ]),
+    ]
+}
+
+#[cfg(feature = "pitch")]
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn pitch_outputs_are_always_finite_and_confidence_is_in_unit_range(
+        input in prop::collection::vec(arb_pitch_sample(), 0..3000),
+        split in 1usize..200,
+        threshold in prop_oneof![Just(f32::NAN), -1.0f32..2.0],
+    ) {
+        let mut t = PitchTracker::new(RATE, &PitchParams { clarity_threshold: threshold });
+        for chunk in input.chunks(split) {
+            t.process_block(chunk);
+            prop_assert!(t.estimate_hz().is_finite() && t.estimate_hz() >= 0.0);
+            prop_assert!((0.0..=1.0).contains(&t.confidence()));
+        }
+    }
+
+    #[test]
+    fn pitch_block_split_does_not_change_the_result(
+        input in prop::collection::vec(-1.0f32..=1.0, 0..2000),
+        split in 1usize..200,
+    ) {
+        let mut a = PitchTracker::new(RATE, &PitchParams::default());
+        let mut b = PitchTracker::new(RATE, &PitchParams::default());
+        for &x in &input {
+            a.tick(x);
+        }
+        for chunk in input.chunks(split) {
+            b.process_block(chunk);
+        }
+        prop_assert_eq!(a.estimate_hz().to_bits(), b.estimate_hz().to_bits());
+        prop_assert_eq!(a.confidence().to_bits(), b.confidence().to_bits());
+    }
 }

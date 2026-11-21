@@ -23,6 +23,9 @@ Crates (root workspace, `crates/`):
 The resonator parts in `asperitas-dsp` (the single tuned voice: parameters, formulation, bound; the
 excitation stage; and the resonator bank that composes them with damping, structure and spread) are described in [docs/reference/resonator.md](docs/reference/resonator.md).
 
+The monophonic pitch estimator in `asperitas-dsp` (method, accuracy, latency, rejection and cost) is in
+[docs/reference/pitch-tracker.md](docs/reference/pitch-tracker.md).
+
 Knob motion for offline renders (`asperitas-cli process --automation`) is defined in
 [docs/reference/automation.md](docs/reference/automation.md).
 A manifest of cases rendered into one self-contained HTML page for listening and review
