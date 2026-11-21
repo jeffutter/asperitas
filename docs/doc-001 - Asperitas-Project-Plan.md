@@ -153,7 +153,8 @@ default voicing are decided in
 Envelope follower and the smoothed random-walk modulation source, modulating resonator
 parameters. This is what separates the project from a static filter bank. Pitch tracking from the
 input, driving the resonator's root note, is the owner's end goal for the tuning model and belongs
-here (see decision-001).
+here (see decision-001). Routing, Pod mapping and tracked-root behaviour are in
+[decision-002](../backlog/decisions/decision-002%20-%20M6-modulation-routing-pod-mapping-and-tracked-root.md).
 
 ### M7 - Polish and hardware
 CPU-cost harness and headroom work, preset save/recall to QSPI flash, and only then enclosure,
