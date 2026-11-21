@@ -3,9 +3,10 @@
 //! Run with: `cargo test -p asperitas-dsp`
 
 use asperitas_dsp::{
-    Excitation, ExcitationParams, FilterParams, Frame, Gain, GainParams, OnePoleLowPass, Processor,
-    Resonator, ResonatorParams, ResonatorVoice, ResonatorVoiceParams, BANK_GAIN, EXCITATION_PARAMS,
-    FILTER_PARAMS, GAIN_PARAMS, RESONATOR_PARAMS, RESONATOR_VOICE_PARAMS, VOICE_COUNT,
+    EnvelopeFollower, EnvelopeParams, Excitation, ExcitationParams, FilterParams, Frame, Gain,
+    GainParams, OnePoleLowPass, Processor, Resonator, ResonatorParams, ResonatorVoice,
+    ResonatorVoiceParams, BANK_GAIN, ENVELOPE_PARAMS, EXCITATION_PARAMS, FILTER_PARAMS,
+    GAIN_PARAMS, RESONATOR_PARAMS, RESONATOR_VOICE_PARAMS, VOICE_COUNT,
 };
 use proptest::prelude::*;
 
@@ -549,6 +550,66 @@ proptest! {
         let mut last = [1.0f32; 2];
         for _ in 0..300_000 { last = f.tick([0.0, 0.0]); }
         prop_assert_eq!(last, [0.0, 0.0]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Envelope follower (a mono control source, not a Processor)
+// ---------------------------------------------------------------------------
+
+fn arb_envelope_params() -> impl Strategy<Value = EnvelopeParams> {
+    // In range and well beyond it, plus non-finite values.
+    let ms = |spec: &'static asperitas_dsp::ParamSpec| {
+        prop_oneof![
+            spec.min..=spec.max,
+            (spec.min * 0.01)..=(spec.max * 10.0),
+            arb_hostile_f32(),
+        ]
+    };
+    (ms(&ENVELOPE_PARAMS[0]), ms(&ENVELOPE_PARAMS[1])).prop_map(|(attack_ms, release_ms)| {
+        EnvelopeParams {
+            attack_ms,
+            release_ms,
+        }
+    })
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn envelope_is_finite_non_negative_and_bounded_by_the_input_peak(
+        params in arb_envelope_params(),
+        input in prop::collection::vec(arb_hostile_f32(), 1..600),
+    ) {
+        let mut f = EnvelopeFollower::new(RATE, &params);
+        let mut peak = 0.0f32;
+        for x in input {
+            if x.is_finite() { peak = peak.max(x.abs()); }
+            let y = f.tick(x);
+            prop_assert!(y.is_finite() && y >= 0.0, "y = {}", y);
+            // One part in a million of rounding slack: the update is a convex step in f32.
+            prop_assert!(y <= peak * (1.0 + 1e-6), "y = {} peak = {}", y, peak);
+        }
+    }
+
+    #[test]
+    fn envelope_block_equals_ticks_and_reset_is_idempotent(
+        params in arb_envelope_params(),
+        input in prop::collection::vec(arb_hostile_f32(), 1..400),
+    ) {
+        let mut a = EnvelopeFollower::new(RATE, &params);
+        let mut b = a.clone();
+        let mut out = vec![0.0f32; input.len()];
+        a.process_block(&input, &mut out);
+        for (x, o) in input.iter().zip(&out) {
+            prop_assert_eq!(b.tick(*x).to_bits(), o.to_bits());
+        }
+        a.reset();
+        let once = a.clone();
+        a.reset();
+        prop_assert_eq!(a.value().to_bits(), once.value().to_bits());
+        prop_assert_eq!(a.value(), 0.0);
     }
 }
 

@@ -15,6 +15,7 @@
 //! either or both sides behaves the same. The defaults are transparent: a 10 Hz low cut, no
 //! emphasis and a ceiling of 2.0 (a linear region up to 1.0, full scale).
 
+use crate::envelope::EnvelopeFollower;
 use crate::param::{ParamSpec, Taper};
 use crate::processor::{Frame, Processor};
 use crate::smooth::{sanitize, Smoother};
@@ -127,12 +128,22 @@ fn soft_limit(x: f32, ceiling: f32) -> f32 {
 }
 
 /// Per-channel state.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone)]
 struct Channel {
     /// One-pole low-pass of the input; the high-pass output is the input minus this.
     lp: f32,
-    fast: f32,
-    slow: f32,
+    fast: EnvelopeFollower,
+    slow: EnvelopeFollower,
+}
+
+impl Channel {
+    fn new(sample_rate_hz: f32) -> Self {
+        Self {
+            lp: 0.0,
+            fast: EnvelopeFollower::with_times(sample_rate_hz, FAST_ENV_MS, FAST_ENV_MS),
+            slow: EnvelopeFollower::with_times(sample_rate_hz, SLOW_ENV_MS, SLOW_ENV_MS),
+        }
+    }
 }
 
 /// The excitation stage. See the module docs for the signal flow.
@@ -147,13 +158,7 @@ pub struct Excitation {
     /// The smoothed `ln(cut)` that `cached_alpha` came from; NaN when stale.
     cached_ln_cut: f32,
     cached_alpha: f32,
-    fast_alpha: f32,
-    slow_alpha: f32,
     ch: [Channel; 2],
-}
-
-fn one_pole_alpha(time_ms: f32, rate: f32) -> f32 {
-    1.0 - exp(-1000.0 / (time_ms * rate))
 }
 
 impl Default for Excitation {
@@ -167,9 +172,7 @@ impl Default for Excitation {
             ceiling: Smoother::new(p.drive_limit, LEVEL_SMOOTH_MS, 48_000.0),
             cached_ln_cut: f32::NAN,
             cached_alpha: 0.0,
-            fast_alpha: one_pole_alpha(FAST_ENV_MS, 48_000.0),
-            slow_alpha: one_pole_alpha(SLOW_ENV_MS, 48_000.0),
-            ch: [Channel::default(); 2],
+            ch: [Channel::new(48_000.0), Channel::new(48_000.0)],
         }
     }
 }
@@ -205,11 +208,10 @@ impl Excitation {
         let s = &mut self.ch[c];
         s.lp = sanitize(s.lp + alpha * (x - s.lp));
         let hp = x - s.lp;
-        let mag = fabsf(hp);
-        s.fast = sanitize(s.fast + self.fast_alpha * (mag - s.fast));
-        s.slow = sanitize(s.slow + self.slow_alpha * (mag - s.slow));
+        let fast = s.fast.tick(hp);
+        let slow = s.slow.tick(hp);
         let shaped = if amount > 0.0 {
-            let attack = (s.fast - s.slow).max(0.0) / (s.fast + ATTACK_FLOOR);
+            let attack = (fast - slow).max(0.0) / (fast + ATTACK_FLOOR);
             hp * (1.0 + (MAX_TRANSIENT_GAIN - 1.0) * amount * attack)
         } else {
             hp
@@ -227,8 +229,10 @@ impl Processor for Excitation {
             self.cut.update_sample_rate(CUT_SMOOTH_MS, hz);
             self.amount.update_sample_rate(TRANSIENT_SMOOTH_MS, hz);
             self.ceiling.update_sample_rate(LEVEL_SMOOTH_MS, hz);
-            self.fast_alpha = one_pole_alpha(FAST_ENV_MS, hz);
-            self.slow_alpha = one_pole_alpha(SLOW_ENV_MS, hz);
+            for c in &mut self.ch {
+                c.fast.set_sample_rate(hz);
+                c.slow.set_sample_rate(hz);
+            }
             self.cached_ln_cut = f32::NAN;
             self.retarget_cut();
         }
@@ -262,7 +266,10 @@ impl Processor for Excitation {
 
     fn reset(&mut self) {
         self.snap_params();
-        self.ch = [Channel::default(); 2];
+        self.ch = [
+            Channel::new(self.sample_rate_hz),
+            Channel::new(self.sample_rate_hz),
+        ];
     }
 }
 

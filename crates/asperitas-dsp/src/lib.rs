@@ -3,6 +3,7 @@
 pub mod asperitas;
 #[cfg(feature = "std")]
 pub mod automation;
+pub mod envelope;
 pub mod excitation;
 pub mod filter;
 pub mod gain;
@@ -15,6 +16,7 @@ pub mod resonator_controls;
 mod smooth;
 
 pub use asperitas::{Asperitas, Controls, ASPERITAS_PARAMS, KNOB_COUNT};
+pub use envelope::{EnvelopeFollower, EnvelopeParams, ENVELOPE_PARAMS};
 pub use excitation::{Excitation, ExcitationParams, EXCITATION_PARAMS, EXCITATION_PRESETS};
 pub use filter::{FilterParams, OnePoleLowPass, FILTER_PARAMS};
 pub use gain::{Gain, GainParams, GAIN_PARAMS};

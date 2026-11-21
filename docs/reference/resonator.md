@@ -94,8 +94,8 @@ mono signal on either or both sides behaves the same.
 
 1. Low cut: a one-pole high-pass (input minus a one-pole low-pass of it).
 2. Transient emphasis: the signal is multiplied by `1 + 2 * transient * attack`. `attack` is
-   `max(fast - slow, 0) / (fast + 1e-4)`, with `fast` and `slow` envelope followers (1 ms and 40 ms)
-   of the high-passed magnitude. It is a ratio, so it does not depend on level, and it is 0 in a
+   `max(fast - slow, 0) / (fast + 1e-4)`, with `fast` and `slow` `EnvelopeFollower`s (1 ms and 40 ms,
+   attack equal to release) of the high-passed magnitude. It is a ratio, so it does not depend on level, and it is 0 in a
    steady tone or a decay. The multiplier is at most 3.
 3. Soft limiter: the identity up to half the ceiling, then a tanh knee that is continuous in value
    and slope and approaches the ceiling from below. It is last, so the output never exceeds the
@@ -138,6 +138,36 @@ From the tests in `excitation.rs` and `crates/asperitas-dsp/tests/property_tests
   magnitude. Property tests cover finite and bounded output, silence in and out, `process_block`
   equal to repeated `tick`, `reset` forgetting history, parameter steps without clicks, and hostile
   parameters and input.
+
+## Envelope follower
+
+Code: `crates/asperitas-dsp/src/envelope.rs`, exported as `EnvelopeFollower`, `EnvelopeParams` and
+`ENVELOPE_PARAMS`. A mono, `no_std`, allocation-free level follower: a modulation source, not a
+`Processor`, because its output is a control signal. A stereo user holds one per channel. The
+excitation stage's two followers are instances of it, so there is one follower implementation.
+
+The input is rectified and fed to a one-pole smoother. While the rectified input is above the state
+the attack coefficient applies, otherwise the release coefficient; each is
+`1 - exp(-1000 / (ms * rate))`, which lies in `[0, 1]`, so the state never overshoots the input.
+Non-finite input counts as silence and the state is flushed through `sanitize`, so a tail reaches
+exactly 0.
+
+| Name | Unit | Range | Taper | Default |
+|------|------|-------|-------|---------|
+| `attack_ms` | ms | 0.1 - 500 | log | 5 |
+| `release_ms` | ms | 1 - 5000 | log | 100 |
+
+NaN parameters fall to the default; others clamp. `tick`, `process_block(&[f32], &mut [f32])`,
+`value`, `reset`, `set_params` and `set_sample_rate` make up the interface; `set_params` and
+`set_sample_rate` commute.
+
+Measured accuracy (`envelope.rs` tests, 48 kHz and 44.1 kHz, attack/release of 0.5/20, 5/100,
+20/300 and 100/2000 ms): a step to 1 reaches 1 - 1/e = 0.632 after `attack_ms` and a step down from
+1 falls to 1/e = 0.368 after `release_ms`, both within 0.001 (the only error is rounding the
+duration to whole samples; the tests allow 0.02). A follower with attack and release swapped misses
+that window. Property tests cover finite, non-negative output no larger than the input peak (to one
+part in a million of f32 rounding) for any parameters and any input including NaN and infinities,
+`process_block` equal to repeated `tick`, and an idempotent `reset`.
 
 ## Resonator bank
 
